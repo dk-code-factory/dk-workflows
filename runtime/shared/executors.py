@@ -2,11 +2,26 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
 from shared.bindings import current_host, resolve
 from shared.reviewer_telemetry import capture
+
+
+class ProviderExhausted(RuntimeError):
+    """Explicit provider usage exhaustion; authentication failures remain blocking."""
+
+
+def provider_failure(detail):
+    authentication = re.search(r'authentication failed|not authenticated|unauthorized|invalid credentials|'
+                               r'(?:invalid|expired|revoked) (?:oauth |access |auth(?:entication)? )?token', detail, re.I)
+    exhausted = re.search(r'usage limit (?:reached|exceeded)|(?:hit|reached) your (?:session )?limit|'
+                         r'(?:out of|no|insufficient) (?:credits|tokens)|tokens? exhausted', detail, re.I)
+    if exhausted and not authentication:
+        raise ProviderExhausted(detail)
+    raise RuntimeError(detail)
 
 
 def managed_update(resolved, env, phase, token=None):
@@ -89,14 +104,14 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
                        cwd=checkout, env=env, timeout=timeout, telemetry_prompt=prompt,
                        telemetry_attempt=attempt, telemetry_provider=host, telemetry_output=output)
         if proc.returncode:
-            raise RuntimeError((proc.stderr or proc.stdout).strip() or f'{host} execution failed')
+            provider_failure('\n'.join(filter(None, (proc.stderr, proc.stdout))).strip() or f'{host} execution failed')
         if host == 'codex':
             if not output.is_file():
                 raise RuntimeError('Codex did not produce a final response')
             return output.read_text()
         envelope = json.loads(proc.stdout)
         if envelope.get('is_error') or envelope.get('subtype') != 'success':
-            raise RuntimeError(envelope.get('result') or 'Claude execution incomplete')
+            provider_failure(envelope.get('result') or json.dumps(envelope))
         result = envelope.get('result')
         if not isinstance(result, str) or not result.strip():
             raise RuntimeError('Claude did not produce a final response')
@@ -116,6 +131,6 @@ def invoke(binding, handoff_path, checkout, prompt, *, attempt=0):
         # instructions and, on retry, the validation error and prior response.
         proc = subprocess.run(argv, input=prompt, cwd=checkout, text=True, capture_output=True, env=env, timeout=600)
         if proc.returncode:
-            raise RuntimeError(proc.stderr.strip() or 'Command provider failed')
+            provider_failure('\n'.join(filter(None, (proc.stderr, proc.stdout))).strip() or 'Command provider failed')
         return proc.stdout
     return execute(prompt, checkout, resolved=resolved, attempt=attempt)

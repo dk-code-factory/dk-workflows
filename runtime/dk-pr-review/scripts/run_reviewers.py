@@ -20,7 +20,7 @@ from reviewer_prompts import preparation_instructions, source_files
 from stats_capture import for_iteration
 from shared.reviewer_telemetry import capture, transport
 from shared import bindings
-from shared.executors import invoke
+from shared.executors import invoke, ProviderExhausted
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())
 _spec = importlib.util.spec_from_file_location('decision_api', ROOT/'dk-pr-decisions/scripts/decisions.py')
@@ -64,7 +64,10 @@ def run_skill_reviewer(name, skill, handoff_path, checkout):
         changed = added_lines(Path(json.loads(Path(handoff_path).read_text())['patch']).read_text())
         for attempt in range(2):
             output.unlink(missing_ok=True)
-            raw = invoke(name, handoff_path, checkout, prompt, attempt=attempt)
+            try:
+                raw = invoke(name, handoff_path, checkout, prompt, attempt=attempt)
+            except ProviderExhausted as exc:
+                return {'status': 'tokens_exhausted', 'findings': [], 'message': str(exc)}
             try:
                 result = json.loads(raw)
                 if isinstance(result, dict) and result.get('status') in ('incomplete', 'tokens_exhausted'):
