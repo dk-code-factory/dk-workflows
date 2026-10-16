@@ -137,3 +137,37 @@ def test_by_name_agent_and_custom_command_resources_are_fingerprinted(tmp_path,m
     assert str(command) in {s['path'] for s in first['sources']}
     agent.write_text('Changed authorization method')
     assert runner.describe_reviewer('third-party:review')!=first
+
+
+@pytest.mark.parametrize('detail',['Usage limit reached','You hit your session limit','Insufficient credits'])
+def test_explicit_provider_exhaustion_is_classified(detail):
+    with pytest.raises(e.ProviderExhausted):e.provider_failure(detail)
+
+
+def test_authentication_and_ordinary_failures_remain_blocking():
+    for detail in ['invalid access token; insufficient credits','network timeout','max turns exhausted']:
+        with pytest.raises(RuntimeError) as failure:e.provider_failure(detail)
+        assert not isinstance(failure.value,e.ProviderExhausted)
+
+
+def test_usage_exhaustion_reaches_reviewers_as_explicit_skipped_coverage(tmp_path,monkeypatch):
+    import importlib.util
+    file=Path(__file__).resolve().parents[1]/'runtime/dk-pr-review/scripts/run_reviewers.py'
+    spec=importlib.util.spec_from_file_location('exhausted_provider',file);runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
+    patch_file=tmp_path/'diff.patch';patch_file.write_text('')
+    handoff=tmp_path/'handoff.json';handoff.write_text(json.dumps({'patch':str(patch_file)}))
+    def invoke(*a,**kw):raise e.ProviderExhausted('Usage limit reached')
+    monkeypatch.setattr(runner,'invoke',invoke)
+    result=runner.run_skill_reviewer({'skill':'provider:review'},tmp_path,handoff,tmp_path)
+    assert result=={'status':'tokens_exhausted','findings':[],'message':'Usage limit reached'}
+
+
+def test_command_quota_failure_preserves_exhaustion_in_real_subprocess(tmp_path):
+    import importlib.util
+    file=Path(__file__).resolve().parents[1]/'runtime/dk-pr-review/scripts/run_reviewers.py'
+    spec=importlib.util.spec_from_file_location('quota_transport',file);runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
+    patch_file=tmp_path/'diff.patch';patch_file.write_text('')
+    handoff=tmp_path/'handoff.json';handoff.write_text(json.dumps({'patch':str(patch_file)}))
+    script=tmp_path/'quota.py';script.write_text('import sys\nprint("Usage limit reached",file=sys.stderr)\nsys.exit(1)\n')
+    result=runner.run_skill_reviewer({'command':[sys.executable,str(script),'{handoff}']},tmp_path,handoff,tmp_path)
+    assert result['status']=='tokens_exhausted' and result['findings']==[]
