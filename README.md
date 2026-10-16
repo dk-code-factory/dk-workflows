@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.0.1.
+Independent MIT plugin for Claude Code and Codex. Version 1.0.2.
 
 ## Install
 

@@ -289,7 +289,7 @@ def lookup(args):
             return ready(args.kind, previous['result'], cache_file)
         discovery_evidence = evidence
         missing = evidence['sources']
-    ticket = secrets.token_urlsafe(24)
+    ticket = 'd-' + secrets.token_urlsafe(24)
     evidence_file = folder / 'evidence' / (ticket + '.json')
     atomic_json(evidence_file, discovery_evidence)
     pending = {'version': VERSION, 'kind': args.kind, 'cwd': str(root), 'pr': args.pr,
