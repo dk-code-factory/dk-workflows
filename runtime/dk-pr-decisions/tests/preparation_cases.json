@@ -1,0 +1,71 @@
+{
+  "purpose": "Independent reasoning fixtures. Apply preparation to each case separately; assess choices and downstream behavior, not prompt phrases.",
+  "cases": [
+    {
+      "id": "encoding-330",
+      "description": "PR #330 fixes HTML encoding of literal tag delimiters in the title encoder.",
+      "agreement": "User: encoding of literal input only; decoding escaped Unicode and entities is explicitly excluded from this PR.",
+      "feedback": "A reviewer demonstrates that decoding an entity before rendering could expose a delimiter and requests a general decoder.",
+      "repository": {"src/title_encoding.py": "def encode_title(value): return value.replace('<', '&lt;').replace('>', '&gt;')", "tests/test_title_encoding.py": "Existing literal delimiter, ordinary Unicode, and already-encoded string cases."},
+      "task": "Choose validity and scope disposition independently, remedy depth, placement and sufficient tests."
+    },
+    {
+      "id": "blanket-sanitization",
+      "description": "The PR description promises safe rendering for all attacker-controlled strings, while the proposed code escapes literal delimiters only.",
+      "agreement": "No explicit exclusion or precedence resolves whether encoded representations are supported.",
+      "feedback": "The issue repeats the all-input safety guarantee; an inline comment proposes treating encoded representations as unsupported.",
+      "repository": {"src/title_encoding.py": "Literal delimiter replacement only.", "tests/test_title_encoding.py": "Literal strings only."},
+      "task": "State whether work can proceed, conflicting statements, viable options and dependent work. Do not invent an exclusion."
+    },
+    {
+      "id": "local-transform",
+      "description": "Fix normalize_name to preserve an internal hyphen while stripping trailing whitespace.",
+      "agreement": "Pure string transformation; supported input is a string. No I/O or persistence contract changes.",
+      "repository": {"src/names.py": "Existing normalize_name owner; currently removes every hyphen.", "tests/unit/test_names.py": "Existing table-driven normalize_name tests and shared name fixture.", "ci.yml": "Requires the unit suite and formatter."},
+      "task": "Choose owning production/test locations, test level and sufficient commands."
+    },
+    {
+      "id": "subprocess-environment",
+      "description": "Fix a launcher that incorrectly passes the inherited LANG instead of the explicitly configured child locale.",
+      "agreement": "The configured locale must reach the actual child. Preserve other inherited environment values.",
+      "repository": {"src/launcher.py": "build_env is passed to subprocess.run; the call currently drops env=build_env(config).", "tests/unit/test_launcher.py": "build_env is tested directly; subprocess.run is replaced with a mock returning success.", "tests/integration/test_launcher.py": "Existing fixture creates an executable in a temporary directory and invokes launch with a controlled PATH."},
+      "task": "Identify exactly what existing units fail to prove and how to cover the missing contract without live services."
+    },
+    {
+      "id": "covered-integration",
+      "description": "Refactor launcher environment merging without changing the documented child locale contract.",
+      "agreement": "Configured LANG wins; unrelated inherited keys remain.",
+      "repository": {"src/launcher.py": "Merge logic moves within the existing launcher module.", "tests/unit/test_launcher.py": "Existing merge cases.", "tests/integration/test_launcher.py": "A real child writes LANG and an unrelated inherited sentinel to JSON. Test asserts configured LANG and preserved sentinel with conflicting parent LANG."},
+      "task": "Decide whether additional integration coverage is needed; state sufficient evidence and remaining limitations."
+    },
+    {
+      "id": "scattered-helpers",
+      "description": "A payload normalization fix copies the same field mapping into CLI, HTTP and batch entrypoints.",
+      "agreement": "All adapters consume the same domain payload contract; no public interface or dependency-direction change is intended.",
+      "repository": {"src/domain/payload.py": "Existing normalize_payload and field aliases own the domain contract.", "src/cli.py": "Adapter invokes domain normalization.", "src/http.py": "Adapter invokes domain normalization.", "src/batch.py": "Adapter invokes domain normalization.", "tests/domain/test_payload.py": "Domain fixtures cover normalization.", "tests/integration/test_adapters.py": "Existing adapter routing coverage."},
+      "task": "Choose coherent ownership and reusable coverage; decide whether a new generic framework or ownership Decision is necessary."
+    },
+    {
+      "id": "performance-obligations",
+      "description": "Two separate changes: optimize a monthly admin report; fix unbounded allocation in the release import path.",
+      "agreement": "Admin report has no latency/resource SLO. Release import must stay below 64 MiB peak memory for the documented 100k-record workload; that limit is a release criterion.",
+      "repository": {"src/admin/report.py": "Cold monthly path, no observed operational failure.", "src/importer.py": "Materializes every decoded record before processing.", "tests/performance/test_importer.py": "Existing subprocess peak-memory measurement fixture for documented workloads."},
+      "task": "Treat each change independently: decide actionability, dedicated performance review and measurements."
+    },
+    {
+      "id": "compatibility",
+      "description": "Version 2 removes a deprecated legacy output field while retaining the stable client_id field.",
+      "agreement": "User explicitly permits removing legacy in v2 and explicitly requires client_id for all supported v2 clients.",
+      "feedback": "Reviewer A demands a compatibility shim for legacy; reviewer B reproduces missing client_id in a supported v2 response.",
+      "repository": {"src/api/v2.py": "Response currently omits both fields.", "tests/api/test_v2.py": "Existing JSON contract fixtures for v2; v1 remains separate."},
+      "task": "Assess the two findings independently without reopening the permitted break or dismissing supported behavior."
+    },
+    {
+      "id": "converged-overgrowth",
+      "description": "A pure two-branch mapping fix adds a plugin registry, dynamic discovery and three test layers duplicating the same mapping matrix. The first reviewer returns no findings and all tests pass.",
+      "agreement": "Only two fixed supported variants; no extension API or external interaction is requested. Preparation places logic in the existing owner and requires a targeted unit regression plus mandatory repository checks.",
+      "repository": {"src/mapping.py": "Existing mapping owner plus new dynamic registry integration.", "src/plugins/registry.py": "New generic plugin discovery framework for the same two fixed variants.", "tests/unit/test_mapping.py": "Regression matrix.", "tests/integration/test_mapping.py": "Same matrix with registry replaced by mocks.", "tests/system/test_mapping.py": "Same direct function calls and assertions again."},
+      "task": "Decide whether completion is clean, what remains to verify or simplify, and when a human choice would be needed."
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "dk-workflows",
+  "interface": {
+    "displayName": "dk-workflows"
+  },
+  "plugins": [
+    {
+      "name": "dk-workflows",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

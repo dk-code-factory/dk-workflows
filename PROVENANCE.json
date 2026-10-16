@@ -1,0 +1,65 @@
+{
+  "organization": "dk-code-factory",
+  "sources": [
+    {
+      "source": "local-skills/dk-flaky-tests",
+      "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
+    },
+    {
+      "source": "local-skills/dk-config",
+      "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
+    },
+    {
+      "source": "local-skills/dk-pr-decisions",
+      "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
+    },
+    {
+      "source": "local-skills/dk-pr-review",
+      "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
+    },
+    {
+      "source": "local-skills/dk-commit-message",
+      "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
+    },
+    {
+      "source": "local-skills/dk-pr-iter",
+      "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
+    },
+    {
+      "source": "local-skills/dk-review-stats",
+      "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
+    },
+    {
+      "source": "local-skills/dk-issue-description",
+      "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
+    },
+    {
+      "source": "local-skills/dk-pr-address-reviews",
+      "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
+    },
+    {
+      "source": "local-skills/dk-pr-split-commits",
+      "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
+    },
+    {
+      "source": "local-skills/dk-pr-post-review",
+      "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
+    },
+    {
+      "source": "local-skills/dk-pr-read-comments",
+      "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
+    },
+    {
+      "source": "local-skills/dk-pr-description",
+      "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
+    },
+    {
+      "source": "local-skills/dk-pr-reply-review",
+      "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
+    },
+    {
+      "source": "local-skills/shared",
+      "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
+    }
+  ]
+}

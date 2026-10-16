@@ -1,0 +1,11 @@
+{
+  "name": "dk-workflows",
+  "version": "1.0.0",
+  "description": "Portable repository workflows, configurable reviewers, and guarded drafting.",
+  "author": {
+    "name": "Dmitry Kropachev"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/dk-code-factory/dk-workflows",
+  "skills": "./codex/skills/"
+}

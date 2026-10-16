@@ -1,0 +1,435 @@
+#!/usr/bin/env python3
+"""Drive inline-first PR replies from live feedback and the iteration run record."""
+from __future__ import annotations
+import sys
+from pathlib import Path
+sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
+
+import argparse
+import copy
+import importlib.util
+import json
+from pathlib import Path
+import re
+import sys
+import tempfile
+from urllib.parse import urlparse
+
+sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
+from shared import private_state
+
+spec = importlib.util.spec_from_file_location('reply_batch', Path(__file__).with_name('reply_batch.py'))
+guard = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(guard)
+spec = importlib.util.spec_from_file_location('reply_resolution', Path(__file__).with_name('reply_resolution.py'))
+resolution = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(resolution)
+
+
+def require(ok, message):
+    guard.require(ok, message)
+
+
+def fingerprint(source):
+    return guard.digest(source)
+
+
+def all_sources(evidence):
+    return guard.sources(evidence)[0]
+
+
+def find_receipt(evidence, receipt):
+    candidates = evidence['items'] if receipt['kind'] == 'issue_comment' else next(
+        (t['comments'] for t in evidence['threads'] if t['id'] == receipt['reference']), [])
+    matches = [c for c in candidates if c.get('url') == receipt['url']]
+    require(len(matches) == 1 and matches[0]['text'] == receipt['body'],
+            'saved reply missing or edited; reconcile live GitHub evidence')
+
+
+def verify_history(workflow, evidence):
+    for entry in workflow['history']:
+        for receipt in entry.get('receipts', []):
+            find_receipt(evidence, receipt)
+    for entry in workflow.get('resolutions', []):
+        find_receipt(evidence, entry['reply'])
+    for answer in workflow.get('answers', {}).values():
+        find_receipt(evidence, answer['receipt'])
+
+
+def fetch(pr, cwd):
+    snapshot = guard.inline.fetch_stable_snapshot(pr, cwd)
+    conversation = guard.top.fetch(snapshot, cwd)
+    return snapshot, conversation, guard.context(snapshot, conversation)
+
+
+class Controller:
+    guard = guard
+    find_receipt = staticmethod(find_receipt)
+
+    def resolve(self, assessment):
+        return resolution.resolve(self, assessment)
+
+    def __init__(self, record, path, pr, cwd, agent):
+        self.record, self.path = record, Path(path)
+        canonical, selection = guard.inline.split_pr_reference(pr)
+        self.pr, self.cwd, self.agent = canonical, Path(cwd), agent
+        self.selection = selection
+        parts = urlparse(pr).path.strip('/').split('/')
+        require(len(parts) == 4 and parts[2] == 'pull' and parts[3].isdigit(), 'PR URL required')
+        require(record.get('pr') == int(parts[3]), 'run record belongs to a different PR')
+        self.work = record.setdefault('reply_workflow', {
+            'schemaVersion': 1, 'pr': canonical, 'selection': selection, 'agent': agent, 'head': None,
+            'phase': 'inline', 'history': [], 'requests': [], 'knownSources': {},
+            'observations': [], 'active': None, 'blocked': None, 'answers': {},
+        })
+        saved_pr, saved_selection = guard.inline.split_pr_reference(self.work['pr'])
+        require(self.work.get('selection', saved_selection) == selection,
+                'review selection changed; resume with the original PR/review URL')
+        self.work.update(pr=saved_pr, selection=selection)
+        self.work.setdefault('resolutions', [])
+        require(self.work['schemaVersion'] == 1 and self.work['pr'] == canonical,
+                'invalid or mismatched reply workflow')
+        # A crash between saving a verdict and updating status must not discard it.
+        active = self.work['active']
+        if active is not None:
+            entry = self.work['history'][active]
+            verdict = entry['attempts'][-1]['verdict'] if entry['attempts'] else None
+            if verdict is not None and verdict.get('status') == 'rejected':
+                entry['status'] = 'rejected'
+                if verdict.get('pass') == 2:
+                    self.work['blocked'] = {'kind': 'rejected', 'reason': 'final validator rejection'}
+        self.directory = self.path.parent / (self.path.stem + '-replies')
+        self.directory.mkdir(parents=True, exist_ok=True)
+
+    def save(self):
+        private_state.write(self.path, self.record)
+
+    def stop(self, kind, reason):
+        self.work['blocked'] = {'kind': kind, 'reason': str(reason)}
+        self.save()
+        return {'action': 'stop' if kind == 'rejected' else 'reconcile',
+                'reason': str(reason), 'phase': self.work['phase']}
+
+    def live(self):
+        target = self.pr + ('#' + self.selection if self.selection else '')
+        snapshot, conversation, evidence = fetch(target, self.cwd)
+        if self.selection:
+            expected = guard.inline.selection_for(self.selection, evidence['threads'])
+            require(snapshot.get('selection') == expected, 'snapshot lost selected review')
+            require(any(s['reference'] == self.selection for s in evidence['items']),
+                    'selected review is missing from complete conversation')
+        verify_history(self.work, evidence)
+        return snapshot, conversation, evidence
+
+    def selected_threads(self, evidence):
+        if self.selection is None:
+            return evidence['threads']
+        ids = guard.inline.selection_for(self.selection, evidence['threads'])['threadReferences']
+        return [t for t in evidence['threads'] if t['id'] in ids]
+
+    def selected_sources(self, evidence):
+        ids = {t['id'] for t in self.selected_threads(evidence)}
+        return {ref: s for ref, s in all_sources(evidence).items() if self.selection is None or
+                ref == self.selection or s.get('threadReference') in ids}
+
+    def scope_fingerprint(self, evidence):
+        return fingerprint({'pr': self.pr, 'scope': evidence['scope'], 'selection': self.selection,
+                            'threads': sorted(t['id'] for t in self.selected_threads(evidence))})
+
+    def conversation_fingerprint(self, evidence, thread):
+        return fingerprint({'thread': {k: v for k, v in thread.items() if k not in ('isResolved', 'viewerCanResolve')},
+                            'items': evidence['items']})
+
+    def pending(self, evidence):
+        sources = self.selected_sources(evidence)
+        known = self.work['knownSources']
+        outstanding = []
+        for request in self.work['requests']:
+            source = sources.get(request['source'])
+            if source is None or request['excerpt'] not in source['text']:
+                continue  # Edited requests must be classified again from the complete snapshot.
+            if (request['disposition'] in ('reply', 'held') or
+                    known.get(request['source']) != fingerprint(source)):
+                outstanding.append(copy.deepcopy(request))
+        unknown = [source for ref, source in sources.items() if known.get(ref) != fingerprint(source)]
+        refs = {r['source'] for r in outstanding} | {s['reference'] for s in unknown}
+        outstanding_threads = {r.get('threadReference') for r in outstanding}
+        threads = [t for t in evidence['threads'] if not t['isResolved'] and (
+            t['id'] in outstanding_threads or any(c['reference'] in refs for c in t['comments']))]
+        comments = [s for s in evidence['items'] if s['reference'] in refs]
+        unresolved = [dict(reference=t['id'], path=t.get('path'),
+                           conversationFingerprint=self.conversation_fingerprint(evidence, t))
+                      for t in self.selected_threads(evidence) if not t['isResolved']]
+        return {'unresolved_threads': unresolved,
+                'cleanup_complete': not unresolved and not outstanding and not unknown,
+                'scopeFingerprint': self.scope_fingerprint(evidence),
+                'unreplied_threads': [dict(reference=t['id'], path=t.get('path'),
+                                          url=t['comments'][0].get('url') if t['comments'] else None)
+                                     for t in threads],
+                'unreplied_comments': [dict(reference=s['reference'], kind=s['kind'], url=s.get('url'))
+                                      for s in comments],
+                'unclassified_sources': [s['reference'] for s in unknown],
+                'outstanding_requests': outstanding}
+
+    def next(self):
+        require(self.work['agent'] == self.agent, 'reuse the reply agent, or reconcile on resume')
+        if self.work['blocked']:
+            block = self.work['blocked']
+            return {'action': 'stop' if block['kind'] == 'rejected' else 'reconcile', **block}
+        if any(r['status'] == 'in_flight' for r in self.work['resolutions']):
+            return self.stop('resolution', 'unfinished resolution; reconcile live state')
+        if self.work['active'] is not None and self.work['history'][self.work['active']]['status'] != 'rejected':
+            return self.stop('publication', 'unfinished batch; reconcile its journal before replying')
+        try:
+            snapshot, conversation, evidence = self.live()
+        except (guard.GuardError, guard.inline.FetchError, guard.top.FetchError) as exc:
+            return self.stop('evidence', exc)
+        if self.work['head'] is not None and self.work['head'] != evidence['head']:
+            return self.stop('head_changed', 'PR head changed; refresh preflight and decision context')
+        self.work['head'] = evidence['head']
+        changed = self.work['knownSources'] != {ref: fingerprint(source)
+                                               for ref, source in self.selected_sources(evidence).items()}
+        if changed and self.work['phase'] != 'inline' and self.work['active'] is None:
+            self.work['phase'] = 'inline'
+        number = len(self.work['observations']) + 1
+        folder = Path(tempfile.mkdtemp(prefix=f'observation-{number}-', dir=self.directory))
+        guard.write(folder / 'inline.json', snapshot)
+        guard.write(folder / 'conversation.json', conversation)
+        observation = {'snapshot': str(folder / 'inline.json'),
+                       'conversation': str(folder / 'conversation.json'),
+                       'head': evidence['head'], 'phase': self.work['phase']}
+        self.work['observations'].append(observation)
+        self.save()
+        active = self.work['active']
+        action = 'correct_batch' if active is not None else self.work['phase']
+        instructions = {
+            'inline': 'Match all sources to threads. Draft only missing inline replies; hold unmatched '
+                      'requests for the top-level pass and preserve pending user decisions.',
+            'top_level': 'Reconcile retained mappings with live replies, including resolved threads. '
+                         'Skip equivalent answers; draft only unanswered requests without a suitable '
+                         'thread, grouped by source. Submit new inline mappings to return to inline first.',
+            'done': 'No new feedback to classify. Report outstanding holds; do not repeat verified replies.',
+            'correct_batch': 'Correct the rejected batch and use the same validator for pass 2. '
+                             'Do not start another batch or reset the rejection limit.',
+        }
+        return {'action': action, 'instructions': instructions[action], 'agent': self.work['agent'],
+                **observation, **self.pending(evidence), 'run_record': str(self.path),
+                'request_mappings': self.work['requests']}
+
+    def finish(self, entry, batch, evidence, receipts):
+        requests = copy.deepcopy(batch['requests'])
+        by_id = {r['id']: r for r in requests}
+        receipt_map = {r['id']: r for r in receipts}
+        reviewed = all_sources(guard.validate(batch))
+        answers = self.work.setdefault('answers', {})
+        for reply in batch['replies']:
+            for key in reply['requestIds']:
+                request = by_id[key]
+                if reply['id'] in receipt_map:
+                    receipt = receipt_map[reply['id']]
+                    request.update(disposition='skip', reason='Answered at ' + receipt['url'])
+                    answers[guard.digest([request['source'], request['excerpt']])] = {
+                        'sourceFingerprint': fingerprint(reviewed[request['source']]), 'receipt': receipt}
+        # Retain live evidence for answers posted before this run, including semantic
+        # matches that the agent/validator identified and skipped with a reply URL.
+        for request in requests:
+            if request['disposition'] != 'skip':
+                continue
+            urls = {url.rstrip('.,;:') for url in re.findall(r'https?://[^\s<>()\[\]]+', request.get('reason', ''))}
+            matches = [source for source in reviewed.values() if source.get('url') in urls and
+                       source['reference'] != request['source']]
+            if len(matches) == 1:
+                source = matches[0]
+                receipt = {'kind': 'inline' if source['kind'] == 'inline' else 'issue_comment',
+                           'reference': source.get('threadReference', source['reference']),
+                           'url': source['url'], 'body': source['text']}
+                answers[guard.digest([request['source'], request['excerpt']])] = {
+                    'sourceFingerprint': fingerprint(reviewed[request['source']]), 'receipt': receipt}
+        self.work['requests'] = requests
+        # Mark only reviewed sources and our verified replies as classified. Recovery may
+        # encounter new/edited feedback that the interrupted batch never examined.
+        self.work['knownSources'] = {ref: fingerprint(s) for ref, s in
+                                    self.selected_sources(guard.validate(batch)).items()}
+        reply_urls = {r['url'] for r in receipts}
+        for ref, source in all_sources(evidence).items():
+            if source.get('url') in reply_urls:
+                self.work['knownSources'][ref] = fingerprint(source)
+        self.work['phase'] = 'top_level' if entry['phase'] == 'inline' else 'done'
+        entry.update(status='complete', receipts=receipts)
+        self.work['active'] = None
+        self.work['blocked'] = None
+        self.save()
+
+    def publish(self, batch_path, verdict_path=None):
+        require(self.work['agent'] == self.agent, 'reuse the reply agent, or reconcile on resume')
+        require(not self.work['blocked'], 'reconcile the blocked workflow before publication')
+        require(self.work['observations'], 'run next before preparing a batch')
+        observation = self.work['observations'][-1]
+        require(self.work['phase'] == observation['phase'] and self.work['phase'] != 'done',
+                'run next for the current phase')
+        batch = guard.read(batch_path)
+        expected = guard.validate(batch)
+        source_map = all_sources(expected)
+        require(batch['snapshot'].get('selection') == guard.read(observation['snapshot']).get('selection'),
+                'batch changed selected review')
+        allowed = self.selected_sources(expected)
+        require(all(r['source'] in allowed and (not r.get('threadReference') or
+                    r['threadReference'] in {t['id'] for t in self.selected_threads(expected)})
+                    for r in batch['requests']), 'request outside selected review')
+        for request in batch['requests']:
+            answer = self.work.get('answers', {}).get(guard.digest([request['source'], request['excerpt']]))
+            if request['disposition'] == 'reply' and answer and answer['sourceFingerprint'] == fingerprint(
+                    source_map[request['source']]):
+                find_receipt(expected, answer['receipt'])
+                raise guard.GuardError('request already has a verified answer; retain its mapping and skip it')
+        require(batch['snapshot'] == guard.read(observation['snapshot']) and
+                batch['conversation'] == guard.read(observation['conversation']),
+                'batch must use the latest controller snapshots')
+        kind = 'inline' if self.work['phase'] == 'inline' else 'issue_comment'
+        if kind == 'issue_comment' and any(r['disposition'] == 'reply' and r.get('threadReference')
+                                          for r in batch['requests']):
+            require(self.work['active'] is None, 'correct the active rejection before changing passes')
+            self.work['phase'] = 'inline'
+            self.save()
+            return {'action': 'inline', 'reason': 'new request needs an inline answer; run next again'}
+        require(all(r['destination']['kind'] == kind for r in batch['replies']),
+                'reply destinations do not match the controller phase')
+        require(not any(r['disposition'] == 'reply' and not r.get('threadReference')
+                        for r in batch['requests']) if kind == 'inline' else True,
+                'hold unmatched requests for the top-level pass')
+        verdict = guard.read(verdict_path) if verdict_path else None
+        if batch['replies']:
+            require(verdict is not None, 'independent verdict required for each nonempty batch')
+        if verdict is not None:
+            require(verdict.get('batchSha256') == guard.digest(batch) and
+                    verdict.get('status') in ('approved', 'rejected') and
+                    isinstance(verdict.get('validatorAgent'), str) and verdict['validatorAgent'].strip() and
+                    verdict['validatorAgent'] != self.agent, 'invalid or non-independent verdict')
+        if verdict is not None and verdict.get('status') == 'approved':
+            guard.require_approval(batch, verdict)
+        active = self.work['active']
+        if active is None:
+            require(not batch['replies'] or verdict.get('pass') == 1, 'first verdict must be pass 1')
+            entry = {'phase': self.work['phase'], 'head': expected['head'], 'status': 'prepared',
+                     'attempts': [], 'receipts': []}
+            self.work['history'].append(entry)
+            self.work['active'] = len(self.work['history']) - 1
+        else:
+            entry = self.work['history'][active]
+            previous = entry['attempts'][-1]['verdict']
+            require(entry['status'] == 'rejected' and previous['pass'] == 1 and verdict is not None and
+                    verdict.get('pass') == 2 and verdict.get('validatorAgent') == previous['validatorAgent'],
+                    'one correction using the same validator is permitted')
+        folder = Path(tempfile.mkdtemp(
+            prefix=f"batch-{len(self.work['history'])}-pass-{len(entry['attempts']) + 1}-", dir=self.directory))
+        saved_batch, saved_verdict, journal = folder / 'batch.json', folder / 'verdict.json', folder / 'journal.json'
+        guard.write(saved_batch, batch)
+        if verdict is not None:
+            guard.write(saved_verdict, verdict)
+        entry['attempts'].append({'batch': str(saved_batch), 'batchSha256': guard.digest(batch),
+                                  'verdictPath': str(saved_verdict) if verdict else None,
+                                  'verdict': verdict, 'journal': str(journal) if batch['replies'] else None})
+        self.save()
+        if verdict is not None and verdict['status'] == 'rejected':
+            entry['status'] = 'rejected'
+            self.save()
+            if verdict['pass'] == 2:
+                return self.stop('rejected', 'final validator rejection; no further reply publication')
+            return {'action': 'correct_batch', 'corrections': verdict.get('corrections', [])}
+        entry['status'] = 'in_flight'
+        self.save()  # Persist intent before calling the existing guard.
+        try:
+            if batch['replies']:
+                result = guard.publish(batch, verdict, journal, self.cwd)
+                receipts = result['replies']
+            else:
+                receipts = []
+            _, _, live = self.live()
+            guard.unchanged(expected, live, receipts)
+            self.finish(entry, batch, live, receipts)
+        except (OSError, ValueError, KeyError, guard.inline.FetchError, guard.top.FetchError) as exc:
+            return self.stop('publication', exc)
+        return {'action': 'next', 'phase': self.work['phase'], 'replies': receipts,
+                'instructions': 'Run next to refresh both complete snapshots before the next pass.'}
+
+    def reconcile(self):
+        require(not self.work['blocked'] or self.work['blocked']['kind'] != 'rejected',
+                'final rejection cannot be reset by reconciliation or restart')
+        snapshot, conversation, evidence = self.live()
+        resolution.reconcile(self, evidence)
+        active = self.work['active']
+        if active is not None:
+            entry = self.work['history'][active]
+            if entry['status'] == 'rejected':
+                require(evidence['head'] == self.work['head'],
+                        'head changed with an outstanding rejection; do not reset the rejection limit')
+                self.work.update(agent=self.agent, blocked=None)
+                self.save()
+                return {'action': 'correct_batch', 'instructions': 'Run next for fresh evidence, then '
+                        'correct the active batch with the same validator for pass 2. Rejection history is retained.'}
+            attempt = entry['attempts'][-1]
+            batch = guard.read(attempt['batch'])
+            require(guard.digest(batch) == attempt['batchSha256'], 'saved batch changed')
+            journal = guard.read(attempt['journal']) if attempt['journal'] and Path(attempt['journal']).exists() else {}
+            require(not journal or journal.get('batchSha256') == attempt['batchSha256'], 'journal mismatch')
+            receipts = copy.deepcopy(journal.get('replies', []))
+            for receipt in receipts:
+                find_receipt(evidence, receipt)
+            pending = journal.get('pending')
+            if pending:
+                reply = next(r for r in batch['replies'] if r['id'] == pending)
+                destination = reply['destination']
+                candidates = evidence['items'] if destination['kind'] == 'issue_comment' else next(
+                    (t['comments'] for t in evidence['threads'] if t['id'] == destination['reference']), [])
+                old_urls = {s.get('url') for s in all_sources(guard.validate(batch)).values()}
+                matches = [s for s in candidates if s['text'] == reply['body'] and s.get('url') not in old_urls]
+                require(len(matches) <= 1, 'uncertain reply has multiple candidates; reconcile manually')
+                if matches:
+                    receipts.append(dict(destination, id=reply['id'], body=reply['body'], url=matches[0]['url']))
+            self.finish(entry, batch, evidence, receipts)
+            entry['status'] = 'reconciled'
+            entry['reconciliation'] = 'verified live replies; unobserved replies require fresh drafting'
+        # Preserve history across heads; force full inline-first reassessment from live evidence.
+        self.work.update(agent=self.agent, head=evidence['head'], phase='inline', blocked=None)
+        self.save()
+        return {'action': 'next', 'head': evidence['head'],
+                'instructions': 'Refresh preflight/decisions after a head change, then run next. '
+                                'Retained replies must not be repeated.'}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--record', type=Path, required=True)
+    parser.add_argument('--pr', required=True)
+    parser.add_argument('--cwd', type=Path, default=Path('.'))
+    parser.add_argument('--agent', required=True)
+    sub = parser.add_subparsers(dest='command', required=True)
+    sub.add_parser('next')
+    sub.add_parser('reconcile')
+    res = sub.add_parser('resolve')
+    res.add_argument('--assessment', type=Path, required=True)
+    pub = sub.add_parser('publish')
+    pub.add_argument('--batch', type=Path, required=True)
+    pub.add_argument('--verdict', type=Path)
+    args = parser.parse_args()
+    try:
+        path = args.record.resolve()
+        require(path.is_file(), 'initialize the iteration run record before starting replies')
+
+        def run(record):
+            controller = Controller(record, path, args.pr, args.cwd.resolve(), args.agent)
+            if args.command == 'resolve':
+                return controller.resolve(args.assessment)
+            if args.command == 'publish':
+                return controller.publish(args.batch, args.verdict)
+            return getattr(controller, args.command)()
+
+        result = private_state.mutate(path, {}, run)
+        print(json.dumps(result, ensure_ascii=False))
+        return 1 if result['action'] in ('stop', 'reconcile') else 0
+    except (OSError, ValueError, KeyError, TypeError, guard.inline.FetchError, guard.top.FetchError) as exc:
+        parser.exit(1, f'reply passes: {exc}\n')
+
+
+if __name__ == '__main__':
+    sys.exit(main())

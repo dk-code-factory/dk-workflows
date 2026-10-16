@@ -1,0 +1,14 @@
+{
+  "name": "dk-workflows",
+  "owner": {
+    "name": "dk-code-factory"
+  },
+  "plugins": [
+    {
+      "name": "dk-workflows",
+      "source": "./",
+      "description": "dk-workflows",
+      "version": "1.0.0"
+    }
+  ]
+}
