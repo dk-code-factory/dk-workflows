@@ -60,6 +60,19 @@ else: sys.exit(2)
         path.write_text(json.dumps(answer))
         return self.call('submit', '--ticket', ticket, '--result-file', str(path))
 
+    def test_dash_leading_entropy_produces_a_cli_safe_ticket(self):
+        import importlib.util
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        spec=importlib.util.spec_from_file_location('safe_discovery_ticket',SCRIPT)
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        args=SimpleNamespace(cwd=str(self.repo),kind='pr-format',pr=None,issue_kind=None,snapshot_file=None)
+        with patch.dict(os.environ,self.env), patch.object(module.secrets,'token_urlsafe',return_value='-'+'a'*31):
+            first=module.lookup(args)
+        done=self.submit(first['ticket'],{'summary':'Use a direct title.','sources':['file:AGENTS.md']})
+        self.assertEqual(done.returncode,0,done.stderr)
+        self.assertEqual(self.lookup('pr-format')['status'],'ready')
+
     def test_format_miss_submit_hit_and_source_change(self):
         first = self.lookup('pr-format')
         self.assertEqual(first['status'], 'needs_discovery')
