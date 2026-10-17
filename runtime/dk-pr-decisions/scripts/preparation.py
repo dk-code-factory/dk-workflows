@@ -101,7 +101,16 @@ def collect(manifest_path):
         raise ValueError('preparation requires a clean isolated checkout')
     sources = {key: {'path': str(Path(value).resolve()), 'sha256': file_hash(value)}
                for key, value in paths.items()}
-    prior = [read(path(value)) for value in evidence['prior_preparation']]
+    prior = []
+    for value in evidence['prior_preparation']:
+        prior_path = path(value)
+        try:
+            prior.append(read(prior_path))
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f'prior_preparation artifact {prior_path} must contain valid JSON; '
+                'when no previous preparation exists, use a JSON object explaining its absence'
+            ) from exc
     return manifest, context, decisions, sources, reviewer_descriptors, prior
 
 
@@ -130,9 +139,24 @@ def analysis_prompt(manifest, context, decisions, sources, descriptors):
             'sources': sources, 'reviewers': descriptors}, ensure_ascii=False))
 
 
-def analyze(prompt, checkout):
+def analyze(prompt, checkout, *, validate=None):
     from shared.executors import execute
-    return json.loads(execute(prompt, checkout))
+    original_prompt = prompt
+    for attempt in range(2):
+        raw = execute(prompt, checkout, attempt=attempt)
+        try:
+            analysis = json.loads(raw)
+            if validate is not None:
+                validate(analysis)
+            return analysis
+        except ValueError as exc:
+            if attempt:
+                raise ValueError('preparation analysis invalid after one correction: ' + str(exc)) from exc
+            prompt = (original_prompt + '\n\nCorrection: ' + str(exc) +
+                      '\nReturn the complete analysis as exactly one JSON object without Markdown fences. '
+                      'Follow the documented field types; worker_instructions and completion_criteria '
+                      'must be nonempty strings. Preserve the same source evidence and constraints. '
+                      'Do not claim readiness from missing evidence.\nPrior response:\n' + raw)
 
 
 def text(value):
@@ -226,8 +250,12 @@ def prepare(manifest_path, output_dir, analyzer=None):
     manifest, context, decisions, sources, descriptors, prior = collect(manifest_path)
     output_dir = outside(output_dir, context.get('repository', context['checkout']))
     outside(output_dir, context['checkout'])
-    analysis = (analyzer or analyze)(analysis_prompt(manifest, context, decisions, sources, descriptors),
-                                    context['checkout'])
+    prompt = analysis_prompt(manifest, context, decisions, sources, descriptors)
+    if analyzer is None:
+        analysis = analyze(prompt, context['checkout'], validate=lambda value:
+                           validate_analysis(value, sources, descriptors, prior))
+    else:
+        analysis = analyzer(prompt, context['checkout'])
     validate_analysis(analysis, sources, descriptors, prior)
     # Analysis can take minutes; reject any source or checkout movement during it.
     for source in sources.values():
