@@ -343,7 +343,7 @@ def main():
     parser.add_argument('--describe', action='store_true', help='Describe effective reviewers without launching a model')
     parser.add_argument('--rules-file')
     parser.add_argument('--stats-cycle', type=int, help='Iteration cycle (normally read from the private run record)')
-    parser.add_argument('--stats-attempt', help='Optional statistics identity suffix; each session invocation has a distinct run ID')
+    parser.add_argument('--stats-attempt', help='Optional suffix for statistics IDs derived from the session and invocation')
     parser.add_argument('--session-file', help='External session path; omitted paths create a fresh review')
     parser.add_argument('--resume', action='store_true', help='Explicitly resume an interrupted session with identical evidence')
     parser.add_argument('--run-record', help='Compatibility adapter for earlier iteration callers')

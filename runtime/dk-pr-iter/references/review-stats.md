@@ -13,7 +13,8 @@ Configured parent skills receive all attribution; nested agent roles do not beco
 separate reviewers. Missing cycle/preparation metadata warns on stderr and does
 not alter the PR review result. Operational counters are unchanged.
 
-Each Session invocation has a distinct statistics run ID. Statistics retain
+Invocations with pending reviewers have distinct statistics run IDs derived from
+the Session ID, invocation number and optional suffix. Statistics retain
 reviewer attempt IDs, repository, PR, cycle, preparation ID, pinned head, prompt
 fingerprint, explicit status, local duration, final structured findings and private
 evidence paths. All configured
@@ -22,6 +23,8 @@ On resume, the full configured comparison cohort remains in the new statistics r
 Only reviewers actually executed in that invocation receive execution telemetry;
 reviewers reused from checkpoints stay `not_run`. Checkpoint reuse is authorized
 only by mandatory Session evidence, never by statistics terminal results.
+When every reviewer is reused, the mandatory result reports that reuse and no new
+statistics run is created.
 Legacy operational record casing is read without moving or resetting counters;
 completed earlier runs and all evidence remain retained.
 
