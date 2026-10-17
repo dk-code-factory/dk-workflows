@@ -18,10 +18,13 @@ and do not change the review result.
 Standalone and iteration reviews use the same [review-session contract](references/sessions.md).
 Every fresh invocation creates a session and immutable result artifact. Explicit
 resume reuses completed reviewer checkpoints only when all evidence matches.
-Iteration supplies a session path allocated by its own cycle controller; the runner
-has no dependency on iteration records or budgets. Return `review_session` and
+Iteration supplies a session path allocated by its own cycle controller. Mandatory
+session and result provenance do not depend on iteration records or budgets.
+Optional statistics may read the iteration record to discover an omitted cycle.
+Return `review_session` and
 `review_artifact` with executed, reused and skipped reviewers. Optional statistics
 never authorize reuse or completion.
 
-The earlier `--run-record` entry point remains available through a thin iteration
-compatibility adapter; prefer the common session contract for new callers.
+The earlier `--run-record` entry point remains available through a thin compatibility
+adapter that delegates cycle checks and result registration to
+`dk-pr-iter/scripts/run_state.py`; prefer the common session contract for new callers.

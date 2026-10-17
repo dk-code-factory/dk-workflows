@@ -49,6 +49,7 @@ Earlier iteration callers may still pass `--run-record`; this compatibility entr
 point delegates state/cycle checks and automatic registration to the iteration
 adapter. It cannot be combined with explicit session options. Completed bound
 sessions may return explicitly reported reused coverage through this legacy path.
-The normal standalone and iteration session API remains independent of iteration
-records. Historical version-1 artifacts retain their original completion checks in
+Mandatory session and result storage remain independent of iteration records.
+Optional statistics may read those records to discover an omitted cycle.
+Historical version-1 artifacts retain their original completion checks in
 the iteration adapter and never supply reusable reviewer checkpoints.

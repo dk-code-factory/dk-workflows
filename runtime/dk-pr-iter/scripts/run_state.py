@@ -296,7 +296,7 @@ def legacy_review_options(record_path, context, prepared, reviewers, scope, rule
         if stats_cycle is not None and stats_cycle != item['cycle']:
             raise ValueError('--stats-cycle differs from the active iteration cycle')
         return item
-    binding = mutate(record_path, {}, allocate)
+    binding = mutate(review_coverage.storage_path(record_path, context), {}, allocate)
     path = Path(binding['session_file'])
     options = {'session_file': str(path), 'resume': path.exists(), 'cycle': binding['cycle']}
     if path.exists():
@@ -316,7 +316,11 @@ def legacy_review_options(record_path, context, prepared, reviewers, scope, rule
 
 
 def legacy_register_review(record_path, result, head):
-    return mutate(Path(record_path), {}, lambda record: register_review(record, result, head))
+    record_path = Path(record_path)
+    prepared = work_gate(read(record_path, {}), head)
+    context = read(Path(prepared['sources']['context']['path']), {})
+    return mutate(review_coverage.storage_path(record_path, context), {},
+                  lambda record: register_review(record, result, head))
 
 
 def retry_exhausted_cycle(record, head):

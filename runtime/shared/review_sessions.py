@@ -36,6 +36,7 @@ class Session:
         if resume and path is None:
             raise ValueError('resuming requires --session-file')
         self.path = outside(path or directory(context['url']) / (uuid.uuid4().hex + '.json'), context)
+        self.execution_lock = self.path.with_name(self.path.name + '.execution.lock')
         self.validate_storage()
         self.identity = identity(context, prepared, reviewers, scope, rules)
         default = {'session_version': 1, 'id': uuid.uuid4().hex, 'identity': self.identity,
@@ -52,7 +53,13 @@ class Session:
 
     def validate_storage(self):
         coverage.storage_path(self.path, self.context)
-        outside(self.path.with_suffix('.execution.lock'), self.context)
+        outside(self.execution_lock, self.context)
+        paths = [self.path, self.path.with_name(self.path.name + '.lock'), self.execution_lock]
+        for index, path in enumerate(paths):
+            for other in paths[:index]:
+                if (path.resolve() == other.resolve()
+                        or (path.exists() and other.exists() and path.samefile(other))):
+                    raise ValueError('review session and its locks must be distinct files')
         for name in ('review-checkpoints', 'review-results'):
             outside(self.path.parent / name, self.context)
 
@@ -67,7 +74,7 @@ class Session:
     @contextmanager
     def execution(self):
         self.validate_storage()
-        with self.path.with_suffix('.execution.lock').open('w') as lock:
+        with self.execution_lock.open('w') as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
