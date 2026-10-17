@@ -309,9 +309,15 @@ class PreparationTests(unittest.TestCase):
         state.attach_preparation(record, saved['artifact'], package.context['url'], package.head)
         state.next_cycle(record, package.head)
         record_path = package.write('run-record.json', record)
-        completion.review_coverage.retain(record_path, package.context, prep.read(saved['artifact']),
-            {'complete': True, 'findings': [], 'executed_reviewers': ['example'],
-             'reused_reviewers': [], 'skipped_reviewers': []}, record['iteration_run']['id'], 1)
+        from shared.review_sessions import Session
+        binding = state.review_session(record, package.head, record_path)
+        package.write('run-record.json', record)
+        session = Session(package.context, prep.read(saved['artifact']), ['example'], path=binding['session_file'])
+        item = session.finish({'complete': True, 'findings': [], 'executed_reviewers': ['example'],
+                               'reused_reviewers': [], 'skipped_reviewers': []})
+        record = state.read(Path(record_path), {})
+        state.register_review(record, {'review_artifact': item}, package.head)
+        package.write('run-record.json', record)
         self.assertEqual(completion.completion_gate(*args, stage='review', preparation=saved['artifact'],
                                                    pr_url=package.context['url']), 'run_record_missing')
         verification = {'verification_version': 1, 'preparation_id': saved['preparation_id'],
@@ -345,9 +351,15 @@ class PreparationTests(unittest.TestCase):
         state.attach_preparation(record, saved['artifact'], package.context['url'], package.head)
         state.next_cycle(record, package.head)
         record_path = package.write('run-record.json', record)
-        completion.review_coverage.retain(record_path, package.context, prep.read(saved['artifact']),
-            {'complete': True, 'findings': [], 'executed_reviewers': ['example'],
-             'reused_reviewers': [], 'skipped_reviewers': []}, record['iteration_run']['id'], 1)
+        from shared.review_sessions import Session
+        binding = state.review_session(record, package.head, record_path)
+        package.write('run-record.json', record)
+        session = Session(package.context, prep.read(saved['artifact']), ['example'], path=binding['session_file'])
+        item = session.finish({'complete': True, 'findings': [], 'executed_reviewers': ['example'],
+                               'reused_reviewers': [], 'skipped_reviewers': []})
+        record = state.read(Path(record_path), {})
+        state.register_review(record, {'review_artifact': item}, package.head)
+        package.write('run-record.json', record)
         source = package.repo / 'transform.py'
         check = {'satisfied': True, 'rationale': 'Inspected the supported behavior and its boundaries',
                  'evidence': [{'path': str(source), 'sha256': prep.file_hash(source)}]}

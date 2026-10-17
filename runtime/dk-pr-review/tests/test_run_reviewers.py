@@ -119,33 +119,41 @@ class RunnerTests(unittest.TestCase):
             mod.main()
         run.assert_not_called()
 
-    def test_iteration_cli_binds_cache_and_provenance_to_current_run(self):
+    def test_both_modes_use_same_session_and_result_contract(self):
         context = {**self.context, 'repository': str(Path(self.tmp.name)/'repository')}
         context_file = Path(self.tmp.name)/'context.json'
         context_file.write_text(json.dumps(context))
-        record_file = Path(self.tmp.name)/'run.json'
+        decisions_file = Path(self.tmp.name)/'decisions.json'
+        decisions_file.write_text(json.dumps(self.decisions))
+        scope_file = Path(self.tmp.name)/'scope.txt'
+        rules_file = Path(self.tmp.name)/'rules.txt'
+        scope = 'Review shared session behavior and preserve legacy callers.'
+        rules = 'Keep iteration budget policy in the iteration adapter.'
+        scope_file.write_text(scope)
+        rules_file.write_text(rules)
         argv = ['run_reviewers.py', '--context', str(context_file), '--decisions-file',
-                str(Path(self.tmp.name)/'decisions.json'), '--preparation-file', str(self.preparation_path)]
-        Path(argv[4]).write_text(json.dumps(self.decisions))
+                str(decisions_file), '--preparation-file', str(self.preparation_path),
+                '--scope-file', str(scope_file), '--rules-file', str(rules_file)]
         result = {'complete': True, 'findings': [], 'executed_reviewers': ['one'],
                   'reused_reviewers': [], 'skipped_reviewers': []}
         with patch.object(sys, 'argv', argv), patch.object(mod, 'run', return_value=json.dumps({'reviewers': self.providers})), \
-             patch.object(mod.preparation_api, 'load', return_value=self.preparation), \
-             patch.object(mod, 'for_iteration') as capture, patch.object(mod, 'review', return_value=result.copy()) as review:
-            with self.assertRaisesRegex(ValueError, '--run-record'):
+             patch.object(mod.preparation_api, 'load') as load, patch.object(mod, 'Session') as factory, \
+             patch.object(mod, 'for_iteration') as capture, patch.object(mod, 'review', return_value=result.copy()) as review, \
+             patch('builtins.print'):
+            session = factory.return_value
+            session.cached.return_value = None
+            session.id, session.invocation = 'review-session', 1
+            session.finish.return_value = {'path': 'saved', 'sha256': 'fingerprint'}
+            for mode in ('standalone', 'iteration'):
+                load.return_value = {**self.preparation, 'mode': mode}
                 mod.main()
-            review.assert_not_called()
-            argv += ['--run-record', str(record_file)]
-            attempts = []
-            with patch.object(mod.review_coverage, 'retain', return_value={'path': 'saved'}) as retain, \
-                 patch('builtins.print'):
-                for run_id in ('first-run', 'second-run'):
-                    record_file.write_text(json.dumps({'iteration_run': {'id': run_id, 'status': 'active'},
-                        'cycles': [{'number': 1, 'head': context['head_sha']}]}))
-                    mod.main()
-                    attempts.append(capture.call_args.args[-1])
-                    self.assertEqual(retain.call_args.args[-2:], (run_id, 1))
-            self.assertEqual(attempts, ['first-run:1', 'second-run:1'])
+                self.assertEqual(factory.call_args.kwargs['scope'], scope)
+                self.assertEqual(factory.call_args.kwargs['rules'], rules)
+                self.assertEqual(review.call_args.args[2], scope)
+                self.assertEqual(review.call_args.args[4], rules)
+                self.assertIs(review.call_args.kwargs['session'], session)
+                session.finish.assert_called()
+                self.assertEqual(capture.call_args.args[-1], 'review-session:1:1')
 
 
 

@@ -16,6 +16,7 @@ import run_reviewers as runner
 from stats_capture import Capture, for_iteration, api
 from preparation_fixtures import artifact
 from shared.reviewer_telemetry import ENV, capture
+from shared.review_sessions import Session
 
 
 @pytest.fixture
@@ -53,7 +54,7 @@ def finding():
     return dict(severity='Major', path='x.py', line=1, message='bug', fix='fix it')
 
 
-def test_capture_before_aggregation_and_idempotent_resume(pinned):
+def test_capture_before_aggregation_and_independent_review_session(pinned):
     context, decisions, prep, names, git = pinned
     stats = Capture(context, prep, names, cycle=1)
     def fake(name, skill, handoff_path, checkout):
@@ -73,10 +74,15 @@ def test_capture_before_aggregation_and_idempotent_resume(pinned):
     assert (Path(context['patch']).parent / 'review-stats.json').exists()
     assert not git('status', '--porcelain')
     assert ENV not in os.environ
-    resumed = Capture(context, prep, names, cycle=1)
-    with patch.object(runner, 'run_skill_reviewer', side_effect=AssertionError('resume relaunched reviewer')):
-        assert runner.review(context, names, '', decisions, '', prep, stats=resumed) == {
-            **result, 'executed_reviewers': [], 'reused_reviewers': names}
+    # Completed optional observations cannot authorize reuse in a fresh session.
+    session = Session(context, prep, names)
+    with session.execution(), patch.object(runner, 'run_skill_reviewer', return_value={'findings': []}) as calls:
+        fresh = runner.review(context, names, '', decisions, '', prep, stats=stats, session=session)
+        session.finish(fresh)
+    assert calls.call_count == 2
+    assert fresh['complete'] and fresh['findings'] == []
+    assert fresh['executed_reviewers'] == names and fresh['reused_reviewers'] == []
+    assert all(session.cached(name) == {'findings': []} for name in names)
     assert api.summary()['total']['reported']['total'] == 2
 
 
