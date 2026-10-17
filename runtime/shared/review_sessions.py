@@ -19,11 +19,7 @@ def directory(pr_url):
 
 
 def outside(path, context):
-    path = Path(path).resolve()
-    for key in ('repository', 'checkout'):
-        if path.is_relative_to(Path(context[key]).resolve()):
-            raise ValueError('review sessions must stay outside the repository and checkout')
-    return path
+    return coverage.outside(path, context)
 
 
 def identity(context, prepared, reviewers, scope='', rules=''):
@@ -40,6 +36,7 @@ class Session:
         if resume and path is None:
             raise ValueError('resuming requires --session-file')
         self.path = outside(path or directory(context['url']) / (uuid.uuid4().hex + '.json'), context)
+        self.validate_storage()
         self.identity = identity(context, prepared, reviewers, scope, rules)
         default = {'session_version': 1, 'id': uuid.uuid4().hex, 'identity': self.identity,
                    'status': 'active', 'reviews': {}, 'results': []}
@@ -53,7 +50,14 @@ class Session:
             return old['id']
         self.id = mutate(self.path, {} if resume else default, initialize)
 
+    def validate_storage(self):
+        coverage.storage_path(self.path, self.context)
+        outside(self.path.with_suffix('.execution.lock'), self.context)
+        for name in ('review-checkpoints', 'review-results'):
+            outside(self.path.parent / name, self.context)
+
     def update(self, operation):
+        self.validate_storage()
         def guarded(data):
             if data.get('id') != self.id or data.get('identity') != self.identity:
                 raise ValueError('review session changed during execution')
@@ -62,6 +66,7 @@ class Session:
 
     @contextmanager
     def execution(self):
+        self.validate_storage()
         with self.path.with_suffix('.execution.lock').open('w') as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -95,12 +100,14 @@ class Session:
         return self.update(lookup)
 
     def record(self, reviewer, status, result=None, reason=None):
+        self.validate_storage()
         if reviewer not in self.identity['reviewers']:
             raise ValueError('reviewer is outside this session')
         saved = {'checkpoint_version': 1, 'session_id': self.id, 'session_identity': self.identity,
                  'reviewer': reviewer, 'status': status, 'result': result, 'reason': reason}
         fingerprint = coverage.digest(saved)
-        path = self.path.parent / 'review-checkpoints' / (fingerprint + '.json')
+        path = coverage.storage_path(
+            self.path.parent / 'review-checkpoints' / (fingerprint + '.json'), self.context)
         def immutable(old):
             if old != saved:
                 raise ValueError('review checkpoint changed')
@@ -112,6 +119,7 @@ class Session:
         self.update(save)
 
     def finish(self, result):
+        self.validate_storage()
         item = coverage.retain(self.path, self.context, self.prepared, result, self.id)
         def save(data):
             data['results'].append(item)

@@ -1,21 +1,29 @@
 # Private reviewer statistics (API v1)
 
 Collection is enabled for future `iteration` preparation runs launched by
-`dk-pr-review/scripts/run_reviewers.py`. It reads the latest recorded cycle and
-cycle retry from the private operational record. `--stats-cycle N` and
-`--stats-attempt STABLE_ID` provide explicit identities when handing off a cycle;
-reuse them on resume. Standalone preparation does not collect statistics.
+`dk-pr-review/scripts/run_reviewers.py`. `--stats-cycle N` supplies the cycle;
+when omitted, collection reads the latest recorded cycle from the private
+operational record. The runner always supplies an attempt identity composed of
+the Session ID, invocation number and optional `--stats-attempt SUFFIX`. The
+suffix may stay stable on resume, but cannot force the same statistics run ID.
+Collection does not derive this attempt identity from recorded cycle retries;
+iteration owns retry policy and cycle budgets.
+Standalone preparation does not collect statistics.
 Configured parent skills receive all attribution; nested agent roles do not become
 separate reviewers. Missing cycle/preparation metadata warns on stderr and does
 not alter the PR review result. Operational counters are unchanged.
 
-Each configured invocation has a stable run ID and reviewer attempt ID, repository,
-PR, cycle, preparation ID, pinned head, prompt fingerprint, explicit status, local
-duration, final structured findings and private evidence paths. All configured
+Each Session invocation has a distinct statistics run ID. Statistics retain
+reviewer attempt IDs, repository, PR, cycle, preparation ID, pinned head, prompt
+fingerprint, explicit status, local duration, final structured findings and private
+evidence paths. All configured
 reviewers start as `not_run`; `running` after interruption is unknown, never clean.
-Resuming the same run reuses terminal results. Legacy operational record casing is
-read without moving or resetting counters. Use a new attempt identity for an
-explicit retry; completed earlier runs and all evidence remain retained.
+On resume, the full configured comparison cohort remains in the new statistics run.
+Only reviewers actually executed in that invocation receive execution telemetry;
+reviewers reused from checkpoints stay `not_run`. Checkpoint reuse is authorized
+only by mandatory Session evidence, never by statistics terminal results.
+Legacy operational record casing is read without moving or resetting counters;
+completed earlier runs and all evidence remain retained.
 
 Storage uses `shared.private_state` locking/atomic writes under
 `$XDG_DATA_HOME/dk-pr-iter/HOST/OWNER/REPO` (or `~/.local/share/dk-pr-iter`).

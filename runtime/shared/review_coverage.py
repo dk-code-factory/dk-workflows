@@ -26,9 +26,28 @@ def scope(prepared):
                                      if key.split('/')[0] in {'issues', 'choices', 'user_instructions', 'rules'}}})
 
 
+def outside(path, context):
+    path = Path(path).resolve()
+    for key in ('repository', 'checkout'):
+        if path.is_relative_to(Path(context[key]).resolve()):
+            raise ValueError('private review state must stay outside the repository and checkout')
+    return path
+
+
+def storage_path(path, context):
+    """Check JSON, temporary-file directory and the adjacent private_state lock."""
+    path = Path(path)
+    outside(path.parent, context)
+    outside(path, context)
+    outside(path.parent / (path.name + '.lock'), context)
+    return path
+
+
 def retain(session_path, context, prepared, result, session_id):
     """Save an immutable result with no knowledge of iteration budgets or state."""
-    session = read(Path(session_path), {})
+    session_path = storage_path(session_path, context)
+    directory = outside(session_path.resolve().parent / 'review-results', context)
+    session = read(session_path, {})
     if session.get('id') != session_id or session.get('session_version') != 1:
         raise ValueError('review result requires its originating session')
     artifact = {'version': 2, 'session_id': session_id,
@@ -39,7 +58,7 @@ def retain(session_path, context, prepared, result, session_id):
                 'result': result}
     validate_session_identity(artifact)
     fingerprint = digest(artifact)
-    path = Path(session_path).resolve().parent / 'review-results' / (fingerprint + '.json')
+    path = storage_path(directory / (fingerprint + '.json'), context)
     def immutable(old):
         if old != artifact:
             raise ValueError('review result artifact changed')

@@ -220,7 +220,13 @@ def register_review(record, output, head):
                     if all(v[k] == value for k, value in identity.items())), None)
     if binding is None:
         raise ValueError('allocate an iteration review session before registering results')
+    if not isinstance(output, dict) or 'review_artifact' not in output:
+        raise ValueError('review result must be an object containing review_artifact')
     item = output['review_artifact']
+    if (not isinstance(item, dict)
+            or any(not isinstance(item.get(key), str) or not item[key]
+                   for key in ('path', 'sha256'))):
+        raise ValueError('review_artifact requires nonempty string path and sha256')
     artifact = review_sessions.result_artifact(binding['session_file'], item)
     if (artifact['head'] != head or artifact['preparation_id'] != prepared['preparation_id']
             or artifact['pr_url'] != prepared['identity']['pr_url']):
