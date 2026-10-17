@@ -104,8 +104,9 @@ runner's sidecar path in handoffs and retain replay inputs when analytics fails.
 
 `iteration_run` identifies the active or terminal request. `start-run` archives the
 terminal record in `run_history` and resets only review cycles, usage retries,
-per-cycle repairs and review-result registrations. Publications, reply-controller
-state, decisions and per-head CI rerun limits remain available. `resume-run` requires
+per-cycle repairs, review-session bindings and review-result registrations.
+Publications, reply-controller state, decisions and per-head CI rerun limits remain
+available. `resume-run` requires
 an active run and preserves its identity and counters. `adopt-run` gives legacy
 history an identity without clearing counters; record its actual outcome explicitly.
 Only a later user request permits a new budget. Never finish/restart within one
@@ -117,8 +118,9 @@ session using `review-session --head SHA` after recording its cycle; this return
 stable external `session_file` for that cycle and usage retry. Give that path to
 [dk-pr-review](../../dk-pr-review/references/sessions.md) with `--session-file`.
 Use `--resume` only after interruption with identical evidence. The runner produces
-review provenance for both standalone and iteration reviews without reading this
-record. Save its JSON and register it through `review-result --head SHA --file FILE`.
+mandatory review provenance for both standalone and iteration reviews independently
+of this record. Optional statistics may read the record to discover an omitted
+cycle. Save its JSON and register it through `review-result --head SHA --file FILE`.
 Registration checks the allocated session, pinned head and current preparation.
 `review_results` links immutable artifacts to the active run, cycle and attempt.
 Each cycle/attempt keeps its allocated session. Changed preparation, scope or rules

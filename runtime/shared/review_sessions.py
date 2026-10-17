@@ -113,6 +113,10 @@ class Session:
                 raise ValueError('review checkpoint changed')
         mutate(path, saved, immutable)
         def save(data):
+            # Coordinator failures can happen before cache lookup. They must not
+            # replace a completed reviewer's authoritative checkpoint or history.
+            if status == 'failed' and data['reviews'].get(reviewer, {}).get('status') == 'completed':
+                return
             item = {'status': status, 'checkpoint': {'path': str(path), 'sha256': fingerprint}}
             data.setdefault('review_history', []).append({'reviewer': reviewer, **item})
             data['reviews'][reviewer] = item
@@ -130,11 +134,13 @@ class Session:
 
 def result_artifact(session_path, item):
     session = read(Path(session_path), {})
+    if (session.get('session_version') != 1 or not session.get('results')
+            or session['results'][-1] != item):
+        raise ValueError('result is not the latest registered result of this review session')
     artifact = coverage.load(item)
-    if (artifact.get('version') != 2 or session.get('session_version') != 1
+    if (artifact.get('version') != 2
             or artifact['session_id'] != session.get('id')
             or artifact['session_identity'] != session.get('identity')
-            or not session.get('results') or session['results'][-1] != item
             or session.get('status') != ('completed' if artifact['result']['complete'] else 'incomplete')):
         raise ValueError('result is not the latest registered result of this review session')
     return artifact

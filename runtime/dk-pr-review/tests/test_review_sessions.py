@@ -55,6 +55,77 @@ def test_interrupted_review_reuses_completed_provider_without_analytics(pinned, 
     assert calls.call_count == 2
 
 
+@pytest.mark.parametrize('failure', ['descriptor', 'status'])
+def test_coordinator_failure_preserves_completed_checkpoint_for_following_resume(pinned, failure):
+    context, decisions, prep, names, git = pinned
+    session = Session(context, prep, names)
+    with session.execution(), patch.object(runner, 'run_skill_reviewer',
+            side_effect=[{'findings': [finding()]}, KeyboardInterrupt]):
+        with pytest.raises(KeyboardInterrupt):
+            runner.review(context, names, '', decisions, '', prep, session=session)
+    before = json.loads(session.path.read_text())
+    checkpoint = Path(before['reviews'][names[0]]['checkpoint']['path'])
+    checkpoint_bytes = checkpoint.read_bytes()
+    resumed = Session(context, prep, names, path=session.path, resume=True)
+    describe, run = runner.describe_reviewer, runner.run
+    status_reads = 0
+
+    def describe_reviewer(name):
+        if failure == 'descriptor':
+            raise OSError('transient descriptor read failed')
+        return describe(name)
+
+    def checked_run(args, cwd=None):
+        nonlocal status_reads
+        if args == ['git', 'status', '--porcelain=v1']:
+            status_reads += 1
+            if failure == 'status' and status_reads == 2:
+                raise OSError('transient status read failed')
+        return run(args, cwd)
+
+    with resumed.execution(), patch.object(runner, 'describe_reviewer', side_effect=describe_reviewer), \
+            patch.object(runner, 'run', side_effect=checked_run), \
+            patch.object(runner, 'run_skill_reviewer') as providers:
+        incomplete = runner.review(context, names, '', decisions, '', prep, session=resumed)
+        resumed.finish(incomplete)
+    providers.assert_not_called()
+    assert not incomplete['complete'] and incomplete['failed_reviewer'] == names[0]
+    assert incomplete['reason'] == f'transient {failure} read failed'
+    assert incomplete['executed_reviewers'] == incomplete['reused_reviewers'] == []
+    after = json.loads(session.path.read_text())
+    assert after['reviews'] == before['reviews']
+    assert after['review_history'] == before['review_history']
+    assert checkpoint.read_bytes() == checkpoint_bytes
+
+    recovered = Session(context, prep, names, path=session.path, resume=True)
+    with recovered.execution(), patch.object(runner, 'run_skill_reviewer', return_value={'findings': []}) as providers:
+        result = runner.review(context, names, '', decisions, '', prep, session=recovered)
+        item = recovered.finish(result)
+    assert [call.args[0] for call in providers.call_args_list] == names[1:]
+    assert result['complete'] and result['reused_reviewers'] == names[:1]
+    assert result['executed_reviewers'] == names[1:]
+    assert result['findings'] == [{**finding(), 'reviewers': names[:1]}]
+    assert result_artifact(session.path, item)['result'] == result
+    assert review_coverage.verify(item, prep)['result'] == result
+    assert not git('status', '--porcelain')
+
+
+def test_failed_checkpoint_validation_remains_visible_without_replacing_completed_slot(pinned):
+    context, decisions, prep, names, git = pinned
+    session = Session(context, prep, names)
+    session.record(names[0], 'completed', {'findings': []})
+    before = json.loads(session.path.read_text())
+    Path(before['reviews'][names[0]]['checkpoint']['path']).write_text('{}')
+    with session.execution(), patch.object(runner, 'run_skill_reviewer') as providers:
+        result = runner.review(context, names, '', decisions, '', prep, session=session)
+    providers.assert_not_called()
+    assert not result['complete'] and result['reason'] == 'review checkpoint changed'
+    after = json.loads(session.path.read_text())
+    assert after['reviews'] == before['reviews'] and after['review_history'] == before['review_history']
+    with pytest.raises(ValueError, match='review checkpoint changed'):
+        session.cached(names[0])
+
+
 def test_resumed_main_preserves_statistics_comparison_cohort(pinned, monkeypatch, capsys):
     context, decisions, prep, names, git = pinned
     third = 'dk-pr-read-comments'
