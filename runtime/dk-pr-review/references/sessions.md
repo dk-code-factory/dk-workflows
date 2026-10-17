@@ -42,3 +42,11 @@ Its adapter additionally checks active run/cycle/attempt and finding validity/sc
 assessments. The shared session/result contract has no iteration-record dependency.
 Statistics collect only reviewers actually executed, with distinct invocation
 identities, and never serve as the source of cached results.
+
+Earlier iteration callers may still pass `--run-record`; this compatibility entry
+point delegates state/cycle checks and automatic registration to the iteration
+adapter. It cannot be combined with explicit session options. Completed bound
+sessions may return explicitly reported reused coverage through this legacy path.
+The normal standalone and iteration session API remains independent of iteration
+records. Historical version-1 artifacts retain their original completion checks in
+the iteration adapter and never supply reusable reviewer checkpoints.

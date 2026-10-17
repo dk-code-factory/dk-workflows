@@ -197,3 +197,45 @@ def test_starting_another_cycle_invalidates_previous_cycle_completion(reviewed):
     write(path, record)
     with pytest.raises(ValueError, match='lacks review coverage'):
         state.verify_review(path, prepared)
+
+
+@pytest.mark.parametrize('change', [None, 'run', 'cycle', 'tree', 'scope', 'incomplete'])
+def test_legacy_coverage_keeps_original_guards_without_creating_sessions(reviewed, change):
+    path, context, prepared, result, item, git = reviewed
+    record = read(path, {})
+    artifact = coverage.load(item)
+    artifact.pop('session_id')
+    artifact.update(version=1, iteration_run_id=record['iteration_run']['id'], cycle=5)
+    if change == 'run': artifact['iteration_run_id'] = 'older-run'
+    if change == 'cycle': artifact['cycle'] = 4
+    if change == 'tree': artifact['tree'] = 'a' * 40
+    if change == 'scope': artifact['scope'] = 'older-scope'
+    if change == 'incomplete': artifact['result']['complete'] = False
+    legacy_path = path.parent / 'legacy-review.json'
+    write(legacy_path, artifact)
+    reference = {'path': str(legacy_path), 'sha256': coverage.digest(artifact)}
+    record['review_results'], record['review_sessions'] = [reference], []
+    write(path, record)
+    if change:
+        with pytest.raises(ValueError):
+            state.verify_review(path, prepared)
+    else:
+        assert state.verify_review(path, prepared)['version'] == 1
+        assert read(path, {})['review_sessions'] == []
+        assert len(read(path, {})['cycles']) == 5
+    with pytest.raises(ValueError, match='latest registered'):
+        review_sessions.result_artifact(item['session_file'], reference)
+
+
+def test_legacy_runner_adapter_reuses_only_its_bound_completed_session(reviewed):
+    path, context, prepared, result, item, git = reviewed
+    options = state.legacy_review_options(path, context, prepared, list(prepared['reviewers']), '', '', 5)
+    assert options['result']['executed_reviewers'] == []
+    assert options['result']['reused_reviewers'] == ['one']
+    assert options['result']['review_artifact']['path'] == item['path']
+    state.legacy_register_review(path, options['result'], context['head_sha'])
+    assert len(read(path, {})['review_results']) == 1
+    with pytest.raises(ValueError, match='stats-cycle'):
+        state.legacy_review_options(path, context, prepared, list(prepared['reviewers']), '', '', 4)
+    with pytest.raises(ValueError, match='evidence changed'):
+        state.legacy_review_options(path, context, prepared, list(prepared['reviewers']), 'new scope', '', 5)

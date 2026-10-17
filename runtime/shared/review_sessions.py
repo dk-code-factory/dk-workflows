@@ -26,17 +26,21 @@ def outside(path, context):
     return path
 
 
+def identity(context, prepared, reviewers, scope='', rules=''):
+    return {'pr_url': context['url'], 'head': context['head_sha'],
+        'base': prepared['identity']['base_sha'], 'preparation_id': prepared['preparation_id'],
+        'tree': coverage.git(context['checkout'], 'rev-parse', f"{context['head_sha']}^{{tree}}"),
+        'scope': coverage.scope(prepared), 'scope_text': coverage.digest(scope),
+        'rules_text': coverage.digest(rules), 'reviewers': list(reviewers)}
+
+
 class Session:
     def __init__(self, context, prepared, reviewers, *, path=None, resume=False, scope='', rules=''):
         self.context, self.prepared = context, prepared
         if resume and path is None:
             raise ValueError('resuming requires --session-file')
         self.path = outside(path or directory(context['url']) / (uuid.uuid4().hex + '.json'), context)
-        self.identity = {'pr_url': context['url'], 'head': context['head_sha'],
-            'base': prepared['identity']['base_sha'], 'preparation_id': prepared['preparation_id'],
-            'tree': coverage.git(context['checkout'], 'rev-parse', f"{context['head_sha']}^{{tree}}"),
-            'scope': coverage.scope(prepared), 'scope_text': coverage.digest(scope),
-            'rules_text': coverage.digest(rules), 'reviewers': list(reviewers)}
+        self.identity = identity(context, prepared, reviewers, scope, rules)
         default = {'session_version': 1, 'id': uuid.uuid4().hex, 'identity': self.identity,
                    'status': 'active', 'reviews': {}, 'results': []}
         def initialize(old):
@@ -114,7 +118,8 @@ class Session:
 def result_artifact(session_path, item):
     session = read(Path(session_path), {})
     artifact = coverage.load(item)
-    if (session.get('session_version') != 1 or artifact['session_id'] != session.get('id')
+    if (artifact.get('version') != 2 or session.get('session_version') != 1
+            or artifact['session_id'] != session.get('id')
             or not session.get('results') or session['results'][-1] != item
             or session.get('status') != ('completed' if artifact['result']['complete'] else 'incomplete')):
         raise ValueError('result is not the latest registered result of this review session')

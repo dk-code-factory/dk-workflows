@@ -137,6 +137,9 @@ The CLI includes verified review provenance or a `review_limitation` reason.
 Report actual reviewer execution in this invocation separately from reused earlier
 results, including reviewed heads/trees and all skipped reviewers with reasons.
 
-Legacy version-1 review artifacts cannot satisfy the version-2 session contract.
-Preserve them and the existing budget as history. Resume with valid session evidence
-or report the missing coverage; do not reset counters to bypass that limitation.
+The iteration adapter still validates fingerprinted version-1 completion coverage
+against its original active-run/latest-cycle, PR/tree/scope, reviewer accounting and
+finding-assessment guards. Legacy evidence never becomes a session checkpoint or
+grants a fresh budget. Existing runner `--run-record` callers route through a thin
+compatibility adapter that allocates/registers shared sessions; new callers use the
+explicit session/result contract.

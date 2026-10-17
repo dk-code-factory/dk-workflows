@@ -44,7 +44,7 @@ def retain(session_path, context, prepared, result, session_id):
 
 def load(item):
     artifact = read(Path(item['path']), {})
-    if digest(artifact) != item['sha256'] or artifact.get('version') != 2:
+    if digest(artifact) != item['sha256'] or artifact.get('version') not in {1, 2}:
         raise ValueError('review result artifact changed or has an unsupported version')
     return artifact
 

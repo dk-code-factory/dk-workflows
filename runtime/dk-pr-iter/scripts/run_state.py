@@ -242,6 +242,14 @@ def verify_review(record_path, prepared):
         raise ValueError('no configured-reviewer results in this iteration run')
     item = record['review_results'][-1]
     cycles = record.get('cycles', [])
+    reference = {k: item[k] for k in ('path', 'sha256')}
+    artifact = review_coverage.load(reference)
+    if artifact['version'] == 1:
+        if (artifact['iteration_run_id'] != run['id'] or not cycles
+                or artifact['cycle'] != cycles[-1]['number']):
+            raise ValueError('legacy result lacks coverage for this iteration run/cycle')
+        artifact = review_coverage.verify(reference, prepared)
+        return verify_findings(record, artifact)
     attempt = 1 + sum(r['number'] == item['cycle'] for r in record.get('cycle_retries', []))
     if (item['iteration_run_id'] != run['id'] or not cycles
             or item['cycle'] != cycles[-1]['number'] or item['attempt'] != attempt
@@ -249,9 +257,12 @@ def verify_review(record_path, prepared):
                        for k in ('iteration_run_id', 'cycle', 'attempt'))
                        for s in record.get('review_sessions', []))):
         raise ValueError('current iteration cycle lacks review coverage')
-    reference = {k: item[k] for k in ('path', 'sha256')}
     review_sessions.result_artifact(item['session_file'], reference)
     artifact = review_coverage.verify(reference, prepared)
+    return verify_findings(record, artifact)
+
+
+def verify_findings(record, artifact):
     for finding in artifact['result']['findings']:
         ref = 'review-finding:' + review_coverage.digest(finding)
         classification = record.get('threads', {}).get(ref, {}).get(artifact['head'])
@@ -265,6 +276,41 @@ def verify_review(record_path, prepared):
                 and classification['disposition'] not in {'no_change', 'deferred'}):
             raise ValueError('review finding remains actionable: ' + ref)
     return artifact
+
+
+def legacy_review_options(record_path, context, prepared, reviewers, scope, rules, stats_cycle=None):
+    """Compatibility boundary for the former runner --run-record interface."""
+    record_path = review_sessions.outside(record_path, context)
+    head = context['head_sha']
+    def allocate(record):
+        current = work_gate(record, head)
+        if current['preparation_id'] != prepared['preparation_id']:
+            raise ValueError('legacy review preparation differs from the active iteration record')
+        item = review_session(record, head, record_path)
+        if stats_cycle is not None and stats_cycle != item['cycle']:
+            raise ValueError('--stats-cycle differs from the active iteration cycle')
+        return item
+    binding = mutate(record_path, {}, allocate)
+    path = Path(binding['session_file'])
+    options = {'session_file': str(path), 'resume': path.exists(), 'cycle': binding['cycle']}
+    if path.exists():
+        session = read(path, {})
+        if session.get('identity') != review_sessions.identity(context, prepared, reviewers, scope, rules):
+            raise ValueError('legacy review session evidence changed')
+        if session.get('status') == 'completed':
+            item = session['results'][-1]
+            artifact = review_sessions.result_artifact(path, item)
+            review_coverage.verify(item, prepared)
+            result = copy.deepcopy(artifact['result'])
+            result['reused_reviewers'] = result['executed_reviewers'] + result['reused_reviewers']
+            result['executed_reviewers'] = []
+            result.update(review_session={'id': session['id'], 'path': str(path)}, review_artifact=item)
+            options['result'] = result
+    return options
+
+
+def legacy_register_review(record_path, result, head):
+    return mutate(Path(record_path), {}, lambda record: register_review(record, result, head))
 
 
 def retry_exhausted_cycle(record, head):

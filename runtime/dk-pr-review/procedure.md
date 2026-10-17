@@ -22,3 +22,6 @@ Iteration supplies a session path allocated by its own cycle controller; the run
 has no dependency on iteration records or budgets. Return `review_session` and
 `review_artifact` with executed, reused and skipped reviewers. Optional statistics
 never authorize reuse or completion.
+
+The earlier `--run-record` entry point remains available through a thin iteration
+compatibility adapter; prefer the common session contract for new callers.

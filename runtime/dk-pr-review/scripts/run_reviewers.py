@@ -346,6 +346,7 @@ def main():
     parser.add_argument('--stats-attempt', help='Stable retry identity; reuse when resuming')
     parser.add_argument('--session-file', help='External session path; omitted paths create a fresh review')
     parser.add_argument('--resume', action='store_true', help='Explicitly resume an interrupted session with identical evidence')
+    parser.add_argument('--run-record', help='Compatibility adapter for earlier iteration callers')
     args = parser.parse_args()
     context = json.loads(Path(args.context).read_text())
     if not args.describe and (not args.decisions_file or not args.preparation_file):
@@ -364,6 +365,20 @@ def main():
         return Path(path).read_text() if path else ''
     scope, rules = optional(args.scope_file), optional(args.rules_file)
     names = [bindings.key(v) for v in config['reviewers']]
+    legacy = None
+    if args.run_record:
+        if preparation['mode'] != 'iteration' or args.session_file or args.resume:
+            raise ValueError('--run-record requires iteration mode and cannot be combined with session options')
+        spec = importlib.util.spec_from_file_location('legacy_iteration_review', ROOT/'dk-pr-iter/scripts/run_state.py')
+        legacy = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(legacy)
+        options = legacy.legacy_review_options(args.run_record, context, preparation, names,
+                                             scope, rules, args.stats_cycle)
+        if 'result' in options:
+            legacy.legacy_register_review(args.run_record, options['result'], context['head_sha'])
+            print(json.dumps(options['result'], ensure_ascii=False))
+            return
+        args.session_file, args.resume, args.stats_cycle = options['session_file'], options['resume'], options['cycle']
     session = Session(context, preparation, names, path=args.session_file,
                       resume=args.resume, scope=scope, rules=rules)
     with session.execution():
@@ -375,6 +390,8 @@ def main():
         artifact = session.finish(result.copy())
     result['review_session'] = {'id': session.id, 'path': str(session.path)}
     result['review_artifact'] = artifact
+    if legacy:
+        legacy.legacy_register_review(args.run_record, result, context['head_sha'])
     print(json.dumps(result, ensure_ascii=False))
 
 
