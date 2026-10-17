@@ -140,23 +140,9 @@ def analysis_prompt(manifest, context, decisions, sources, descriptors):
 
 
 def analyze(prompt, checkout, *, validate=None):
-    from shared.executors import execute
-    original_prompt = prompt
-    for attempt in range(2):
-        raw = execute(prompt, checkout, attempt=attempt)
-        try:
-            analysis = json.loads(raw)
-            if validate is not None:
-                validate(analysis)
-            return analysis
-        except ValueError as exc:
-            if attempt:
-                raise ValueError('preparation analysis invalid after one correction: ' + str(exc)) from exc
-            prompt = (original_prompt + '\n\nCorrection: ' + str(exc) +
-                      '\nReturn the complete analysis as exactly one JSON object without Markdown fences. '
-                      'Follow the documented field types; worker_instructions and completion_criteria '
-                      'must be nonempty strings. Preserve the same source evidence and constraints. '
-                      'Do not claim readiness from missing evidence.\nPrior response:\n' + raw)
+    from shared.executors import execute_json
+    return execute_json(prompt, checkout, validate=validate,
+                        correction_instructions='worker_instructions and completion_criteria must be nonempty strings.')
 
 
 def text(value):

@@ -15,6 +15,50 @@ spec.loader.exec_module(mod)
 
 
 class DecisionTests(unittest.TestCase):
+    def test_discussion_corrects_fenced_model_json_without_changing_evidence(self):
+        context = {'pr': {'title': 'Fixture', 'headRefOid': 'a' * 40}, 'linked_issues': [], 'diff': ''}
+        valid = {'decisions': [], 'thread_summaries': []}
+        invalid = '```json\n' + json.dumps(valid) + '\n```'
+        with tempfile.TemporaryDirectory() as td, patch.object(mod, 'execute', side_effect=[invalid, json.dumps(valid)]) as model:
+            self.assertEqual(mod.analyze(Path(td), context, {}, {}, {}, set(), set(), set()), ([], {}))
+        self.assertEqual(model.call_count, 2)
+        self.assertIn(invalid, model.call_args_list[1].args[0])
+        self.assertIn('without Markdown fences', model.call_args_list[1].args[0])
+
+    def test_discussion_rejects_unsupported_references_after_one_correction(self):
+        context = {'pr': {'title': 'Fixture', 'headRefOid': 'a' * 40}, 'linked_issues': [], 'diff': ''}
+        invalid = {'decisions': [{'text': 'Unestablished choice', 'references': ['https://example.test/invented']}], 'thread_summaries': []}
+        with tempfile.TemporaryDirectory() as td, patch.object(mod, 'execute', return_value=json.dumps(invalid)) as model:
+            with self.assertRaisesRegex(RuntimeError, 'after one correction'):
+                mod.analyze(Path(td), context, {}, {}, {}, set(), set(), set())
+        self.assertEqual(model.call_count, 2)
+        self.assertIn('exact evidence references', model.call_args_list[1].args[0])
+
+    def test_discussion_provider_failure_does_not_spend_a_correction(self):
+        context = {'pr': {'title': 'Fixture', 'headRefOid': 'a' * 40}, 'linked_issues': [], 'diff': ''}
+        with tempfile.TemporaryDirectory() as td, patch.object(mod, 'execute', side_effect=RuntimeError('authentication failed')) as model:
+            with self.assertRaisesRegex(RuntimeError, 'authentication failed'):
+                mod.analyze(Path(td), context, {}, {}, {}, set(), set(), set())
+        model.assert_called_once()
+
+    def test_description_corrects_references_before_saving_suggestions(self):
+        url = 'https://github.com/o/r/pull/2'
+        state = {'pr': {'url': url, 'body': 'Preserve the existing API.'}}
+        invalid = {'decisions': [{'text': 'Preserve the API', 'references': ['https://example.test/invented']}]}
+        valid = {'decisions': [{'text': 'Preserve the API', 'references': [url]}]}
+        calls = []
+        def model(prompt, checkout, **kwargs):
+            calls.append(prompt)
+            self.assertNotIn('description_suggestions', state)
+            return json.dumps(invalid if len(calls) == 1 else valid)
+        with patch.object(mod, 'execute', side_effect=model), patch.object(mod, 'save_state') as save:
+            result = mod.suggest_from_description(state, Path('unused-private-cache.json'))
+        self.assertEqual(result, valid['decisions'])
+        self.assertEqual(state['description_suggestions']['items'], valid['decisions'])
+        self.assertEqual(len(calls), 2)
+        self.assertIn('exact PR URL', calls[1])
+        save.assert_called_once()
+
     def test_context_keeps_live_unpublished_and_local_choices_without_publishing(self):
         url = 'https://github.com/o/r/pull/2'
         body = 'Intro\n\n## Decisions\n\n- Keep existing API\n'
@@ -153,7 +197,7 @@ class DecisionTests(unittest.TestCase):
         response = {'decisions': [{'text': 'Keep the parser behavior', 'references': [url]}],
                     'thread_summaries': [{'thread_id': 't1', 'summary': 'Parser behavior retained'}]}
         prompts = []
-        def fake_execute(prompt, cwd):
+        def fake_execute(prompt, cwd, **kwargs):
             prompts.append(prompt)
             return json.dumps(response)
         with tempfile.TemporaryDirectory() as td, patch.object(mod, 'execute', side_effect=fake_execute):

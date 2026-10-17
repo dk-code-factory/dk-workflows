@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 import argparse
 import base64
-from shared.executors import execute
+from shared.executors import execute, execute_json
 import hashlib
 import json
 import os
@@ -420,44 +420,47 @@ def analyze(repo_dir, context, prior, comments, threads, changed_ids, invalid_th
         "local_repository_path.\n\n"
         + language_review_instructions() + "\n\nEVIDENCE JSON:\n" + json.dumps(payload, ensure_ascii=False)
     )
+    def validate_discussion(result):
+        if not isinstance(result, dict) or set(result) != {"decisions", "thread_summaries"}:
+            raise RuntimeError("Model returned an invalid analysis shape")
+        allowed_comments = {c["url"] for c in comments.values()}
+        decisions = result["decisions"]
+        if not isinstance(decisions, list):
+            raise RuntimeError("Model decisions must be a list")
+        for decision in decisions:
+            if (not isinstance(decision, dict) or set(decision) != {"text", "references"}
+                    or not isinstance(decision["text"], str) or not decision["text"].strip()
+                    or "\n" in decision["text"] or "\r" in decision["text"]
+                    or not isinstance(decision["references"], list) or not decision["references"]
+                    or any(not isinstance(ref, str) or ref not in allowed_comments
+                           for ref in decision["references"])):
+                raise RuntimeError("Model returned a decision without exact evidence references")
+        summaries = dict(prior.get("summaries", {}))
+        seen = set()
+        if not isinstance(result["thread_summaries"], list):
+            raise RuntimeError("Model thread summaries must be a list")
+        for item in result["thread_summaries"]:
+            if (not isinstance(item, dict) or set(item) != {"thread_id", "summary"}
+                    or not isinstance(item["thread_id"], str)
+                    or item["thread_id"] not in changed_threads or item["thread_id"] in seen
+                    or not isinstance(item["summary"], str)):
+                raise RuntimeError("Model returned an invalid thread summary")
+            seen.add(item["thread_id"])
+            summaries[item["thread_id"]] = item["summary"]
+        if seen != changed_threads:
+            raise RuntimeError("Model omitted a changed thread summary")
+        return decisions, summaries
     with tempfile.TemporaryDirectory(prefix="pr-read-comments-") as td:
         schema_path = Path(td) / "schema.json"
         schema_path.write_text(json.dumps(SCHEMA), encoding="utf-8")
         workspace = Path(td) / "workspace"
         workspace.mkdir()
-        output = execute("Required JSON schema: " + json.dumps(SCHEMA) + "\n" + instructions, workspace)
-    try:
-        result = json.loads(output)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("Model returned invalid JSON") from exc
-    if not isinstance(result, dict) or set(result) != {"decisions", "thread_summaries"}:
-        raise RuntimeError("Model returned an invalid analysis shape")
-    allowed_comments = {c["url"] for c in comments.values()}
-    decisions = result["decisions"]
-    if not isinstance(decisions, list):
-        raise RuntimeError("Model decisions must be a list")
-    for decision in decisions:
-        if (not isinstance(decision, dict) or set(decision) != {"text", "references"}
-                or not isinstance(decision["text"], str) or not decision["text"].strip()
-                or "\n" in decision["text"] or "\r" in decision["text"]
-                or not isinstance(decision["references"], list) or not decision["references"]
-                or any(not isinstance(ref, str) or ref not in allowed_comments
-                       for ref in decision["references"])):
-            raise RuntimeError("Model returned a decision without exact evidence references")
-    summaries = dict(prior.get("summaries", {}))
-    seen = set()
-    if not isinstance(result["thread_summaries"], list):
-        raise RuntimeError("Model thread summaries must be a list")
-    for item in result["thread_summaries"]:
-        if (not isinstance(item, dict) or set(item) != {"thread_id", "summary"}
-                or item["thread_id"] not in changed_threads or item["thread_id"] in seen
-                or not isinstance(item["summary"], str)):
-            raise RuntimeError("Model returned an invalid thread summary")
-        seen.add(item["thread_id"])
-        summaries[item["thread_id"]] = item["summary"]
-    if seen != changed_threads:
-        raise RuntimeError("Model omitted a changed thread summary")
-    return decisions, summaries
+        try:
+            result = execute_json("Required JSON schema: " + json.dumps(SCHEMA) + "\n" + instructions,
+                                  workspace, validate=validate_discussion, executor=execute)
+        except ValueError as exc:
+            raise RuntimeError("Model analysis invalid after one correction: " + str(exc)) from exc
+    return validate_discussion(result)
 
 
 def render(pr, viewer, state):
@@ -1019,16 +1022,18 @@ def suggest_from_description(state, path):
               'Return a decisions array with text and references; each reference must be the supplied PR URL.\n'
               + language_review_instructions() + '\nEVIDENCE JSON:\n'
               + json.dumps({'description': description, 'pr_url': state['pr']['url']}))
+    def validate_description(result):
+        if not isinstance(result, dict) or set(result) != {'decisions'} or not isinstance(result['decisions'], list):
+            raise ValueError('Invalid description suggestions')
+        for item in result['decisions']:
+            validate_item(item)
+            if item['references'] != [state['pr']['url']]:
+                raise ValueError('Description suggestion must cite the exact PR URL')
     with tempfile.TemporaryDirectory(prefix='pr-description-suggestions-') as td:
         schema_path = Path(td) / 'schema.json'
         schema_path.write_text(json.dumps(schema))
-        result = json.loads(execute("Required JSON schema: " + json.dumps(schema) + "\n" + prompt, td))
-    if not isinstance(result, dict) or set(result) != {'decisions'} or not isinstance(result['decisions'], list):
-        raise ValueError('Invalid description suggestions')
-    for item in result['decisions']:
-        validate_item(item)
-        if item['references'] != [state['pr']['url']]:
-            raise ValueError('Description suggestion must cite the exact PR URL')
+        result = execute_json("Required JSON schema: " + json.dumps(schema) + "\n" + prompt, td,
+                              validate=validate_description, executor=execute)
     state['description_suggestions'] = {'body_hash': digest, 'items': result['decisions']}
     save_state(state, path)
     return result['decisions']

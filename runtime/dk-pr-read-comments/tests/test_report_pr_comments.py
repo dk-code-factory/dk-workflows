@@ -188,7 +188,7 @@ class IntegrationTests(unittest.TestCase):
     def invoke(self, context_json=False):
         with patch.object(mod, "gh_json", side_effect=self.fake_gh), \
              patch.object(mod, "run", side_effect=self.fake_run), \
-             patch.object(mod, "execute", side_effect=lambda prompt, cwd: self.fake_run(["codex", "exec", "-C", str(cwd)], input_text=prompt)), \
+             patch.object(mod, "execute", side_effect=lambda prompt, cwd, **kwargs: self.fake_run(["codex", "exec", "-C", str(cwd)], input_text=prompt)), \
              patch.object(mod, "collect_metadata", return_value=(self.meta, self.threads)), \
              patch.object(mod, "linked_issues", return_value=[]), \
              patch.object(mod, "fetch_bodies", side_effect=self.fetch_bodies), \
@@ -263,7 +263,7 @@ class IntegrationTests(unittest.TestCase):
         self.meta["i2"] = {**comment("i2"), "kind": "inline", "thread_id": "t"}
         self.threads["t"]["comment_ids"] = ["i1", "i2"]
         self.codex_output_override = "not JSON"
-        with self.assertRaisesRegex(RuntimeError, "Model returned invalid JSON"):
+        with self.assertRaisesRegex(RuntimeError, "Model analysis invalid after one correction"):
             self.invoke()
         self.assertEqual(self.state_path().read_bytes(), previous)
 

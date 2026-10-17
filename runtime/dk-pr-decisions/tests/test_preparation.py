@@ -129,7 +129,7 @@ class PreparationTests(unittest.TestCase):
         self.assertIn('worker instructions and completion criteria required', model.call_args_list[1].args[0])
 
     def test_invalid_analysis_exhausts_correction_without_preparing(self):
-        for raw in ('not JSON', json.dumps({'boundaries': {}})):
+        for raw in ('not JSON', json.dumps({'boundaries': {}}), '[]'):
             with self.subTest(raw=raw):
                 with patch('shared.executors.execute', return_value=raw) as model:
                     with self.assertRaisesRegex(ValueError, 'invalid after one correction'):

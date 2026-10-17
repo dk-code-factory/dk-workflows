@@ -14,6 +14,28 @@ class ProviderExhausted(RuntimeError):
     """Explicit provider usage exhaustion; authentication failures remain blocking."""
 
 
+def execute_json(prompt, checkout, *, validate=None, executor=None, correction_instructions=''):
+    """Correct model JSON once, without retrying provider failures or coercing data."""
+    original_prompt = prompt
+    for attempt in range(2):
+        raw = (executor or execute)(prompt, checkout, attempt=attempt)
+        try:
+            result = json.loads(raw)
+            if not isinstance(result, dict):
+                raise ValueError('expected one JSON object')
+            if validate is not None:
+                validate(result)
+            return result
+        except (ValueError, RuntimeError) as exc:
+            if attempt:
+                raise ValueError('Model JSON invalid after one correction: ' + str(exc)) from exc
+            prompt = (original_prompt + '\n\nCorrection: ' + str(exc) +
+                      '\nReturn the complete result as exactly one JSON object without Markdown fences. '
+                      'Follow the declared field types and preserve the same evidence and constraints. '
+                      'Do not invent missing evidence or grant publication authority. ' + correction_instructions +
+                      '\nPrior response:\n' + raw)
+
+
 def provider_failure(detail):
     authentication = re.search(r'authentication failed|not authenticated|unauthorized|invalid credentials|'
                                r'(?:invalid|expired|revoked) (?:oauth |access |auth(?:entication)? )?token', detail, re.I)
