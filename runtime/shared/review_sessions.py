@@ -87,13 +87,18 @@ class Session:
             saved = read(Path(item['checkpoint']['path']), {})
             if coverage.digest(saved) != item['checkpoint']['sha256']:
                 raise ValueError('review checkpoint changed')
+            if (saved.get('checkpoint_version') != 1 or saved.get('reviewer') != reviewer
+                    or saved.get('status') != 'completed' or saved.get('session_id') != self.id
+                    or saved.get('session_identity') != self.identity):
+                raise ValueError('review checkpoint does not match this session and reviewer')
             return saved['result']
         return self.update(lookup)
 
     def record(self, reviewer, status, result=None, reason=None):
         if reviewer not in self.identity['reviewers']:
             raise ValueError('reviewer is outside this session')
-        saved = {'reviewer': reviewer, 'status': status, 'result': result, 'reason': reason}
+        saved = {'checkpoint_version': 1, 'session_id': self.id, 'session_identity': self.identity,
+                 'reviewer': reviewer, 'status': status, 'result': result, 'reason': reason}
         fingerprint = coverage.digest(saved)
         path = self.path.parent / 'review-checkpoints' / (fingerprint + '.json')
         def immutable(old):
@@ -120,6 +125,7 @@ def result_artifact(session_path, item):
     artifact = coverage.load(item)
     if (artifact.get('version') != 2 or session.get('session_version') != 1
             or artifact['session_id'] != session.get('id')
+            or artifact['session_identity'] != session.get('identity')
             or not session.get('results') or session['results'][-1] != item
             or session.get('status') != ('completed' if artifact['result']['complete'] else 'incomplete')):
         raise ValueError('result is not the latest registered result of this review session')

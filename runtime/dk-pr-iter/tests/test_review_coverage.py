@@ -24,6 +24,7 @@ completion = load('completion')
 def retain_review(path, context, prepared, result, number):
     record = read(path, {})
     binding = state.review_session(record, context['head_sha'], path)
+    assert binding['cycle'] == number
     write(path, record)
     session_path = Path(binding['session_file'])
     if not session_path.exists():
@@ -199,7 +200,8 @@ def test_starting_another_cycle_invalidates_previous_cycle_completion(reviewed):
         state.verify_review(path, prepared)
 
 
-@pytest.mark.parametrize('change', [None, 'run', 'cycle', 'tree', 'scope', 'incomplete'])
+@pytest.mark.parametrize('change', [None, 'run', 'cycle', 'tree', 'scope', 'incomplete',
+                                  'missing_reviewer', 'unassessed', 'actionable'])
 def test_legacy_coverage_keeps_original_guards_without_creating_sessions(reviewed, change):
     path, context, prepared, result, item, git = reviewed
     record = read(path, {})
@@ -211,13 +213,25 @@ def test_legacy_coverage_keeps_original_guards_without_creating_sessions(reviewe
     if change == 'tree': artifact['tree'] = 'a' * 40
     if change == 'scope': artifact['scope'] = 'older-scope'
     if change == 'incomplete': artifact['result']['complete'] = False
+    if change == 'missing_reviewer': artifact['result']['skipped_reviewers'] = []
+    if change in {'unassessed', 'actionable'}:
+        finding = {'path': 'code.py', 'line': 1, 'message': 'bug', 'reviewers': ['one']}
+        artifact['result']['findings'] = [finding]
+        if change == 'actionable':
+            ref = 'review-finding:' + coverage.digest(finding)
+            record['threads'] = {ref: {context['head_sha']: {'disposition': 'fix'}}}
+            record['assessments'] = [{'reference': ref, 'head': context['head_sha'],
+                'preparation_id': prepared['preparation_id'], 'disposition': 'within_scope'}]
     legacy_path = path.parent / 'legacy-review.json'
     write(legacy_path, artifact)
     reference = {'path': str(legacy_path), 'sha256': coverage.digest(artifact)}
     record['review_results'], record['review_sessions'] = [reference], []
     write(path, record)
     if change:
-        with pytest.raises(ValueError):
+        reason = {'missing_reviewer': 'configured-reviewer execution is incomplete',
+                  'unassessed': 'lacks validity and scope assessment',
+                  'actionable': 'remains actionable'}.get(change)
+        with pytest.raises(ValueError, match=reason):
             state.verify_review(path, prepared)
     else:
         assert state.verify_review(path, prepared)['version'] == 1

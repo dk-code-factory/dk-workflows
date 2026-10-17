@@ -28,11 +28,16 @@ def scope(prepared):
 
 def retain(session_path, context, prepared, result, session_id):
     """Save an immutable result with no knowledge of iteration budgets or state."""
+    session = read(Path(session_path), {})
+    if session.get('id') != session_id or session.get('session_version') != 1:
+        raise ValueError('review result requires its originating session')
     artifact = {'version': 2, 'session_id': session_id,
+                'session_identity': session.get('identity'),
                 'pr_url': context['url'], 'head': context['head_sha'],
                 'tree': git(context['checkout'], 'rev-parse', f"{context['head_sha']}^{{tree}}"),
                 'scope': scope(prepared), 'preparation_id': prepared['preparation_id'],
                 'result': result}
+    validate_session_identity(artifact)
     fingerprint = digest(artifact)
     path = Path(session_path).resolve().parent / 'review-results' / (fingerprint + '.json')
     def immutable(old):
@@ -42,10 +47,28 @@ def retain(session_path, context, prepared, result, session_id):
     return {'path': str(path), 'sha256': fingerprint}
 
 
+def validate_session_identity(artifact):
+    identity = artifact.get('session_identity')
+    fields = {'pr_url', 'head', 'base', 'preparation_id', 'tree', 'scope',
+              'scope_text', 'rules_text', 'reviewers'}
+    if (not isinstance(identity, dict) or set(identity) != fields
+            or any(not isinstance(identity[key], str) or not identity[key]
+                   for key in fields - {'reviewers'})
+            or not isinstance(identity['reviewers'], list)
+            or not identity['reviewers']
+            or any(not isinstance(reviewer, str) or not reviewer for reviewer in identity['reviewers'])
+            or len(set(identity['reviewers'])) != len(identity['reviewers'])
+            or any(identity[key] != artifact[key]
+                   for key in ('pr_url', 'head', 'preparation_id', 'tree', 'scope'))):
+        raise ValueError('review result session identity is missing or inconsistent')
+
+
 def load(item):
     artifact = read(Path(item['path']), {})
     if digest(artifact) != item['sha256'] or artifact.get('version') not in {1, 2}:
         raise ValueError('review result artifact changed or has an unsupported version')
+    if artifact['version'] == 2:
+        validate_session_identity(artifact)
     return artifact
 
 

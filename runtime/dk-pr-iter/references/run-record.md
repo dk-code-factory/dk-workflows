@@ -121,6 +121,12 @@ review provenance for both standalone and iteration reviews without reading this
 record. Save its JSON and register it through `review-result --head SHA --file FILE`.
 Registration checks the allocated session, pinned head and current preparation.
 `review_results` links immutable artifacts to the active run, cycle and attempt.
+Each cycle/attempt keeps its allocated session. Changed preparation, scope or rules
+requires the next allowed cycle and a fresh session; an exhausted cap remains a
+visible coverage limitation. If execution finished before result registration,
+save a JSON object whose `review_artifact` is that session's `results[-1]` and pass
+it to `review-result`. This registers the already completed evidence without
+another provider execution or cycle. Preserve the session and immutable artifact.
 Classify and assess findings using `review-finding:` plus
 `shared.review_coverage.digest(finding)` as their references.
 For review events, include the iteration run ID in the unique key; events retain

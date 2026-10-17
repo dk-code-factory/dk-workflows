@@ -13,6 +13,8 @@ same PR/base/head, preparation, scope, rules and ordered reviewers. Preserve tho
 input artifacts on interruption. New requests and iteration cycles start fresh;
 finished sessions cannot be resumed. Changed evidence requires a fresh session,
 within the caller's existing budget. Never reset iteration counters to obtain one.
+Iteration uses its next allowed cycle for changed evidence; it does not replace a
+bound session under the same cycle/attempt to bypass the cap.
 
 The session checkpoints each completed reviewer in immutable private storage before
 continuing. Resume reuses only completed checkpoints; failed, incomplete, exhausted

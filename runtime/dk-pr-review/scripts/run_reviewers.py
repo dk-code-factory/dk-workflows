@@ -375,6 +375,9 @@ def main():
         options = legacy.legacy_review_options(args.run_record, context, preparation, names,
                                              scope, rules, args.stats_cycle)
         if 'result' in options:
+            for provider, name in zip(config['reviewers'], names):
+                if describe_reviewer(provider) != preparation['reviewers'][name]:
+                    raise ValueError('effective reviewer instructions changed; refresh preparation')
             legacy.legacy_register_review(args.run_record, options['result'], context['head_sha'])
             print(json.dumps(options['result'], ensure_ascii=False))
             return
@@ -383,7 +386,9 @@ def main():
                       resume=args.resume, scope=scope, rules=rules)
     with session.execution():
         pending = [name for name in names if session.cached(name) is None]
-        stats = for_iteration(context, preparation, pending, args.stats_cycle,
+        # Reuse changes execution, not the configured comparison cohort. Cached
+        # reviewers stay not_run in this invocation's optional statistics.
+        stats = for_iteration(context, preparation, names, args.stats_cycle,
                               session.id + ':' + str(session.invocation) + ':' + (args.stats_attempt or '1')) if pending else None
         result = review(context, config['reviewers'], scope, decisions, rules, preparation,
                         stats=stats, session=session)
