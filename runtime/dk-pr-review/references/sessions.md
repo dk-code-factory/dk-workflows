@@ -16,6 +16,12 @@ within the caller's existing budget. Never reset iteration counters to obtain on
 Iteration uses its next allowed cycle for changed evidence; it does not replace a
 bound session under the same cycle/attempt to bypass the cap.
 
+Session filenames ending in `.lock` are reserved for locks. An existing nonempty
+file at either derived lock destination blocks the session before writes, preserving
+earlier evidence. If an interrupted session from an earlier version has a reserved
+name, move only its JSON to a nonreserved filename in the same external directory,
+preserve its checkpoint and result files, then explicitly resume with identical evidence.
+
 The session checkpoints each completed reviewer in immutable private storage before
 continuing. Resume reuses only completed checkpoints; failed, incomplete, exhausted
 or interrupted reviewers execute again. A per-session execution lock rejects

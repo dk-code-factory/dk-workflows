@@ -52,6 +52,8 @@ class Session:
         self.id = mutate(self.path, {} if resume else default, initialize)
 
     def validate_storage(self):
+        if self.path.name.endswith('.lock'):
+            raise ValueError('review session filenames ending in .lock are reserved for locks')
         coverage.storage_path(self.path, self.context)
         outside(self.execution_lock, self.context)
         paths = [self.path, self.path.with_name(self.path.name + '.lock'), self.execution_lock]
@@ -60,6 +62,9 @@ class Session:
                 if (path.resolve() == other.resolve()
                         or (path.exists() and other.exists() and path.samefile(other))):
                     raise ValueError('review session and its locks must be distinct files')
+        for path in paths[1:]:
+            if path.exists() and path.stat().st_size:
+                raise ValueError('review session lock destination contains existing data')
         for name in ('review-checkpoints', 'review-results'):
             outside(self.path.parent / name, self.context)
 

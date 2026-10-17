@@ -246,3 +246,70 @@ def test_legacy_main_rechecks_record_lock_before_registration(
     for key, content in before_roots.items():
         assert (Path(context[key]) / 'x.py').read_bytes() == content
     assert_clean(context)
+
+
+def interrupted_evidence(context, prepared, names, path):
+    session = Session(context, prepared, names, path=path)
+    result = {'complete': False, 'reason': 'controlled interruption', 'findings': [],
+              'executed_reviewers': names[:1], 'reused_reviewers': [], 'skipped_reviewers': []}
+    with session.execution():
+        session.record(names[0], 'completed', {'findings': []})
+        item = session.finish(result)
+    return session, item
+
+
+@pytest.mark.parametrize('suffix', ['.lock', '.execution.lock'])
+@pytest.mark.parametrize('existing_first', [False, True])
+def test_lock_named_sessions_reject_in_either_creation_order(
+        storage_layout, main_call, tmp_path, suffix, existing_first):
+    context, decisions, prepared, names = storage_layout
+    path = tmp_path / 'review'
+    if existing_first:
+        session, item = interrupted_evidence(context, prepared, names, path)
+        checkpoint = read(session.path, {})['reviews'][names[0]]['checkpoint']
+        before = {entry: entry.read_bytes() for entry in
+                  (session.path, Path(item['path']), Path(checkpoint['path']))}
+        locks = set(tmp_path.glob('review*.lock'))
+    with patch.object(runner, 'run_skill_reviewer') as provider:
+        with pytest.raises(ValueError, match='ending in .lock are reserved'):
+            main_call('--session-file', tmp_path / ('review' + suffix))
+    provider.assert_not_called()
+    if existing_first:
+        assert all(entry.read_bytes() == content for entry, content in before.items())
+        assert set(tmp_path.glob('review*.lock')) == locks
+    else:
+        assert not path.exists() and not path.with_name('review' + suffix).exists()
+        session, item = interrupted_evidence(context, prepared, names, path)
+    assert result_artifact(path, item)['session_id'] == session.id
+    resumed = Session(context, prepared, names, path=path, resume=True)
+    assert resumed.cached(names[0]) == {'findings': []}
+    assert_clean(context)
+
+
+@pytest.mark.parametrize('suffix', ['.lock', '.execution.lock'])
+def test_earlier_lock_named_evidence_blocks_later_sibling_without_truncation(
+        storage_layout, main_call, tmp_path, suffix):
+    context, decisions, prepared, names = storage_layout
+    session, item = interrupted_evidence(context, prepared, names, tmp_path / 'earlier.json')
+    earlier_path = tmp_path / ('review' + suffix)
+    # Session identity is independent of its JSON filename. This is the valid
+    # on-disk state produced by an earlier version accepting the reserved name.
+    session.path.rename(earlier_path)
+    assert result_artifact(earlier_path, item)['session_id'] == session.id
+    checkpoint = read(earlier_path, {})['reviews'][names[0]]['checkpoint']
+    before = {path: path.read_bytes() for path in
+              (earlier_path, Path(item['path']), Path(checkpoint['path']))}
+    with patch.object(runner, 'run_skill_reviewer') as provider:
+        with pytest.raises(ValueError, match='lock destination contains existing data'):
+            main_call('--session-file', tmp_path / 'review')
+    provider.assert_not_called()
+    assert not (tmp_path / 'review').exists()
+    assert all(path.read_bytes() == content for path, content in before.items())
+    assert result_artifact(earlier_path, item)['session_id'] == session.id
+    assert coverage.digest(read(Path(checkpoint['path']), {})) == checkpoint['sha256']
+    recovered = tmp_path / 'recovered.json'
+    earlier_path.rename(recovered)
+    resumed = Session(context, prepared, names, path=recovered, resume=True)
+    assert resumed.cached(names[0]) == {'findings': []}
+    assert result_artifact(recovered, item)['session_id'] == session.id
+    assert_clean(context)
