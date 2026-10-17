@@ -37,7 +37,8 @@ def archive(text, steps=None):
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, 'w') as bundle:
         for number, value in (steps or {1: text}).items():
-            bundle.writestr(f'{JOB}/{number}_Tests.txt', value)
+            member = zipfile.ZipInfo(f'{JOB}/{number}_Tests.txt', date_time=(2026, 1, 1, 0, 0, 0))
+            bundle.writestr(member, value)
     return stream.getvalue()
 
 
