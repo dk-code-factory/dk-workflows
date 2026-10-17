@@ -15,10 +15,10 @@ JSON contracts; see [the analytics handoff](../dk-pr-iter/references/review-stat
 Standalone reviews are outside collection. Analytics warnings indicate missing data
 and do not change the review result.
 
-For iteration preparation, also pass `--run-record RUN_RECORD.json` to the runner.
-It requires an active run and matching recorded cycle/head, scopes cached results to
-that run, and saves mandatory review provenance beside the external record. Pass
-its `review_artifact` path and the full result to the parent. Preserve
-`executed_reviewers`, `reused_reviewers` and skipped reviewers with reasons; these
-execution lists contain completed reviewers. Report failed or incomplete reviewers
-separately. Statistics failure cannot replace or suppress mandatory provenance.
+Standalone and iteration reviews use the same [review-session contract](references/sessions.md).
+Every fresh invocation creates a session and immutable result artifact. Explicit
+resume reuses completed reviewer checkpoints only when all evidence matches.
+Iteration supplies a session path allocated by its own cycle controller; the runner
+has no dependency on iteration records or budgets. Return `review_session` and
+`review_artifact` with executed, reused and skipped reviewers. Optional statistics
+never authorize reuse or completion.

@@ -20,8 +20,7 @@ from reviewer_prompts import preparation_instructions, source_files
 from stats_capture import for_iteration
 from shared.reviewer_telemetry import capture, transport
 from shared import bindings
-from shared import review_coverage
-from shared.private_state import read
+from shared.review_sessions import Session
 from shared.executors import invoke, ProviderExhausted
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())
@@ -227,7 +226,7 @@ def describe_reviewer(name):
         'aspects': ['selected provider procedures']})
 
 
-def review(context, reviewers, scope, decisions, rules, preparation, stats=None):
+def review(context, reviewers, scope, decisions, rules, preparation, stats=None, session=None):
     provider_map = {bindings.key(value): value for value in reviewers}
     reviewers = list(provider_map)
     decisions = validate_decisions(context, decisions)
@@ -270,7 +269,9 @@ def review(context, reviewers, scope, decisions, rules, preparation, stats=None)
             handoff_path.write_text(json.dumps(handoff, ensure_ascii=False, indent=2) + '\n')
             provider = provider_map[name]
             skill = skill_path(provider)
-            cached = stats.cached(name) if stats else None
+            cached = session.cached(name) if session else None
+            if session and cached is None:
+                session.record(name, 'running')
             capturing = bool(stats and cached is None)
             with stats.invocation(name, handoff, preparation['reviewers'][name]) if capturing else nullcontext():
                 if cached is not None:
@@ -286,11 +287,15 @@ def review(context, reviewers, scope, decisions, rules, preparation, stats=None)
                 skipped_reviewers.append({'reviewer': name, 'reason': result['message']})
                 if capturing:
                     stats.safe(stats.finish, 'exhausted', result, result['message'])
+                if session:
+                    session.record(name, 'exhausted', reason=result['message'])
                 continue
             if (isinstance(result, dict) and result.get('status') == 'incomplete'
                     and result.get('findings') == [] and isinstance(result.get('message'), str)):
                 if capturing:
                     stats.safe(stats.finish, 'incomplete', result, result['message'])
+                if session:
+                    session.record(name, 'incomplete', reason=result['message'])
                 return outcome({'complete': False, 'failed_reviewer': name,
                         'reason': result['message'], 'findings': findings,
                         'skipped_reviewers': skipped_reviewers})
@@ -306,9 +311,13 @@ def review(context, reviewers, scope, decisions, rules, preparation, stats=None)
                 raise RuntimeError('reviewer changed isolated checkout')
             if capturing:
                 stats.safe(stats.finish, 'completed', result)
+            if session and cached is None:
+                session.record(name, 'completed', result=result)
             completed_reviewers += 1
             (reused if cached is not None else executed).append(name)
         except Exception as exc:
+            if session:
+                session.record(name, 'failed', reason=str(exc))
             if stats and not cached:
                 if not capturing:
                     # Descriptor/skill failures happened before model launch.
@@ -335,7 +344,8 @@ def main():
     parser.add_argument('--rules-file')
     parser.add_argument('--stats-cycle', type=int, help='Iteration cycle (normally read from the private run record)')
     parser.add_argument('--stats-attempt', help='Stable retry identity; reuse when resuming')
-    parser.add_argument('--run-record', help='Required active run record for iteration review provenance')
+    parser.add_argument('--session-file', help='External session path; omitted paths create a fresh review')
+    parser.add_argument('--resume', action='store_true', help='Explicitly resume an interrupted session with identical evidence')
     args = parser.parse_args()
     context = json.loads(Path(args.context).read_text())
     if not args.describe and (not args.decisions_file or not args.preparation_file):
@@ -352,25 +362,19 @@ def main():
     preparation = preparation_api.load(args.preparation_file, context, decisions)
     def optional(path):
         return Path(path).read_text() if path else ''
-    run_id = number = None
-    attempt = args.stats_attempt
-    if preparation['mode'] == 'iteration':
-        if not args.run_record:
-            raise ValueError('--run-record is required for iteration review provenance')
-        record = read(Path(args.run_record), {})
-        run_id = review_coverage.active_run(record)
-        number = review_coverage.cycle(record, context['head_sha'])
-        if args.stats_cycle is not None and args.stats_cycle != number:
-            raise ValueError('--stats-cycle differs from the active iteration cycle')
-        retry = 1 + sum(r['number'] == number for r in record.get('cycle_retries', []))
-        attempt = run_id + ':' + (attempt or str(retry))
-    stats = for_iteration(context, preparation, [bindings.key(v) for v in config['reviewers']],
-                          number if number is not None else args.stats_cycle, attempt)
-    result = review(context, config['reviewers'], optional(args.scope_file),
-                    decisions, optional(args.rules_file), preparation, stats=stats)
-    if run_id:
-        result['review_artifact'] = review_coverage.retain(
-            args.run_record, context, preparation, result.copy(), run_id, number)
+    scope, rules = optional(args.scope_file), optional(args.rules_file)
+    names = [bindings.key(v) for v in config['reviewers']]
+    session = Session(context, preparation, names, path=args.session_file,
+                      resume=args.resume, scope=scope, rules=rules)
+    with session.execution():
+        pending = [name for name in names if session.cached(name) is None]
+        stats = for_iteration(context, preparation, pending, args.stats_cycle,
+                              session.id + ':' + str(session.invocation) + ':' + (args.stats_attempt or '1')) if pending else None
+        result = review(context, config['reviewers'], scope, decisions, rules, preparation,
+                        stats=stats, session=session)
+        artifact = session.finish(result.copy())
+    result['review_session'] = {'id': session.id, 'path': str(session.path)}
+    result['review_artifact'] = artifact
     print(json.dumps(result, ensure_ascii=False))
 
 

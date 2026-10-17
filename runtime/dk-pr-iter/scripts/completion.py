@@ -16,7 +16,6 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 
 from shared.discovery_cache import repository
 from shared.repository_scope import identities
 from shared import series_assessment
-from shared import review_coverage
 
 _spec = importlib.util.spec_from_file_location('completion_preparation',
     next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir()) / 'dk-pr-decisions/scripts/preparation.py')
@@ -138,7 +137,7 @@ def completion_gate(start_head, final_head, live_head, review_complete, actionab
     if not review_complete:
         return "review_incomplete"
     try:
-        review_coverage.verify(run_record, prepared)
+        run_state_api.verify_review(run_record, prepared)
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
         return 'review_coverage_invalid'
     if actionable:
@@ -277,7 +276,7 @@ def main():
                 try:
                     prepared = current_preparation(args.preparation_file, args.run_record, args.pr,
                                                    live_scope['headRefOid'], live_scope['body'])
-                    output['review_coverage'] = review_coverage.verify(args.run_record, prepared)
+                    output['review_coverage'] = run_state_api.verify_review(args.run_record, prepared)
                 except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as exc:
                     output['review_limitation'] = str(exc)
                     result = output['gate'] = 'review_coverage_invalid'

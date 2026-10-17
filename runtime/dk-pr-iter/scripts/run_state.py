@@ -20,6 +20,7 @@ CLASSIFICATIONS = {"valid", "already_fixed", "unsupported", "pre_existing"}
 
 from shared.private_state import root, read, write, mutate
 from shared.flaky_tests import Registry, record_flaky
+from shared import review_coverage, review_sessions
 
 _spec = importlib.util.spec_from_file_location('iteration_preparation',
     next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir()) / 'dk-pr-decisions/scripts/preparation.py')
@@ -41,7 +42,7 @@ def start_run(record, *, resume=False):
     if active:
         snapshot = copy.deepcopy({k: v for k, v in record.items() if k != 'run_history'})
         record.setdefault('run_history', []).append(snapshot)
-    for field in ('cycles', 'cycle_retries', 'repairs', 'review_results'):
+    for field in ('cycles', 'cycle_retries', 'repairs', 'review_results', 'review_sessions'):
         record[field] = []
     record.pop('preparation', None)
     record['iteration_run'] = {'id': uuid.uuid4().hex, 'status': 'active'}
@@ -182,6 +183,88 @@ def next_cycle(record, head):
     if number > 5:
         raise ValueError("five review cycles exhausted")
     return append_unique(record, "cycles", {"number": number, "head": head}, "number")
+
+
+def review_attempt(record, head):
+    run = record.get('iteration_run', {})
+    if not run.get('id') or run.get('status') != 'active':
+        raise ValueError('an active iteration run is required')
+    cycles = record.get('cycles', [])
+    if not cycles:
+        raise ValueError('record a review cycle before launching reviewers')
+    last = cycles[-1]
+    retries = [r for r in record.get('cycle_retries', []) if r['number'] == last['number']]
+    if head != (retries[-1]['head'] if retries else last['head']):
+        raise ValueError('review head differs from recorded cycle')
+    return {'iteration_run_id': run['id'], 'cycle': last['number'], 'attempt': 1 + len(retries)}
+
+
+def review_session(record, head, record_path):
+    work_gate(record, head)
+    identity = review_attempt(record, head)
+    entries = record.setdefault('review_sessions', [])
+    item = next((v for v in entries if all(v[k] == value for k, value in identity.items())), None)
+    if item is None:
+        item = {**identity, 'head': head, 'session_file': str(
+            Path(record_path).resolve().parent / 'review-sessions' / (uuid.uuid4().hex + '.json'))}
+        entries.append(item)
+    if item['head'] != head:
+        raise ValueError('iteration review session head changed')
+    return item
+
+
+def register_review(record, output, head):
+    prepared = work_gate(record, head)
+    identity = review_attempt(record, head)
+    binding = next((v for v in record.get('review_sessions', [])
+                    if all(v[k] == value for k, value in identity.items())), None)
+    if binding is None:
+        raise ValueError('allocate an iteration review session before registering results')
+    item = output['review_artifact']
+    artifact = review_sessions.result_artifact(binding['session_file'], item)
+    if (artifact['head'] != head or artifact['preparation_id'] != prepared['preparation_id']
+            or artifact['pr_url'] != prepared['identity']['pr_url']):
+        raise ValueError('review result differs from the active preparation')
+    registered = {**item, **identity, 'session_file': binding['session_file']}
+    entries = record.setdefault('review_results', [])
+    if registered not in entries:
+        entries.append(registered)
+    return registered
+
+
+def verify_review(record_path, prepared):
+    record = read(Path(record_path), {})
+    # A final regroup may change the head while preserving the reviewed tree.
+    run = record.get('iteration_run', {})
+    if not run.get('id') or run.get('status') != 'active':
+        raise ValueError('an active iteration run is required')
+    if not record.get('review_results'):
+        raise ValueError('no configured-reviewer results in this iteration run')
+    item = record['review_results'][-1]
+    cycles = record.get('cycles', [])
+    attempt = 1 + sum(r['number'] == item['cycle'] for r in record.get('cycle_retries', []))
+    if (item['iteration_run_id'] != run['id'] or not cycles
+            or item['cycle'] != cycles[-1]['number'] or item['attempt'] != attempt
+            or not any(s['session_file'] == item['session_file'] and all(s[k] == item[k]
+                       for k in ('iteration_run_id', 'cycle', 'attempt'))
+                       for s in record.get('review_sessions', []))):
+        raise ValueError('current iteration cycle lacks review coverage')
+    reference = {k: item[k] for k in ('path', 'sha256')}
+    review_sessions.result_artifact(item['session_file'], reference)
+    artifact = review_coverage.verify(reference, prepared)
+    for finding in artifact['result']['findings']:
+        ref = 'review-finding:' + review_coverage.digest(finding)
+        classification = record.get('threads', {}).get(ref, {}).get(artifact['head'])
+        assessment = next((a for a in record.get('assessments', [])
+                           if a['reference'] == ref and a['head'] == artifact['head']
+                           and a['preparation_id'] == artifact['preparation_id']), None)
+        if not classification or not assessment:
+            raise ValueError('review finding lacks validity and scope assessment: ' + ref)
+        if assessment['disposition'] == 'decision_blocked' or (
+                assessment['disposition'] == 'within_scope'
+                and classification['disposition'] not in {'no_change', 'deferred'}):
+            raise ValueError('review finding remains actionable: ' + ref)
+    return artifact
 
 
 def retry_exhausted_cycle(record, head):
@@ -336,6 +419,9 @@ def main():
         e.add_argument("--" + arg, required=True)
     c = sub.add_parser("cycle"); c.add_argument("--head", required=True)
     cr = sub.add_parser("cycle-retry"); cr.add_argument("--head", required=True)
+    session = sub.add_parser('review-session'); session.add_argument('--head', required=True)
+    result = sub.add_parser('review-result')
+    result.add_argument('--head', required=True); result.add_argument('--file', required=True)
     d = sub.add_parser("decision")
     d.add_argument("--text", required=True); d.add_argument("--source", required=True)
     for kind in ("repair", "rerun"):
@@ -377,6 +463,9 @@ def main():
                     "head": a.head, 'iteration_run_id': d.get('iteration_run', {}).get('id')}, "key"))
             elif a.command == "cycle": result = mutate(path, default, lambda d: next_cycle(d, a.head))
             elif a.command == "cycle-retry": result = mutate(path, default, lambda d: retry_exhausted_cycle(d, a.head))
+            elif a.command == 'review-session': result = mutate(path, default, lambda d: review_session(d, a.head, path))
+            elif a.command == 'review-result':
+                result = mutate(path, default, lambda d: register_review(d, json.loads(Path(a.file).read_text()), a.head))
             elif a.command == "decision": result = mutate(path, default, lambda d: record_local_decision(d, a.text, a.source))
             else: result = mutate(path, default, lambda d: attempt(d, a.command, a.cycle, a.head, getattr(a, "run_id", None)))
         print(json.dumps(result, sort_keys=True))

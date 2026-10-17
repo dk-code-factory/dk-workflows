@@ -14,6 +14,8 @@ run_state.py --repo HOST/OWNER/REPO --pr NUMBER thread --ref ID --head SHA --cla
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER event --key UNIQUE_KEY --kind KIND --head SHA --detail TEXT
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER cycle --head SHA
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER cycle-retry --head SHA
+run_state.py --repo HOST/OWNER/REPO --pr NUMBER review-session --head SHA
+run_state.py --repo HOST/OWNER/REPO --pr NUMBER review-result --head SHA --file RESULT.json
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER decision --text TEXT --source SOURCE
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER repair --cycle N --head SHA
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER rerun --cycle N --head SHA --run-id ID
@@ -110,13 +112,17 @@ Only a later user request permits a new budget. Never finish/restart within one
 request to evade the cap. Keep active status on interruption. Finished runs cannot
 pass completion or authorize more prepared work.
 
-Pass this record as `--run-record` to the review runner for iteration preparation.
-It requires a matching recorded cycle/head and automatically registers immutable
-review results in `review_results` with a fingerprint, run ID, cycle, preparation ID,
-head/tree, PR identity and scope fingerprint. Statistics remain optional. Review
-result artifacts retain executed and reused completed reviewers, skipped reviewers
-with reasons, and the full aggregated findings. Classify and assess each finding
-using `review-finding:` plus `shared.review_coverage.digest(finding)` as its reference.
+Iteration keeps budgets and active run/cycle/attempt checks here. Allocate a
+session using `review-session --head SHA` after recording its cycle; this returns a
+stable external `session_file` for that cycle and usage retry. Give that path to
+[dk-pr-review](../../dk-pr-review/references/sessions.md) with `--session-file`.
+Use `--resume` only after interruption with identical evidence. The runner produces
+review provenance for both standalone and iteration reviews without reading this
+record. Save its JSON and register it through `review-result --head SHA --file FILE`.
+Registration checks the allocated session, pinned head and current preparation.
+`review_results` links immutable artifacts to the active run, cycle and attempt.
+Classify and assess findings using `review-finding:` plus
+`shared.review_coverage.digest(finding)` as their references.
 For review events, include the iteration run ID in the unique key; events retain
 `iteration_run_id`, so an older run cannot authorize a usage-limited retry.
 
@@ -130,3 +136,7 @@ tree requires a visible limitation rather than completion or a sixth cycle.
 The CLI includes verified review provenance or a `review_limitation` reason.
 Report actual reviewer execution in this invocation separately from reused earlier
 results, including reviewed heads/trees and all skipped reviewers with reasons.
+
+Legacy version-1 review artifacts cannot satisfy the version-2 session contract.
+Preserve them and the existing budget as history. Resume with valid session evidence
+or report the missing coverage; do not reset counters to bypass that limitation.

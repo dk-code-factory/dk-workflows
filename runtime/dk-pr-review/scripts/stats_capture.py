@@ -77,15 +77,6 @@ class Capture:
             'run_id': self.run_id, 'ledger': str(api.ledger_path(self.repo)),
             'run': self.run, 'report': str(api.ledger_path(self.repo).with_suffix('.md'))}, indent=2) + '\n')
 
-    def cached(self, name):
-        review = self.run['reviews'][name]
-        if review['status'] == 'completed':
-            return {'findings': [f['reported'] for f in review['findings']]}
-        if review['status'] in {'failed', 'incomplete', 'exhausted'}:
-            return {'status': 'tokens_exhausted' if review['status'] == 'exhausted' else 'incomplete',
-                    'findings': [], 'message': review.get('reason') or review['status']}
-        return None
-
     @contextmanager
     def invocation(self, name, handoff, descriptor):
         review = self.run['reviews'][name]
@@ -180,9 +171,6 @@ class OfflineCapture:
         path = self.directory / (category + '-' + api.digest(payload) + '.json')
         mutate(path, payload, lambda _: None)
         return str(path)
-
-    def cached(self, name):
-        return None
 
     @contextmanager
     def invocation(self, name, handoff, descriptor):

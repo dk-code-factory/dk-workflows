@@ -1,0 +1,44 @@
+# Review sessions and results
+
+Standalone reviews and iteration cycles use `shared/review_sessions.py` and
+`shared/review_coverage.py`. The runner owns execution and result provenance;
+workflow callers own their budgets, remediation assessments and completion policy.
+Session storage is mandatory and independent of optional reviewer statistics.
+
+Run `run_reviewers.py` with its normal context, Decisions, preparation, scope and
+rules files. Omitting `--session-file` creates a fresh external session. Supplying
+a new external path creates the session there. Existing paths require explicit
+`--resume`, which is valid only for interrupted or incomplete sessions with the
+same PR/base/head, preparation, scope, rules and ordered reviewers. Preserve those
+input artifacts on interruption. New requests and iteration cycles start fresh;
+finished sessions cannot be resumed. Changed evidence requires a fresh session,
+within the caller's existing budget. Never reset iteration counters to obtain one.
+
+The session checkpoints each completed reviewer in immutable private storage before
+continuing. Resume reuses only completed checkpoints; failed, incomplete, exhausted
+or interrupted reviewers execute again. A per-session execution lock rejects
+concurrent coordinators. Missing, changed or unwritable session evidence blocks
+review; analytics failure merely warns and retains replay inputs.
+
+The runner returns the ordinary aggregate findings and completion flag, plus:
+
+- `review_session`: session `id` and external `path`.
+- `review_artifact`: immutable result `path` and `sha256`.
+- `executed_reviewers` and `reused_reviewers`: completed providers from this
+  execution and from earlier checkpoints, respectively.
+- `skipped_reviewers`: exhausted providers and their reasons; other incomplete
+  providers remain explicit blockers.
+
+Each result binds session ID, PR, reviewed head/tree, scope, Decisions, base,
+reviewer instructions and preparation. All attempts remain available. Coverage
+validation accepts only a complete, fingerprinted result with accounted configured
+reviewers and the current tree and boundaries. Tree-equivalent commit regrouping
+may retain coverage when those boundaries match. A changed tree requires review;
+green CI and coordinator verification cannot substitute for it.
+
+Iteration allocates its session paths through `run_state.py review-session`, invokes
+dk-pr-review with that path, and registers the runner's JSON using `review-result`.
+Its adapter additionally checks active run/cycle/attempt and finding validity/scope
+assessments. The shared session/result contract has no iteration-record dependency.
+Statistics collect only reviewers actually executed, with distinct invocation
+identities, and never serve as the source of cached results.

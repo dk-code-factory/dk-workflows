@@ -162,7 +162,7 @@ def prepared_boundaries(monkeypatch):
     # gates and resume interactions are exercised in test_preparation.py.
     monkeypatch.setattr(state, 'work_gate', lambda record, head: {'readiness': 'ready'})
     monkeypatch.setattr(completion, 'current_preparation', lambda *a: {'mode': 'iteration'})
-    monkeypatch.setattr(completion.review_coverage, 'verify', lambda *a: {})
+    monkeypatch.setattr(completion.run_state_api, 'verify_review', lambda *a: {})
     monkeypatch.setattr(completion, 'live_preparation_scope', lambda *a: {'body': '', 'headRefOid': SHA})
     monkeypatch.setattr(completion.preparation_api, 'verify_completion', lambda *a: {'checks': 'passed'})
     original = completion.completion_gate
