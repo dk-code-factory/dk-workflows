@@ -64,7 +64,7 @@ def test_capture_before_aggregation_and_idempotent_resume(pinned):
     with patch.object(runner, 'run_skill_reviewer', side_effect=fake) as calls:
         result = runner.review(context, names, '', decisions, '', prep, stats=stats)
     assert calls.call_count == 2
-    assert result == {'complete': True, 'findings': [{**finding(), 'reviewers': names}], 'skipped_reviewers': []}
+    assert result == {'complete': True, 'findings': [{**finding(), 'reviewers': names}], 'skipped_reviewers': [], 'executed_reviewers': names, 'reused_reviewers': []}
     data = api.ledger('github.com/o/r')
     reviews = data['runs'][stats.run_id]['reviews']
     assert len({rev['findings'][0]['id'] for rev in reviews.values()}) == 2
@@ -75,7 +75,8 @@ def test_capture_before_aggregation_and_idempotent_resume(pinned):
     assert ENV not in os.environ
     resumed = Capture(context, prep, names, cycle=1)
     with patch.object(runner, 'run_skill_reviewer', side_effect=AssertionError('resume relaunched reviewer')):
-        assert runner.review(context, names, '', decisions, '', prep, stats=resumed) == result
+        assert runner.review(context, names, '', decisions, '', prep, stats=resumed) == {
+            **result, 'executed_reviewers': [], 'reused_reviewers': names}
     assert api.summary()['total']['reported']['total'] == 2
 
 

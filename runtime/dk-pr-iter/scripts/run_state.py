@@ -9,6 +9,8 @@ import re
 from pathlib import Path
 import sys
 import importlib.util
+import copy
+import uuid
 
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 
@@ -23,6 +25,44 @@ _spec = importlib.util.spec_from_file_location('iteration_preparation',
     next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir()) / 'dk-pr-decisions/scripts/preparation.py')
 preparation_api = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(preparation_api)
+
+
+def start_run(record, *, resume=False):
+    """Start a distinct bounded request, or explicitly resume interrupted work."""
+    active = record.get('iteration_run')
+    if resume:
+        if not active or active['status'] != 'active':
+            raise ValueError('no active iteration run to resume')
+        return active
+    if active and active['status'] == 'active':
+        raise ValueError('iteration run is active; resume or finish it before starting another')
+    if any(record.get(field) for field in ('cycles', 'cycle_retries', 'repairs', 'review_results')) and not active:
+        raise ValueError('legacy record requires explicit adoption with adopt-run before continuing')
+    if active:
+        snapshot = copy.deepcopy({k: v for k, v in record.items() if k != 'run_history'})
+        record.setdefault('run_history', []).append(snapshot)
+    for field in ('cycles', 'cycle_retries', 'repairs', 'review_results'):
+        record[field] = []
+    record.pop('preparation', None)
+    record['iteration_run'] = {'id': uuid.uuid4().hex, 'status': 'active'}
+    return record['iteration_run']
+
+
+def adopt_run(record):
+    """Migrate a legacy record without discarding its exhausted counters."""
+    if record.get('iteration_run'):
+        raise ValueError('record already has an iteration run')
+    record['iteration_run'] = {'id': uuid.uuid4().hex, 'status': 'active', 'legacy': True}
+    return record['iteration_run']
+
+
+def finish_run(record, status, reason):
+    active = record.get('iteration_run')
+    if (not active or active['status'] != 'active' or not reason.strip()
+            or status not in {'completed', 'limited'}):
+        raise ValueError('finishing requires an active run and an outcome reason')
+    active.update(status=status, reason=reason)
+    return active
 
 
 def attach_preparation(record, path, pr_url, head):
@@ -44,6 +84,8 @@ def attach_preparation(record, path, pr_url, head):
 
 
 def work_gate(record, head, *, require_ready=True):
+    if record.get('iteration_run') and record['iteration_run']['status'] != 'active':
+        raise ValueError('iteration run is finished; start a new run')
     item = record.get('preparation')
     if not item:
         raise ValueError('preparation required before initial work or review')
@@ -153,7 +195,8 @@ def retry_exhausted_cycle(record, head):
     number = last["number"]
     prefix = f"review-cycle-{number}:"
     events = [event for event in record.get("events", [])
-              if event.get("kind") == "review" and event.get("key", "").startswith(prefix)]
+              if event.get("kind") == "review" and event.get("key", "").startswith(prefix)
+              and event.get('iteration_run_id') == record.get('iteration_run', {}).get('id')]
     exhausted = any(event.get("key", "").endswith(":incomplete")
                     and any(term in event.get("detail", "").lower()
                             for term in ("session limit", "usage limit", "tokens_exhausted"))
@@ -263,6 +306,12 @@ def main():
     p.add_argument("--pr", type=int)
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("show")
+    sub.add_parser('start-run')
+    sub.add_parser('resume-run')
+    sub.add_parser('adopt-run')
+    finish = sub.add_parser('finish-run')
+    finish.add_argument('--status', choices=('completed', 'limited'), required=True)
+    finish.add_argument('--reason', required=True)
     stats = sub.add_parser('review-assess')
     stats.add_argument('--file', required=True, help='Compact links to existing finding classifications and scope')
     prep = sub.add_parser('preparation')
@@ -308,6 +357,11 @@ def main():
             path = base / f"pr-{a.pr}.json"
             default = {"pr": a.pr, "threads": {}, "events": [], "cycles": [], "cycle_retries": [], "repairs": [], "reruns": [], "local_decisions": []}
             if a.command == "show": result = read(path, default)
+            elif a.command in {'start-run', 'resume-run'}:
+                result = mutate(path, default, lambda d: start_run(d, resume=a.command == 'resume-run'))
+            elif a.command == 'adopt-run': result = mutate(path, default, adopt_run)
+            elif a.command == 'finish-run':
+                result = mutate(path, default, lambda d: finish_run(d, a.status, a.reason))
             elif a.command == 'review-assess':
                 result = reviewer_assessments(read(path, default), a.repo, json.loads(Path(a.file).read_text()))
             elif a.command == 'preparation': result = mutate(path, default, lambda d: attach_preparation(d, a.file, a.pr_url, a.head))
@@ -319,7 +373,8 @@ def main():
             elif a.command == "thread": result = mutate(path, default, lambda d: classify(d, a.ref, a.head, a.classification, a.evidence, a.reason, a.production_lines))
             elif a.command == "event":
                 require_head(a.head)
-                result = mutate(path, default, lambda d: append_unique(d, "events", vars(a) | {"head": a.head}, "key"))
+                result = mutate(path, default, lambda d: append_unique(d, "events", vars(a) | {
+                    "head": a.head, 'iteration_run_id': d.get('iteration_run', {}).get('id')}, "key"))
             elif a.command == "cycle": result = mutate(path, default, lambda d: next_cycle(d, a.head))
             elif a.command == "cycle-retry": result = mutate(path, default, lambda d: retry_exhausted_cycle(d, a.head))
             elif a.command == "decision": result = mutate(path, default, lambda d: record_local_decision(d, a.text, a.source))
