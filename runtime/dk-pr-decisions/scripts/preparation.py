@@ -101,7 +101,16 @@ def collect(manifest_path):
         raise ValueError('preparation requires a clean isolated checkout')
     sources = {key: {'path': str(Path(value).resolve()), 'sha256': file_hash(value)}
                for key, value in paths.items()}
-    prior = [read(path(value)) for value in evidence['prior_preparation']]
+    prior = []
+    for value in evidence['prior_preparation']:
+        prior_path = path(value)
+        try:
+            prior.append(read(prior_path))
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f'prior_preparation artifact {prior_path} must contain valid JSON; '
+                'when no previous preparation exists, use a JSON object explaining its absence'
+            ) from exc
     return manifest, context, decisions, sources, reviewer_descriptors, prior
 
 
@@ -130,9 +139,10 @@ def analysis_prompt(manifest, context, decisions, sources, descriptors):
             'sources': sources, 'reviewers': descriptors}, ensure_ascii=False))
 
 
-def analyze(prompt, checkout):
-    from shared.executors import execute
-    return json.loads(execute(prompt, checkout))
+def analyze(prompt, checkout, *, validate=None):
+    from shared.executors import execute_json
+    return execute_json(prompt, checkout, validate=validate,
+                        correction_instructions='worker_instructions and completion_criteria must be nonempty strings.')
 
 
 def text(value):
@@ -226,8 +236,12 @@ def prepare(manifest_path, output_dir, analyzer=None):
     manifest, context, decisions, sources, descriptors, prior = collect(manifest_path)
     output_dir = outside(output_dir, context.get('repository', context['checkout']))
     outside(output_dir, context['checkout'])
-    analysis = (analyzer or analyze)(analysis_prompt(manifest, context, decisions, sources, descriptors),
-                                    context['checkout'])
+    prompt = analysis_prompt(manifest, context, decisions, sources, descriptors)
+    if analyzer is None:
+        analysis = analyze(prompt, context['checkout'], validate=lambda value:
+                           validate_analysis(value, sources, descriptors, prior))
+    else:
+        analysis = analyzer(prompt, context['checkout'])
     validate_analysis(analysis, sources, descriptors, prior)
     # Analysis can take minutes; reject any source or checkout movement during it.
     for source in sources.values():

@@ -90,6 +90,60 @@ class PreparationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'adaptation incomplete'):
             self.package.prepare()
 
+    def test_plain_text_prior_absence_reports_source_and_blocks_before_model(self):
+        package = self.package
+        prior = package.root / 'prior.txt'
+        prior.write_text('No previous preparation exists for this run.\n')
+        manifest = copy.deepcopy(package.manifest)
+        manifest['evidence']['prior_preparation'] = [str(prior)]
+        package.write('manifest.json', manifest)
+        with patch.object(prep, 'analyze') as model:
+            with self.assertRaisesRegex(ValueError, 'prior_preparation.*valid JSON') as error:
+                prep.prepare(package.manifest_path, package.root / 'versions', analyzer=model)
+            model.assert_not_called()
+        self.assertIn(str(prior), str(error.exception))
+        self.assertFalse((package.root / 'versions').exists())
+
+    def test_native_analysis_corrects_fenced_json_once(self):
+        expected = analysis()
+        invalid = '```json\n' + json.dumps(expected) + '\n```'
+        with patch('shared.executors.execute', side_effect=[invalid, json.dumps(expected)]) as model:
+            result = prep.analyze('Frozen evidence', self.package.repo)
+        self.assertEqual(result, expected)
+        self.assertEqual(model.call_count, 2)
+        self.assertEqual([call.kwargs['attempt'] for call in model.call_args_list], [0, 1])
+        correction = model.call_args_list[1].args[0]
+        self.assertTrue(correction.startswith('Frozen evidence'))
+        self.assertIn('Prior response:\n' + invalid, correction)
+        self.assertIn('without Markdown fences', correction)
+
+    def test_native_analysis_corrects_invalid_fields_before_readiness(self):
+        invalid = analysis()
+        invalid['worker_instructions'] = ['Preserve the supported transform']
+        with patch('shared.executors.execute', side_effect=[json.dumps(invalid), json.dumps(analysis())]) as model:
+            result = prep.prepare(self.package.manifest_path, self.package.root / 'versions')
+        artifact = prep.load(result['artifact'], self.package.context, self.package.decisions)
+        self.assertEqual(artifact['readiness'], 'ready')
+        self.assertEqual(artifact['analysis'], analysis())
+        self.assertEqual(model.call_count, 2)
+        self.assertIn('worker instructions and completion criteria required', model.call_args_list[1].args[0])
+
+    def test_invalid_analysis_exhausts_correction_without_preparing(self):
+        for raw in ('not JSON', json.dumps({'boundaries': {}}), '[]'):
+            with self.subTest(raw=raw):
+                with patch('shared.executors.execute', return_value=raw) as model:
+                    with self.assertRaisesRegex(ValueError, 'invalid after one correction'):
+                        prep.prepare(self.package.manifest_path, self.package.root / 'versions')
+                self.assertEqual(model.call_count, 2)
+                self.assertFalse((self.package.root / 'versions').exists())
+
+    def test_provider_failure_is_not_retried_as_invalid_analysis(self):
+        with patch('shared.executors.execute', side_effect=RuntimeError('authentication failed')) as model:
+            with self.assertRaisesRegex(RuntimeError, 'authentication failed'):
+                prep.prepare(self.package.manifest_path, self.package.root / 'versions')
+        model.assert_called_once()
+        self.assertFalse((self.package.root / 'versions').exists())
+
     def test_proposals_and_sync_are_readiness_gates(self):
         result = analysis()
         result['boundaries']['correctness'][0].update(agreement='proposal', material=True)

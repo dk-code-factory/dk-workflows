@@ -28,7 +28,10 @@ Every evidence category is a nonempty array of original artifact paths:
 - `user_instructions`: exact current instructions, constraints and human answers.
 - `run_history`: prior assessments, counts, events and operational history.
 - `questions`: unanswered questions and affected dependent work.
-- `prior_preparation`: previous preparation artifacts on refresh/resume.
+- `prior_preparation`: previous preparation JSON artifacts on refresh/resume.
+  When there is no previous preparation, supply a JSON object such as
+  `{"verified_absence": true, "reason": "No previous preparation exists for this run"}`.
+  Plain-text absence files are not accepted for this category.
 - `rules`: applicable repository rules and conflict resolutions.
 - `production`: owning modules, dependencies, callers and analogous implementations.
 - `tests`: test layout, fixtures, commands and required coverage.
@@ -41,6 +44,9 @@ establish unsupported inputs. Original evidence remains available. Summaries pro
 navigation; inspect exact sources for material conclusions and contradictions.
 
 Preparation invokes a read-only semantic analysis. It never publishes or edits code.
+Invalid model JSON or analysis fields receive one correction attempt with the error
+and prior response. A second invalid response blocks preparation; do not coerce
+fields or substitute a local analysis to make the readiness gate pass.
 The existing API v2 envelope returns `data.artifact`, `data.preparation_id` and
 `data.readiness`. The separately versioned artifact (`preparation_version: 1`) binds
 PR URL, base/head, body and complete Decisions hashes to source fingerprints,

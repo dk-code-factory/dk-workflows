@@ -4,6 +4,10 @@ Before drafting or revising decision text, read and follow [the decision languag
 
 Use `python3 PLUGIN_ROOT/runtime/dk-pr-decisions/scripts/decisions.py --pr PR_URL COMMAND`. Always use the full PR URL for forks. `list` and `publish` require a full URL to locate the cache without discovery. Read [the API contract](references/api.md) for JSON fields, replacement details, and migration from the previous interface.
 
+Discussion analysis and description suggestions allow one correction for invalid
+model JSON or evidence references. A second invalid result blocks the operation;
+provider and authentication failures are not retried as formatting errors.
+
 - `scan`: fetch paginated discussions, analyze changed text, and cache settled decisions and unresolved thread summaries. Does not publish unless explicitly invoked with `--publish`.
 - `list`: read the cached snapshot without network requests, model calls, or cache writes. Run `scan` first if there is no cache. Results may be stale.
 - `context`: refresh and export verified context without publishing. Save its JSON outside the repository for review and fix handoffs. Add `--local-decisions-file RUN_RECORD.json` for a `dk-pr-iter` run or a JSON array of local choices. Read active entries in `data.decisions`; superseded entries are history. An empty verified record is valid. Refresh after a new decision, body edit, or head change; stop dependent work if context is missing, stale, or conflicting.
