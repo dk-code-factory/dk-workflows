@@ -119,6 +119,34 @@ class RunnerTests(unittest.TestCase):
             mod.main()
         run.assert_not_called()
 
+    def test_iteration_cli_binds_cache_and_provenance_to_current_run(self):
+        context = {**self.context, 'repository': str(Path(self.tmp.name)/'repository')}
+        context_file = Path(self.tmp.name)/'context.json'
+        context_file.write_text(json.dumps(context))
+        record_file = Path(self.tmp.name)/'run.json'
+        argv = ['run_reviewers.py', '--context', str(context_file), '--decisions-file',
+                str(Path(self.tmp.name)/'decisions.json'), '--preparation-file', str(self.preparation_path)]
+        Path(argv[4]).write_text(json.dumps(self.decisions))
+        result = {'complete': True, 'findings': [], 'executed_reviewers': ['one'],
+                  'reused_reviewers': [], 'skipped_reviewers': []}
+        with patch.object(sys, 'argv', argv), patch.object(mod, 'run', return_value=json.dumps({'reviewers': self.providers})), \
+             patch.object(mod.preparation_api, 'load', return_value=self.preparation), \
+             patch.object(mod, 'for_iteration') as capture, patch.object(mod, 'review', return_value=result.copy()) as review:
+            with self.assertRaisesRegex(ValueError, '--run-record'):
+                mod.main()
+            review.assert_not_called()
+            argv += ['--run-record', str(record_file)]
+            attempts = []
+            with patch.object(mod.review_coverage, 'retain', return_value={'path': 'saved'}) as retain, \
+                 patch('builtins.print'):
+                for run_id in ('first-run', 'second-run'):
+                    record_file.write_text(json.dumps({'iteration_run': {'id': run_id, 'status': 'active'},
+                        'cycles': [{'number': 1, 'head': context['head_sha']}]}))
+                    mod.main()
+                    attempts.append(capture.call_args.args[-1])
+                    self.assertEqual(retain.call_args.args[-2:], (run_id, 1))
+            self.assertEqual(attempts, ['first-run:1', 'second-run:1'])
+
 
 
 if __name__=='__main__':unittest.main()

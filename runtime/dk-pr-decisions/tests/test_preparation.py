@@ -273,6 +273,7 @@ class PreparationTests(unittest.TestCase):
         saved = package.prepare(result)
         state = module('blocked_state', 'dk-pr-iter/scripts/run_state.py')
         record = {}
+        state.start_run(record)
         state.attach_preparation(record, saved['artifact'], package.context['url'], package.head)
         state.assess(record, 'feedback-1', package.head, saved['preparation_id'], 'decision_blocked',
                      'Conflicting exact scope statements', 'Human scope decision needed')
@@ -304,8 +305,13 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(completion.completion_gate(*args, stage='review'), 'preparation_missing')
         state = module('completion_preparation_state', 'dk-pr-iter/scripts/run_state.py')
         record = {}
+        state.start_run(record)
         state.attach_preparation(record, saved['artifact'], package.context['url'], package.head)
+        state.next_cycle(record, package.head)
         record_path = package.write('run-record.json', record)
+        completion.review_coverage.retain(record_path, package.context, prep.read(saved['artifact']),
+            {'complete': True, 'findings': [], 'executed_reviewers': ['example'],
+             'reused_reviewers': [], 'skipped_reviewers': []}, record['iteration_run']['id'], 1)
         self.assertEqual(completion.completion_gate(*args, stage='review', preparation=saved['artifact'],
                                                    pr_url=package.context['url']), 'run_record_missing')
         verification = {'verification_version': 1, 'preparation_id': saved['preparation_id'],
@@ -335,8 +341,13 @@ class PreparationTests(unittest.TestCase):
         state = module('completion_live_state', 'dk-pr-iter/scripts/run_state.py')
         completion = module('completion_live_record', 'dk-pr-iter/scripts/completion.py')
         record = {'local_decisions': []}
+        state.start_run(record)
         state.attach_preparation(record, saved['artifact'], package.context['url'], package.head)
+        state.next_cycle(record, package.head)
         record_path = package.write('run-record.json', record)
+        completion.review_coverage.retain(record_path, package.context, prep.read(saved['artifact']),
+            {'complete': True, 'findings': [], 'executed_reviewers': ['example'],
+             'reused_reviewers': [], 'skipped_reviewers': []}, record['iteration_run']['id'], 1)
         source = package.repo / 'transform.py'
         check = {'satisfied': True, 'rationale': 'Inspected the supported behavior and its boundaries',
                  'evidence': [{'path': str(source), 'sha256': prep.file_hash(source)}]}
@@ -348,6 +359,7 @@ class PreparationTests(unittest.TestCase):
         kwargs = {'stage': 'review', 'preparation': saved['artifact'], 'pr_url': package.context['url'],
                   'body': '', 'verification': verification_path, 'run_record': record_path}
         self.assertEqual(completion.completion_gate(*args, **kwargs), 'clean')
+        record = state.read(Path(record_path), {})
         other_analysis = analysis()
         other_analysis['worker_instructions'] += ' Record the routine placement rationale.'
         other = package.prepare(other_analysis)

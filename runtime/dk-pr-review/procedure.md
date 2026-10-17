@@ -14,3 +14,11 @@ patch back to the iteration coordinator for its ordinary assessment. Preserve re
 JSON contracts; see [the analytics handoff](../dk-pr-iter/references/review-stats.md).
 Standalone reviews are outside collection. Analytics warnings indicate missing data
 and do not change the review result.
+
+For iteration preparation, also pass `--run-record RUN_RECORD.json` to the runner.
+It requires an active run and matching recorded cycle/head, scopes cached results to
+that run, and saves mandatory review provenance beside the external record. Pass
+its `review_artifact` path and the full result to the parent. Preserve
+`executed_reviewers`, `reused_reviewers` and skipped reviewers with reasons; these
+execution lists contain completed reviewers. Report failed or incomplete reviewers
+separately. Statistics failure cannot replace or suppress mandatory provenance.

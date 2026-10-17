@@ -6,6 +6,10 @@ Commands:
 
 ```text
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER show
+run_state.py --repo HOST/OWNER/REPO --pr NUMBER start-run
+run_state.py --repo HOST/OWNER/REPO --pr NUMBER resume-run
+run_state.py --repo HOST/OWNER/REPO --pr NUMBER adopt-run
+run_state.py --repo HOST/OWNER/REPO --pr NUMBER finish-run --status completed|limited --reason TEXT
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER thread --ref ID --head SHA --classification CLASS --evidence URL --reason TEXT [--production-lines N]
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER event --key UNIQUE_KEY --kind KIND --head SHA --detail TEXT
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER cycle --head SHA
@@ -93,3 +97,36 @@ invocations and assessment history without changing cycle, retry, repair or reru
 counters. Record `review-assess --file LINKS.json` after ordinary classification/scope
 assessment; the compact links reuse its evidence and validated severity. Preserve the
 runner's sidecar path in handoffs and retain replay inputs when analytics fails.
+
+## Iteration runs and required review provenance
+
+`iteration_run` identifies the active or terminal request. `start-run` archives the
+terminal record in `run_history` and resets only review cycles, usage retries,
+per-cycle repairs and review-result registrations. Publications, reply-controller
+state, decisions and per-head CI rerun limits remain available. `resume-run` requires
+an active run and preserves its identity and counters. `adopt-run` gives legacy
+history an identity without clearing counters; record its actual outcome explicitly.
+Only a later user request permits a new budget. Never finish/restart within one
+request to evade the cap. Keep active status on interruption. Finished runs cannot
+pass completion or authorize more prepared work.
+
+Pass this record as `--run-record` to the review runner for iteration preparation.
+It requires a matching recorded cycle/head and automatically registers immutable
+review results in `review_results` with a fingerprint, run ID, cycle, preparation ID,
+head/tree, PR identity and scope fingerprint. Statistics remain optional. Review
+result artifacts retain executed and reused completed reviewers, skipped reviewers
+with reasons, and the full aggregated findings. Classify and assess each finding
+using `review-finding:` plus `shared.review_coverage.digest(finding)` as its reference.
+For review events, include the iteration run ID in the unique key; events retain
+`iteration_run_id`, so an older run cannot authorize a usage-limited retry.
+
+Both completion stages validate the latest registered result against the active
+run and current tree, base, scope/Decisions and reviewer instructions, and require
+validity/scope assessments for every finding. Missing, incomplete, changed or stale
+results yield `review_coverage_invalid`, even with `--review-complete` and green CI.
+An in-scope actionable finding blocks completion. Proven tree-equivalent regrouping
+may reuse coverage when the other boundaries match. A final-cycle fix changing the
+tree requires a visible limitation rather than completion or a sixth cycle.
+The CLI includes verified review provenance or a `review_limitation` reason.
+Report actual reviewer execution in this invocation separately from reused earlier
+results, including reviewed heads/trees and all skipped reviewers with reasons.

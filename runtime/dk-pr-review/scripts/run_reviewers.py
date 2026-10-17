@@ -20,6 +20,8 @@ from reviewer_prompts import preparation_instructions, source_files
 from stats_capture import for_iteration
 from shared.reviewer_telemetry import capture, transport
 from shared import bindings
+from shared import review_coverage
+from shared.private_state import read
 from shared.executors import invoke, ProviderExhausted
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())
@@ -253,6 +255,10 @@ def review(context, reviewers, scope, decisions, rules, preparation, stats=None)
     findings = []
     skipped_reviewers = []
     completed_reviewers = 0
+    executed = []
+    reused = []
+    def outcome(value):
+        return {**value, 'executed_reviewers': executed, 'reused_reviewers': reused}
     for name in reviewers:
         cached = None
         capturing = False
@@ -285,9 +291,9 @@ def review(context, reviewers, scope, decisions, rules, preparation, stats=None)
                     and result.get('findings') == [] and isinstance(result.get('message'), str)):
                 if capturing:
                     stats.safe(stats.finish, 'incomplete', result, result['message'])
-                return {'complete': False, 'failed_reviewer': name,
+                return outcome({'complete': False, 'failed_reviewer': name,
                         'reason': result['message'], 'findings': findings,
-                        'skipped_reviewers': skipped_reviewers}
+                        'skipped_reviewers': skipped_reviewers})
             validate_findings(result, lines)
             for item in result['findings']:
                 existing = next((entry for entry in findings
@@ -301,6 +307,7 @@ def review(context, reviewers, scope, decisions, rules, preparation, stats=None)
             if capturing:
                 stats.safe(stats.finish, 'completed', result)
             completed_reviewers += 1
+            (reused if cached is not None else executed).append(name)
         except Exception as exc:
             if stats and not cached:
                 if not capturing:
@@ -308,14 +315,14 @@ def review(context, reviewers, scope, decisions, rules, preparation, stats=None)
                     stats.safe(stats.failure, name, str(exc))
                 else:
                     stats.safe(stats.finish, 'failed', reason=str(exc))
-            return {'complete': False, 'failed_reviewer': name, 'reason': str(exc),
-                    'findings': findings, 'skipped_reviewers': skipped_reviewers}
+            return outcome({'complete': False, 'failed_reviewer': name, 'reason': str(exc),
+                    'findings': findings, 'skipped_reviewers': skipped_reviewers})
     preparation_api.validate(preparation, context, decisions)
     findings.sort(key=lambda x: (('Major', 'Minor', 'Nit').index(x['severity']), x['path'], x['line']))
     if not completed_reviewers:
-        return {'complete': False, 'reason': 'all configured reviewers exhausted their usage limits',
-                'findings': findings, 'skipped_reviewers': skipped_reviewers}
-    return {'complete': True, 'findings': findings, 'skipped_reviewers': skipped_reviewers}
+        return outcome({'complete': False, 'reason': 'all configured reviewers exhausted their usage limits',
+                'findings': findings, 'skipped_reviewers': skipped_reviewers})
+    return outcome({'complete': True, 'findings': findings, 'skipped_reviewers': skipped_reviewers})
 
 
 def main():
@@ -328,6 +335,7 @@ def main():
     parser.add_argument('--rules-file')
     parser.add_argument('--stats-cycle', type=int, help='Iteration cycle (normally read from the private run record)')
     parser.add_argument('--stats-attempt', help='Stable retry identity; reuse when resuming')
+    parser.add_argument('--run-record', help='Required active run record for iteration review provenance')
     args = parser.parse_args()
     context = json.loads(Path(args.context).read_text())
     if not args.describe and (not args.decisions_file or not args.preparation_file):
@@ -344,9 +352,26 @@ def main():
     preparation = preparation_api.load(args.preparation_file, context, decisions)
     def optional(path):
         return Path(path).read_text() if path else ''
-    stats = for_iteration(context, preparation, [bindings.key(v) for v in config['reviewers']], args.stats_cycle, args.stats_attempt)
-    print(json.dumps(review(context, config['reviewers'], optional(args.scope_file),
-                            decisions, optional(args.rules_file), preparation, stats=stats), ensure_ascii=False))
+    run_id = number = None
+    attempt = args.stats_attempt
+    if preparation['mode'] == 'iteration':
+        if not args.run_record:
+            raise ValueError('--run-record is required for iteration review provenance')
+        record = read(Path(args.run_record), {})
+        run_id = review_coverage.active_run(record)
+        number = review_coverage.cycle(record, context['head_sha'])
+        if args.stats_cycle is not None and args.stats_cycle != number:
+            raise ValueError('--stats-cycle differs from the active iteration cycle')
+        retry = 1 + sum(r['number'] == number for r in record.get('cycle_retries', []))
+        attempt = run_id + ':' + (attempt or str(retry))
+    stats = for_iteration(context, preparation, [bindings.key(v) for v in config['reviewers']],
+                          number if number is not None else args.stats_cycle, attempt)
+    result = review(context, config['reviewers'], optional(args.scope_file),
+                    decisions, optional(args.rules_file), preparation, stats=stats)
+    if run_id:
+        result['review_artifact'] = review_coverage.retain(
+            args.run_record, context, preparation, result.copy(), run_id, number)
+    print(json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == '__main__':
