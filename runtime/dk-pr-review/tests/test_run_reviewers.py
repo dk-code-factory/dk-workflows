@@ -125,8 +125,15 @@ class RunnerTests(unittest.TestCase):
         context_file.write_text(json.dumps(context))
         decisions_file = Path(self.tmp.name)/'decisions.json'
         decisions_file.write_text(json.dumps(self.decisions))
+        scope_file = Path(self.tmp.name)/'scope.txt'
+        rules_file = Path(self.tmp.name)/'rules.txt'
+        scope = 'Review shared session behavior and preserve legacy callers.'
+        rules = 'Keep iteration budget policy in the iteration adapter.'
+        scope_file.write_text(scope)
+        rules_file.write_text(rules)
         argv = ['run_reviewers.py', '--context', str(context_file), '--decisions-file',
-                str(decisions_file), '--preparation-file', str(self.preparation_path)]
+                str(decisions_file), '--preparation-file', str(self.preparation_path),
+                '--scope-file', str(scope_file), '--rules-file', str(rules_file)]
         result = {'complete': True, 'findings': [], 'executed_reviewers': ['one'],
                   'reused_reviewers': [], 'skipped_reviewers': []}
         with patch.object(sys, 'argv', argv), patch.object(mod, 'run', return_value=json.dumps({'reviewers': self.providers})), \
@@ -140,6 +147,10 @@ class RunnerTests(unittest.TestCase):
             for mode in ('standalone', 'iteration'):
                 load.return_value = {**self.preparation, 'mode': mode}
                 mod.main()
+                self.assertEqual(factory.call_args.kwargs['scope'], scope)
+                self.assertEqual(factory.call_args.kwargs['rules'], rules)
+                self.assertEqual(review.call_args.args[2], scope)
+                self.assertEqual(review.call_args.args[4], rules)
                 self.assertIs(review.call_args.kwargs['session'], session)
                 session.finish.assert_called()
                 self.assertEqual(capture.call_args.args[-1], 'review-session:1:1')
