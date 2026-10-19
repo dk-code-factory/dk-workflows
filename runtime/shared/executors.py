@@ -14,6 +14,18 @@ class ProviderExhausted(RuntimeError):
     """Explicit provider usage exhaustion; authentication failures remain blocking."""
 
 
+def provider_timeout():
+    """Read the per-invocation provider deadline in seconds."""
+    value = os.environ.get('DK_PROVIDER_TIMEOUT_SECONDS', '1200')
+    try:
+        seconds = int(value)
+    except ValueError:
+        raise ValueError('DK_PROVIDER_TIMEOUT_SECONDS must be a positive integer') from None
+    if seconds <= 0:
+        raise ValueError('DK_PROVIDER_TIMEOUT_SECONDS must be a positive integer')
+    return seconds
+
+
 def execute_json(prompt, checkout, *, validate=None, executor=None, correction_instructions=''):
     """Correct model JSON once, without retrying provider failures or coercing data."""
     original_prompt = prompt
@@ -83,7 +95,8 @@ def update_process(resolved, env, phase, token=None):
     return receipt
 
 
-def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=600):
+def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None):
+    timeout = provider_timeout() if timeout is None else timeout
     host = resolved['executor'] if resolved else current_host()
     if host not in ('codex', 'claude'):
         raise ValueError('Model execution requires a native host')
@@ -151,7 +164,8 @@ def invoke(binding, handoff_path, checkout, prompt, *, attempt=0):
                    DK_PROVIDER_ATTEMPT=str(attempt))
         # The immutable evidence handoff stays in argv. stdin carries the output
         # instructions and, on retry, the validation error and prior response.
-        proc = subprocess.run(argv, input=prompt, cwd=checkout, text=True, capture_output=True, env=env, timeout=600)
+        proc = subprocess.run(argv, input=prompt, cwd=checkout, text=True, capture_output=True,
+                              env=env, timeout=provider_timeout())
         if proc.returncode:
             provider_failure('\n'.join(filter(None, (proc.stderr, proc.stdout))).strip() or 'Command provider failed')
         return proc.stdout
