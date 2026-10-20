@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -62,3 +63,58 @@ def test_real_subprocess_transport_usage_reaches_trace_without_changing_output(t
     assert attempt['model'] == 'model-a'
     assert attempt['stdout'] == process.stdout
     assert attempt['returncode'] == 0
+
+
+def test_timeout_retains_real_subprocess_diagnostics_and_partial_artifact(tmp_path, monkeypatch):
+    trace = tmp_path / 'trace.json'
+    partial = tmp_path / 'partial.txt'
+    monkeypatch.setenv(ENV, str(trace))
+    script = ('import sys,time; from pathlib import Path; '
+              'Path(sys.argv[1]).write_text("partial review"); '
+              'print("provider started", flush=True); '
+              'print("model: model-a", file=sys.stderr, flush=True); '
+              'time.sleep(30)')
+    with pytest.raises(subprocess.TimeoutExpired) as failure:
+        capture(subprocess.run, [sys.executable, '-c', script, str(partial)],
+                text=True, capture_output=True, timeout=1,
+                telemetry_prompt='review', telemetry_attempt=0,
+                telemetry_provider='codex', telemetry_output=partial)
+    attempt, = json.loads(trace.read_text())['attempts']
+    assert attempt['error_type'] == 'TimeoutExpired'
+    assert attempt['timeout_seconds'] == failure.value.timeout == 1
+    assert attempt['stdout'] == 'provider started\n'
+    assert attempt['stderr'] == 'model: model-a\n'
+    assert attempt['output'] == 'partial review'
+    assert attempt['model'] == 'model-a'
+    assert attempt['usage'] is None and attempt['returncode'] is None
+    assert 'timed out' in attempt['error']
+    assert os.environ[ENV] == str(trace)
+
+
+def test_timeout_decodes_invalid_utf8_without_losing_trace(tmp_path, monkeypatch):
+    trace = tmp_path / 'trace.json'
+    monkeypatch.setenv(ENV, str(trace))
+    timeout = subprocess.TimeoutExpired(['provider'], 1, output=b'partial \xff', stderr=b'failure \xff')
+    def provider():
+        raise timeout
+    with pytest.raises(subprocess.TimeoutExpired) as failure:
+        capture(provider, telemetry_prompt='review', telemetry_attempt=0, telemetry_provider='claude')
+    assert failure.value is timeout
+    attempt, = json.loads(trace.read_text())['attempts']
+    assert attempt['stdout'] == 'partial \ufffd'
+    assert attempt['stderr'] == 'failure \ufffd'
+    assert attempt['usage'] is None
+
+
+
+def test_explicit_subprocess_environment_cannot_reinstrument_nested_provider(tmp_path, monkeypatch):
+    trace = tmp_path / 'trace.json'
+    monkeypatch.setenv(ENV, str(trace))
+    child_env = dict(os.environ)
+    process = capture(subprocess.run,
+                      [sys.executable, '-c', 'import os; print(os.environ.get("' + ENV + '"))'],
+                      env=child_env, text=True, capture_output=True,
+                      telemetry_prompt='review', telemetry_attempt=0)
+    assert process.stdout == 'None\n'
+    assert child_env[ENV] == os.environ[ENV] == str(trace)
+    assert len(json.loads(trace.read_text())['attempts']) == 1
