@@ -10,7 +10,6 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
-import re
 import sys
 import tempfile
 from urllib.parse import urlparse
@@ -24,6 +23,9 @@ spec.loader.exec_module(guard)
 spec = importlib.util.spec_from_file_location('reply_resolution', Path(__file__).with_name('reply_resolution.py'))
 resolution = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(resolution)
+spec = importlib.util.spec_from_file_location('reply_answers', Path(__file__).with_name('reply_answers.py'))
+answer_state = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(answer_state)
 
 
 def require(ok, message):
@@ -38,22 +40,22 @@ def all_sources(evidence):
     return guard.sources(evidence)[0]
 
 
-def find_receipt(evidence, receipt):
+def find_receipt(evidence, receipt, category='controller_published'):
     candidates = evidence['items'] if receipt['kind'] == 'issue_comment' else next(
         (t['comments'] for t in evidence['threads'] if t['id'] == receipt['reference']), [])
     matches = [c for c in candidates if c.get('url') == receipt['url']]
     require(len(matches) == 1 and matches[0]['text'] == receipt['body'],
-            'saved reply missing or edited; reconcile live GitHub evidence')
+            f"saved reply missing or edited: {receipt['url']} [{category}]; reconcile live GitHub evidence")
 
 
 def verify_history(workflow, evidence):
-    for entry in workflow['history']:
-        for receipt in entry.get('receipts', []):
-            find_receipt(evidence, receipt)
-    for entry in workflow.get('resolutions', []):
-        find_receipt(evidence, entry['reply'])
+    strict = answer_state.strict_receipts(guard, workflow)
+    for receipt, category in strict:
+        find_receipt(evidence, receipt, category)
+    strict_urls = {r['url'] for r, _ in strict}
     for answer in workflow.get('answers', {}).values():
-        find_receipt(evidence, answer['receipt'])
+        if answer.get('provenance') == 'controller_published' or answer['receipt']['url'] in strict_urls:
+            find_receipt(evidence, answer['receipt'])
 
 
 def fetch(pr, cwd):
@@ -78,7 +80,7 @@ class Controller:
         require(len(parts) == 4 and parts[2] == 'pull' and parts[3].isdigit(), 'PR URL required')
         require(record.get('pr') == int(parts[3]), 'run record belongs to a different PR')
         self.work = record.setdefault('reply_workflow', {
-            'schemaVersion': 1, 'pr': canonical, 'selection': selection, 'agent': agent, 'head': None,
+            'schemaVersion': 2, 'pr': canonical, 'selection': selection, 'agent': agent, 'head': None,
             'phase': 'inline', 'history': [], 'requests': [], 'knownSources': {},
             'observations': [], 'active': None, 'blocked': None, 'answers': {},
         })
@@ -87,7 +89,7 @@ class Controller:
                 'review selection changed; resume with the original PR/review URL')
         self.work.update(pr=saved_pr, selection=selection)
         self.work.setdefault('resolutions', [])
-        require(self.work['schemaVersion'] == 1 and self.work['pr'] == canonical,
+        require(self.work['schemaVersion'] in (1, 2) and self.work['pr'] == canonical,
                 'invalid or mismatched reply workflow')
         # A crash between saving a verdict and updating status must not discard it.
         active = self.work['active']
@@ -108,7 +110,13 @@ class Controller:
         self.work['blocked'] = {'kind': kind, 'reason': str(reason)}
         self.save()
         return {'action': 'stop' if kind == 'rejected' else 'reconcile',
-                'reason': str(reason), 'phase': self.work['phase']}
+                'reason': str(reason), 'phase': self.work['phase'],
+                'stale_answers': self.stale_answers()}
+
+    def stale_answers(self, evidence=None):
+        evidence = evidence if evidence is not None else getattr(self, 'evidence', None)
+        sources = self.selected_sources(evidence) if evidence is not None else None
+        return answer_state.stale(self.work, sources)
 
     def live(self):
         target = self.pr + ('#' + self.selection if self.selection else '')
@@ -118,7 +126,23 @@ class Controller:
             require(snapshot.get('selection') == expected, 'snapshot lost selected review')
             require(any(s['reference'] == self.selection for s in evidence['items']),
                     'selected review is missing from complete conversation')
-        verify_history(self.work, evidence)
+        self.evidence = evidence
+        observations = self.work.setdefault('evidenceObservations', [])
+        number = len(observations) + 1
+        folder = Path(tempfile.mkdtemp(prefix=f'observation-{number}-', dir=self.directory))
+        guard.write(folder / 'inline.json', snapshot)
+        guard.write(folder / 'conversation.json', conversation)
+        observation = {'snapshot': str(folder / 'inline.json'),
+                       'conversation': str(folder / 'conversation.json'),
+                       'head': evidence['head'], 'phase': self.work['phase']}
+        observations.append(observation)
+        self.observation = observation
+        try:
+            answer_state.migrate(guard, self.work, observation)
+            verify_history(self.work, evidence)
+            answer_state.inspect(guard, self.work, evidence, observation)
+        finally:
+            self.save()
         return snapshot, conversation, evidence
 
     def selected_threads(self, evidence):
@@ -144,11 +168,16 @@ class Controller:
         sources = self.selected_sources(evidence)
         known = self.work['knownSources']
         outstanding = []
-        for request in self.work['requests']:
+        stale = self.stale_answers(evidence)
+        stale_keys = {s['answerKey'] for s in stale if s['requestPresent']}
+        requests = {answer_state.key(guard, r): r for r in self.work['requests']}
+        requests.update({s['answerKey']: s['request'] for s in stale if s['requestPresent'] and
+                         s['answerKey'] not in requests})
+        for identity, request in requests.items():
             source = sources.get(request['source'])
             if source is None or request['excerpt'] not in source['text']:
                 continue  # Edited requests must be classified again from the complete snapshot.
-            if (request['disposition'] in ('reply', 'held') or
+            if (identity in stale_keys or request['disposition'] in ('reply', 'held') or
                     known.get(request['source']) != fingerprint(source)):
                 outstanding.append(copy.deepcopy(request))
         unknown = [source for ref, source in sources.items() if known.get(ref) != fingerprint(source)]
@@ -169,13 +198,14 @@ class Controller:
                 'unreplied_comments': [dict(reference=s['reference'], kind=s['kind'], url=s.get('url'))
                                       for s in comments],
                 'unclassified_sources': [s['reference'] for s in unknown],
-                'outstanding_requests': outstanding}
+                'outstanding_requests': outstanding, 'stale_answers': stale}
 
     def next(self):
         require(self.work['agent'] == self.agent, 'reuse the reply agent, or reconcile on resume')
-        if self.work['blocked']:
+        if self.work['blocked'] and self.work['blocked']['kind'] != 'evidence':
             block = self.work['blocked']
-            return {'action': 'stop' if block['kind'] == 'rejected' else 'reconcile', **block}
+            return {'action': 'stop' if block['kind'] == 'rejected' else 'reconcile', **block,
+                    'stale_answers': self.stale_answers()}
         if any(r['status'] == 'in_flight' for r in self.work['resolutions']):
             return self.stop('resolution', 'unfinished resolution; reconcile live state')
         if self.work['active'] is not None and self.work['history'][self.work['active']]['status'] != 'rejected':
@@ -184,21 +214,20 @@ class Controller:
             snapshot, conversation, evidence = self.live()
         except (guard.GuardError, guard.inline.FetchError, guard.top.FetchError) as exc:
             return self.stop('evidence', exc)
+        self.work['blocked'] = None
         if self.work['head'] is not None and self.work['head'] != evidence['head']:
             return self.stop('head_changed', 'PR head changed; refresh preflight and decision context')
         self.work['head'] = evidence['head']
         changed = self.work['knownSources'] != {ref: fingerprint(source)
                                                for ref, source in self.selected_sources(evidence).items()}
-        if changed and self.work['phase'] != 'inline' and self.work['active'] is None:
+        stale = any(s['requestPresent'] and self.work['answers'][s['answerKey']].get('heldChange') !=
+                    self.work['answers'][s['answerKey']].get('changeFingerprint')
+                    for s in self.stale_answers(evidence))
+        if (changed or stale) and self.work['phase'] != 'inline' and self.work['active'] is None:
             self.work['phase'] = 'inline'
-        number = len(self.work['observations']) + 1
-        folder = Path(tempfile.mkdtemp(prefix=f'observation-{number}-', dir=self.directory))
-        guard.write(folder / 'inline.json', snapshot)
-        guard.write(folder / 'conversation.json', conversation)
-        observation = {'snapshot': str(folder / 'inline.json'),
-                       'conversation': str(folder / 'conversation.json'),
-                       'head': evidence['head'], 'phase': self.work['phase']}
-        self.work['observations'].append(observation)
+        observation = self.observation
+        observation['phase'] = self.work['phase']
+        self.work['observations'].append(copy.deepcopy(observation))
         self.save()
         active = self.work['active']
         action = 'correct_batch' if active is not None else self.work['phase']
@@ -220,36 +249,74 @@ class Controller:
         requests = copy.deepcopy(batch['requests'])
         by_id = {r['id']: r for r in requests}
         receipt_map = {r['id']: r for r in receipts}
-        reviewed = all_sources(guard.validate(batch))
+        expected = guard.validate(batch)
+        reviewed = all_sources(expected)
         answers = self.work.setdefault('answers', {})
+        observation = self.observation
+        approved = entry['attempts'][-1]['verdict']
+        approved = approved is not None and approved.get('status') == 'approved'
+        try:
+            guard.unchanged(expected, evidence, receipts)
+            fresh = True
+        except guard.GuardError:
+            fresh = False
+        strict = answer_state.strict_receipts(guard, self.work)
+        strict_urls = {r['url'] for r, _ in strict} | {r['url'] for r in receipts}
+        proposed = {}
         for reply in batch['replies']:
             for key in reply['requestIds']:
                 request = by_id[key]
                 if reply['id'] in receipt_map:
                     receipt = receipt_map[reply['id']]
                     request.update(disposition='skip', reason='Answered at ' + receipt['url'])
-                    answers[guard.digest([request['source'], request['excerpt']])] = {
-                        'sourceFingerprint': fingerprint(reviewed[request['source']]), 'receipt': receipt}
-        # Retain live evidence for answers posted before this run, including semantic
-        # matches that the agent/validator identified and skipped with a reply URL.
+                    proposed[answer_state.key(guard, request)] = (request, receipt)
         for request in requests:
-            if request['disposition'] != 'skip':
+            if request['disposition'] == 'skip' and answer_state.key(guard, request) not in proposed:
+                receipt = answer_state.semantic_receipt(guard, request, expected)
+                if receipt is not None:
+                    proposed[answer_state.key(guard, request)] = (request, receipt)
+        # A recovered old batch may not dismiss a mapping invalidated by newer evidence.
+        for identity, old in list(answers.items()):
+            if old['status'] != 'stale':
                 continue
-            urls = {url.rstrip('.,;:') for url in re.findall(r'https?://[^\s<>()\[\]]+', request.get('reason', ''))}
-            matches = [source for source in reviewed.values() if source.get('url') in urls and
-                       source['reference'] != request['source']]
-            if len(matches) == 1:
-                source = matches[0]
-                receipt = {'kind': 'inline' if source['kind'] == 'inline' else 'issue_comment',
-                           'reference': source.get('threadReference', source['reference']),
-                           'url': source['url'], 'body': source['text']}
-                answers[guard.digest([request['source'], request['excerpt']])] = {
-                    'sourceFingerprint': fingerprint(reviewed[request['source']]), 'receipt': receipt}
+            request = next((r for r in requests if answer_state.key(guard, r) == identity), None)
+            source = all_sources(evidence).get(old['request']['source'])
+            present = source is not None and old['request']['excerpt'] in source['text']
+            if not present:
+                proposed.pop(identity, None)
+                continue  # Removed requests keep stale audit history without supplying an answer.
+            if request is not None and request['disposition'] == 'held':
+                proposed.pop(identity, None)
+                if fresh:
+                    old['heldChange'] = old['changeFingerprint']
+                continue
+            if not (approved and fresh):
+                proposed.pop(identity, None)
+                if present:
+                    requests = [r for r in requests if answer_state.key(guard, r) != identity]
+                    requests.append(copy.deepcopy(old['request']))
+                continue
+            if identity not in proposed:
+                answer_state.revision(self.work, identity, 'dismissed', old, observation)
+                del answers[identity]
+        for identity, (request, receipt) in proposed.items():
+            answer = dict(request=copy.deepcopy(request),
+                          sourceFingerprint=fingerprint(reviewed[request['source']]), receipt=receipt,
+                          provenance='controller_published' if receipt['url'] in strict_urls else 'semantic_evidence',
+                          status='current')
+            old = answers.get(identity)
+            if old != answer:
+                if old is not None:
+                    answer_state.revision(self.work, identity, 'superseded', old, observation)
+                answers[identity] = answer
+                answer_state.revision(self.work, identity, 'assessed', answer, observation)
         self.work['requests'] = requests
+        # In particular, never reactivate edited semantic evidence from an interrupted batch.
+        answer_state.inspect(guard, self.work, evidence, observation)
         # Mark only reviewed sources and our verified replies as classified. Recovery may
         # encounter new/edited feedback that the interrupted batch never examined.
         self.work['knownSources'] = {ref: fingerprint(s) for ref, s in
-                                    self.selected_sources(guard.validate(batch)).items()}
+                                    self.selected_sources(expected).items()}
         reply_urls = {r['url'] for r in receipts}
         for ref, source in all_sources(evidence).items():
             if source.get('url') in reply_urls:
@@ -278,8 +345,8 @@ class Controller:
                     for r in batch['requests']), 'request outside selected review')
         for request in batch['requests']:
             answer = self.work.get('answers', {}).get(guard.digest([request['source'], request['excerpt']]))
-            if request['disposition'] == 'reply' and answer and answer['sourceFingerprint'] == fingerprint(
-                    source_map[request['source']]):
+            if (request['disposition'] == 'reply' and answer and answer['status'] == 'current' and
+                    answer['sourceFingerprint'] == fingerprint(source_map[request['source']])):
                 find_receipt(expected, answer['receipt'])
                 raise guard.GuardError('request already has a verified answer; retain its mapping and skip it')
         require(batch['snapshot'] == guard.read(observation['snapshot']) and
@@ -291,15 +358,19 @@ class Controller:
             require(self.work['active'] is None, 'correct the active rejection before changing passes')
             self.work['phase'] = 'inline'
             self.save()
-            return {'action': 'inline', 'reason': 'new request needs an inline answer; run next again'}
+            return {'action': 'inline', 'reason': 'new request needs an inline answer; run next again',
+                    'stale_answers': self.stale_answers(expected)}
         require(all(r['destination']['kind'] == kind for r in batch['replies']),
                 'reply destinations do not match the controller phase')
         require(not any(r['disposition'] == 'reply' and not r.get('threadReference')
                         for r in batch['requests']) if kind == 'inline' else True,
                 'hold unmatched requests for the top-level pass')
         verdict = guard.read(verdict_path) if verdict_path else None
-        if batch['replies']:
-            require(verdict is not None, 'independent verdict required for each nonempty batch')
+        stale_requests = {s['answerKey'] for s in self.stale_answers(expected) if s['requestPresent']}
+        held = {answer_state.key(guard, r) for r in batch['requests'] if r['disposition'] == 'held'}
+        needs_verdict = bool(batch['replies'] or stale_requests - held)
+        if needs_verdict:
+            require(verdict is not None, 'independent verdict required for replies or stale request reassessment')
         if verdict is not None:
             require(verdict.get('batchSha256') == guard.digest(batch) and
                     verdict.get('status') in ('approved', 'rejected') and
@@ -309,7 +380,7 @@ class Controller:
             guard.require_approval(batch, verdict)
         active = self.work['active']
         if active is None:
-            require(not batch['replies'] or verdict.get('pass') == 1, 'first verdict must be pass 1')
+            require(verdict is None or verdict.get('pass') == 1, 'first verdict must be pass 1')
             entry = {'phase': self.work['phase'], 'head': expected['head'], 'status': 'prepared',
                      'attempts': [], 'receipts': []}
             self.work['history'].append(entry)
@@ -335,10 +406,13 @@ class Controller:
             self.save()
             if verdict['pass'] == 2:
                 return self.stop('rejected', 'final validator rejection; no further reply publication')
-            return {'action': 'correct_batch', 'corrections': verdict.get('corrections', [])}
+            return {'action': 'correct_batch', 'corrections': verdict.get('corrections', []),
+                    'stale_answers': self.stale_answers(expected)}
         entry['status'] = 'in_flight'
         self.save()  # Persist intent before calling the existing guard.
         try:
+            _, _, before = self.live()
+            guard.unchanged(expected, before, [])
             if batch['replies']:
                 result = guard.publish(batch, verdict, journal, self.cwd)
                 receipts = result['replies']
@@ -350,6 +424,7 @@ class Controller:
         except (OSError, ValueError, KeyError, guard.inline.FetchError, guard.top.FetchError) as exc:
             return self.stop('publication', exc)
         return {'action': 'next', 'phase': self.work['phase'], 'replies': receipts,
+                'stale_answers': self.stale_answers(live),
                 'instructions': 'Run next to refresh both complete snapshots before the next pass.'}
 
     def reconcile(self):
@@ -366,7 +441,8 @@ class Controller:
                 self.work.update(agent=self.agent, blocked=None)
                 self.save()
                 return {'action': 'correct_batch', 'instructions': 'Run next for fresh evidence, then '
-                        'correct the active batch with the same validator for pass 2. Rejection history is retained.'}
+                        'correct the active batch with the same validator for pass 2. Rejection history is retained.',
+                        'stale_answers': self.stale_answers(evidence)}
             attempt = entry['attempts'][-1]
             batch = guard.read(attempt['batch'])
             require(guard.digest(batch) == attempt['batchSha256'], 'saved batch changed')
@@ -393,6 +469,7 @@ class Controller:
         self.work.update(agent=self.agent, head=evidence['head'], phase='inline', blocked=None)
         self.save()
         return {'action': 'next', 'head': evidence['head'],
+                'stale_answers': self.stale_answers(evidence),
                 'instructions': 'Refresh preflight/decisions after a head change, then run next. '
                                 'Retained replies must not be repeated.'}
 
