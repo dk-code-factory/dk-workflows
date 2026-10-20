@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.1.9.
+Independent MIT plugin for Claude Code and Codex. Version 1.1.10.
 
 ## Install
 
@@ -155,3 +155,18 @@ or interpreter scripts. Ordinary external data and output arguments keep their
 original paths. Drafting corrections share one retained binding for the whole
 operation. Interpreter and host installations remain runtime prerequisites.
 Completed review reuse follows the same retained binding checks as execution.
+
+Add `--result-file /ABSOLUTE/PRIVATE/result.json` before the helper name for a
+typed terminal receipt. Its `outcome` distinguishes `success`, expected workflow
+`blocked` states, infrastructure `error`, and `interrupted` work. `error_code`,
+`next_action`, `exit_code` and `artifact` identify what needs attention. Read the
+outcome even when the native helper exits zero: incomplete reviewers and pending
+Decisions are blocks. `retryable` is false; reconcile mutations before retrying.
+
+The result artifact retains parsed helper data and paths to complete stdout and
+stderr files. All three paths must be new and outside the repository and plugin;
+they are reserved before execution and created with private permissions. Storage
+failures during reservation prevent dispatch. A `running` artifact without a
+terminal result signals interrupted or uncertain work and requires reconciliation. Direct helper output
+and exit codes remain available when the flag is omitted. The envelope reports
+workflow gates; it cannot authorize publication or replace native validation.

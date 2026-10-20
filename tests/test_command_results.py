@@ -1,0 +1,95 @@
+import importlib.util
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'runtime'))
+from shared.command_results import ResultFile, classification
+
+SCRIPT = ROOT / 'scripts/dk.py'
+
+
+@pytest.mark.parametrize('command,data,code,outcome,error', [
+    ('ci-wait', {'result': 'failure'}, 1, 'blocked', 'ci_failure'),
+    ('ci-wait', {'result': 'timeout'}, 1, 'blocked', 'ci_timeout'),
+    ('ci-wait', {'result': 'error'}, 2, 'error', 'helper_error'),
+    ('completion', {'gate': 'head_changed'}, 1, 'blocked', 'completion_head_changed'),
+    ('replies', {'action': 'reconcile'}, 1, 'blocked', 'reply_reconcile'),
+    ('decisions', {'data': {'readiness': 'needs_decision'}}, 0, 'blocked', 'needs_decision'),
+    ('reviewers', {'complete': False}, 0, 'blocked', 'review_incomplete'),
+    ('update', {'action': 'stop'}, 0, 'error', 'runtime_unavailable'),
+    ('ci-wait', {'result': 'failure'}, 2, 'error', 'helper_failed'),
+    ('replies', None, 1, 'error', 'helper_failed'),
+    ('run-state', {'status': 'failed'}, 0, 'success', None),
+])
+def test_only_known_contracts_are_workflow_blocks(command, data, code, outcome, error):
+    assert classification(command, code, data)[:2] == (outcome, error)
+
+
+def call(tmp_path, *arguments):
+    path = tmp_path / 'results' / 'result.json'
+    result = subprocess.run([sys.executable, str(SCRIPT), '--result-file', str(path),
+        '--cwd', str(tmp_path), '--host', 'codex', *arguments], text=True, capture_output=True)
+    return result, json.loads(result.stdout), json.loads(path.read_text())
+
+
+def test_real_invalid_publication_retains_diagnostic_and_does_not_mask_exit(tmp_path):
+    result, receipt, artifact = call(tmp_path, '--pr', 'https://github.com/o/r/pull/42',
+        'edit-pr', '--review-state', 'invalid', '--title-file', 'missing', '--body-file', 'missing')
+    assert result.returncode == receipt['exit_code'] == 1
+    assert receipt['outcome'] == 'error' and receipt['retryable'] is False
+    assert 'invalid review state token' in Path(artifact['stderr']).read_text()
+    assert len(result.stdout) < 1000
+    assert (Path(receipt['artifact']).stat().st_mode & 0o777) == 0o600
+
+
+def test_dispatch_errors_and_commands_have_one_typed_result(tmp_path):
+    result, receipt, artifact = call(tmp_path, 'unknown-helper')
+    assert result.returncode == 2 and receipt['error_code'] == 'invocation_error'
+    assert 'invalid choice' in artifact['message']
+    other = tmp_path / 'other'
+    other.mkdir()
+    result, receipt, artifact = call(other, 'commands')
+    assert result.returncode == 0 and receipt['outcome'] == 'success'
+    assert artifact['data']['schema_version'] == 1
+
+
+def test_large_output_and_progress_stay_complete_in_files(tmp_path):
+    artifact = ResultFile(tmp_path / 'result.json', tmp_path, ROOT)
+    text = 'x' * 100000
+    receipt, code = artifact.run('fixture', [sys.executable, '-c',
+        'import json,sys;print(json.dumps({"text":"x"*100000}));print("progress",file=sys.stderr)'],
+        tmp_path, None)
+    saved = json.loads(Path(receipt['artifact']).read_text())
+    assert code == 0 and saved['data']['text'] == text
+    assert Path(saved['stderr']).read_text() == 'progress\n'
+    assert len(json.dumps(receipt)) < 1000
+
+
+def test_artifact_reservation_precedes_mutation_and_never_clobbers(tmp_path, monkeypatch, capsys):
+    spec = importlib.util.spec_from_file_location('result_cli', SCRIPT)
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    helper = tmp_path / 'helper.py'
+    marker = tmp_path / 'mutated'
+    helper.write_text(f'from pathlib import Path;Path({str(marker)!r}).touch()')
+    monkeypatch.setattr(cli, 'ROOT', tmp_path / 'plugin')
+    monkeypatch.setattr(cli, 'ROUTES', {'fixture': ('../helper.py', None, None, False)})
+    path = tmp_path / 'result.json'
+    path.write_text('existing')
+    monkeypatch.setattr(sys, 'argv', ['dk.py', '--host', 'codex', '--result-file', str(path), 'fixture'])
+    assert cli.main() == 2
+    assert json.loads(capsys.readouterr().out)['error_code'] == 'artifact_storage'
+    assert path.read_text() == 'existing' and not marker.exists()
+
+
+def test_repository_and_plugin_artifacts_are_rejected(tmp_path):
+    subprocess.run(['git', 'init', '-q', str(tmp_path / 'repo')], check=True)
+    for path in (tmp_path / 'repo' / 'result.json', ROOT / 'result.json'):
+        with pytest.raises(ValueError, match='outside'):
+            ResultFile(path, tmp_path / 'repo', ROOT)
+        assert not path.exists()

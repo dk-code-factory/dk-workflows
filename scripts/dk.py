@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Route workflow helpers with one repository, PR and host context."""
 import argparse
+from contextlib import nullcontext, redirect_stdout
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,8 @@ import sys
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / 'runtime'))
+from shared.command_results import ResultFile, receipt
 # Each row is a packaged script, cwd argument placement, PR argument, repo argument.
 ROUTES = {
     'config': ('runtime/dk-config/scripts/repo_rules.py', 'before', 'url', False),
@@ -128,17 +131,47 @@ def invocation(root, command, arguments, cwd, pr, repo, host, parent):
     return [sys.executable, str(script), *prefix, *arguments, *suffix], cwd, environment
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+class InvocationError(ValueError):
+    pass
+
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        raise InvocationError(message)
+
+
+def early_context(arguments):
+    """Find storage context before parsing, stopping at the native helper boundary."""
+    context = {}
+    index = 0
+    options = {'--cwd', '--pr', '--repo', '--host', '--parent', '--result-file'}
+    while index < len(arguments):
+        option, separator, value = arguments[index].partition('=')
+        if option in options:
+            if not separator:
+                index += 1
+                if index >= len(arguments):
+                    break
+                value = arguments[index]
+            context[option] = value
+        elif option != '--dry-run':
+            break
+        index += 1
+    return context
+
+
+def dispatch(arguments, result_file=None):
+    parser = Parser(description=__doc__, allow_abbrev=False)
     parser.add_argument('--cwd', default='.')
     parser.add_argument('--pr', help='PR URL, or number with --repo')
     parser.add_argument('--repo', help='HOST/OWNER/REPO or OWNER/REPO')
     parser.add_argument('--host', choices=('codex', 'claude'), default=os.environ.get('DK_HOST'))
     parser.add_argument('--parent', default=os.environ.get('DK_UPDATE_PARENT'))
     parser.add_argument('--dry-run', action='store_true', help='Print argv and workflow context without running a helper')
+    parser.add_argument('--result-file', help='Retain full private diagnostics and print a typed terminal receipt')
     parser.add_argument('command', choices=['commands', *ROUTES])
     parser.add_argument('arguments', nargs=argparse.REMAINDER)
-    args = parser.parse_args()
+    args = parser.parse_args(arguments)
     if args.command == 'commands':
         if args.arguments:
             parser.error('commands accepts no native helper arguments')
@@ -157,8 +190,55 @@ def main():
         print(json.dumps({'argv': argv, 'cwd': str(cwd), 'environment': {
             key: env[key] for key in ('DK_HOST', 'DK_UPDATE_PARENT') if key in env}}, sort_keys=True))
         return 0
+    if result_file is not None:
+        _, code = result_file.run(args.command, argv, cwd, env)
+        return code
     status = subprocess.run(argv, cwd=cwd, env=env).returncode
     return status if status >= 0 else 128 - status
+
+
+def main():
+    arguments = sys.argv[1:]
+    context = early_context(arguments)
+    artifact = None
+    if '--result-file' in context:
+        try:
+            artifact = ResultFile(context['--result-file'], context.get('--cwd', '.'), ROOT)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            print(json.dumps({**receipt('error', 'artifact_storage',
+                'Choose a new writable private artifact path before running the helper.', None, 2),
+                'message': str(exc)}))
+            return 2
+    try:
+        with redirect_stdout(artifact.streams['stdout']) if artifact else nullcontext():
+            code = dispatch(arguments, artifact)
+        if artifact is not None:
+            result = (artifact.terminal if artifact.streams['result'].closed
+                      else artifact.finish(None, code))
+            print(json.dumps(result, sort_keys=True))
+        return code
+    except InvocationError as exc:
+        if artifact is not None:
+            print(json.dumps(artifact.finish(None, 2, error=str(exc)), sort_keys=True))
+        else:
+            print(f'dk.py: {exc}', file=sys.stderr)
+        return 2
+    except SystemExit as exc:
+        if artifact is not None:
+            print(json.dumps(artifact.finish(None, exc.code or 0), sort_keys=True))
+            return exc.code or 0
+        raise
+    except OSError as exc:
+        if artifact is None:
+            print(f'dk.py: {exc}', file=sys.stderr)
+        else:
+            print(json.dumps({**receipt('error', 'artifact_storage',
+                'Inspect retained files and reconcile any executed mutation before resuming.',
+                str(artifact.path), 2), 'message': str(exc)}))
+        return 2
+    finally:
+        if artifact is not None:
+            artifact.close()
 
 
 if __name__ == '__main__':

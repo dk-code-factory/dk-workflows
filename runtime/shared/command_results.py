@@ -1,0 +1,115 @@
+"""Typed terminal results for the stable CLI; native helper contracts stay intact."""
+import json
+import os
+from pathlib import Path
+import subprocess
+
+from shared.repository_scope import inside_checkout
+
+
+def classification(command, code, data):
+    """Only documented structured outcomes may turn a failed call into a block."""
+    value = data if isinstance(data, dict) else {}
+    reason = None
+    if command == 'ci-wait' and value.get('result') in {
+            'failure', 'timeout', 'no_checks', 'head_changed', 'pending'}:
+        reason = 'ci_' + value['result']
+    elif command == 'completion' and isinstance(value.get('gate'), str) and value['gate'] != 'clean':
+        reason = 'completion_' + value['gate']
+    elif command == 'replies' and value.get('action') in {'stop', 'reconcile'}:
+        reason = 'reply_' + value['action']
+    elif command == 'decisions':
+        payload = value.get('data')
+        if isinstance(payload, dict) and payload.get('readiness') in {'needs_decision', 'sync_pending'}:
+            reason = payload['readiness']
+        elif value.get('status') == 'pending':
+            reason = 'publication_pending'
+    elif command == 'reviewers' and value.get('complete') is False:
+        reason = 'review_incomplete'
+    elif command == 'update' and value.get('action') == 'stop':
+        return 'error', 'runtime_unavailable', 'Restore the runtime before continuing.'
+    if reason and code in (0, 1):
+        return 'blocked', reason, 'Inspect the result artifact and satisfy the reported workflow gate.'
+    if value.get('status') == 'error' or value.get('result') == 'error':
+        return 'error', 'helper_error', 'Inspect retained diagnostics; correct the cause before resuming.'
+    if code:
+        return 'error', 'helper_failed', 'Inspect retained diagnostics; reconcile any uncertain mutation before retrying.'
+    return 'success', None, None
+
+
+def receipt(outcome, error_code, next_action, artifact, code):
+    return {'schema_version': 1, 'outcome': outcome, 'error_code': error_code,
+            'retryable': False, 'next_action': next_action, 'artifact': artifact,
+            'exit_code': code}
+
+
+class ResultFile:
+    """Reserve private diagnostics before launching a potentially mutating helper."""
+    def __init__(self, path, cwd, plugin_root):
+        path = Path(path).expanduser()
+        if not path.is_absolute():
+            raise ValueError('--result-file must be absolute')
+        self.path = path.resolve()
+        if self.path.is_relative_to(plugin_root.resolve()) or inside_checkout(self.path, cwd):
+            raise ValueError('--result-file must stay outside the plugin and repository')
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.streams = {}
+        created = []
+        try:
+            for key, target in [('result', self.path),
+                                ('stdout', self.path.with_name(self.path.name + '.stdout')),
+                                ('stderr', self.path.with_name(self.path.name + '.stderr'))]:
+                fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                created.append(target)
+                self.streams[key] = os.fdopen(fd, 'w', encoding='utf-8')
+            self.save({'schema_version': 1, 'outcome': 'running', 'artifact': str(self.path)})
+        except BaseException:
+            self.close()
+            for target in created:
+                target.unlink(missing_ok=True)
+            raise
+
+    def close(self):
+        for stream in self.streams.values():
+            stream.close()
+
+    def save(self, value):
+        stream = self.streams['result']
+        stream.seek(0)
+        json.dump(value, stream, ensure_ascii=False)
+        stream.write('\n')
+        stream.truncate()
+        stream.flush()
+        os.fsync(stream.fileno())
+
+    def finish(self, command, code, *, error=None, interrupted=False):
+        for key in ('stdout', 'stderr'):
+            self.streams[key].flush()
+        output = self.path.with_name(self.path.name + '.stdout').read_text(encoding='utf-8', errors='replace')
+        try:
+            data = json.loads(output)
+        except ValueError:
+            data = None
+        outcome, error_code, action = classification(command, code, data)
+        if error:
+            outcome, error_code, action = 'error', 'invocation_error', 'Inspect retained diagnostics before resuming.'
+        if interrupted:
+            outcome, error_code, action = 'interrupted', 'interrupted', 'Reconcile the retained operation before resuming.'
+        result = receipt(outcome, error_code, action, str(self.path), code)
+        self.save({**result, 'command': command, 'data': data, 'message': error,
+                   'stdout': str(self.path.with_name(self.path.name + '.stdout')),
+                   'stderr': str(self.path.with_name(self.path.name + '.stderr'))})
+        self.terminal = result
+        self.close()
+        return result
+
+    def run(self, command, argv, cwd, env):
+        try:
+            code = subprocess.run(argv, cwd=cwd, env=env, stdout=self.streams['stdout'],
+                                  stderr=self.streams['stderr']).returncode
+            code = code if code >= 0 else 128 - code
+            return self.finish(command, code, interrupted=code >= 128), code
+        except KeyboardInterrupt:
+            return self.finish(command, 130, interrupted=True), 130
+        except OSError as exc:
+            return self.finish(command, 2, error=str(exc)), 2
