@@ -20,6 +20,7 @@ IDENTITY = 'remote:' + REPO
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
+    (tmp_path / 'checkout').mkdir()
     return Registry(REPO, tmp_path / 'checkout')
 
 

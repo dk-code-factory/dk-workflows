@@ -3,6 +3,7 @@ import copy
 import io
 import json
 import multiprocessing
+import subprocess
 from pathlib import Path
 import sys
 import zipfile
@@ -97,6 +98,7 @@ def snapshot(head=SHA, job_id=101):
 @pytest.fixture
 def registry(tmp_path, monkeypatch):
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
+    (tmp_path / 'checkout').mkdir()
     return Registry(REPO, tmp_path / 'checkout')
 
 
@@ -262,6 +264,7 @@ def test_repository_normalization_isolation_and_outside_checkout(registry, tmp_p
     for bad in ('github.com/../project', '../acme/project', 'owner/repo'):
         with pytest.raises(ValueError):
             Registry(bad)
+    subprocess.run(['git', 'init', '-q', str(tmp_path)], check=True)
     with pytest.raises(ValueError, match='outside'):
         Registry(REPO, tmp_path)
     assert pr_repository('https://github.com/acme/project/pull/1') == REPO
@@ -479,3 +482,17 @@ def test_partial_issue_context_remains_candidate_despite_history(registry):
     assert report['verification']['entries'][0]['status'] == 'candidate'
     assert report['verification']['entries'][0]['issue_url'] == URL
     assert not report['verification']['entries'][0]['active']
+
+
+def test_registry_from_non_repository_home_and_nested_checkout(tmp_path, monkeypatch):
+    home = tmp_path / 'home'
+    home.mkdir()
+    monkeypatch.setenv('XDG_DATA_HOME', str(home / 'data'))
+    assert Registry(REPO, home).path.is_relative_to(home)
+    checkout = tmp_path / 'checkout'
+    subprocess.run(['git', 'init', '-q', str(checkout)], check=True)
+    nested = checkout / 'src'
+    nested.mkdir()
+    monkeypatch.setenv('XDG_DATA_HOME', str(checkout / 'private'))
+    with pytest.raises(ValueError, match='outside'):
+        Registry(REPO, nested)

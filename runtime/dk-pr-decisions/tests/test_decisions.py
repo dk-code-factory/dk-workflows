@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -501,6 +502,32 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(refreshed['decision_sources'], self.state['decision_sources'])
         records = mod.decision_records(refreshed)
         self.assertEqual(next(r for r in records if r['text'] == old['text'])['status'], 'superseded')
+
+    def test_scan_from_home_allows_private_data_but_nested_checkout_rejects_it(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            checkout = home / 'checkout'
+            subprocess.run(['git', 'init', '-q', str(checkout)], check=True)
+            nested = checkout / 'src'
+            nested.mkdir()
+            private = home / 'data'
+            with patch.dict(os.environ, {'XDG_DATA_HOME': str(private)}), \
+                 patch.object(mod.Path, 'cwd', return_value=home), \
+                 patch.object(mod, 'gh_json', return_value=self.state['pr']), \
+                 patch.object(mod, 'run', return_value='viewer'), \
+                 patch.object(mod, 'pr_diff', return_value=''), \
+                 patch.object(mod, 'collect_metadata', return_value=({}, {})), \
+                 patch.object(mod, 'fetch_bodies', return_value={}), \
+                 patch.object(mod, 'linked_issues', return_value=[]), \
+                 patch.object(mod, 'analyze', return_value=([], {})):
+                _, saved = mod.scan(self.url)
+                self.assertTrue(saved.is_relative_to(private))
+            with patch.dict(os.environ, {'XDG_DATA_HOME': str(checkout / 'private')}), \
+                 patch.object(mod.Path, 'cwd', return_value=nested), \
+                 patch.object(mod, 'gh_json', return_value=self.state['pr']), \
+                 patch.object(mod, 'run', return_value='viewer'):
+                with self.assertRaisesRegex(RuntimeError, 'outside the code repository'):
+                    mod.scan(self.url)
 
     def test_cache_path_rejects_path_traversal(self):
         for url in ('https://github.com/../r/pull/2', 'https://github.com/o/../pull/2'):
