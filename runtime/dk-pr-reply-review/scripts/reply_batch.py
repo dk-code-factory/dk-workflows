@@ -211,7 +211,7 @@ def unchanged(expected, live, receipts):
             (t['comments'] for t in live['threads'] if t['id'] == receipt['reference']), [])
         found = [c for c in candidates if c.get('url') == receipt['url']]
         require(len(found) == 1 and found[0]['text'] == receipt['body'],
-                'published reply missing or changed; reconcile live state')
+                f"published reply missing or changed: {receipt['url']} [controller_published]; reconcile live state")
         candidates.remove(found[0])
     require(expected == live, 'PR head or source conversation changed; rebuild and revalidate')
 

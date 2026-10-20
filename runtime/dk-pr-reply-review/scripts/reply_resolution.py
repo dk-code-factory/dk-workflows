@@ -24,6 +24,9 @@ def check(controller, assessment, evidence):
     held = [r for r in controller.work['requests'] if r.get('threadReference') == thread['id'] and
             r['disposition'] in ('held', 'reply')]
     require(not held, 'thread still has held or unanswered requests; reassess reply mappings first')
+    require(not any(s['requestPresent'] and s['request'].get('threadReference') == thread['id']
+                    for s in controller.stale_answers(evidence)),
+            'thread has stale answer evidence; independently reassess reply mappings first')
     require(isinstance(assessment.get('evidence'), list) and assessment['evidence'] and
             all(isinstance(e, str) and e.strip() for e in assessment['evidence']),
             'published supporting evidence required')
@@ -70,7 +73,8 @@ def resolve(controller, path):
     _, _, evidence = controller.live()
     thread, reply = check(controller, assessment, evidence)
     if thread['isResolved']:
-        return {'action': 'next', 'status': 'already_resolved', 'reference': thread['id']}
+        return {'action': 'next', 'status': 'already_resolved', 'reference': thread['id'],
+                'stale_answers': controller.stale_answers(evidence)}
     require(thread.get('viewerCanResolve') is not False, 'viewer lacks thread resolution permission')
     entry = {'assessment': assessment, 'assessmentSha256': digest, 'status': 'in_flight',
              'reference': thread['id'], 'reply': reply}
@@ -89,7 +93,8 @@ def resolve(controller, path):
         entry.update(status='complete', receipt={'reference': thread['id'], 'isResolved': True,
                                                'head': live['head'], 'replyUrl': reply['url']})
         controller.save()
-        return {'action': 'next', 'status': 'resolved', 'resolution': entry['receipt']}
+        return {'action': 'next', 'status': 'resolved', 'resolution': entry['receipt'],
+                'stale_answers': controller.stale_answers(live)}
     except (OSError, ValueError, KeyError, TypeError, guard.inline.FetchError, guard.top.FetchError) as exc:
         return controller.stop('resolution', exc)
 
