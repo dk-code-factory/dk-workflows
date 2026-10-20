@@ -90,6 +90,20 @@ class RunnerTests(unittest.TestCase):
                     mod.review(self.context, self.providers[:1], '', {**self.decisions, **changed}, '', self.preparation)
                 run.assert_not_called()
 
+    def test_malformed_incomplete_response_gets_one_field_correction(self):
+        handoff=Path(self.tmp.name)/'handoff.json';handoff.write_text(json.dumps({'patch':self.context['patch']}))
+        invalid={'status':'incomplete','findings':[self.finding],'message':'source missing'}
+        stopped={'status':'incomplete','findings':[],'message':'source missing'}
+        with patch.object(mod,'invoke',side_effect=[json.dumps(invalid),json.dumps(stopped)]) as invoke:
+            result=mod.run_skill_reviewer(self.providers[0],Path(self.tmp.name),handoff,Path(self.tmp.name))
+        self.assertEqual(result,stopped)
+        self.assertEqual(invoke.call_count,2)
+        self.assertIn('empty findings array',invoke.call_args.args[3])
+        prompt=mod.build_skill_prompt(Path(self.tmp.name),handoff)
+        self.assertIn('{"findings":[]}',prompt)
+        self.assertIn('review-result.schema.json',prompt)
+        self.assertNotIn('"Major|Minor|Nit"',prompt)
+
     def test_verified_empty_decisions_are_valid(self):
         (Path(self.context['metadata'])).write_text(json.dumps({'body': ''}))
         empty = {**self.decisions, 'live_decisions': '', 'body_hash': hashlib.sha256(b'').hexdigest()}
