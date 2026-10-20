@@ -100,3 +100,55 @@ def test_local_entry_in_remote_marketplace_can_auto_update(tmp_path):
     f.records[0]['marketplaceSource']={'sourceType':'git','source':'https://github.com/dk-code-factory/dk-workflows.git','ref':'main'}
     one=f.invoke();assert one['status']=='deferred'
     assert f.invoke(phase='complete',token=one['token'])['updates'][0]['status']=='updated'
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+def test_inspection_identifies_owners_without_completing_or_updating(tmp_path, monkeypatch, host):
+    f = Fixture(tmp_path, 'inspection', 'auto', host)
+    f.env['CODEX_THREAD_ID'] = 'codex-thread'
+    f.env['CLAUDE_SESSION_ID'] = 'claude-session'
+    monkeypatch.setattr(f.modules['dk-workflows'].time, 'time', lambda: 100)
+    outer = f.invoke()
+    inner = f.invoke('code-review-qodo', parent=outer['token'])
+    before = f.state()
+    network_calls = len(f.network)
+    report = f.invoke(phase='inspect')
+    assert report['active_count'] == 2
+    assert len(report['invocations']) == 2
+    row = next(r for r in report['invocations'] if r['token'] == outer['token'])
+    assert row['created_at'] == 100
+    assert row['owner']['thread_id'] == ('codex-thread' if host == 'codex' else 'claude-session')
+    assert row['owner']['parent_pid'] > 0
+    assert row['host'] == host and row['plugin'] == 'dk-workflows'
+    nested = next(r for r in report['invocations'] if r['token'] == inner['token'])
+    assert nested['parent'] == outer['token']
+    assert report['pending_plugins'] == [host + ':code-review-qodo', host + ':dk-workflows']
+    assert f.state() == before
+    assert len(f.network) == network_calls
+    assert not [a for a in f.calls if a[1:3] in (['plugin', 'add'], ['plugin', 'update'])]
+
+
+def test_legacy_inspection_and_explicit_recovery_preserve_other_active_work(tmp_path, monkeypatch):
+    f = Fixture(tmp_path, 'legacy-inspection', 'auto')
+    old = f.invoke()
+    state = f.state()
+    row = state['invocations'][old['token']]
+    for key in ['owner', 'created_at', 'parent', 'host', 'plugin']:
+        del row[key]
+    state_path = f.base / 'state/dk-code-factory/updates/state.json'
+    state_path.write_text(json.dumps(state))
+    inspection = f.invoke(phase='inspect', token=old['token'])
+    assert inspection['invocations'] == [{'token': old['token'], **row}]
+    assert f.state() == state
+    live = f.invoke()
+    monkeypatch.setattr(f.modules['dk-workflows'].time, 'time', lambda: 200)
+    done = f.invoke(phase='complete', token=old['token'], reason='Confirmed interrupted work stopped')
+    assert done['status'] == 'deferred' and done['active_count'] == 1
+    saved = f.state()['invocations'][old['token']]
+    assert saved['completed_at'] == 200
+    assert saved['completion_reason'] == 'Confirmed interrupted work stopped'
+    f.invoke(phase='complete', token=old['token'], reason='Repeated request')
+    assert f.state()['invocations'][old['token']] == saved
+    assert not f.state()['invocations'][live['token']]['complete']
+    assert f.invoke(phase='inspect')['active_count'] == 1
+    assert f.invoke(phase='inspect', token='unknown')['status'] == 'unavailable'

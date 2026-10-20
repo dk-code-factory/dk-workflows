@@ -181,7 +181,26 @@ def update(identity, target):
         return {'status': 'update_failed', 'message': str(exc), 'reload_required': False}
 
 
-def lifecycle(root, host, phase, *, token=None, parent=None, now=None):
+def inspect_lifecycle(root, token=None):
+    """Report retained records without inferring process liveness or completing work."""
+    _, state = paths(root, Path.cwd())
+    with locked(state / '.lock'):
+        data = read(state / 'state.json', {'invocations': {}, 'sessions': {}})
+    records = data['invocations']
+    if token and token not in records:
+        raise ValueError('Unknown inspection token')
+    selected = {key: value for key, value in records.items()
+                if key == token or (not token and not value['complete'])}
+    return {'status': 'inspection',
+            'active_count': sum(not row['complete'] for row in records.values()),
+            'invocations': [{'token': key, **value} for key, value in sorted(selected.items())],
+            'pending_plugins': sorted({key for row in data['sessions'].values()
+                                       for key in row.get('pending', {})}),
+            'instruction': 'Incomplete records are not proof that work stopped. Verify the owner and '
+                           'all nested work before explicitly completing a retained token.'}
+
+
+def lifecycle(root, host, phase, *, token=None, parent=None, now=None, reason=None):
     now = time.time() if now is None else now
     config_path, state = paths(root, Path.cwd())
     settings = read(config_path)
@@ -200,7 +219,12 @@ def lifecycle(root, host, phase, *, token=None, parent=None, now=None):
                 data['sessions'][session_id] = {'active': [], 'pending': {}}
             session = data['sessions'][session_id]
             session['active'].append(token)
-            data['invocations'][token] = {'session': session_id, 'complete': False}
+            data['invocations'][token] = {
+                'session': session_id, 'complete': False, 'parent': parent,
+                'created_at': now, 'host': host, 'plugin': identity['name'],
+                'owner': {'thread_id': os.environ.get('CODEX_THREAD_ID') if host == 'codex'
+                          else os.environ.get('CLAUDE_SESSION_ID'),
+                          'parent_pid': os.getppid(), 'cwd': str(Path.cwd())}}
             result = {'status': 'current', 'action': 'continue', 'message': '', 'token': token,
                       'identity': identity, 'mode': policy}
             if policy != 'off':
@@ -235,8 +259,12 @@ def lifecycle(root, host, phase, *, token=None, parent=None, now=None):
             result = {'status': 'completed', 'action': 'continue', 'message': '', 'token': token, 'updates': []}
             if not invocation['complete']:
                 invocation['complete'] = True
+                invocation['completed_at'] = now
+                if reason:
+                    invocation['completion_reason'] = reason
                 session['active'].remove(token)
-            if any(row['active'] for row in data['sessions'].values()):
+            result['active_count'] = sum(len(row['active']) for row in data['sessions'].values())
+            if result['active_count']:
                 result['status'] = 'deferred'
             else:
                 # Concurrent outer workflows can share an installation too. Drain
@@ -267,16 +295,19 @@ def lifecycle(root, host, phase, *, token=None, parent=None, now=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('phase', choices=['entry', 'complete', 'policy'])
+    parser.add_argument('phase', choices=['entry', 'complete', 'inspect', 'policy'])
     parser.add_argument('--host', choices=['claude', 'codex'], required=True)
     parser.add_argument('--token')
+    parser.add_argument('--reason', help='Optional completion audit reason after verifying work stopped')
     parser.add_argument('--parent', default=os.environ.get('DK_UPDATE_PARENT'))
     parser.add_argument('--mode', choices=MODES)
     parser.add_argument('--plugin', help='Per-plugin policy override; omit for the global default')
     args = parser.parse_args()
     root = next(p for p in Path(__file__).resolve().parents if (p / '.codex-plugin/plugin.json').is_file())
     try:
-        if args.phase == 'policy':
+        if args.phase == 'inspect':
+            result = inspect_lifecycle(root, args.token)
+        elif args.phase == 'policy':
             config, _ = paths(root, Path.cwd())
             with locked(config.with_suffix('.lock')):
                 settings = read(config)
@@ -288,7 +319,8 @@ def main():
                     write(config, settings)
             result = {'status': 'policy', 'settings': settings, 'path': str(config)}
         else:
-            result = lifecycle(root, args.host, args.phase, token=args.token, parent=args.parent)
+            result = lifecycle(root, args.host, args.phase, token=args.token, parent=args.parent,
+                               reason=args.reason)
     except Exception as exc:
         result = {'status': 'unavailable', 'action': 'continue', 'message': str(exc), 'non_blocking': True}
     print(json.dumps(result))

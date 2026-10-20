@@ -9,3 +9,18 @@ After work (including failure), run `python3 PLUGIN_ROOT/scripts/update.py compl
 PLUGIN_ROOT is the directory containing this plugin's host manifests. Resolve it from the loaded skill location, or use `${CLAUDE_PLUGIN_ROOT}` in Claude. Keep the reviewed working directory when invoking lifecycle commands so the script can reject state locations inside that repository.
 
 When a DK host executor supplies `DK_UPDATE_MANAGED_RECEIPT` for this plugin identity, that executor has already called this plugin's entry script outside the model's read-only sandbox and will call completion in a finalization step. Use that receipt and token; do not enter or complete it twice. Pass its token as parent to native child skills. For a different plugin identity, perform the normal entry and completion calls. A direct standalone invocation always uses its own script and does not require DK.
+
+
+Inspect retained lifecycle records with `python3 PLUGIN_ROOT/scripts/update.py inspect --host HOST`.
+This reads all incomplete records across plugins and hosts, their owner metadata,
+creation times and pending updates. Add `--token TOKEN` to inspect one completed
+or incomplete record. Older records may lack ownership or timestamps; inspection
+preserves them unchanged. A recorded parent PID identifies the launcher and does
+not prove current liveness. An old record is not evidence that its work stopped.
+
+After verifying that an interrupted invocation and all its nested work have
+stopped, use the normal `complete --host HOST --token TOKEN` command. Optionally
+add `--reason TEXT` to retain the recovery reason with its completion timestamp.
+Completion remains idempotent and updates stay deferred while any other work is
+active. Never expire tokens automatically or delete lifecycle records to unblock
+an update.
