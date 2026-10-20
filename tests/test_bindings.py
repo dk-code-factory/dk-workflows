@@ -171,3 +171,97 @@ def test_command_quota_failure_preserves_exhaustion_in_real_subprocess(tmp_path)
     script=tmp_path/'quota.py';script.write_text('import sys\nprint("Usage limit reached",file=sys.stderr)\nsys.exit(1)\n')
     result=runner.run_skill_reviewer({'command':[sys.executable,str(script),'{handoff}']},tmp_path,handoff,tmp_path)
     assert result['status']=='tokens_exhausted' and result['findings']==[]
+
+
+
+def test_codex_inventory_reused_only_within_operation_and_manifests_stay_live(tmp_path, monkeypatch):
+    root = plugin(tmp_path, host='codex')
+    monkeypatch.setenv('DK_HOST', 'codex')
+    monkeypatch.setattr(b.shutil, 'which', lambda n: '/bin/' + n)
+    record = {'name': 'third-party', 'pluginId': 'third-party@fixture',
+              'version': '1.2.3', 'installedPath': str(root)}
+    inventory = {'installed': [record]}
+    calls = []
+    def run(*args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess([], 0, json.dumps(inventory), '')
+    monkeypatch.setattr(b.subprocess, 'run', run)
+    with b.registry_snapshot():
+        for _ in range(5):
+            assert b.resolve('third-party:review')['version'] == '1.2.3'
+        with b.registry_snapshot():
+            b.resolve('third-party:review')
+        assert len(calls) == 1
+        manifest = root / '.codex-plugin/plugin.json'
+        original = manifest.read_text()
+        manifest.write_text(original.replace('1.2.3', '9.9.9'))
+        with pytest.raises(ValueError, match='disagree'):
+            b.resolve('third-party:review')
+        manifest.write_text(original)
+    inventory['installed'] = []
+    with b.registry_snapshot():
+        with pytest.raises(ValueError, match='found 0'):
+            b.resolve('third-party:review')
+    assert len(calls) == 2
+
+
+def test_registry_failure_not_cached_and_profile_change_requires_fresh_inventory(tmp_path, monkeypatch):
+    monkeypatch.setattr(b.shutil, 'which', lambda n: '/bin/' + n)
+    calls = []
+    def run(*args, **kwargs):
+        calls.append(args)
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(args[0], 30)
+        return subprocess.CompletedProcess([], 0, '{"installed": []}', '')
+    monkeypatch.setattr(b.subprocess, 'run', run)
+    with b.registry_snapshot():
+        with pytest.raises(subprocess.TimeoutExpired):
+            b.codex_plugins()
+        assert b.codex_plugins() == []
+        assert b.codex_plugins() == []
+        monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'other-profile'))
+        assert b.codex_plugins() == []
+    assert len(calls) == 3
+
+
+
+def test_describe_cli_shares_inventory_across_reviewer_descriptors(tmp_path, monkeypatch, capsys):
+    import importlib.util
+    path = Path(__file__).resolve().parents[1] / 'runtime/dk-pr-review/scripts/run_reviewers.py'
+    spec = importlib.util.spec_from_file_location('inventory_runner', path)
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    root = plugin(tmp_path, host='codex')
+    style = root / 'native/skills/style'
+    style.mkdir()
+    (style / 'SKILL.md').write_text('Review style read-only')
+    monkeypatch.setenv('DK_HOST', 'codex')
+    monkeypatch.setattr(b.shutil, 'which', lambda n: '/bin/' + n)
+    record = {'name': 'third-party', 'pluginId': 'third-party@fixture',
+              'version': '1.2.3', 'installedPath': str(root)}
+    calls = []
+    def registry_run(*args, **kwargs):
+        calls.append(args[0])
+        return subprocess.CompletedProcess([], 0, json.dumps({'installed': [record]}), '')
+    monkeypatch.setattr(b.subprocess, 'run', registry_run)
+    monkeypatch.setattr(runner, 'run', lambda *args: json.dumps({'reviewers': [
+        {'skill': 'third-party:review'}, {'skill': 'third-party:style'}]}))
+    context = tmp_path / 'context.json'
+    context.write_text(json.dumps({'repository': str(tmp_path), 'url': 'https://github.com/o/r/pull/1'}))
+    monkeypatch.setattr(sys, 'argv', ['run_reviewers.py', '--context', str(context), '--describe'])
+    for expected_calls in [1, 2]:
+        runner.main()
+        assert len(json.loads(capsys.readouterr().out)['reviewers']) == 2
+        assert len(calls) == expected_calls
+
+
+
+@pytest.mark.parametrize('invalid', [[], {'installed': None}, {'installed': ['invalid']}])
+def test_malformed_registry_response_not_cached(monkeypatch, invalid):
+    responses = iter([invalid, {'installed': []}])
+    monkeypatch.setattr(b.subprocess, 'run', lambda *a, **kw:
+                        subprocess.CompletedProcess([], 0, json.dumps(next(responses)), ''))
+    with b.registry_snapshot():
+        with pytest.raises(ValueError, match='installed array'):
+            b.codex_plugins()
+        assert b.codex_plugins() == []

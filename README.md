@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.1.5.
+Independent MIT plugin for Claude Code and Codex. Version 1.1.6.
 
 ## Install
 
@@ -107,3 +107,8 @@ reviews, preparation, Decisions, and drafting. It is not a deadline for the enti
 Iteration requests use distinct bounded runs. Interrupted work resumes its existing budget; a new request after a terminal run retains history and receives a new budget. Completion requires configured-reviewer evidence for the final tree and current scope/Decisions. Passing CI cannot substitute for missing review coverage; reports distinguish executed, reused and skipped reviewers.
 
 Standalone reviews and iteration cycles share durable review sessions and immutable results. Fresh requests start fresh sessions; explicit interruption resumes can reuse completed reviewers with identical evidence. Iteration owns its cycle budgets and consumes the shared results. Optional statistics never supply cached review evidence.
+
+Reviewer description, execution and configuration diagnostics reuse one Codex
+plugin inventory within each command invocation. A later invocation reads the
+registry again; selected manifests and skill files are still checked on each
+resolution. This inventory reuse never supplies cached review findings.

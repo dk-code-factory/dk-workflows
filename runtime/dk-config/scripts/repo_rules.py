@@ -20,6 +20,7 @@ import fcntl
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 from shared.repository_scope import identities
 from shared import ci_exceptions
+from shared.bindings import registry_snapshot
 
 DATA = Path(os.environ.get('XDG_DATA_HOME', str(Path.home()/'.local/share'))) / 'codex-repo-rules'
 SKIP = {'.git', 'node_modules', 'vendor', 'dist', 'build', '.venv', '.next', '.cache'}
@@ -312,6 +313,7 @@ def refresh(root, index_folder, rules_folder, upstream_folder=None, lookup_ident
         return index
 
 
+@registry_snapshot()
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser()

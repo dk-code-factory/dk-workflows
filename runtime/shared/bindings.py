@@ -1,4 +1,6 @@
 """Portable bindings resolved from host registries, never by cache enumeration."""
+from contextlib import contextmanager
+from contextvars import ContextVar
 import hashlib
 import json
 import os
@@ -18,6 +20,41 @@ ALIASES = {
 }
 ROLES = ('commit_message', 'pr_description', 'issue_description')
 FORBIDDEN = {'dk-pr-review', 'dk-pr-iter'}
+
+
+_REGISTRY_SNAPSHOT = ContextVar('dk_registry_snapshot', default=None)
+
+
+@contextmanager
+def registry_snapshot():
+    """Reuse host inventory during one operation; the next operation reads it fresh."""
+    if _REGISTRY_SNAPSHOT.get() is not None:
+        yield
+        return
+    token = _REGISTRY_SNAPSHOT.set({})
+    try:
+        yield
+    finally:
+        _REGISTRY_SNAPSHOT.reset(token)
+
+
+def codex_plugins():
+    cache = _REGISTRY_SNAPSHOT.get()
+    profile = str(Path(os.environ.get('CODEX_HOME', Path.home() / '.codex')).resolve())
+    key = (profile, shutil.which('codex'))
+    if cache is not None and key in cache:
+        return cache[key]
+    proc = subprocess.run(['codex', 'plugin', 'list', '--json'], text=True, capture_output=True, timeout=30)
+    if proc.returncode:
+        raise ValueError(proc.stderr.strip() or 'Codex registry lookup failed')
+    data = json.loads(proc.stdout)
+    if (not isinstance(data, dict) or not isinstance(data.get('installed', []), list)
+            or any(not isinstance(record, dict) for record in data.get('installed', []))):
+        raise ValueError('Codex registry response must contain an installed array of objects')
+    records = data.get('installed', [])
+    if cache is not None:
+        cache[key] = records
+    return records
 
 
 def current_host():
@@ -118,11 +155,8 @@ def resolve(value):
                 for record in records:
                     matches.append((identity, Path(record['installPath']), record))
     else:
-        proc = subprocess.run(['codex', 'plugin', 'list', '--json'], text=True, capture_output=True, timeout=30)
-        if proc.returncode:
-            raise ValueError(proc.stderr.strip() or 'Codex registry lookup failed')
         home = Path(os.environ.get('CODEX_HOME', Path.home() / '.codex'))
-        for record in json.loads(proc.stdout).get('installed', []):
+        for record in codex_plugins():
             if record.get('name') == namespace and record.get('enabled', True):
                 identity = record['pluginId']
                 path = record.get('installedPath') or home / 'plugins/cache' / record['marketplaceName'] / namespace / record['version']
