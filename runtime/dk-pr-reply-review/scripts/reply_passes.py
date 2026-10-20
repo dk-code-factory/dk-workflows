@@ -43,9 +43,7 @@ def all_sources(evidence):
 def find_receipt(evidence, receipt, category='controller_published'):
     candidates = evidence['items'] if receipt['kind'] == 'issue_comment' else next(
         (t['comments'] for t in evidence['threads'] if t['id'] == receipt['reference']), [])
-    matches = [c for c in candidates if c.get('url') == receipt['url']]
-    require(len(matches) == 1 and matches[0]['text'] == receipt['body'],
-            f"saved reply missing or edited: {receipt['url']} [{category}]; reconcile live GitHub evidence")
+    guard.verify_receipt(candidates, receipt, category)
 
 
 def verify_history(workflow, evidence):
@@ -106,11 +104,15 @@ class Controller:
     def save(self):
         private_state.write(self.path, self.record)
 
-    def stop(self, kind, reason):
+    def stop(self, kind, reason, diagnostic=None):
         self.work['blocked'] = {'kind': kind, 'reason': str(reason)}
+        diagnostic = diagnostic or getattr(reason, 'diagnostic', None)
+        if diagnostic:
+            self.work['blocked']['diagnostic'] = diagnostic
         self.save()
         return {'action': 'stop' if kind == 'rejected' else 'reconcile',
                 'reason': str(reason), 'phase': self.work['phase'],
+                **({'diagnostic': diagnostic} if diagnostic else {}),
                 'stale_answers': self.stale_answers()}
 
     def stale_answers(self, evidence=None):
@@ -216,7 +218,9 @@ class Controller:
             return self.stop('evidence', exc)
         self.work['blocked'] = None
         if self.work['head'] is not None and self.work['head'] != evidence['head']:
-            return self.stop('head_changed', 'PR head changed; refresh preflight and decision context')
+            return self.stop('head_changed', 'PR head changed; refresh preflight and decision context',
+                {'changes': {'head': {'expected': self.work['head'], 'actual': evidence['head']}},
+                 'next_action': 'refresh_preflight_decisions_and_preparation_then_reconcile'})
         self.work['head'] = evidence['head']
         changed = self.work['knownSources'] != {ref: fingerprint(source)
                                                for ref, source in self.selected_sources(evidence).items()}

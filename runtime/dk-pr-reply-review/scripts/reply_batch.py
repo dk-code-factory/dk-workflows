@@ -33,6 +33,57 @@ class GuardError(ValueError):
     pass
 
 
+class EvidenceChanged(GuardError):
+    def __init__(self, message, changes, next_action='refresh_affected_sources_and_revalidate'):
+        super().__init__(message)
+        self.diagnostic = {'changes': changes, 'next_action': next_action}
+
+
+def evidence_changes(expected, live):
+    """Describe changed identities without copying conversations into diagnostics."""
+    changes = {'evidence_digest': {'expected': digest(expected), 'actual': digest(live)}}
+    for key in ('pr', 'head'):
+        if expected.get(key) != live.get(key):
+            changes[key] = {'expected': expected.get(key), 'actual': live.get(key)}
+    scope_keys = expected.get('scope', {}).keys() | live.get('scope', {}).keys()
+    changed_scope = sorted(key for key in scope_keys
+                           if expected.get('scope', {}).get(key) != live.get('scope', {}).get(key))
+    if changed_scope:
+        changes['scope_fields'] = changed_scope
+
+    def indexed(evidence, threads=False):
+        if threads:
+            return {t['id']: {k: v for k, v in t.items() if k != 'comments'}
+                    for t in evidence.get('threads', [])}
+        result = {s['reference']: s for s in evidence.get('items', [])}
+        for thread in evidence.get('threads', []):
+            result.update({s['reference']: dict(s, threadReference=thread['id'])
+                           for s in thread.get('comments', [])})
+        return result
+
+    for key, is_thread in (('sources', False), ('threads', True)):
+        before, after = indexed(expected, is_thread), indexed(live, is_thread)
+        delta = {'added': sorted(after.keys() - before.keys()),
+                 'removed': sorted(before.keys() - after.keys()),
+                 'changed': sorted(ref for ref in before.keys() & after.keys() if before[ref] != after[ref])}
+        if any(delta.values()):
+            changes[key] = delta
+    return changes
+
+
+def verify_receipt(candidates, receipt, category):
+    matches = [c for c in candidates if c.get('url') == receipt['url']]
+    if len(matches) != 1 or matches[0]['text'] != receipt['body']:
+        raise EvidenceChanged(
+            f"saved reply missing or edited: {receipt['url']} [{category}]; reconcile live evidence",
+            {'receipt': {'url': receipt['url'], 'category': category,
+                         'status': 'missing' if not matches else ('ambiguous' if len(matches) > 1 else 'edited'),
+                         'expected_sha256': digest(receipt['body']),
+                         'actual_sha256': digest(matches[0]['text']) if len(matches) == 1 else None}},
+            'reconcile_receipt_provenance_before_retry')
+    return matches[0]
+
+
 def require(ok, message):
     if not ok:
         raise GuardError(message)
@@ -209,11 +260,11 @@ def unchanged(expected, live, receipts):
     for receipt in receipts:
         candidates = live['items'] if receipt['kind'] == 'issue_comment' else next(
             (t['comments'] for t in live['threads'] if t['id'] == receipt['reference']), [])
-        found = [c for c in candidates if c.get('url') == receipt['url']]
-        require(len(found) == 1 and found[0]['text'] == receipt['body'],
-                f"published reply missing or changed: {receipt['url']} [controller_published]; reconcile live state")
-        candidates.remove(found[0])
-    require(expected == live, 'PR head or source conversation changed; rebuild and revalidate')
+        found = verify_receipt(candidates, receipt, 'controller_published')
+        candidates.remove(found)
+    if expected != live:
+        raise EvidenceChanged('PR head or source conversation changed; rebuild and revalidate',
+                              evidence_changes(expected, live))
 
 
 def post(reply, pr, cwd):

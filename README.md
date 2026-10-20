@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.1.13.
+Independent MIT plugin for Claude Code and Codex. Version 1.1.14.
 
 ## Install
 
@@ -202,3 +202,9 @@ and retain pinned evidence paths. Unchanged sections already read in the same
 agent context can be reused with their immutable runtime identity. A parent read
 does not replace a child's required reading, and live publication evidence is
 always refreshed through the existing gates.
+
+Reply reconciliation diagnostics identify changed heads, scope fields and
+source/thread IDs without repeating conversation bodies. Receipt failures retain
+their URL, provenance and expected/actual hashes. Diagnostics survive interruption
+in the run record and supply a next action; unchanged publication guards still
+require fresh complete evidence and independent approval.
