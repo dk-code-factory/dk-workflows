@@ -1,5 +1,16 @@
 # Workflow lifecycle
 
+Reuse `DK_CLI_REFERENCE` when supplied by the parent. Otherwise, after entry and
+runtime retention, create one CLI reference for this root workflow with
+`python3 PLUGIN_ROOT/scripts/dk.py --host HOST --parent UPDATE_TOKEN reference`.
+Retain its `reference` path and pass it as `DK_CLI_REFERENCE` on helper processes
+and in child handoffs. The reference contains the command map; a helper help query
+with that environment retains its text once and returns a reference section.
+Read only the needed section and reuse it in this agent's context. Version or
+helper changes invalidate it; create a fresh reference instead of using stale
+help. If reference creation is unavailable, inspect the current helper directly.
+The reference never supplies workflow results, review evidence or authorization.
+
 At entry, run `python3 PLUGIN_ROOT/scripts/update.py entry --host HOST`, replacing HOST with the calling platform. If a DK workflow or another skill supplies a parent token, pass `--parent PARENT_TOKEN`. Retain the returned invocation `token` as UPDATE_TOKEN. Set `DK_HOST=HOST` and `DK_UPDATE_PARENT=UPDATE_TOKEN` on **every** helper or provider process launched during this invocation. Shell exports do not persist between independent tool calls; repeat the environment prefix or use an explicit environment argument. Pass UPDATE_TOKEN as the parent for nested native skill calls, including other plugins.
 
 After entry, require `runtime_root` and `completion_script` in its receipt. Set

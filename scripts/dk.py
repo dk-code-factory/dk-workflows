@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'runtime'))
 from shared.command_results import ResultFile, receipt, default_path, inspect_result
+from shared import cli_reference
 
 ARTIFACT_DEFAULTS = {'run-state', 'replies', 'reviewers', 'conversation', 'inline-feedback'}
 # Each row is a packaged script, cwd argument placement, PR argument, repo argument.
@@ -146,7 +147,7 @@ def early_context(arguments):
     """Find storage context before parsing, stopping at the native helper boundary."""
     context = {}
     index = 0
-    options = {'--cwd', '--pr', '--repo', '--host', '--parent', '--result-file'}
+    options = {'--cwd', '--pr', '--repo', '--host', '--parent', '--result-file', '--reference'}
     while index < len(arguments):
         option, separator, value = arguments[index].partition('=')
         if option in options:
@@ -175,11 +176,23 @@ def dispatch(arguments, result_file=None):
     parser.add_argument('--dry-run', action='store_true', help='Print argv and workflow context without running a helper')
     parser.add_argument('--result-file', help='Retain full private diagnostics and print a typed terminal receipt')
     parser.add_argument('--full', action='store_true', help='Print native helper output instead of automatic artifact receipts')
-    parser.add_argument('command', choices=['commands', 'result', *ROUTES])
+    parser.add_argument('--reference', default=os.environ.get('DK_CLI_REFERENCE'), help='Shared versioned CLI reference for help discovery')
+    parser.add_argument('command', choices=['commands', 'reference', 'result', *ROUTES])
     parser.add_argument('arguments', nargs=argparse.REMAINDER)
     args = parser.parse_args(arguments)
     if args.full and args.result_file:
         parser.error('--full cannot be combined with --result-file')
+    if args.command == 'reference':
+        reference_parser = Parser(description='Create or reuse root-workflow CLI discovery')
+        reference_parser.add_argument('--workflow-id', default=args.parent)
+        reference_parser.add_argument('--output')
+        selected = reference_parser.parse_args(args.arguments)
+        try:
+            value = cli_reference.create(ROOT, ROUTES, args.cwd, selected.workflow_id, selected.output)
+        except (OSError, ValueError, RuntimeError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(value, sort_keys=True))
+        return 0
     if args.command == 'commands':
         if args.arguments:
             parser.error('commands accepts no native helper arguments')
@@ -208,9 +221,19 @@ def dispatch(arguments, result_file=None):
                                     args.pr, args.repo, args.host, args.parent)
     except ValueError as exc:
         parser.error(str(exc))
+    if args.reference:
+        env['DK_CLI_REFERENCE'] = args.reference
     if args.dry_run:
         print(json.dumps({'argv': argv, 'cwd': str(cwd), 'environment': {
             key: env[key] for key in ('DK_HOST', 'DK_UPDATE_PARENT') if key in env}}, sort_keys=True))
+        return 0
+    if args.reference and any(x in ('--help', '-h') for x in args.arguments):
+        try:
+            result = cli_reference.help_result(args.reference, ROOT, ROUTES, args.command,
+                                               args.arguments, argv, cwd, env)
+        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            parser.error(str(exc))
+        print(json.dumps(result, sort_keys=True))
         return 0
     if result_file is not None:
         _, code = result_file.run(args.command, argv, cwd, env)
