@@ -20,6 +20,7 @@ from reviewer_prompts import preparation_instructions, source_files
 from stats_capture import for_iteration
 from shared.reviewer_telemetry import capture, transport
 from shared import bindings
+from shared.runtime_bundles import retained_binding, retain
 from shared.review_sessions import Session
 from shared.executors import invoke, ProviderExhausted
 
@@ -192,7 +193,8 @@ def validate_descriptor(value):
 
 
 def describe_reviewer(name):
-    resolved = bindings.resolve(name)
+    resolved = retained_binding(bindings.resolve(name))
+    own_root = retain(ROOT.parent)
     initial = [Path(__file__), Path(__file__).with_name('reviewer_prompts.py'),
                ROOT/'shared/bindings.py', ROOT/'shared/executors.py']
     if 'procedure' in resolved:
@@ -200,9 +202,15 @@ def describe_reviewer(name):
         manifest = Path(resolved['root']) / ('.' + resolved['executor'] + '-plugin/plugin.json')
         initial += [manifest]
     else:
-        executable = __import__('shutil').which(resolved['binding']['command'][0])
+        command = resolved.get('argv', resolved['binding']['command'])
+        executable = __import__('shutil').which(command[0])
         initial += [Path(executable)]
-        initial += [Path(arg) for arg in resolved['binding']['command'][1:] if Path(arg).is_file()]
+        for arg in command[1:]:
+            candidate = arg.split('=', 1)[1] if arg.startswith('-') and '=' in arg else arg
+            if Path(candidate).is_file():
+                initial.append(Path(candidate))
+    initial = [own_root / path.relative_to(ROOT.parent) if path.is_relative_to(ROOT.parent) else path
+               for path in initial]
     sources, missing = source_files(initial)
     if 'root' in resolved:
         # Native agents and command directories may be dispatched by name, and
@@ -222,15 +230,21 @@ def describe_reviewer(name):
     prompt = build_skill_prompt(skill, '{handoff}')
     return validate_descriptor({'descriptor_version': 1, 'reviewer': bindings.key(name),
         'complete': not missing, 'missing': missing, 'sources': sources,
+        'execution': resolved if 'bundle_digest' in resolved or resolved.get('bundles') else None,
         'effective_prompt': json.dumps(resolved, sort_keys=True) + '\n' + prompt,
         'aspects': ['selected provider procedures']})
 
 
 def review(context, reviewers, scope, decisions, rules, preparation, stats=None, session=None):
-    provider_map = {bindings.key(value): value for value in reviewers}
-    reviewers = list(provider_map)
     decisions = validate_decisions(context, decisions)
     preparation = preparation_api.validate(preparation, context, decisions)
+    with bindings.pinned_bindings(preparation['reviewers']):
+        return _review(context, reviewers, scope, decisions, rules, preparation, stats, session)
+
+
+def _review(context, reviewers, scope, decisions, rules, preparation, stats=None, session=None):
+    provider_map = {bindings.key(value): value for value in reviewers}
+    reviewers = list(provider_map)
     if any(name not in preparation['reviewers'] for name in reviewers):
         raise ValueError('preparation omits a configured reviewer')
     if not reviewers:
@@ -376,9 +390,10 @@ def main():
         options = legacy.legacy_review_options(args.run_record, context, preparation, names,
                                              scope, rules, args.stats_cycle)
         if 'result' in options:
-            for provider, name in zip(config['reviewers'], names):
-                if describe_reviewer(provider) != preparation['reviewers'][name]:
-                    raise ValueError('effective reviewer instructions changed; refresh preparation')
+            with bindings.pinned_bindings(preparation['reviewers']):
+                for provider, name in zip(config['reviewers'], names):
+                    if describe_reviewer(provider) != preparation['reviewers'][name]:
+                        raise ValueError('effective reviewer instructions changed; refresh preparation')
             legacy.legacy_register_review(args.run_record, options['result'], context['head_sha'])
             print(json.dumps(options['result'], ensure_ascii=False))
             return

@@ -59,3 +59,17 @@ Mandatory session and result storage remain independent of iteration records.
 Optional statistics may read those records to discover an omitted cycle.
 Historical version-1 artifacts retain their original completion checks in
 the iteration adapter and never supply reusable reviewer checkpoints.
+
+
+New provider descriptors include a retained execution binding. The package and
+source hashes are pinned before preparation, and review resolves that binding
+without consulting a replacement registry entry. Private package copies remain
+available after host cache deletion. Resource or descriptor changes still block
+coverage acceptance. Legacy descriptors continue to use their original checks;
+missing legacy resources require fresh preparation rather than a version switch.
+
+Command descriptors retain package resources and standalone entrypoints as well.
+They execute a pinned argument vector while preserving ordinary data/output paths.
+Both explicit session execution and the completed iteration compatibility path
+use these bindings. Native drafting providers and command drafting corrections
+also retain their binding across the bounded correction operation.

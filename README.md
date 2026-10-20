@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.1.8.
+Independent MIT plugin for Claude Code and Codex. Version 1.1.9.
 
 ## Install
 
@@ -136,3 +136,22 @@ can use a full PR URL or `--repo HOST/OWNER/REPO`. `--dry-run` prints the argume
 vector and workflow environment without executing it. The router preserves
 helper exit codes and publication guards. Existing script entrypoints remain
 available. Lifecycle entry/completion still happen once per skill invocation.
+
+At lifecycle entry, the receipt supplies `runtime_root` and `completion_script`.
+Use these retained paths for the invocation and its child handoffs. Packages are
+copied once per content hash into private lifecycle `runtimes/` storage, preserving
+resources and executable bits. Installed cache replacement cannot remove these
+copies. Resource changes are detected before reuse; retained copies are kept for
+interruption recovery and review evidence. Release-check failures stay nonblocking;
+failure to retain the required runtime blocks its use.
+
+New reviewer preparation records bind native providers to retained package copies.
+An active review continues with that exact package when the host registry changes;
+it never silently selects the replacement. Fresh preparations use the current
+registry. Legacy preparations retain their existing source and registry checks.
+
+Command providers retain their packaged entrypoints and standalone executables
+or interpreter scripts. Ordinary external data and output arguments keep their
+original paths. Drafting corrections share one retained binding for the whole
+operation. Interpreter and host installations remain runtime prerequisites.
+Completed review reuse follows the same retained binding checks as execution.

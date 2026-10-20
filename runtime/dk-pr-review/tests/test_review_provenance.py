@@ -177,7 +177,7 @@ def test_legacy_main_validates_effective_selection_before_completed_reuse(
     with patch.object(sys, 'argv', argv), \
             patch.object(runner, 'run', return_value=json.dumps({'reviewers': [provider]})), \
             patch.object(runner, 'run_skill_reviewer') as launch:
-        if change == 'unchanged':
+        if prepared['reviewers'][names[0]].get('execution') or change == 'unchanged':
             runner.main()
             reused = json.loads(capsys.readouterr().out)
             assert reused['executed_reviewers'] == [] and reused['reused_reviewers'] == names
