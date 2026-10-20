@@ -1,5 +1,9 @@
 # Iterate a pull request
 
+Pass the root workflow's `DK_CLI_REFERENCE` path to each child agent and helper.
+Use its command map and previously read help sections before new discovery calls;
+query missing help through the stable CLI with that reference.
+
 Use the stable `PLUGIN_ROOT/scripts/dk.py` routes for workflow helpers. Its
 `run-state`, `replies`, `reviewers`, `conversation` and `inline-feedback` routes
 retain full results and return compact artifact receipts. Pass common host,

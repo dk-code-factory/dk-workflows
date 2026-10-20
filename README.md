@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.1.11.
+Independent MIT plugin for Claude Code and Codex. Version 1.1.12.
 
 ## Install
 
@@ -185,3 +185,13 @@ Sections use JSON pointers relative to `data`; `/` and `~` in keys use `~1` and
 `~0`. Collection entries show container counts and scalar previews; select a
 deeper pointer for details. Long text stays in the artifact. `next` is an index
 for the next page in that immutable result, not a cursor across different runs.
+
+Create a versioned command reference once per root workflow with
+`dk.py --parent ROOT_UPDATE_TOKEN reference`. Share its returned path as
+`DK_CLI_REFERENCE` (or common `--reference FILE`) with child agents. Helper help
+queries then return a small reference/section receipt; the complete help text is
+retained once under that section. Concurrent identical help queries run one
+helper process. Read relevant help from the reference once per agent context.
+References live in private state, are scoped to the root workflow, and invalidate
+when the package version, router or helper scripts change. No workflow output or
+review findings are cached. Without a reference, help retains its native output.
