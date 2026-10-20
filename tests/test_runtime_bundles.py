@@ -14,6 +14,48 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'runtime'))
 from shared import bindings, runtime_bundles
 
 
+def test_entry_cyclic_resource_is_a_critical_stop(tmp_path):
+    fixture = Fixture(tmp_path, 'cycle', 'off')
+    (fixture.base / 'installed/dk-workflows/loop').symlink_to('loop')
+    receipt = fixture.invoke()
+    assert receipt['status'] == 'runtime_unavailable'
+    assert receipt['action'] == 'stop' and receipt['non_blocking'] is False
+    assert 'token' not in receipt and 'runtime_root' not in receipt
+    assert not (fixture.base / 'state/dk-code-factory/updates/state.json').exists()
+
+
+@pytest.mark.parametrize('remove_installation', [False, True])
+def test_entry_registry_timeout_keeps_retained_package_pinned(tmp_path, remove_installation):
+    fixture = Fixture(tmp_path, 'metadata-timeout', 'auto')
+    original = fixture.subrun
+    def unavailable(argv, **kwargs):
+        if argv[:4] == ['codex', 'plugin', 'list', '--json']:
+            if remove_installation:
+                shutil.rmtree(fixture.base / 'installed/dk-workflows')
+            raise subprocess.TimeoutExpired(argv, 30)
+        return original(argv, **kwargs)
+    fixture.subrun = unavailable
+    receipt = fixture.invoke()
+    assert receipt['action'] in ('continue', 'notify')
+    assert receipt['identity']['pinned'] is True and receipt['update_identity_unavailable'] is True
+    assert Path(receipt['runtime_root']).is_dir() and Path(receipt['completion_script']).is_file()
+    assert all(not session['pending'] for session in fixture.state()['sessions'].values())
+    process = subprocess.run([sys.executable, receipt['completion_script'], 'complete',
+        '--host', 'codex', '--token', receipt['token']],
+        env=dict(os.environ, **fixture.env), capture_output=True, text=True, check=True)
+    completed = json.loads(process.stdout)
+    assert completed['status'] == 'completed'
+    assert not completed.get('updates')
+
+
+def test_entry_storage_failure_cannot_continue_without_a_runtime(tmp_path):
+    fixture = Fixture(tmp_path, 'bad-storage', 'off')
+    fixture.env['XDG_STATE_HOME'] = str(fixture.base / 'installed/dk-workflows')
+    receipt = fixture.invoke()
+    assert receipt['action'] == 'stop' and receipt['non_blocking'] is False
+    assert 'token' not in receipt and 'runtime_root' not in receipt
+
+
 def test_retained_lifecycle_survives_removed_installation(tmp_path):
     fixture = Fixture(tmp_path, 'retained', 'off')
     source = fixture.base / 'installed/dk-workflows'

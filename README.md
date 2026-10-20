@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.1.15.
+Independent MIT plugin for Claude Code and Codex. Version 1.1.16.
 
 ## Install
 
@@ -214,3 +214,10 @@ Field-level validation errors identify the rejected field without dumping all
 eligible lines. The adapter still checks the pinned diff and allows one correction;
 incomplete responses require an empty findings array and an explicit reason.
 Use `dk.py --host HOST validate-review --schema` to inspect the provider contract.
+
+Lifecycle entry retains and validates the package before consulting optional host
+registry metadata. Registry failure keeps the frozen package pinned and cannot
+schedule an update. All later manifest reads use that retained copy, including
+when the host removes the original installation during lookup. Entry failures
+without a usable runtime receipt stop work; offline release checks still return
+a retained runtime and token and remain nonblocking.
