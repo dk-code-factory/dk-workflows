@@ -24,3 +24,12 @@ add `--reason TEXT` to retain the recovery reason with its completion timestamp.
 Completion remains idempotent and updates stay deferred while any other work is
 active. Never expire tokens automatically or delete lifecycle records to unblock
 an update.
+
+
+Prefer the router for listed helpers: `python3 PLUGIN_ROOT/scripts/dk.py --host HOST --parent UPDATE_TOKEN
+--cwd REPO --pr PR_URL HELPER ...` supplies the workflow environment and routes
+to the packaged script. Keep that command on one shell line or use explicit
+shell continuations. Run `dk.py commands` for helper names and context options;
+use `--dry-run` before the helper name to inspect routing. Common context flags
+precede the helper; native helper arguments follow it. Existing direct helpers
+remain supported. The router does not enter or complete the lifecycle again.
