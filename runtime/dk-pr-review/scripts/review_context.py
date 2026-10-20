@@ -12,13 +12,14 @@ import sys
 import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
+from shared.github_reads import run as github_run
 
 FIELDS = 'number,url,title,body,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,files'
 LARGE_DIFF_ERROR = re.compile(r'diff exceeded the maximum number of lines|20,?000\s+lines|PullRequest\.diff too_large', re.I)
 
 
 def command(args, cwd):
-    result = subprocess.run(args, cwd=cwd, text=True, capture_output=True)
+    result = github_run(args, cwd=cwd, text=True, capture_output=True)
     if result.returncode:
         raise RuntimeError(f"{' '.join(args[:3])} failed: {result.stderr.strip() or result.stdout.strip()}")
     return result.stdout

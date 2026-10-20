@@ -15,12 +15,13 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 
 from shared.flaky_tests import Registry
 from shared.flaky_actions import GitHub, pr_repository
 from shared.ci_policy import decide
+from shared.github_reads import run as github_run
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
 def gh_json(args):
-    result = subprocess.run(["gh", *args], capture_output=True, text=True, check=False)
+    result = github_run(["gh", *args], capture_output=True, text=True, check=False)
     if not result.stdout.strip():
         raise RuntimeError(result.stderr.strip() or f"gh exited {result.returncode}")
     try:

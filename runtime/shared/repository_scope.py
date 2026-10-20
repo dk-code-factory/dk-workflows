@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import subprocess
 from urllib.parse import urlparse
+from shared.github_reads import run as github_run
 
 
 def checkout_roots(cwd):
@@ -65,7 +66,7 @@ def upstream(root, identity):
         return candidate
     repository_name = identity.removeprefix('remote:')
     try:
-        result = subprocess.run(['gh', 'repo', 'view', repository_name, '--json', 'isFork,parent'],
+        result = github_run(['gh', 'repo', 'view', repository_name, '--json', 'isFork,parent'],
                                 cwd=root, capture_output=True, text=True, timeout=8)
     except (OSError, subprocess.TimeoutExpired):
         result = None
@@ -90,7 +91,7 @@ def identities(root, pr=None):
     root = Path(root).resolve()
     if pr:
         try:
-            result = subprocess.run(['gh', 'pr', 'view', pr, '--json', 'url,headRepository'],
+            result = github_run(['gh', 'pr', 'view', pr, '--json', 'url,headRepository'],
                                     cwd=root, capture_output=True, text=True, timeout=15)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise RuntimeError('could not resolve PR repository identities') from exc
