@@ -1,0 +1,91 @@
+"""Bound transient retries to known read-only GitHub CLI operations."""
+import json
+from pathlib import Path
+import random
+import re
+import subprocess
+import time
+
+
+def read_only(argv, input_text=None):
+    if len(argv) < 3 or Path(argv[0]).name != 'gh':
+        return False
+    if argv[1] in ('pr', 'repo', 'issue'):
+        return argv[2] in ('view', 'list', 'checks', 'diff')
+    if argv[1] != 'api':
+        return False
+    endpoint, methods, fields, body_file = None, [], [], None
+    values = {'--hostname', '--method', '-X', '-f', '-F', '--field', '--raw-field',
+              '--input', '--jq', '-q', '--template', '-t', '--header', '-H', '--cache'}
+    flags = {'--paginate', '--slurp', '--silent', '--include', '-i', '--verbose'}
+    args = iter(argv[2:])
+    for arg in args:
+        option, separator, inline = arg.partition('=')
+        if option in values:
+            value = inline if separator else next(args, None)
+            if value is None:
+                return False
+            if option in ('--method', '-X'):
+                methods.append(value.upper())
+            elif option in ('-f', '-F', '--field', '--raw-field'):
+                fields.append(value)
+            elif option == '--input':
+                body_file = value
+        elif arg in flags:
+            continue
+        elif arg.startswith('-') or endpoint is not None:
+            return False
+        else:
+            endpoint = arg
+    if endpoint == 'graphql':
+        queries = [field.split('=', 1)[1] for field in fields if field.startswith('query=')]
+        if body_file == '-':
+            try:
+                payload = json.loads(input_text)
+                queries.append(payload['query'])
+            except (ValueError, TypeError, KeyError):
+                return False
+        if len(queries) != 1 or any(method not in ('GET', 'POST') for method in methods):
+            return False
+        query = queries[0]
+        return (isinstance(query, str) and bool(re.match(r'\s*(?:query\b|\{)', query))
+                and not re.search(r'\b(?:mutation|subscription)\b', query))
+    return bool(endpoint) and (all(method == 'GET' for method in methods) if methods
+                               else not fields and body_file is None)
+
+
+def transient(result):
+    detail = result.stderr or ''
+    if isinstance(detail, bytes):
+        detail = detail.decode(errors='replace')
+    if re.search(r'HTTP (?:401|403)|not authenticated|authentication failed|bad credentials', detail, re.I):
+        return False
+    return bool(re.search(r'HTTP 5\d\d|error connecting to|TLS handshake timeout|'
+                          r'connection reset|connection refused|unexpected EOF|no such host|'
+                          r'context deadline exceeded|net/http:.*timeout', detail, re.I))
+
+
+def run(argv, **kwargs):
+    """Keep original result/exception semantics; never retry publication or schema errors."""
+    if not read_only(argv, kwargs.get('input')):
+        return subprocess.run(argv, **kwargs)
+    budget = kwargs.get('timeout')
+    budget = 60 if budget is None else min(60, budget)
+    deadline = time.monotonic() + budget
+    for attempt in range(3):
+        options = dict(kwargs, timeout=max(0, deadline - time.monotonic()))
+        failure = None
+        try:
+            result = subprocess.run(argv, **options)
+        except subprocess.TimeoutExpired as exc:
+            failure = exc
+        else:
+            if not result.returncode or not transient(result):
+                return result
+        remaining = deadline - time.monotonic()
+        delay = 0.25 * (2 ** attempt) + random.uniform(0, 0.25)
+        if attempt == 2 or remaining <= delay:
+            if failure is not None:
+                raise failure
+            return result
+        time.sleep(delay)

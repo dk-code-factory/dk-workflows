@@ -13,6 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
+from shared.github_reads import run as github_run
 
 
 class FetchError(RuntimeError):
@@ -20,7 +21,7 @@ class FetchError(RuntimeError):
 
 
 def gh_json(args: list[str], cwd: Path) -> object:
-    result = subprocess.run(["gh", *args], cwd=cwd, text=True, capture_output=True)
+    result = github_run(["gh", *args], cwd=cwd, text=True, capture_output=True)
     if result.returncode:
         raise FetchError(result.stderr.strip() or result.stdout.strip() or "gh failed")
     try:

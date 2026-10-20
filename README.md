@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.1.6.
+Independent MIT plugin for Claude Code and Codex. Version 1.1.7.
 
 ## Install
 
@@ -112,3 +112,9 @@ Reviewer description, execution and configuration diagnostics reuse one Codex
 plugin inventory within each command invocation. A later invocation reads the
 registry again; selected manifests and skill files are still checked on each
 resolution. This inventory reuse never supplies cached review findings.
+
+Known GitHub read operations retry transient connection and HTTP 5xx failures
+at most three times, with jitter and one shared deadline per read (60 seconds
+unless the caller supplies a shorter timeout). Authentication, schema failures,
+normal CI outcomes and publication operations are not retried. Exact-head and
+source-evidence checks still run after reads recover.

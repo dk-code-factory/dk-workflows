@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from shared.github_reads import run as github_run
 
 
 THREADS_QUERY = """
@@ -85,7 +86,7 @@ class FetchError(RuntimeError):
 
 
 def run_gh(arguments: list[str], cwd: Path) -> dict[str, Any]:
-    result = subprocess.run(
+    result = github_run(
         ["gh", *arguments],
         cwd=cwd,
         text=True,

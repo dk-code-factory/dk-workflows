@@ -12,6 +12,7 @@ from shared.flaky_tests import digest, normalize_repo, now, require_head
 from shared.private_state import write
 from shared.test_evidence import parse_report, result
 from shared.ci_exceptions import matching
+from shared.github_reads import run as github_run
 
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 MAX_REPORT_BYTES = 10 * 1024 * 1024
@@ -25,7 +26,7 @@ class GitHub:
     def request(self, endpoint, binary=False):
         command = ['gh', 'api', '--hostname', self.host, f'repos/{self.name}/{endpoint}']
         try:
-            completed = subprocess.run(command, capture_output=True, timeout=60)
+            completed = github_run(command, capture_output=True, timeout=60)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise RuntimeError(f'GitHub request unavailable: {endpoint}') from exc
         if completed.returncode:
@@ -62,7 +63,7 @@ class GitHub:
         command = ['gh', 'issue', 'list', '--repo', self.repo, '--state', 'open',
                    '--search', 'sort:updated-desc', '--limit', str(limit),
                    '--json', 'number,url,title,body,updatedAt,state']
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=60)
+        completed = github_run(command, capture_output=True, text=True, timeout=60)
         if completed.returncode:
             raise RuntimeError(completed.stderr.strip() or 'open issue scan unavailable')
         issues = json.loads(completed.stdout)
@@ -272,7 +273,7 @@ def pr_repository(pr, repo=None):
         command = ['gh', 'pr', 'view', pr, '--json', 'url']
         if repo:
             command += ['--repo', repo]
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        completed = github_run(command, capture_output=True, text=True, timeout=30)
         if completed.returncode:
             raise ValueError('cannot resolve PR base repository')
         pr = json.loads(completed.stdout)['url']

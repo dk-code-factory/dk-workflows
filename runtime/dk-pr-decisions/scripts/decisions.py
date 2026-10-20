@@ -17,6 +17,7 @@ import sys
 import tempfile
 from pathlib import Path
 from urllib.parse import quote, urlparse
+from shared.github_reads import run as github_run
 
 GH_HOST = "github.com"
 
@@ -42,7 +43,7 @@ SCHEMA = {
 
 
 def run(args, *, input_text=None, cwd=None):
-    result = subprocess.run(args, input=input_text, text=True, capture_output=True, cwd=cwd)
+    result = github_run(args, input=input_text, text=True, capture_output=True, cwd=cwd)
     if result.returncode:
         raise RuntimeError(f"{' '.join(args[:3])} failed: {result.stderr.strip() or result.stdout.strip()}")
     return result.stdout
