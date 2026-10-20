@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.1.12.
+Independent MIT plugin for Claude Code and Codex. Version 1.1.13.
 
 ## Install
 
@@ -195,3 +195,10 @@ helper process. Read relevant help from the reference once per agent context.
 References live in private state, are scoped to the root workflow, and invalidate
 when the package version, router or helper scripts change. No workflow output or
 review findings are cached. Without a reference, help retains its native output.
+
+Iteration instructions use a coordinator entry with mandatory stage contracts.
+Read each contract before its stage; child handoffs select their role's contracts
+and retain pinned evidence paths. Unchanged sections already read in the same
+agent context can be reused with their immutable runtime identity. A parent read
+does not replace a child's required reading, and live publication evidence is
+always refreshed through the existing gates.

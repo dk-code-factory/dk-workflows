@@ -7,4 +7,4 @@ Use Claude Code native agents and tools. `${CLAUDE_PLUGIN_ROOT}` is this plugin 
 
 Before work, read [the lifecycle procedure](../../../common/lifecycle.md), then run its entry command with `--host claude`. Retain its returned token and follow its structured action. Always run its completion command with that token in a finalization step, including on failure or interruption.
 
-Read [the shared procedure](../../../runtime/dk-pr-iter/procedure.md) and perform the requested workflow. Resolve paths beginning with `PLUGIN_ROOT/` against this plugin's root. Preserve the shared procedure's validation and publication guards.
+Read [the coordinator entry](../../../runtime/dk-pr-iter/procedure.md), then read each linked stage contract before acting in that stage. Give child agents only their assigned role contracts and pinned evidence paths. Resolve paths beginning with `PLUGIN_ROOT/` against this plugin's root. Preserve the shared procedure's validation and publication guards.
