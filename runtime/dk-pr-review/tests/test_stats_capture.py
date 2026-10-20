@@ -133,10 +133,8 @@ def test_execution_corrections_retained_without_nested_double_counting(pinned, m
     responses = ['not json', json.dumps({'findings': [finding()]})]
     def fake(args, input, **kwargs):
         Path(args[args.index('-o') + 1]).write_text(responses.pop(0))
-        result = subprocess.CompletedProcess(args, 0, '', '')
-        result.model = 'exposed-model'
-        result.usage = {'input_tokens': 5, 'output_tokens': 2}
-        return result
+        return subprocess.CompletedProcess(
+            args, 0, '', 'model: exposed-model\nuser\nreview\ntokens used\n7\n')
     # Only replace model execution; git validation still uses real subprocesses.
     real_run = subprocess.run
     def execute(args, *a, **k):
@@ -146,7 +144,7 @@ def test_execution_corrections_retained_without_nested_double_counting(pinned, m
     assert result['complete']
     rev = api.ledger(stats.repo)['runs'][stats.run_id]['reviews'][names[0]]
     assert rev['correction_retries'] == 1
-    assert rev['usage'] == [{'input_tokens': 5, 'output_tokens': 2}] * 2
+    assert rev['usage'] == [{'total_tokens': 7, 'source': 'codex_cli_summary'}] * 2
     assert rev['model'] == 'exposed-model'
     trace = json.loads(next(stats.directory.glob('*-execution.json')).read_text())
     assert len(trace['attempts']) == 2
