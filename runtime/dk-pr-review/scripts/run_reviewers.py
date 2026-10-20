@@ -334,6 +334,7 @@ def review(context, reviewers, scope, decisions, rules, preparation, stats=None,
     return outcome({'complete': True, 'findings': findings, 'skipped_reviewers': skipped_reviewers})
 
 
+@bindings.registry_snapshot()
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--context', required=True)
