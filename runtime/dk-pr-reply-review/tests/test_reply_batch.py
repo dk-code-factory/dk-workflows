@@ -241,6 +241,25 @@ class ReplyBatchTest(unittest.TestCase):
                 guard.publish(batch, approval(batch), Path(folder) / 'journal', Path('.'))
             post.assert_not_called()
 
+    def test_changed_evidence_reports_entities_without_copying_conversations(self):
+        expected = guard.validate(fixture(True))
+        original = copy.deepcopy(expected)
+        live = copy.deepcopy(expected)
+        live['head'] = 'new-head'
+        live['scope']['title'] = 'New scope'
+        live['items'][0]['text'] += 'x' * 70000
+        live['threads'][0]['comments'][0]['text'] += ' Edited.'
+        live['items'].append({'reference': 'new-source', 'text': 'New request'})
+        with self.assertRaises(guard.EvidenceChanged) as caught:
+            guard.unchanged(expected, live, [])
+        diagnostic = caught.exception.diagnostic
+        self.assertEqual(diagnostic['changes']['head'], {'expected': 'abc', 'actual': 'new-head'})
+        self.assertEqual(diagnostic['changes']['scope_fields'], ['title'])
+        self.assertEqual(diagnostic['changes']['sources']['changed'], ['C1', REVIEW])
+        self.assertEqual(diagnostic['changes']['sources']['added'], ['new-source'])
+        self.assertLess(len(json.dumps(diagnostic)), 2000)
+        self.assertEqual(expected, original)
+
     def test_mixed_batch_can_publish_both_destinations_with_fresh_checks(self):
         batch = fixture(True)
         batch['requests'] = [request('r1', thread='T1'), request('r2', excerpt='Document the timeout.')]

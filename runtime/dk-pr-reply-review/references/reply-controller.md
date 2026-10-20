@@ -1,5 +1,17 @@
 # Script-controlled reply passes
 
+Evidence-change stops include a retained `diagnostic` with `changes` and a safe
+`next_action`. It identifies expected/actual heads, changed scope fields, added,
+removed and changed source/thread IDs, or a missing/edited receipt's URL,
+provenance category and content hashes. Full text remains in the observation
+artifacts. An evidence digest also captures ordering or metadata changes.
+
+Refresh the identified evidence and reconcile before retrying publication.
+Retain verified mappings and journals, and reassess affected requests from the
+complete current snapshots. A diagnostic never restores approval, authorizes a
+retry or weakens the full-evidence equality check. Uncertain publications still
+use reconciliation; never repeat an observed reply.
+
 Prefer the stable `dk.py replies` route with common context before the route and
 controller arguments after it. It returns a compact artifact receipt. Load the
 saved artifact's `data` from disk to read the controller action and mappings;

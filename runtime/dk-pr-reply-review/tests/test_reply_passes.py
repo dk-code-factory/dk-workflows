@@ -113,6 +113,29 @@ class ReplyPassesTest(unittest.TestCase):
     def controller(self, agent='reply-agent'):
         return passes.Controller(guard.read(self.record), self.record, PR, self.folder, agent)
 
+    def test_head_change_diagnostic_survives_resume(self):
+        self.next()
+        self.github.head = 'b' * 40
+        result = self.next()
+        self.assertEqual(result['action'], 'reconcile')
+        self.assertEqual(result['diagnostic']['changes']['head'],
+                         {'expected': SHA, 'actual': 'b' * 40})
+        self.assertEqual(self.next()['diagnostic'], result['diagnostic'])
+        self.assertEqual(self.github.posts, [])
+
+    def test_edited_reply_diagnostic_retains_provenance_and_blocks_publication(self):
+        self.publish(self.inline_batch(self.next()))
+        self.github.threads[0]['comments'][-1]['text'] = 'Edited published reply'
+        result = self.next()
+        self.assertEqual(result['action'], 'reconcile')
+        receipt = result['diagnostic']['changes']['receipt']
+        self.assertEqual(receipt['category'], 'controller_published')
+        self.assertEqual(receipt['status'], 'edited')
+        self.assertNotEqual(receipt['expected_sha256'], receipt['actual_sha256'])
+        self.assertEqual(len(self.github.posts), 1)
+        saved = guard.read(self.record)['reply_workflow']['blocked']
+        self.assertEqual(saved['diagnostic'], result['diagnostic'])
+
     def next(self):
         return self.controller().next()
 
