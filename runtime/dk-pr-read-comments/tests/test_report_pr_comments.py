@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -283,10 +284,11 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(current['run_number'], previous['run_number'] + 1)
 
     def test_rejects_data_directory_inside_repository(self):
+        subprocess.run(['git', 'init', '-q', str(self.repo)], check=True)
         with patch.dict(os.environ, {"XDG_DATA_HOME": str(self.repo / "data")}):
             with self.assertRaisesRegex(RuntimeError, "outside the code repository"):
                 self.invoke()
-        self.assertEqual(list(self.repo.iterdir()), [])
+        self.assertEqual([p.name for p in self.repo.iterdir()], ['.git'])
 
     def test_deleted_reply_reanalyzes_remaining_thread(self):
         self.meta["i2"] = {**comment("i2"), "kind": "inline", "thread_id": "t"}

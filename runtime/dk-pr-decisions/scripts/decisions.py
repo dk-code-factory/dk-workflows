@@ -7,6 +7,7 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 
 import argparse
 import base64
 from shared.executors import execute, execute_json
+from shared.repository_scope import inside_checkout
 import hashlib
 import json
 import os
@@ -545,11 +546,7 @@ def scan(pr_target=None):
     if not base.is_absolute():
         raise RuntimeError("XDG_DATA_HOME must be an absolute path")
     private = base / "dk-pr-decisions" / host / owner / name
-    try:
-        private.resolve().relative_to(repo_dir.resolve())
-    except ValueError:
-        pass
-    else:
+    if inside_checkout(private, repo_dir):
         raise RuntimeError("Private data directory must be outside the code repository")
     state_path = private / f"pr-{pr['number']}.json"
     legacy_path = base / "dk-pr-read-comments" / host / owner / name / f"pr-{pr['number']}.json"

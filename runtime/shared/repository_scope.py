@@ -5,6 +5,28 @@ import subprocess
 from urllib.parse import urlparse
 
 
+def checkout_roots(cwd):
+    """Locate checkout and shared Git storage; a non-repository cwd protects neither."""
+    cwd = Path(cwd).resolve()
+    result = subprocess.run(['git', '-C', str(cwd), 'rev-parse', '--path-format=absolute',
+                             '--show-toplevel', '--git-common-dir'],
+                            capture_output=True, text=True, timeout=15)
+    if result.returncode:
+        # A bare repository has no worktree but its metadata is still protected.
+        result = subprocess.run(['git', '-C', str(cwd), 'rev-parse',
+                                 '--path-format=absolute', '--git-common-dir'],
+                                capture_output=True, text=True, timeout=15)
+    if result.returncode:
+        if 'not a git repository' in result.stderr.lower():
+            return []
+        raise RuntimeError(result.stderr.strip() or 'Could not resolve repository storage')
+    return [Path(line).resolve() for line in result.stdout.splitlines()]
+
+
+def inside_checkout(path, cwd):
+    return any(Path(path).resolve().is_relative_to(root) for root in checkout_roots(cwd))
+
+
 def normalize_remote(value):
     value = value.strip()
     if '://' not in value and ':' in value and not value.startswith('/'):

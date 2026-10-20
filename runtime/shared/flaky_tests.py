@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
+from shared.repository_scope import inside_checkout
 from shared.private_state import root, read, mutate
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -89,7 +90,7 @@ class Registry:
     def __init__(self, repo, cwd=None):
         self.repo = normalize_repo(repo)
         self.path = root(self.repo) / 'flaky-tests.json'
-        if cwd and self.path.resolve().is_relative_to(Path(cwd).resolve()):
+        if cwd and inside_checkout(self.path, cwd):
             raise ValueError('flake tracking must be outside the repository')
         # Preserve pre-normalization legacy history without enabling it.
         folders = [root(self.repo).parents[2]]
