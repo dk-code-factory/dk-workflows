@@ -3,8 +3,60 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import uuid
 
 from shared.repository_scope import inside_checkout
+
+
+def default_path():
+    base = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state')
+    if not base.is_absolute():
+        raise ValueError('XDG_STATE_HOME must be absolute')
+    return base / 'dk-code-factory/helper-results' / (uuid.uuid4().hex + '.json')
+
+
+def inspect_result(path, section=None, since=0, limit=20):
+    """Page a retained native result without returning its entire history."""
+    if since < 0 or not 1 <= limit <= 100:
+        raise ValueError('--since must be nonnegative and --limit must be between 1 and 100')
+    path = Path(path).expanduser().resolve()
+    artifact = json.loads(path.read_text())
+    if not isinstance(artifact, dict) or artifact.get('schema_version') != 1 or 'data' not in artifact:
+        raise ValueError('expected a terminal helper result artifact')
+    value = artifact['data']
+    if section:
+        if not section.startswith('/'):
+            raise ValueError('--section must be a JSON pointer, for example /threads')
+        for token in section[1:].split('/'):
+            token = token.replace('~1', '/').replace('~0', '~')
+            if isinstance(value, list):
+                if not token.isdecimal():
+                    raise ValueError('array sections require a numeric index')
+                value = value[int(token)]
+            elif isinstance(value, dict):
+                value = value[token]
+            else:
+                raise ValueError('section traverses a scalar value')
+
+    def preview(item):
+        if isinstance(item, (dict, list)):
+            return {'type': 'object' if isinstance(item, dict) else 'array', 'count': len(item)}
+        return item[:1024] + ('… [read artifact for full text]' if len(item) > 1024 else '') if isinstance(item, str) else item
+
+    output = {'artifact': str(path), 'outcome': artifact['outcome'], 'section': section or '',
+              'since': since, 'next': None}
+    if isinstance(value, (dict, list)):
+        entries = list(value.items()) if isinstance(value, dict) else list(enumerate(value))
+        page = [{'key': preview(str(key)), 'value': preview(item)} for key, item in entries[since:since + limit]]
+        output['count'] = len(entries)
+        while page and len(json.dumps(page, ensure_ascii=False)) > 12000:
+            page.pop()
+        output['items'] = page
+        if since + len(page) < len(entries):
+            output['next'] = since + len(page)
+    else:
+        output['value'] = preview(value)
+    return output
 
 
 def classification(command, code, data):

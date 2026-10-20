@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.1.10.
+Independent MIT plugin for Claude Code and Codex. Version 1.1.11.
 
 ## Install
 
@@ -170,3 +170,18 @@ failures during reservation prevent dispatch. A `running` artifact without a
 terminal result signals interrupted or uncertain work and requires reconciliation. Direct helper output
 and exit codes remain available when the flag is omitted. The envelope reports
 workflow gates; it cannot authorize publication or replace native validation.
+
+The stable CLI automatically uses artifact receipts for `run-state`, `replies`,
+`reviewers`, `conversation` and `inline-feedback`. Results live under
+`${XDG_STATE_HOME:-~/.local/state}/dk-code-factory/helper-results/`; an explicit
+`--result-file` selects another new private path. `--full` before the helper name
+prints native output. Native help, `--dry-run` and direct script entrypoints keep
+their existing output. Retained results are not automatically deleted.
+
+Parse the artifact's `data` from disk in programmatic consumers. Never parse a
+possibly truncated tool response as the full helper result. Inspect a bounded
+page with `dk.py result --artifact FILE --section /events --since 20 --limit 10`.
+Sections use JSON pointers relative to `data`; `/` and `~` in keys use `~1` and
+`~0`. Collection entries show container counts and scalar previews; select a
+deeper pointer for details. Long text stays in the artifact. `next` is an index
+for the next page in that immutable result, not a cursor across different runs.

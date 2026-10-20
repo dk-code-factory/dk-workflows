@@ -59,7 +59,7 @@ def test_registry_paths_exist_and_commands_available_outside_checkout(tmp_path):
 def test_real_helper_dispatch_uses_context_and_preserves_exit_codes(tmp_path, monkeypatch):
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'private'))
     monkeypatch.delenv('DK_HOST', raising=False)
-    result = subprocess.run([sys.executable, str(SCRIPT), '--host', 'codex', '--cwd', str(tmp_path),
+    result = subprocess.run([sys.executable, str(SCRIPT), '--full', '--host', 'codex', '--cwd', str(tmp_path),
         '--pr', 'https://github.com/o/r/pull/42', 'run-state', 'show'], cwd=tmp_path,
         text=True, capture_output=True)
     assert result.returncode == 0
