@@ -164,8 +164,10 @@ def invoke(binding, handoff_path, checkout, prompt, *, attempt=0):
                    DK_PROVIDER_ATTEMPT=str(attempt))
         # The immutable evidence handoff stays in argv. stdin carries the output
         # instructions and, on retry, the validation error and prior response.
-        proc = subprocess.run(argv, input=prompt, cwd=checkout, text=True, capture_output=True,
-                              env=env, timeout=provider_timeout())
+        proc = capture(subprocess.run, argv, input=prompt, cwd=checkout, text=True,
+                       capture_output=True, env=env, timeout=provider_timeout(),
+                       telemetry_prompt=prompt, telemetry_attempt=attempt,
+                       telemetry_provider='command')
         if proc.returncode:
             provider_failure('\n'.join(filter(None, (proc.stderr, proc.stdout))).strip() or 'Command provider failed')
         return proc.stdout

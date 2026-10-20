@@ -75,8 +75,16 @@ def test_command_timeout_is_enforced_by_real_subprocess(tmp_path, monkeypatch):
     monkeypatch.setenv('DK_HOST', 'codex')
     monkeypatch.setenv('DK_PROVIDER_TIMEOUT_SECONDS', '1')
     provider = tmp_path / 'slow_provider.py'
-    provider.write_text('import time\ntime.sleep(30)\n')
+    provider.write_text('import sys,time\nprint("partial command review", flush=True)\n'
+                        'print("provider waiting", file=sys.stderr, flush=True)\ntime.sleep(30)\n')
+    trace = tmp_path / 'command-trace.json'
+    monkeypatch.setenv('DK_REVIEW_STATS_TRACE', str(trace))
     with pytest.raises(subprocess.TimeoutExpired) as failure:
         executors.invoke({'command': [sys.executable, str(provider), '{handoff}']},
                          tmp_path / 'handoff.json', tmp_path, 'Review evidence')
     assert failure.value.timeout == 1
+    attempt, = json.loads(trace.read_text())['attempts']
+    assert attempt['provider'] == 'command'
+    assert attempt['stdout'] == 'partial command review\n'
+    assert attempt['stderr'] == 'provider waiting\n'
+    assert attempt['error_type'] == 'TimeoutExpired'
