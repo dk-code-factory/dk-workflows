@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.1.7.
+Independent MIT plugin for Claude Code and Codex. Version 1.1.8.
 
 ## Install
 
@@ -118,3 +118,21 @@ at most three times, with jitter and one shared deadline per read (60 seconds
 unless the caller supplies a shorter timeout). Authentication, schema failures,
 normal CI outcomes and publication operations are not retried. Exact-head and
 source-evidence checks still run after reads recover.
+
+## Workflow helper CLI
+
+Use `python3 PLUGIN_ROOT/scripts/dk.py commands` for the machine-readable helper
+map. The entrypoint resolves packaged scripts independently of the working
+directory, normalizes PR identities and supplies the selected host environment:
+
+```sh
+python3 PLUGIN_ROOT/scripts/dk.py --host codex --parent UPDATE_TOKEN \
+  --cwd REPO --pr https://github.com/OWNER/REPO/pull/42 run-state show
+```
+
+Place common context flags before the helper name, followed by its existing
+native arguments. `--repo OWNER/REPO --pr 42` is also accepted; enterprise hosts
+can use a full PR URL or `--repo HOST/OWNER/REPO`. `--dry-run` prints the argument
+vector and workflow environment without executing it. The router preserves
+helper exit codes and publication guards. Existing script entrypoints remain
+available. Lifecycle entry/completion still happen once per skill invocation.
