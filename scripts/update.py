@@ -95,7 +95,9 @@ def verify_runtime(root):
 def retain_runtime(root, cwd=None):
     try:
         return _retain_runtime(root, cwd)
-    except OSError as exc:
+    except RetentionError:
+        raise
+    except (OSError, RuntimeError) as exc:
         raise RetentionError('Runtime retention failed: ' + str(exc)) from exc
 
 
@@ -373,21 +375,22 @@ def lifecycle(root, host, phase, *, token=None, parent=None, now=None, reason=No
     with locked(state / '.lock'):
         data = read(state / 'state.json', {'checks': {}, 'notices': [], 'invocations': {}, 'sessions': {}})
         if phase == 'entry':
-            identity = installed(root, host)
+            retained = retain_runtime(root)
+            identity = installed(retained, host)
             identity_unavailable = False
-            if origin_root and (Path(origin_root) / f'.{host}-plugin/plugin.json').is_file():
+            original_root = Path(origin_root or root)
+            if original_root != retained and (original_root / f'.{host}-plugin/plugin.json').is_file():
                 try:
-                    original = installed(Path(origin_root), host)
+                    original = installed(original_root, host)
                     if original['name'] == identity['name'] and original['version'] == identity['version']:
                         identity = original
                 except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError):
                     # The frozen package remains usable when host metadata is unavailable.
                     # It stays pinned rather than granting an update to an unknown installation.
                     identity_unavailable = True
-            manifest = read(root / f'.{host}-plugin/plugin.json')
+            manifest = read(retained / f'.{host}-plugin/plugin.json')
             if identity['version'] != manifest['version']:
                 identity.update(version=manifest['version'], pinned=True)
-            retained = retain_runtime(root)
             policy = mode(settings, identity['name'])
             token = uuid.uuid4().hex
             if parent:
@@ -507,7 +510,10 @@ def main():
     except RetentionError as exc:
         result = {'status': 'runtime_unavailable', 'action': 'stop', 'message': str(exc), 'non_blocking': False}
     except Exception as exc:
-        result = {'status': 'unavailable', 'action': 'continue', 'message': str(exc), 'non_blocking': True}
+        entry = args.phase == 'entry'
+        result = {'status': 'runtime_unavailable' if entry else 'unavailable',
+                  'action': 'stop' if entry else 'continue', 'message': str(exc),
+                  'non_blocking': not entry}
     print(json.dumps(result))
 
 
