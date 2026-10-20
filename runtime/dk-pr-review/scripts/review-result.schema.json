@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pinned review provider response",
+  "description": "Return one JSON object. Pinned changed-file and added-line evidence is additionally validated by DK.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["findings"],
+      "properties": {
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["severity", "path", "line", "message", "fix"],
+            "properties": {
+              "severity": {"enum": ["Major", "Minor", "Nit"]},
+              "path": {"type": "string", "minLength": 1},
+              "line": {"type": "integer", "minimum": 1},
+              "message": {"type": "string", "pattern": "\\S"},
+              "fix": {"type": "string", "pattern": "\\S"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "findings", "message"],
+      "properties": {
+        "status": {"enum": ["incomplete", "tokens_exhausted"]},
+        "findings": {"type": "array", "maxItems": 0},
+        "message": {"type": "string", "pattern": "\\S"}
+      }
+    }
+  ],
+  "examples": [
+    {"findings": []},
+    {"findings": [{"severity": "Major", "path": "src/example.py", "line": 1, "message": "Explain the defect and consequence", "fix": "State the required outcome"}]},
+    {"status": "incomplete", "findings": [], "message": "Required source evidence is unavailable"}
+  ]
+}

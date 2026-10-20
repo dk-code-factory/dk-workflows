@@ -73,3 +73,15 @@ They execute a pinned argument vector while preserving ordinary data/output path
 Both explicit session execution and the completed iteration compatibility path
 use these bindings. Native drafting providers and command drafting corrections
 also retain their binding across the bounded correction operation.
+
+Reviewer adapters provide valid complete, clean and incomplete JSON examples and
+the packaged `scripts/review-result.schema.json` contract. The schema is included
+in retained instruction provenance; `validate_result.py --schema` prints it for
+provider integrations. JSON structure is checked in addition to pinned file/line
+and source-evidence validation. Schema-valid JSON alone cannot establish review
+coverage or publication authority.
+
+Validation failures identify JSON field pointers, missing/unexpected fields and
+bounded eligible-line samples. One correction remains the limit. Incomplete or
+usage-exhausted responses must have empty findings and a nonempty reason; they
+cannot pass the completed-result validator or become a clean review.

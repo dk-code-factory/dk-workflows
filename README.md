@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.1.14.
+Independent MIT plugin for Claude Code and Codex. Version 1.1.15.
 
 ## Install
 
@@ -208,3 +208,9 @@ source/thread IDs without repeating conversation bodies. Receipt failures retain
 their URL, provenance and expected/actual hashes. Diagnostics survive interruption
 in the run record and supply a next action; unchanged publication guards still
 require fresh complete evidence and independent approval.
+
+Review providers receive valid JSON examples and a packaged response schema.
+Field-level validation errors identify the rejected field without dumping all
+eligible lines. The adapter still checks the pinned diff and allows one correction;
+incomplete responses require an empty findings array and an explicit reason.
+Use `dk.py --host HOST validate-review --schema` to inspect the provider contract.
