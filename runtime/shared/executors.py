@@ -65,10 +65,15 @@ def managed_update(resolved, env, phase, token=None):
     Standalone plugins still ship and execute their own self-contained updater.
     """
     try:
-        return update_process(resolved, env, phase, token)
+        receipt = update_process(resolved, env, phase, token)
     except Exception as exc:
+        if resolved and resolved.get('bundle_digest'):
+            raise
         print('Plugin lifecycle unavailable: ' + str(exc), file=sys.stderr)
         return None
+    if receipt and receipt.get('action') == 'stop':
+        raise RuntimeError(receipt.get('message') or 'Required plugin runtime unavailable')
+    return receipt
 
 
 def update_process(resolved, env, phase, token=None):
@@ -78,6 +83,15 @@ def update_process(resolved, env, phase, token=None):
     manifest = json.loads((root / '.codex-plugin/plugin.json').read_text()) if (root / '.codex-plugin/plugin.json').is_file() else {}
     if manifest.get('repository') != 'https://github.com/dk-code-factory/' + manifest.get('name', ''):
         return None
+    if resolved.get('bundle_digest'):
+        from shared.runtime_bundles import updater, verify
+        if verify(root) != resolved['bundle_digest']:
+            raise ValueError('retained provider runtime changed')
+        receipt = updater().lifecycle(root, resolved['executor'], phase, token=token,
+            parent=env.get('DK_UPDATE_PARENT'), origin_root=resolved.get('origin_root'))
+        if receipt.get('message'):
+            print(receipt['message'], file=sys.stderr)
+        return receipt
     script = root / 'scripts/update.py'
     if not script.is_file():
         return None
@@ -106,11 +120,15 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None):
         identity = resolved['binding']['skill']
         if identity in stack:
             raise ValueError('Recursive provider invocation: ' + identity)
+        from shared.runtime_bundles import retained_binding
+        resolved = retained_binding(resolved)
         stack.append(identity)
         env['DK_BINDING_STACK'] = json.dumps(stack)
         prompt = (f'Apply the installed procedure at {resolved["procedure"]}. '
                   f'Its plugin root is {resolved["root"]}. Read linked resources.\n\n' + prompt)
     receipt = managed_update(resolved, env, 'entry')
+    if receipt and receipt.get('action') == 'stop':
+        raise RuntimeError(receipt.get('message') or 'Required plugin runtime unavailable')
     token = receipt.get('token') if receipt else None
     if token:
         env['DK_UPDATE_PARENT'] = token
@@ -154,12 +172,15 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
 
 
 def invoke(binding, handoff_path, checkout, prompt, *, attempt=0):
+    from shared.runtime_bundles import retained_binding
     resolved = resolve(binding)
     if resolved['executor'] == 'command':
-        argv = [part.replace('{handoff}', str(handoff_path)) for part in resolved['binding']['command']]
         stack = json.loads(os.environ.get('DK_BINDING_STACK', '[]'))
         if resolved['identity'] in stack:
             raise ValueError('Recursive command provider invocation')
+        resolved = retained_binding(resolved)
+        argv = [part.replace('{handoff}', str(handoff_path))
+                for part in resolved.get('argv', resolved['binding']['command'])]
         env = dict(os.environ, DK_BINDING_STACK=json.dumps([*stack, resolved['identity']]),
                    DK_PROVIDER_ATTEMPT=str(attempt))
         # The immutable evidence handoff stays in argv. stdin carries the output

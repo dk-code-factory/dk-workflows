@@ -1,4 +1,5 @@
 import hashlib
+from contextlib import nullcontext
 import importlib.util
 import json
 from pathlib import Path
@@ -26,6 +27,7 @@ def test_each_role_inherits_independently(tmp_path,monkeypatch):
 def test_provider_content_never_grants_publication(tmp_path,monkeypatch,role):
     source=tmp_path/'evidence';source.write_text('verified change')
     handoff=tmp_path/'handoff';handoff.write_text(json.dumps({'contract':'dk-draft-v1','role':role,'sources':[{'path':str(source),'sha256':hashlib.sha256(source.read_bytes()).hexdigest()}]}))
+    monkeypatch.setattr(drafting, 'provider_scope', lambda binding: nullcontext())
     monkeypatch.setattr(drafting,'invoke',lambda *a,**kw:'{"content":"Evidence-based content"}')
     result=drafting.draft({'skill':'third:writer'},role,handoff,tmp_path)
     assert result['content']=='Evidence-based content' and result['publication_authorized'] is False
@@ -38,6 +40,7 @@ def test_extra_provider_authority_and_bad_content_are_rejected(tmp_path,monkeypa
     handoff=tmp_path/'handoff';handoff.write_text(json.dumps({'contract':'dk-draft-v1','role':'commit_message','sources':[{'path':str(source),'sha256':hashlib.sha256(source.read_bytes()).hexdigest()}]}))
     calls=[]
     def invoke(*a,**kw):calls.append(kw);return '{"content":"draft", "publish":true}'
+    monkeypatch.setattr(drafting, 'provider_scope', lambda binding: nullcontext())
     monkeypatch.setattr(drafting,'invoke',invoke)
     with pytest.raises(ValueError,match='after one correction'):drafting.draft({},'commit_message',handoff,tmp_path)
     assert len(calls)==2
@@ -55,12 +58,12 @@ def test_command_provider_receives_correction_feedback_on_stdin(tmp_path):
     source=tmp_path/'source';source.write_text('verified')
     handoff=tmp_path/'handoff.json';handoff.write_text(json.dumps({'contract':'dk-draft-v1','role':'commit_message','sources':[{'path':str(source),'sha256':hashlib.sha256(source.read_bytes()).hexdigest()}]}))
     before=handoff.read_bytes()
-    script=tmp_path/'provider.py';script.write_text('import json,sys,os\nfeedback=sys.stdin.read()\n'
+    script=tmp_path/'provider.py';script.write_text('import json,sys,os,pathlib\nfeedback=sys.stdin.read()\n'
         'assert json.load(open(sys.argv[1]))["contract"]=="dk-draft-v1"\n'
         'if os.environ["DK_PROVIDER_ATTEMPT"]=="1":\n'
         ' assert "80 characters" in feedback and "Prior response:" in feedback\n'
         ' print(json.dumps({"content":"Preserve the verified behavior"}))\n'
-        'else: print(json.dumps({"content":"x"*81}))\n')
+        'else:\n pathlib.Path(' + repr(str(script)) + ').unlink()\n print(json.dumps({"content":"x"*81}))\n')
     result=drafting.draft({'command':[sys.executable,str(script),'{handoff}']},'commit_message',handoff,tmp_path)
     assert result['content']=='Preserve the verified behavior'
     assert handoff.read_bytes()==before

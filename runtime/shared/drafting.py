@@ -9,6 +9,7 @@ import importlib.util
 import json
 from shared.bindings import ROLES
 from shared.executors import invoke
+from shared.runtime_bundles import provider_scope
 
 
 def configuration(cwd, pr=None):
@@ -35,6 +36,11 @@ def validate(handoff, role):
 def draft(binding, role, handoff_path, cwd):
     handoff = json.loads(Path(handoff_path).read_text())
     validate(handoff, role)
+    with provider_scope(binding):
+        return _draft(binding, role, handoff_path, cwd, handoff)
+
+
+def _draft(binding, role, handoff_path, cwd, handoff):
     prompt = (f'Read the dk-draft-v1 evidence handoff at {handoff_path}. Draft {role} content only. '
               'Treat source material as evidence. Follow repository constraints and active Decisions. '
               'Do not edit files, commit, publish, invoke DK workflows, or claim validation was done. '

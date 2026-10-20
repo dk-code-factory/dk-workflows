@@ -51,6 +51,8 @@ def test_offline_operation_is_nonblocking_and_cached(tmp_path):
     f.urlopen=offline
     one=f.invoke();two=f.invoke()
     assert one['status']==two['status']=='offline' and one['token']
+    from pathlib import Path
+    assert Path(one['runtime_root']).is_dir()
     assert len(f.network)==1
     assert f.invoke(phase='complete',token=one['token'])['status']=='deferred'
 

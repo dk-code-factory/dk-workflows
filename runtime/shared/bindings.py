@@ -57,6 +57,42 @@ def codex_plugins():
     return records
 
 
+_PINNED_BINDINGS = ContextVar('dk_pinned_bindings', default={})
+
+
+@contextmanager
+def pinned_bindings(descriptors):
+    from shared.runtime_bundles import verify, verify_binding
+    pinned = {}
+    for name, descriptor in descriptors.items():
+        value = descriptor.get('execution')
+        if value is None:
+            continue  # Legacy preparation keeps its original registry validation.
+        canonical = key(value['binding'])
+        alias = name in ALIASES and normalize(name) == normalize(value['binding'])
+        if value.get('executor') == 'command':
+            if name != canonical or value.get('identity') != canonical or not value.get('bundles'):
+                raise ValueError('invalid retained command binding')
+            verify_binding(value)
+            pinned[name] = value
+            continue
+        host = current_host() if value['binding'].get('host', 'current') == 'current' else value['binding']['host']
+        if (value.get('executor') != host or (name != canonical and not alias)
+                or value.get('identity') != canonical or verify(value['root']) != value.get('bundle_digest')):
+            raise ValueError('invalid retained reviewer binding')
+        procedure, manifest = manifest_skill(Path(value['root']), value['executor'],
+                                             *value['binding']['skill'].split(':'))
+        if (str(procedure) != value['procedure'] or (value.get('version') is not None
+                and manifest.get('version') != value['version'])):
+            raise ValueError('retained reviewer procedure or version changed')
+        pinned[name] = value
+    token = _PINNED_BINDINGS.set(pinned)
+    try:
+        yield
+    finally:
+        _PINNED_BINDINGS.reset(token)
+
+
 def current_host():
     host = os.environ.get('DK_HOST')
     if host not in ('codex', 'claude'):
@@ -136,6 +172,11 @@ def manifest_skill(root, host, namespace, name):
 
 
 def resolve(value):
+    selected = _PINNED_BINDINGS.get().get(key(value))
+    if selected is not None:
+        from shared.runtime_bundles import verify_binding
+        verify_binding(selected)
+        return dict(selected)
     binding = normalize(value)
     if 'command' in binding:
         exe = binding['command'][0]

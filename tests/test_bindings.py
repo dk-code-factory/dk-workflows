@@ -107,15 +107,34 @@ def test_owned_plugin_lifecycle_surrounds_read_only_execution_even_on_failure(tm
         'with p.open("a") as f:f.write(sys.argv[1]+"\\n")\n'
         'print(json.dumps({"token":"fixture-token","action":"continue","identity":{"name":"owned"}}))\n')
     monkeypatch.setenv('DK_TEST_EVENTS',str(events))
+    monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'config'))
+    policy = tmp_path / 'config/dk-code-factory/updates.json'
+    policy.parent.mkdir(parents=True)
+    policy.write_text('{"mode":"off"}')
+    from shared.runtime_bundles import updater
+    api = updater()
+    installed = api.installed
+    def identity(path, host):
+        if path == root:
+            return {'name':'owned','host':host,'marketplace':None,'version':'1.2.3',
+                    'repository':'dk-code-factory/owned','pinned':True,'scope':'user','root':str(path)}
+        return installed(path, host)
+    monkeypatch.setattr(api, 'installed', identity)
+    observed = []
     def process(prompt,checkout,host,env,*args):
-        assert env['DK_UPDATE_PARENT']=='fixture-token'
-        assert json.loads(env['DK_UPDATE_MANAGED_RECEIPT'])['token']=='fixture-token'
+        receipt = json.loads(env['DK_UPDATE_MANAGED_RECEIPT'])
+        observed.append(receipt['token'])
+        assert env['DK_UPDATE_PARENT'] == receipt['token']
+        assert Path(receipt['runtime_root']).is_dir()
         assert 'do not duplicate' in prompt
         raise RuntimeError('interrupted provider')
     monkeypatch.setattr(e,'execute_process',process)
     resolved={'executor':'codex','binding':{'skill':'owned:review'},'procedure':str(root/'native/skills/review/SKILL.md'),'root':str(root)}
     with pytest.raises(RuntimeError,match='interrupted provider'):e.execute('Review evidence',tmp_path,resolved=resolved)
-    assert events.read_text().splitlines()==['entry','complete']
+    ledger = json.loads((tmp_path / 'state/dk-code-factory/updates/state.json').read_text())
+    assert ledger['invocations'][observed[0]]['complete']
+    assert not events.exists()
 
 
 def test_third_party_updater_is_not_invoked(tmp_path,monkeypatch):
@@ -133,8 +152,12 @@ def test_by_name_agent_and_custom_command_resources_are_fingerprinted(tmp_path,m
     (root/'custom-commands').mkdir();command=root/'custom-commands/review-pr.md';command.write_text('Dispatch security agent')
     manifest=root/'.claude-plugin/plugin.json';data=json.loads(manifest.read_text());data['commands']='./custom-commands/';manifest.write_text(json.dumps(data))
     first=runner.describe_reviewer('third-party:review')
-    assert str(agent) in {s['path'] for s in first['sources']}
-    assert str(command) in {s['path'] for s in first['sources']}
+    retained_agent = Path(first['execution']['root']) / agent.relative_to(root)
+    assert str(retained_agent) in {s['path'] for s in first['sources']}
+    assert retained_agent.read_text() == agent.read_text()
+    retained_command = Path(first['execution']['root']) / command.relative_to(root)
+    assert str(retained_command) in {s['path'] for s in first['sources']}
+    assert retained_command.read_text() == command.read_text()
     agent.write_text('Changed authorization method')
     assert runner.describe_reviewer('third-party:review')!=first
 
@@ -241,7 +264,8 @@ def test_describe_cli_shares_inventory_across_reviewer_descriptors(tmp_path, mon
               'version': '1.2.3', 'installedPath': str(root)}
     calls = []
     def registry_run(*args, **kwargs):
-        calls.append(args[0])
+        if args[0][0] == 'codex':
+            calls.append(args[0])
         return subprocess.CompletedProcess([], 0, json.dumps({'installed': [record]}), '')
     monkeypatch.setattr(b.subprocess, 'run', registry_run)
     monkeypatch.setattr(runner, 'run', lambda *args: json.dumps({'reviewers': [

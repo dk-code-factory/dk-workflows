@@ -3,6 +3,9 @@
 import argparse
 from contextlib import contextmanager
 import json
+import hashlib
+import shutil
+import stat
 import os
 from pathlib import Path
 import re
@@ -15,6 +18,134 @@ import uuid
 
 DAY = 86400
 MODES = ('notify', 'auto', 'off')
+
+
+BUNDLE_MARKER = '.dk-runtime-bundle.json'
+BUNDLE_SKIP = {'.git', '__pycache__', '.pytest_cache', BUNDLE_MARKER}
+
+
+class RetentionError(RuntimeError):
+    """Required runtime resources could not be retained or verified."""
+
+
+def resource_hash(path):
+    sha = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            sha.update(chunk)
+    return sha.hexdigest()
+
+
+def resource_manifest(root):
+    root = Path(root).resolve()
+    files = {}
+    def walk(folder, relative, ancestors, record=True):
+        resolved = folder.resolve()
+        if not resolved.is_relative_to(root) or resolved in ancestors:
+            raise RetentionError('Runtime contains an escaping or cyclic directory link')
+        for path in sorted(folder.iterdir()):
+            if path.name in BUNDLE_SKIP:
+                continue
+            name = relative / path.name
+            target = path.resolve()
+            if not target.is_relative_to(root):
+                raise RetentionError('Runtime resource escapes its package: ' + str(name))
+            if path.is_symlink():
+                if path.is_dir():
+                    walk(path, name, ancestors | {resolved}, record=False)
+                elif not path.is_file():
+                    raise RetentionError('Unsupported runtime resource: ' + str(name))
+                if record:
+                    files[name.as_posix()] = {'symlink': os.path.relpath(target, path.parent.resolve()),
+                                             'directory': path.is_dir()}
+            elif path.is_dir():
+                if record:
+                    files[name.as_posix()] = {'directory': True}
+                walk(path, name, ancestors | {resolved}, record)
+            elif path.is_file():
+                if record:
+                    files[name.as_posix()] = {'sha256': resource_hash(path),
+                        'executable': stat.S_IMODE(path.stat().st_mode) & 0o111}
+            else:
+                raise RetentionError('Unsupported runtime resource: ' + str(name))
+    walk(root, Path(), set())
+    return files
+
+
+def bundle_digest(files):
+    return hashlib.sha256(json.dumps(files, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def verify_runtime(root):
+    root = Path(root).resolve()
+    try:
+        marker = json.loads((root / BUNDLE_MARKER).read_text())
+        files = resource_manifest(root)
+        if not isinstance(marker, dict):
+            raise RetentionError('Retained runtime marker is invalid')
+        if (marker.get('version') != 1 or marker.get('files') != files
+                or marker.get('digest') != bundle_digest(files)
+                or root.name != marker['digest']):
+            raise RetentionError('Retained runtime resources changed')
+    except (OSError, ValueError, KeyError) as exc:
+        raise RetentionError('Retained runtime resources unavailable: ' + str(exc)) from exc
+    return marker['digest']
+
+
+def retain_runtime(root, cwd=None):
+    try:
+        return _retain_runtime(root, cwd)
+    except OSError as exc:
+        raise RetentionError('Runtime retention failed: ' + str(exc)) from exc
+
+
+def _retain_runtime(root, cwd=None):
+    root = Path(root).resolve()
+    _, state = paths(root, Path(cwd or Path.cwd()))
+    store = state / 'runtimes'
+    if (root / BUNDLE_MARKER).is_file():
+        if root.parent != store.resolve():
+            raise RetentionError('Retained runtime is outside the configured private store')
+        verify_runtime(root)
+        return root
+    files = resource_manifest(root)
+    fingerprint = bundle_digest(files)
+    store.mkdir(parents=True, exist_ok=True, mode=0o700)
+    target = store / fingerprint
+    with locked(store / (fingerprint + '.lock')):
+        if target.exists():
+            verify_runtime(target)
+            return target
+        temporary = Path(tempfile.mkdtemp(prefix='.runtime-', dir=store))
+        try:
+            for name, info in files.items():
+                destination = temporary / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                if 'symlink' in info:
+                    destination.symlink_to(info['symlink'], target_is_directory=info['directory'])
+                    continue
+                if info.get('directory'):
+                    destination.mkdir(exist_ok=True)
+                    continue
+                shutil.copyfile(root / name, destination)
+                os.chmod(destination, 0o444 | info['executable'])
+            if resource_manifest(temporary) != files or resource_manifest(root) != files:
+                raise RetentionError('Runtime changed while retaining resources; retry from a stable installation')
+            (temporary / BUNDLE_MARKER).write_text(json.dumps(
+                {'version': 1, 'digest': fingerprint, 'files': files}, sort_keys=True) + '\n')
+            os.chmod(temporary / BUNDLE_MARKER, 0o444)
+            for directory in sorted((p for p in temporary.rglob('*') if p.is_dir() and not p.is_symlink()), reverse=True):
+                os.chmod(directory, 0o555)
+            os.chmod(temporary, 0o555)
+            os.replace(temporary, target)
+        finally:
+            if temporary.exists():
+                for directory in temporary.rglob('*'):
+                    if directory.is_dir() and not directory.is_symlink():
+                        os.chmod(directory, 0o700)
+                os.chmod(temporary, 0o700)
+                shutil.rmtree(temporary)
+    return target
 
 
 def read(path, default=None):
@@ -66,6 +197,12 @@ def run(argv):
 
 
 def installed(root, host):
+    if (root / BUNDLE_MARKER).is_file():
+        verify_runtime(root)
+        manifest = read(root / f'.{host}-plugin/plugin.json')
+        return {'name': manifest['name'], 'host': host, 'marketplace': None,
+                'version': manifest['version'], 'repository': 'dk-code-factory/' + manifest['name'],
+                'pinned': True, 'scope': 'user', 'root': str(root)}
     manifest = read(root / f'.{host}-plugin/plugin.json')
     name = manifest['name']
     marketplace = None
@@ -114,6 +251,35 @@ def installed(root, host):
     return {'name': name, 'host': host, 'marketplace': marketplace, 'version': manifest['version'],
             'repository': 'dk-code-factory/' + name, 'pinned': pinned, 'scope': scope,
             'root': str(root)}
+
+
+def current_installation(identity):
+    """Reconcile a host-replaced cache through its registry, never by directory guessing."""
+    root = Path(identity['root'])
+    if (root / f'.{identity["host"]}-plugin/plugin.json').is_file():
+        current = installed(root, identity['host'])
+        if any(current[key] != identity[key] for key in ('name', 'host', 'marketplace', 'scope')):
+            raise ValueError('Installation identity changed during workflow')
+        return current
+    if identity['host'] == 'claude':
+        home = Path(os.environ.get('CLAUDE_CONFIG_DIR', Path.home() / '.claude'))
+        rows = read(home / 'plugins/installed_plugins.json').get('plugins', {}).get(
+            identity['name'] + '@' + identity['marketplace'], [])
+        matches = [Path(row['installPath']) for row in rows
+                   if row.get('scope', 'user') == identity['scope']]
+    else:
+        rows = json.loads(run(['codex', 'plugin', 'list', '--json'])).get('installed', [])
+        home = Path(os.environ.get('CODEX_HOME', Path.home() / '.codex'))
+        matches = [Path(row.get('installedPath') or row.get('installPath') or
+                       home / 'plugins/cache' / row['marketplaceName'] / row['name'] / row['version'])
+                   for row in rows if row.get('pluginId') == identity['name'] + '@' + identity['marketplace']
+                   and row.get('scope', 'user') == identity['scope']]
+    if len(matches) != 1:
+        raise ValueError('Installed plugin replacement is missing or ambiguous')
+    current = installed(matches[0], identity['host'])
+    if any(current[key] != identity[key] for key in ('name', 'host', 'marketplace', 'scope')):
+        raise ValueError('Installation identity changed during workflow')
+    return current
 
 
 def latest(repository):
@@ -200,7 +366,7 @@ def inspect_lifecycle(root, token=None):
                            'all nested work before explicitly completing a retained token.'}
 
 
-def lifecycle(root, host, phase, *, token=None, parent=None, now=None, reason=None):
+def lifecycle(root, host, phase, *, token=None, parent=None, now=None, reason=None, origin_root=None):
     now = time.time() if now is None else now
     config_path, state = paths(root, Path.cwd())
     settings = read(config_path)
@@ -208,6 +374,20 @@ def lifecycle(root, host, phase, *, token=None, parent=None, now=None, reason=No
         data = read(state / 'state.json', {'checks': {}, 'notices': [], 'invocations': {}, 'sessions': {}})
         if phase == 'entry':
             identity = installed(root, host)
+            identity_unavailable = False
+            if origin_root and (Path(origin_root) / f'.{host}-plugin/plugin.json').is_file():
+                try:
+                    original = installed(Path(origin_root), host)
+                    if original['name'] == identity['name'] and original['version'] == identity['version']:
+                        identity = original
+                except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError):
+                    # The frozen package remains usable when host metadata is unavailable.
+                    # It stays pinned rather than granting an update to an unknown installation.
+                    identity_unavailable = True
+            manifest = read(root / f'.{host}-plugin/plugin.json')
+            if identity['version'] != manifest['version']:
+                identity.update(version=manifest['version'], pinned=True)
+            retained = retain_runtime(root)
             policy = mode(settings, identity['name'])
             token = uuid.uuid4().hex
             if parent:
@@ -222,11 +402,14 @@ def lifecycle(root, host, phase, *, token=None, parent=None, now=None, reason=No
             data['invocations'][token] = {
                 'session': session_id, 'complete': False, 'parent': parent,
                 'created_at': now, 'host': host, 'plugin': identity['name'],
+                'runtime_root': str(retained),
                 'owner': {'thread_id': os.environ.get('CODEX_THREAD_ID') if host == 'codex'
                           else os.environ.get('CLAUDE_SESSION_ID'),
                           'parent_pid': os.getppid(), 'cwd': str(Path.cwd())}}
             result = {'status': 'current', 'action': 'continue', 'message': '', 'token': token,
-                      'identity': identity, 'mode': policy}
+                      'identity': identity, 'mode': policy, 'runtime_root': str(retained),
+                      'completion_script': str(retained / 'scripts/update.py'),
+                      'update_identity_unavailable': identity_unavailable}
             if policy != 'off':
                 cache = data['checks'].get(identity['repository'], {})
                 if now - cache.get('checked', -DAY) >= DAY:
@@ -278,7 +461,7 @@ def lifecycle(root, host, phase, *, token=None, parent=None, now=None, reason=No
                     if mode(settings, identity['name']) != 'auto':
                         continue
                     try:
-                        current = installed(Path(identity['root']), identity['host'])
+                        current = current_installation(identity)
                         if current['marketplace'] != identity['marketplace']:
                             raise ValueError('Installation identity changed during workflow')
                         outcome = update(current, pending['target'])
@@ -321,6 +504,8 @@ def main():
         else:
             result = lifecycle(root, args.host, args.phase, token=args.token, parent=args.parent,
                                reason=args.reason)
+    except RetentionError as exc:
+        result = {'status': 'runtime_unavailable', 'action': 'stop', 'message': str(exc), 'non_blocking': False}
     except Exception as exc:
         result = {'status': 'unavailable', 'action': 'continue', 'message': str(exc), 'non_blocking': True}
     print(json.dumps(result))

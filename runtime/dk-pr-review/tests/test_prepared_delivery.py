@@ -41,9 +41,11 @@ class PreparedDeliveryTests(unittest.TestCase):
         self.assertEqual(prep.git(self.package.repo,'rev-parse','HEAD'),before)
         self.assertEqual(prep.git(self.package.repo,'status','--porcelain=v1'),'')
     def test_changed_provider_source_blocks_before_launch(self):
-        artifact=self.prepare();self.script.write_text('print("changed")')
+        artifact=self.prepare()
+        retained=Path(artifact['reviewers'][self.name]['execution']['argv'][1])
+        retained.chmod(0o644);retained.write_text('print("changed")')
         with patch.object(runner,'invoke') as launch:
-            with self.assertRaisesRegex(ValueError,'changed'):runner.review(self.package.context,[self.provider],'',self.package.decisions,'',artifact)
+            with self.assertRaisesRegex((ValueError, RuntimeError),'changed'):runner.review(self.package.context,[self.provider],'',self.package.decisions,'',artifact)
         launch.assert_not_called()
     def test_descriptor_contract_change_blocks_even_when_source_remains(self):
         artifact=self.prepare();changed=dict(artifact['reviewers'][self.name],effective_prompt='different')
@@ -59,3 +61,10 @@ class PreparedDeliveryTests(unittest.TestCase):
         with patch.object(runner,'invoke') as launch,self.assertRaisesRegex(ValueError,'supplied patch'):
             runner.review(context,[self.provider],'',self.package.decisions,'',artifact)
         launch.assert_not_called()
+
+    def test_removed_command_resource_uses_retained_copy(self):
+        artifact=self.prepare()
+        self.script.unlink()
+        result=runner.review(self.package.context,[self.provider],'',self.package.decisions,'',artifact)
+        self.assertTrue(result['complete'],result)
+        self.assertTrue(self.received.is_file())

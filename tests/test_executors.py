@@ -88,3 +88,28 @@ def test_command_timeout_is_enforced_by_real_subprocess(tmp_path, monkeypatch):
     assert attempt['stdout'] == 'partial command review\n'
     assert attempt['stderr'] == 'provider waiting\n'
     assert attempt['error_type'] == 'TimeoutExpired'
+
+
+
+def test_runtime_stop_receipt_blocks_provider_start(tmp_path, monkeypatch):
+    monkeypatch.setenv('DK_HOST', 'codex')
+    monkeypatch.setattr(executors, 'managed_update', Mock(return_value={
+        'status': 'runtime_unavailable', 'action': 'stop', 'message': 'runtime retention failed'}))
+    process = Mock()
+    monkeypatch.setattr(executors, 'execute_process', process)
+    with pytest.raises(RuntimeError, match='runtime retention failed'):
+        executors.execute('Review evidence', tmp_path)
+    process.assert_not_called()
+
+
+
+def test_managed_retention_exception_is_not_reported_as_optional_update_failure(monkeypatch):
+    # Call the real manager; this module's autouse fixture replaces the exported name.
+    import importlib.util
+    path = Path(executors.__file__)
+    spec = importlib.util.spec_from_file_location('retention_manager', path)
+    manager = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(manager)
+    monkeypatch.setattr(manager, 'update_process', Mock(side_effect=RuntimeError('retained runtime changed')))
+    with pytest.raises(RuntimeError, match='retained runtime changed'):
+        manager.managed_update({'bundle_digest': 'pinned'}, {}, 'entry')
