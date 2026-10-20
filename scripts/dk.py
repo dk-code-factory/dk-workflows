@@ -12,7 +12,9 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'runtime'))
-from shared.command_results import ResultFile, receipt
+from shared.command_results import ResultFile, receipt, default_path, inspect_result
+
+ARTIFACT_DEFAULTS = {'run-state', 'replies', 'reviewers', 'conversation', 'inline-feedback'}
 # Each row is a packaged script, cwd argument placement, PR argument, repo argument.
 ROUTES = {
     'config': ('runtime/dk-config/scripts/repo_rules.py', 'before', 'url', False),
@@ -154,7 +156,10 @@ def early_context(arguments):
                     break
                 value = arguments[index]
             context[option] = value
-        elif option != '--dry-run':
+        elif option in ('--dry-run', '--full'):
+            context[option] = True
+        else:
+            context['command'] = option
             break
         index += 1
     return context
@@ -169,15 +174,32 @@ def dispatch(arguments, result_file=None):
     parser.add_argument('--parent', default=os.environ.get('DK_UPDATE_PARENT'))
     parser.add_argument('--dry-run', action='store_true', help='Print argv and workflow context without running a helper')
     parser.add_argument('--result-file', help='Retain full private diagnostics and print a typed terminal receipt')
-    parser.add_argument('command', choices=['commands', *ROUTES])
+    parser.add_argument('--full', action='store_true', help='Print native helper output instead of automatic artifact receipts')
+    parser.add_argument('command', choices=['commands', 'result', *ROUTES])
     parser.add_argument('arguments', nargs=argparse.REMAINDER)
     args = parser.parse_args(arguments)
+    if args.full and args.result_file:
+        parser.error('--full cannot be combined with --result-file')
     if args.command == 'commands':
         if args.arguments:
             parser.error('commands accepts no native helper arguments')
         print(json.dumps({'schema_version': 1, 'commands': {
-            name: {'script': row[0], 'cwd': row[1], 'pr': row[2], 'repo': row[3]}
+            name: {'script': row[0], 'cwd': row[1], 'pr': row[2], 'repo': row[3],
+                   'output': 'artifact' if name in ARTIFACT_DEFAULTS else 'native'}
             for name, row in ROUTES.items()}}, sort_keys=True))
+        return 0
+    if args.command == 'result':
+        result_parser = Parser(description='Inspect retained native helper data')
+        result_parser.add_argument('--artifact', required=True)
+        result_parser.add_argument('--section')
+        result_parser.add_argument('--since', type=int, default=0)
+        result_parser.add_argument('--limit', type=int, default=20)
+        selected = result_parser.parse_args(args.arguments)
+        try:
+            value = inspect_result(selected.artifact, selected.section, selected.since, selected.limit)
+        except (OSError, ValueError, KeyError, IndexError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(value, ensure_ascii=False))
         return 0
     if args.host not in ('codex', 'claude'):
         parser.error('set --host codex|claude or use the native skill entrypoint environment')
@@ -201,6 +223,14 @@ def main():
     arguments = sys.argv[1:]
     context = early_context(arguments)
     artifact = None
+    automatic = (context.get('command') in ARTIFACT_DEFAULTS and not context.get('--full')
+                 and not context.get('--dry-run') and not any(x in ('--help', '-h') for x in arguments))
+    if automatic and '--result-file' not in context:
+        try:
+            context['--result-file'] = str(default_path())
+        except ValueError as exc:
+            print(json.dumps({**receipt('error', 'artifact_storage', str(exc), None, 2)}))
+            return 2
     if '--result-file' in context:
         try:
             artifact = ResultFile(context['--result-file'], context.get('--cwd', '.'), ROOT)

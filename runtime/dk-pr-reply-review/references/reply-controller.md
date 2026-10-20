@@ -1,5 +1,13 @@
 # Script-controlled reply passes
 
+Prefer the stable `dk.py replies` route with common context before the route and
+controller arguments after it. It returns a compact artifact receipt. Load the
+saved artifact's `data` from disk to read the controller action and mappings;
+do not JSON-parse a truncated tool response. Use `dk.py result --artifact FILE
+--section /FIELD` for bounded inspection and pass artifact paths to validators.
+Direct `reply_passes.py` examples below show the native arguments and remain
+compatible; `dk.py --full ... replies` explicitly requests their native output.
+
 Use `scripts/reply_passes.py` to control both passes. The reply agent follows its `action` and prepares request mappings and text; it does not select the next phase or publish directly. The controller uses the complete shared GitHub fetchers, retains all resolved conversations, and publishes through the existing `reply_batch.py` guard. Existing guard commands and batch schema are unchanged.
 
 When called by `dk-pr-iter`, use the existing run record and canonical reply agent ID. For standalone reply work, initialize a JSON record outside the repository containing `{"pr": NUMBER}`. The controller stores history under `reply_workflow` in this record and saves immutable evidence/batch/verdict/journal artifacts beside it in `RECORD_STEM-replies/`. Use the same record through completion, interruptions, and head changes.
