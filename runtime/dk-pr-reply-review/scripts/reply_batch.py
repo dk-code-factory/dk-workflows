@@ -142,7 +142,8 @@ def quote(excerpt):
     return '\n'.join('> ' + line for line in excerpt.split('\n'))
 
 
-def validate(batch):
+def validate(batch, *, require_details=False):
+    """Validate retained evidence; apply current wording rules only to new replies."""
     require(batch.get('schemaVersion') == 1, 'unsupported reply batch')
     evidence = context(batch['snapshot'], batch['conversation'])
     source_map, threads = sources(evidence)
@@ -233,6 +234,10 @@ def validate(batch):
                 end = positions[i + 1][0] if i + 1 < len(positions) else len(body)
                 answer = body[start + len(quoted):end].strip()
                 require(answer and not answer.startswith('>'), 'each quoted request needs its own answer')
+                if require_details:
+                    require(answer.casefold().rstrip('.!').strip() not in
+                            ('fixed', 'done', 'addressed', 'resolved'),
+                            'PR-level answer must describe the change or outcome, not just acknowledge it')
         else:
             raise GuardError('invalid reply destination')
     require(used == {key for key, r in requests.items() if r['disposition'] == 'reply'},
@@ -294,7 +299,7 @@ def post(reply, pr, cwd):
 
 
 def publish(batch, verdict, journal_path, cwd):
-    expected = validate(batch)
+    expected = validate(batch, require_details=True)
     if not batch['replies']:
         return {'status': 'empty', 'replies': []}
     require_approval(batch, verdict)
@@ -333,12 +338,12 @@ def main():
         if args.command == 'prepare':
             batch = dict(read(args.draft), schemaVersion=1, snapshot=read(args.snapshot),
                          conversation=read(args.conversation))
-            validate(batch)
+            validate(batch, require_details=True)
             write(args.out, batch)
             result = {'batchSha256': digest(batch), 'replyCount': len(batch['replies'])}
         elif args.command == 'check':
             batch = read(args.batch)
-            validate(batch)
+            validate(batch, require_details=True)
             result = {'batchSha256': digest(batch), 'replyCount': len(batch['replies'])}
         else:
             result = publish(read(args.batch), read(args.verdict), args.journal, args.cwd.resolve())
