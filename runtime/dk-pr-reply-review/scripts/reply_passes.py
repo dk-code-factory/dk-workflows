@@ -339,7 +339,7 @@ class Controller:
         require(self.work['phase'] == observation['phase'] and self.work['phase'] != 'done',
                 'run next for the current phase')
         batch = guard.read(batch_path)
-        expected = guard.validate(batch)
+        expected = guard.validate(batch, require_details=True)
         source_map = all_sources(expected)
         require(batch['snapshot'].get('selection') == guard.read(observation['snapshot']).get('selection'),
                 'batch changed selected review')

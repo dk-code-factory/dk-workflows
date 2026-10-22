@@ -39,8 +39,11 @@ def request(key, source=REVIEW, excerpt='Add a test.', thread=None, disposition=
 
 
 def reply(key, ids, source=REVIEW, excerpts=('Add a test.',), kind='issue_comment'):
+    answers = {'Add a test.': 'Added a regression test.',
+               'Document the timeout.': 'Documented the timeout in the usage guide.'}
     body = 'fixed.' if kind == 'inline' else f'[In reply to]({PR}#{source})\n\n' + '\n\n'.join(
-        guard.quote(excerpt) + '\n\nfixed.' for excerpt in excerpts)
+        guard.quote(excerpt) + '\n\n' + answers.get(excerpt, 'Explained the timeout and its configured limit.')
+        for excerpt in excerpts)
     return {'id': key, 'requestIds': ids, 'destination': {'kind': kind, 'reference': source}, 'body': body}
 
 
@@ -59,9 +62,33 @@ def approval(batch, **changes):
 class ReplyBatchTest(unittest.TestCase):
     def test_body_only_quotes_and_answers_both_requests_in_one_comment(self):
         batch = body_batch()
-        guard.validate(batch)
+        guard.validate(batch, require_details=True)
         self.assertEqual(len(batch['replies']), 1)
-        self.assertEqual(batch['replies'][0]['body'].count('fixed.'), 2)
+        self.assertIn('Added a regression test.', batch['replies'][0]['body'])
+        self.assertIn('Documented the timeout in the usage guide.', batch['replies'][0]['body'])
+
+    def test_top_level_boilerplate_rejected_before_any_publication_work(self):
+        for answer in ('fixed.', 'Done!', 'ADDRESSED', 'resolved.'):
+            with self.subTest(answer=answer):
+                batch = body_batch()
+                batch['replies'][0]['body'] = batch['replies'][0]['body'].replace(
+                    'Added a regression test.', answer)
+                with tempfile.TemporaryDirectory() as folder, patch.object(guard, 'fetch_live') as fetch, \
+                        patch.object(guard, 'post') as post:
+                    journal = Path(folder) / 'journal.json'
+                    with self.assertRaisesRegex(guard.GuardError, 'describe the change or outcome'):
+                        guard.publish(batch, approval(batch), journal, Path('.'))
+                    self.assertFalse(journal.exists())
+                    fetch.assert_not_called()
+                    post.assert_not_called()
+
+    def test_legacy_repeated_acknowledgements_remain_valid_recovery_evidence(self):
+        batch = body_batch()
+        batch['replies'][0]['body'] = (f'[In reply to]({PR}#{REVIEW})\n\n'
+                                      '> Add a test.\n\nfixed.\n\n> Document the timeout.\n\nfixed.')
+        guard.validate(batch)
+        with self.assertRaisesRegex(guard.GuardError, 'describe the change or outcome'):
+            guard.validate(batch, require_details=True)
 
     def test_inline_only_and_body_duplicate_share_one_inline_reply(self):
         batch = fixture(True)
@@ -95,7 +122,7 @@ class ReplyBatchTest(unittest.TestCase):
 
     def test_each_excerpt_must_be_exact_and_have_its_own_answer(self):
         for transform in (lambda b: b.replace('Add a test.', 'Add tests.'),
-                          lambda b: b.replace('> Add a test.\n\nfixed.', '> Add a test.')):
+                          lambda b: b.replace('> Add a test.\n\nAdded a regression test.', '> Add a test.')):
             batch = body_batch()
             batch['replies'][0]['body'] = transform(batch['replies'][0]['body'])
             with self.assertRaises(guard.GuardError):

@@ -90,7 +90,8 @@ def request(key, source=REVIEW, excerpt='Add a test.', thread=None, disposition=
 
 
 def response(key, ids, reference='T1', kind='inline', excerpt='Document the timeout.'):
-    body = 'fixed.' if kind == 'inline' else f'[In reply to]({PR}#{reference})\n\n> {excerpt}\n\nfixed.'
+    body = 'fixed.' if kind == 'inline' else (
+        f'[In reply to]({PR}#{reference})\n\n> {excerpt}\n\nDocumented the timeout in the usage guide.')
     return dict(id=key, requestIds=ids, destination=dict(kind=kind, reference=reference), body=body)
 
 
