@@ -316,6 +316,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                 if capturing:
                     stats.safe(stats.finish, 'exhausted', result, result['message'])
                 if session:
+                    checking = True
                     session.record(name, 'exhausted', reason=result['message'])
                 continue
             if (isinstance(result, dict) and result.get('status') == 'incomplete'
@@ -324,6 +325,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                 if capturing:
                     stats.safe(stats.finish, 'incomplete', result, result['message'])
                 if session:
+                    checking = True
                     session.record(name, 'incomplete', reason=result['message'])
                 failed_reviewers.append({'reviewer': name, 'status': 'incomplete',
                                          'reason': result['message']})
@@ -339,6 +341,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             if capturing:
                 stats.safe(stats.finish, 'completed', result)
             if session and cached is None:
+                checking = True
                 session.record(name, 'completed', result=result)
             completed_reviewers += 1
             (reused if cached is not None else executed).append(name)

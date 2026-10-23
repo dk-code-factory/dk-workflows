@@ -5,7 +5,7 @@ import tempfile
 import unittest
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 SCRIPT = Path(__file__).resolve().parents[1]/'scripts/run_reviewers.py'
 spec=importlib.util.spec_from_file_location('run_reviewers',SCRIPT)
 mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
@@ -88,6 +88,27 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(provider.call_count, 1)
         self.assertTrue(result['guard_failure'])
         self.assertNotIn('failed_reviewers', result)
+    def test_checkpoint_write_failure_is_a_guard_failure(self):
+        outcomes = [('completed', {'findings': []}),
+                    ('incomplete', {'status': 'incomplete', 'findings': [], 'message': 'API failed'}),
+                    ('exhausted', {'status': 'tokens_exhausted', 'findings': [], 'message': 'limit'})]
+        for checkpoint_status, response in outcomes:
+            with self.subTest(checkpoint_status=checkpoint_status):
+                session = Mock()
+                session.cached.return_value = None
+                def record(name, status, **kwargs):
+                    if status == checkpoint_status:
+                        raise OSError('checkpoint write failed')
+                session.record.side_effect = record
+                with patch.object(mod, 'run', side_effect=self.git), patch.object(
+                        mod, 'run_skill_reviewer', return_value=response) as reviewer:
+                    result = mod.review(self.context, self.providers, '', self.decisions,
+                                        '', self.preparation, session=session)
+                self.assertEqual(reviewer.call_count, 1)
+                self.assertFalse(result['complete'])
+                self.assertTrue(result['guard_failure'])
+                self.assertEqual(result['reason'], 'checkpoint write failed')
+                self.assertNotIn('failed_reviewers', result)
     def test_unpinned_findings_fail(self):
         with patch.object(mod,'run',side_effect=self.git),patch.object(mod,'run_skill_reviewer',return_value={'findings':[{**self.finding,'line':99}]}):result=self.review()
         self.assertFalse(result['complete'])
