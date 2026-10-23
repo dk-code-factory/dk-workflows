@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.1.17.
+Independent MIT plugin for Claude Code and Codex. Version 1.1.18.
 
 ## Install
 
@@ -104,7 +104,7 @@ The value must be a positive integer number of seconds; invalid values fail befo
 starting the provider. This applies to Claude, Codex, and command providers used for
 reviews, preparation, Decisions, and drafting. It is not a deadline for the entire workflow.
 
-Iteration requests use distinct bounded runs. Interrupted work resumes its existing budget; a new request after a terminal run retains history and receives a new budget. Completion requires configured-reviewer evidence for the final tree and current scope/Decisions. Passing CI cannot substitute for missing review coverage; reports distinguish executed, reused and skipped reviewers.
+Iteration requests use distinct bounded runs. Interrupted work resumes its existing budget; a new request after a terminal run retains history and receives a new budget. Completion requires configured-reviewer evidence for the final tree and current scope/Decisions. Explicit human acceptance can cover recorded provider failures for that exact run and result; incomplete reviews remain incomplete in reports. Missing/unrun reviewers, changed evidence and actionable findings cannot be waived. Passing CI alone cannot substitute for review coverage; reports distinguish completed, reused, skipped and explicitly accepted failed reviewers. Authorized fully answered threads are resolved during reply processing, independently of final review/CI completion.
 
 Standalone reviews and iteration cycles share durable review sessions and immutable results. Fresh requests start fresh sessions; explicit interruption resumes can reuse completed reviewers with identical evidence. Iteration owns its cycle budgets and consumes the shared results. Optional statistics never supply cached review evidence.
 

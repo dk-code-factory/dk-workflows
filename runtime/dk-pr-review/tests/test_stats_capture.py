@@ -86,24 +86,25 @@ def test_capture_before_aggregation_and_independent_review_session(pinned):
     assert api.summary()['total']['reported']['total'] == 2
 
 
-def test_partial_failure_retains_completed_and_never_run_reviewers(pinned, monkeypatch):
+def test_partial_failure_retains_completed_and_later_reviewers(pinned, monkeypatch):
     context, decisions, prep, names, git = pinned
-    # One completed reviewer, malformed second, third never runs.
+    # One completed reviewer, malformed second, third still runs.
     third = 'dk-pr-read-comments'
     prep['reviewers'][third] = {**prep['reviewers'][names[0]], 'reviewer': third}
     prep['analysis']['reviewer_addenda'][third] = prep['analysis']['reviewer_addenda'][names[0]]
     prep['preparation_id'] = runner.preparation_api.digest({k: v for k, v in prep.items() if k != 'preparation_id'})
     names.append(third)
     stats = Capture(context, prep, names, cycle=1)
-    with patch.object(runner, 'run_skill_reviewer', side_effect=[{'findings': [finding()]}, {'bad': True}]):
+    with patch.object(runner, 'run_skill_reviewer', side_effect=[
+            {'findings': [finding()]}, {'bad': True}, {'findings': []}]):
         result = runner.review(context, names, '', decisions, '', prep, stats=stats)
     assert not result['complete']
     reviews = api.ledger(stats.repo)['runs'][stats.run_id]['reviews']
-    assert [r['status'] for r in reviews.values()] == ['completed', 'failed', 'not_run']
+    assert [r['status'] for r in reviews.values()] == ['completed', 'failed', 'completed']
     assert len(result['findings']) == 1
     assert api.summary()['total']['rejected']['total'] == 0
     assert api.summary()['total']['reviews']['failures'] == 1
-    assert api.summary()['total']['reviews']['not_run'] == 1
+    assert api.summary()['total']['reviews']['not_run'] == 0
     assert api.summary()['warnings']
 
 

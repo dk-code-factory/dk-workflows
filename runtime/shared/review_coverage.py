@@ -91,7 +91,20 @@ def load(item):
     return artifact
 
 
-def verify(item, prepared):
+def failures(result):
+    """Only recorded provider failures can be accepted; guard failures stay blocking."""
+    if result.get('guard_failure'):
+        raise ValueError('review evidence guard failed')
+    failed = result.get('failed_reviewers', [])
+    if (not isinstance(failed, list) or any(not isinstance(f, dict)
+            or not isinstance(f.get('reviewer'), str) or not f['reviewer']
+            or f.get('status') not in {'failed', 'incomplete'}
+            or not isinstance(f.get('reason'), str) or not f['reason'].strip() for f in failed)):
+        raise ValueError('invalid reviewer failure evidence')
+    return failed
+
+
+def verify(item, prepared, *, accepted_failures=()):
     """Validate current-tree coverage; callers separately assess remediation."""
     artifact = load(item)
     context = read(Path(prepared['sources']['context']['path']), {})
@@ -102,10 +115,24 @@ def verify(item, prepared):
     result = artifact['result']
     completed = result['executed_reviewers'] + result['reused_reviewers']
     skipped = result['skipped_reviewers']
-    if (result.get('complete') is not True or not completed
+    failed = failures(result)
+    failed_names = [f['reviewer'] for f in failed]
+    skipped_names = [s['reviewer'] for s in skipped]
+    required = set(failed_names) | (set(skipped_names) if not completed else set())
+    accepted = set(accepted_failures)
+    if (type(result.get('complete')) is not bool
+            or (failed and result['complete'])
+            or (result['complete'] and not completed)
+            or (not result['complete'] and not required)
+            or required - accepted
+            or accepted - (set(failed_names) | set(skipped_names))
             or len(set(completed)) != len(completed)
+            or len(set(failed_names)) != len(failed_names)
+            or len(set(skipped_names)) != len(skipped_names)
             or any(not s.get('reason') for s in skipped)
-            or set(completed) & {s['reviewer'] for s in skipped}
-            or set(completed) | {s['reviewer'] for s in skipped} != set(prepared['reviewers'])):
+            or set(completed) & (set(skipped_names) | set(failed_names))
+            or set(skipped_names) & set(failed_names)
+            or set(completed) | set(skipped_names) | set(failed_names) != set(prepared['reviewers'])):
         raise ValueError('configured-reviewer execution is incomplete')
-    return artifact
+    # Preserve the immutable result's complete:false and diagnostics.
+    return {**artifact, **({'accepted_failures': sorted(required)} if required else {})}

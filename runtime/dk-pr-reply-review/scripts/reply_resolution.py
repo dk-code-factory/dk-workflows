@@ -5,6 +5,13 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 
 from urllib.parse import urlparse
 
 
+def authorized(controller):
+    authorization = controller.record.get('resolution_authorization', {})
+    return (authorization.get('pr') == controller.pr
+            and authorization.get('selection') == controller.selection
+            and isinstance(authorization.get('source'), str) and bool(authorization['source'].strip()))
+
+
 def check(controller, assessment, evidence):
     guard = controller.guard
     require = guard.require
@@ -55,10 +62,7 @@ def check(controller, assessment, evidence):
 def resolve(controller, path):
     guard = controller.guard
     require = guard.require
-    authorization = controller.record.get('resolution_authorization', {})
-    require(authorization.get('pr') == controller.pr and
-            authorization.get('selection') == controller.selection and
-            isinstance(authorization.get('source'), str) and authorization['source'].strip(),
+    require(authorized(controller),
             'existing resolution authorization for this PR and selection is required')
     require(controller.work['agent'] == controller.agent, 'reuse the reply agent, or reconcile on resume')
     require(not controller.work['blocked'] and controller.work['active'] is None and

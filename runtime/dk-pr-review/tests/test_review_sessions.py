@@ -149,21 +149,21 @@ def test_resumed_main_preserves_statistics_comparison_cohort(pinned, monkeypatch
     monkeypatch.setattr(runner, 'run', run)
     monkeypatch.setattr(sys, 'argv', argv)
     with patch.object(runner, 'run_skill_reviewer', side_effect=[
-            {'findings': [finding()]}, RuntimeError('provider interrupted')]) as calls:
+            {'findings': [finding()]}, RuntimeError('provider interrupted'), {'findings': []}]) as calls:
         runner.main()
     first = json.loads(capsys.readouterr().out)
-    assert not first['complete'] and first['executed_reviewers'] == names[:1]
-    assert [call.args[0] for call in calls.call_args_list] == names[:2]
+    assert not first['complete'] and first['executed_reviewers'] == [names[0], names[2]]
+    assert [call.args[0] for call in calls.call_args_list] == names
     first_run = json.loads((directory / 'review-stats.json').read_text())['run_id']
 
     monkeypatch.setattr(sys, 'argv', [*argv, '--resume'])
     with patch.object(runner, 'run_skill_reviewer', side_effect=[
-            {'findings': [finding()]}, {'findings': []}]) as calls:
+            {'findings': [finding()]}]) as calls:
         runner.main()
     resumed = json.loads(capsys.readouterr().out)
-    assert resumed['complete'] and resumed['reused_reviewers'] == names[:1]
-    assert resumed['executed_reviewers'] == names[1:]
-    assert [call.args[0] for call in calls.call_args_list] == names[1:]
+    assert resumed['complete'] and resumed['reused_reviewers'] == [names[0], names[2]]
+    assert resumed['executed_reviewers'] == [names[1]]
+    assert [call.args[0] for call in calls.call_args_list] == [names[1]]
     assert resumed['findings'] == [{**finding(), 'reviewers': names[:2]}]
     assert resumed['review_session'] == first['review_session']
     assert len(json.loads(session_path.read_text())['results']) == 2
@@ -172,7 +172,7 @@ def test_resumed_main_preserves_statistics_comparison_cohort(pinned, monkeypatch
     assert sidecar['run_id'] != first_run
     runs = api.ledger(sidecar['repository'])['runs']
     initial, latest = runs[first_run], runs[sidecar['run_id']]
-    assert [initial['reviews'][name]['status'] for name in names] == ['completed', 'failed', 'not_run']
+    assert [initial['reviews'][name]['status'] for name in names] == ['completed', 'failed', 'completed']
     api.record_assessments(sidecar['repository'], [{
         'id': 'resumed-finding', 'finding_id': latest['reviews'][names[1]]['findings'][0]['id'],
         'canonical_issue': 'same-defect', 'verdict': 'confirmed', 'severity': 'Major',
@@ -184,7 +184,7 @@ def test_resumed_main_preserves_statistics_comparison_cohort(pinned, monkeypatch
     assert totals['exclusive']['total'] == 0
     assert totals['exclusive_unknown']['total'] == 1
     assert latest['reviewers'] == names
-    assert [latest['reviews'][name]['status'] for name in names] == ['not_run', 'completed', 'completed']
+    assert [latest['reviews'][name]['status'] for name in names] == ['not_run', 'completed', 'not_run']
     cached = latest['reviews'][names[0]]
     assert cached['duration_seconds'] is None and cached['findings'] == [] and cached['artifacts'] == []
     assert not git('status', '--porcelain')

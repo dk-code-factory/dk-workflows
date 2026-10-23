@@ -134,12 +134,12 @@ def completion_gate(start_head, final_head, live_head, review_complete, actionab
         preparation_api.verify_completion(verification, prepared)
     except (ValueError, KeyError, TypeError, OSError):
         return 'engineering_verification_invalid'
-    if not review_complete:
-        return "review_incomplete"
     try:
-        run_state_api.verify_review(run_record, prepared)
+        review = run_state_api.verify_review(run_record, prepared)
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
-        return 'review_coverage_invalid'
+        return 'review_coverage_invalid' if review_complete else 'review_incomplete'
+    if not review_complete and not review.get('accepted_failures'):
+        return 'review_incomplete'
     if actionable:
         return "actionable_work"
     if isinstance(ci_result, dict):

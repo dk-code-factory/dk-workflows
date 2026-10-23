@@ -151,3 +151,8 @@ finding-assessment guards. Legacy evidence never becomes a session checkpoint or
 grants a fresh budget. Existing runner `--run-record` callers route through a thin
 compatibility adapter that allocates/registers shared sessions; new callers use the
 explicit session/result contract.
+
+
+## Accepted reviewer failures
+
+`accept-review-failures --head SHA --reviewer NAME [--reviewer NAME ...] --source EXACT_HUMAN_INSTRUCTION_OR_SOURCE --reason TEXT` appends `accepted_review_failures`. Each entry retains the active iteration ID, immutable review-artifact reference, reviewed head/tree/scope, exact reviewer names, human source and rationale. Apply prior applicable human acceptance without asking again. Only recorded provider failures/exhaustion can be accepted, after all configured reviewers were accounted for. Evidence/checkout/instruction guards and unrun reviewers cannot be accepted. History survives restart, but a different active run/result/tree/scope does not inherit permission. Gates preserve `complete: false` and return accepted failure names plus their source records; report these separately from successful/reused reviews. Findings, CI, preparation and series cleanup remain mandatory.

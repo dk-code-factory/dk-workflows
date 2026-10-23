@@ -58,9 +58,36 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(result['complete']);self.assertEqual(len(result['skipped_reviewers']),1)
         with patch.object(mod,'run',side_effect=self.git),patch.object(mod,'run_skill_reviewer',return_value=exhausted):result=self.review()
         self.assertFalse(result['complete']);self.assertEqual(len(result['skipped_reviewers']),2)
-    def test_stops_after_failed_provider(self):
+    def test_continues_after_failed_provider_without_claiming_completion(self):
         with patch.object(mod,'run',side_effect=self.git),patch.object(mod,'run_skill_reviewer',side_effect=RuntimeError('failed')) as reviewer:result=self.review()
-        self.assertFalse(result['complete']);self.assertEqual(reviewer.call_count,1)
+        self.assertFalse(result['complete']);self.assertEqual(reviewer.call_count,2)
+        self.assertEqual([f['reviewer'] for f in result['failed_reviewers']],
+                         [mod.bindings.key(p) for p in self.providers])
+    def test_incomplete_provider_does_not_hide_later_findings(self):
+        values = [{'status':'incomplete','findings':[],'message':'API DNS failed'},
+                  {'findings':[self.finding]}]
+        with patch.object(mod,'run',side_effect=self.git), patch.object(
+                mod,'run_skill_reviewer',side_effect=values) as reviewer:
+            result = self.review()
+        self.assertEqual(reviewer.call_count, 2)
+        self.assertFalse(result['complete'])
+        self.assertEqual(result['executed_reviewers'], [mod.bindings.key(self.providers[1])])
+        self.assertEqual(result['findings'][0]['message'], self.finding['message'])
+        self.assertEqual(result['failed_reviewers'][0]['reason'], 'API DNS failed')
+    def test_checkout_mutation_is_a_guard_failure_and_stops_later_reviewers(self):
+        changed = False
+        def git(argv, cwd=None):
+            return '?? changed' if changed and argv[:3] == ['git','status','--porcelain=v1'] else self.git(argv,cwd)
+        def reviewer(*args):
+            nonlocal changed
+            changed = True
+            raise RuntimeError('provider failed after editing checkout')
+        with patch.object(mod,'run',side_effect=git), patch.object(
+                mod,'run_skill_reviewer',side_effect=reviewer) as provider:
+            result = self.review()
+        self.assertEqual(provider.call_count, 1)
+        self.assertTrue(result['guard_failure'])
+        self.assertNotIn('failed_reviewers', result)
     def test_unpinned_findings_fail(self):
         with patch.object(mod,'run',side_effect=self.git),patch.object(mod,'run_skill_reviewer',return_value={'findings':[{**self.finding,'line':99}]}):result=self.review()
         self.assertFalse(result['complete'])
