@@ -1,4 +1,5 @@
 
+import re
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -182,6 +183,10 @@ class FetchUnresolvedReviewThreadsTest(unittest.TestCase):
             threads = fetcher.fetch_all_threads(self.metadata, Path("."))
 
         self.assertEqual(graphql.call_count, 3)
+        # BigInt fixtures are valid only when both entities request the full-width API field.
+        for call in graphql.call_args_list:
+            fields = re.findall(r'\bdatabaseId\s*:\s*(\w+)', call.args[0])
+            self.assertEqual(fields, ['fullDatabaseId', 'fullDatabaseId'])
         for value in threads:
             for entry in value["comments"]:
                 self.assertEqual(entry["reviewReference"], "pullrequestreview-42")
