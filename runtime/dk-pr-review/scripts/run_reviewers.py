@@ -271,14 +271,23 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
     handoff_path.write_text(json.dumps(handoff, ensure_ascii=False, indent=2) + '\n')
     findings = []
     skipped_reviewers = []
+    failed_reviewers = []
     completed_reviewers = 0
     executed = []
     reused = []
     def outcome(value):
-        return {**value, 'executed_reviewers': executed, 'reused_reviewers': reused}
+        return {**value, **({'failed_reviewers': failed_reviewers} if failed_reviewers else {}),
+                'executed_reviewers': executed, 'reused_reviewers': reused}
+    def unchanged():
+        preparation_api.validate(preparation, context, decisions)
+        if (run(['git', 'rev-parse', 'HEAD'], checkout).strip() != context['head_sha']
+                or run(['git', 'status', '--porcelain=v1'], checkout).strip()):
+            raise RuntimeError('reviewer changed isolated checkout')
     for name in reviewers:
         cached = None
         capturing = False
+        attempted = False
+        checking = False
         try:
             preparation_api.validate(preparation, context, decisions)
             if describe_reviewer(provider_map[name]) != preparation['reviewers'][name]:
@@ -291,32 +300,36 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             if session and cached is None:
                 session.record(name, 'running')
             capturing = bool(stats and cached is None)
+            attempted = True
             with stats.invocation(name, handoff, preparation['reviewers'][name]) if capturing else nullcontext():
                 if cached is not None:
                     result = cached
                 else:
                     result = run_skill_reviewer(provider, skill or Path('command'), handoff_path, checkout)
+            checking = True
+            unchanged()
+            checking = False
             if (isinstance(result, dict) and result.get('status') == 'tokens_exhausted'
                     and result.get('findings') == [] and isinstance(result.get('message'), str)
                     and result['message'].strip()):
-                if (run(['git', 'rev-parse', 'HEAD'], checkout).strip() != context['head_sha']
-                        or run(['git', 'status', '--porcelain=v1'], checkout).strip()):
-                    raise RuntimeError('reviewer changed isolated checkout')
                 skipped_reviewers.append({'reviewer': name, 'reason': result['message']})
                 if capturing:
                     stats.safe(stats.finish, 'exhausted', result, result['message'])
                 if session:
+                    checking = True
                     session.record(name, 'exhausted', reason=result['message'])
                 continue
             if (isinstance(result, dict) and result.get('status') == 'incomplete'
-                    and result.get('findings') == [] and isinstance(result.get('message'), str)):
+                    and result.get('findings') == [] and isinstance(result.get('message'), str)
+                    and result['message'].strip()):
                 if capturing:
                     stats.safe(stats.finish, 'incomplete', result, result['message'])
                 if session:
+                    checking = True
                     session.record(name, 'incomplete', reason=result['message'])
-                return outcome({'complete': False, 'failed_reviewer': name,
-                        'reason': result['message'], 'findings': findings,
-                        'skipped_reviewers': skipped_reviewers})
+                failed_reviewers.append({'reviewer': name, 'status': 'incomplete',
+                                         'reason': result['message']})
+                continue
             validate_findings(result, lines)
             for item in result['findings']:
                 existing = next((entry for entry in findings
@@ -325,15 +338,20 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                     existing['reviewers'].append(name)
                 else:
                     findings.append({**item, 'reviewers': [name]})
-            if run(['git', 'rev-parse', 'HEAD'], checkout).strip() != context['head_sha'] or run(['git', 'status', '--porcelain=v1'], checkout).strip():
-                raise RuntimeError('reviewer changed isolated checkout')
             if capturing:
                 stats.safe(stats.finish, 'completed', result)
             if session and cached is None:
+                checking = True
                 session.record(name, 'completed', result=result)
             completed_reviewers += 1
             (reused if cached is not None else executed).append(name)
         except Exception as exc:
+            guard_failure = not attempted or checking or cached is not None
+            if not guard_failure:
+                try:
+                    unchanged()
+                except Exception as guard_error:
+                    exc, guard_failure = guard_error, True
             if session:
                 session.record(name, 'failed', reason=str(exc))
             if stats and not cached:
@@ -342,10 +360,17 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                     stats.safe(stats.failure, name, str(exc))
                 else:
                     stats.safe(stats.finish, 'failed', reason=str(exc))
-            return outcome({'complete': False, 'failed_reviewer': name, 'reason': str(exc),
-                    'findings': findings, 'skipped_reviewers': skipped_reviewers})
+            if guard_failure:
+                return outcome({'complete': False, 'failed_reviewer': name, 'reason': str(exc),
+                        'guard_failure': True, 'findings': findings,
+                        'skipped_reviewers': skipped_reviewers})
+            failed_reviewers.append({'reviewer': name, 'status': 'failed', 'reason': str(exc)})
     preparation_api.validate(preparation, context, decisions)
     findings.sort(key=lambda x: (('Major', 'Minor', 'Nit').index(x['severity']), x['path'], x['line']))
+    if failed_reviewers:
+        return outcome({'complete': False, 'failed_reviewer': failed_reviewers[0]['reviewer'],
+                'reason': failed_reviewers[0]['reason'], 'findings': findings,
+                'skipped_reviewers': skipped_reviewers})
     if not completed_reviewers:
         return outcome({'complete': False, 'reason': 'all configured reviewers exhausted their usage limits',
                 'findings': findings, 'skipped_reviewers': skipped_reviewers})

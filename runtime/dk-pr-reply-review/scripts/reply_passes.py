@@ -235,6 +235,17 @@ class Controller:
         self.save()
         active = self.work['active']
         action = 'correct_batch' if active is not None else self.work['phase']
+        pending = self.pending(evidence)
+        unanswered = {t['reference'] for t in pending['unreplied_threads']}
+        answered = {a['receipt']['reference'] for a in self.work['answers'].values()
+                    if a['status'] == 'current' and a['receipt']['kind'] == 'inline'}
+        candidates = [t for t in pending['unresolved_threads']
+                      if t['reference'] in answered - unanswered]
+        if (active is None and resolution.authorized(self) and candidates
+                and not pending['unclassified_sources']):
+            action = 'resolve'
+        else:
+            candidates = []
         instructions = {
             'inline': 'Match all sources to threads. Draft only missing inline replies; hold unmatched '
                       'requests for the top-level pass and preserve pending user decisions.',
@@ -242,11 +253,15 @@ class Controller:
                          'Skip equivalent answers; draft only unanswered requests without a suitable '
                          'thread, grouped by source. Submit new inline mappings to return to inline first.',
             'done': 'No new feedback to classify. Report outstanding holds; do not repeat verified replies.',
+            'resolve': 'Assess resolution_candidates against the entire conversation and published code. '
+                       'Use guarded resolve with a fresh assessment for each fully answered thread, then next. '
+                       'Do this now, independently of overall review/CI completion. Do not post another reply. '
+                       'Keep disputed, partial or pending-decision work open with held mappings and reasons.',
             'correct_batch': 'Correct the rejected batch and use the same validator for pass 2. '
                              'Do not start another batch or reset the rejection limit.',
         }
         return {'action': action, 'instructions': instructions[action], 'agent': self.work['agent'],
-                **observation, **self.pending(evidence), 'run_record': str(self.path),
+                **observation, **pending, 'resolution_candidates': candidates, 'run_record': str(self.path),
                 'request_mappings': self.work['requests']}
 
     def finish(self, entry, batch, evidence, receipts):

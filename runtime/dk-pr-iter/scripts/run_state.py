@@ -238,8 +238,7 @@ def register_review(record, output, head):
     return registered
 
 
-def verify_review(record_path, prepared):
-    record = read(Path(record_path), {})
+def current_review(record, prepared):
     # A final regroup may change the head while preserving the reviewed tree.
     run = record.get('iteration_run', {})
     if not run.get('id') or run.get('status') != 'active':
@@ -254,8 +253,7 @@ def verify_review(record_path, prepared):
         if (artifact['iteration_run_id'] != run['id'] or not cycles
                 or artifact['cycle'] != cycles[-1]['number']):
             raise ValueError('legacy result lacks coverage for this iteration run/cycle')
-        artifact = review_coverage.verify(reference, prepared)
-        return verify_findings(record, artifact)
+        return reference, artifact
     attempt = 1 + sum(r['number'] == item['cycle'] for r in record.get('cycle_retries', []))
     if (item['iteration_run_id'] != run['id'] or not cycles
             or item['cycle'] != cycles[-1]['number'] or item['attempt'] != attempt
@@ -264,7 +262,49 @@ def verify_review(record_path, prepared):
                        for s in record.get('review_sessions', []))):
         raise ValueError('current iteration cycle lacks review coverage')
     review_sessions.result_artifact(item['session_file'], reference)
-    artifact = review_coverage.verify(reference, prepared)
+    return reference, artifact
+
+
+def accept_review_failures(record, head, reviewers, source, reason):
+    """Retain explicit human acceptance without rewriting a failed review as complete."""
+    prepared = work_gate(record, head)
+    reference, artifact = current_review(record, prepared)
+    if not all(isinstance(v, str) and v.strip() for v in (source, reason)):
+        raise ValueError('exact human instruction/source and acceptance rationale are required')
+    eligible = {f['reviewer'] for f in review_coverage.failures(artifact['result'])}
+    if not artifact['result'].get('complete'):
+        eligible.update(s['reviewer'] for s in artifact['result']['skipped_reviewers'])
+    selected = set(reviewers)
+    if not selected or not selected <= eligible:
+        raise ValueError('accept only recorded reviewer failures, never reviewers that did not run')
+    # This still rejects missing reviewers, guard failures and changed tree/scope.
+    review_coverage.verify(reference, prepared, accepted_failures=eligible)
+    entry = {'iteration_run_id': record['iteration_run']['id'], 'review_artifact': reference,
+             'head': artifact['head'], 'tree': artifact['tree'], 'scope': artifact['scope'],
+             'reviewers': sorted(selected), 'source': source, 'reason': reason}
+    history = record.setdefault('accepted_review_failures', [])
+    if entry not in history:
+        history.append(entry)
+    return entry
+
+
+def verify_review(record_path, prepared):
+    record = read(Path(record_path), {})
+    reference, artifact = current_review(record, prepared)
+    acceptances = [entry for entry in record.get('accepted_review_failures', [])
+                   if entry.get('iteration_run_id') == record['iteration_run']['id']
+                   and entry.get('review_artifact') == reference
+                   and entry.get('head') == artifact['head']
+                   and entry.get('tree') == artifact['tree'] and entry.get('scope') == artifact['scope']]
+    for entry in acceptances:
+        if (not all(isinstance(entry.get(k), str) and entry[k].strip() for k in ('source', 'reason'))
+                or not isinstance(entry.get('reviewers'), list)
+                or not entry['reviewers'] or not all(isinstance(v, str) for v in entry['reviewers'])):
+            raise ValueError('review failure acceptance lacks human evidence')
+    accepted = {name for entry in acceptances for name in entry['reviewers']}
+    artifact = review_coverage.verify(reference, prepared, accepted_failures=accepted)
+    if artifact.get('accepted_failures'):
+        artifact['failure_acceptances'] = acceptances
     return verify_findings(record, artifact)
 
 
@@ -478,6 +518,11 @@ def main():
     session = sub.add_parser('review-session'); session.add_argument('--head', required=True)
     result = sub.add_parser('review-result')
     result.add_argument('--head', required=True); result.add_argument('--file', required=True)
+    accept = sub.add_parser('accept-review-failures')
+    accept.add_argument('--head', required=True)
+    accept.add_argument('--reviewer', action='append', required=True)
+    accept.add_argument('--source', required=True, help='Exact human instruction or its retained source')
+    accept.add_argument('--reason', required=True)
     d = sub.add_parser("decision")
     d.add_argument("--text", required=True); d.add_argument("--source", required=True)
     for kind in ("repair", "rerun"):
@@ -522,6 +567,9 @@ def main():
             elif a.command == 'review-session': result = mutate(path, default, lambda d: review_session(d, a.head, path))
             elif a.command == 'review-result':
                 result = mutate(path, default, lambda d: register_review(d, json.loads(Path(a.file).read_text()), a.head))
+            elif a.command == 'accept-review-failures':
+                result = mutate(path, default, lambda d: accept_review_failures(
+                    d, a.head, a.reviewer, a.source, a.reason))
             elif a.command == "decision": result = mutate(path, default, lambda d: record_local_decision(d, a.text, a.source))
             else: result = mutate(path, default, lambda d: attempt(d, a.command, a.cycle, a.head, getattr(a, "run_id", None)))
         print(json.dumps(result, sort_keys=True))

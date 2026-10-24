@@ -67,9 +67,29 @@ class ResolutionTest(unittest.TestCase):
         with self.assertRaisesRegex(guard.GuardError, 'outside selected review'):
             guard.validate(bad)
 
-    def test_done_keeps_unresolved_cleanup_visible(self):
+    def test_answered_threads_require_resolution_even_when_review_and_ci_are_incomplete(self):
         self.existing_answer()
         self.authorize()
+        record = guard.read(self.record)
+        record.update(review_results=[{'complete': False}], ci={'result': 'pending'})
+        guard.write(self.record, record)
+        for _ in range(2):
+            step = self.controller().next()
+            mapped = request('existing', source='C1', thread='T1', disposition='skip',
+                             reason='Answered at ' + PR + '#discussion_r2')
+            self.publish(self.batch(step, [mapped], []))
+        step = self.controller().next()
+        self.assertEqual(step['action'], 'resolve')
+        self.assertEqual([t['reference'] for t in step['resolution_candidates']], ['T1'])
+        self.assertEqual(step['unreplied_threads'], [])
+        self.assertEqual(len(step['unresolved_threads']), 1)
+        self.assertFalse(step['cleanup_complete'])
+        self.controller().resolve(self.assessment(step))
+        self.assertTrue(self.controller().next()['cleanup_complete'])
+        self.assertEqual(self.github.posts, [])
+
+    def test_reply_only_permission_does_not_direct_resolution(self):
+        self.existing_answer()
         for _ in range(2):
             step = self.controller().next()
             mapped = request('existing', source='C1', thread='T1', disposition='skip',
@@ -77,12 +97,8 @@ class ResolutionTest(unittest.TestCase):
             self.publish(self.batch(step, [mapped], []))
         step = self.controller().next()
         self.assertEqual(step['action'], 'done')
-        self.assertEqual(step['unreplied_threads'], [])
-        self.assertEqual(len(step['unresolved_threads']), 1)
+        self.assertEqual(step['resolution_candidates'], [])
         self.assertFalse(step['cleanup_complete'])
-        self.controller().resolve(self.assessment(step))
-        self.assertTrue(self.controller().next()['cleanup_complete'])
-        self.assertEqual(self.github.posts, [])
 
     def test_publication_is_verified_before_resolution(self):
         self.authorize()
