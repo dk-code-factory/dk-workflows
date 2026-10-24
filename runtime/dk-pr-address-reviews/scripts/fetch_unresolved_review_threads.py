@@ -39,12 +39,12 @@ query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
           comments(first: 100) {
             nodes {
               id
-              databaseId
+              databaseId: fullDatabaseId
               body
               url
               createdAt
               updatedAt
-              pullRequestReview { id databaseId }
+              pullRequestReview { id databaseId: fullDatabaseId }
               author { login }
             }
             pageInfo { hasNextPage endCursor }
@@ -65,12 +65,12 @@ query($threadId: ID!, $cursor: String!) {
       comments(first: 100, after: $cursor) {
         nodes {
           id
-          databaseId
+          databaseId: fullDatabaseId
           body
           url
           createdAt
           updatedAt
-          pullRequestReview { id databaseId }
+          pullRequestReview { id databaseId: fullDatabaseId }
           author { login }
         }
         pageInfo { hasNextPage endCursor }
@@ -285,10 +285,13 @@ def normalize_comments(raw_comments: list[Any]) -> list[dict[str, Any]]:
         author = raw_comment.get("author")
         review = raw_comment.get("pullRequestReview") or {}
         review_id = review.get("databaseId")
+        database_id = raw_comment.get("databaseId")
+        if isinstance(database_id, str) and database_id.isdecimal():
+            database_id = int(database_id)
         comments.append(
             {
                 "reference": reference,
-                "databaseId": raw_comment.get("databaseId"),
+                "databaseId": database_id,
                 "author": author.get("login") if isinstance(author, dict) else None,
                 "createdAt": raw_comment.get("createdAt"),
                 "updatedAt": raw_comment.get("updatedAt"),

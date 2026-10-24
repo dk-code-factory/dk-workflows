@@ -9,13 +9,13 @@ import fetch_unresolved_review_threads as fetcher
 def comment(reference: str, created_at: str, text: str) -> dict:
     return {
         "id": reference,
-        "databaseId": 1,
+        "databaseId": "1",
         "body": text,
         "url": f"https://example.test/{reference}",
         "createdAt": created_at,
         "author": {"login": "reviewer"},
         "updatedAt": created_at,
-        "pullRequestReview": {"id": "REVIEW_NODE", "databaseId": 42},
+        "pullRequestReview": {"id": "REVIEW_NODE", "databaseId": "42"},
     }
 
 
@@ -90,7 +90,8 @@ class FetchUnresolvedReviewThreadsTest(unittest.TestCase):
             metadata = fetcher.resolve_pull_request(raw['url'] + '#' + anchor, Path('.'))
         self.assertEqual(gh.call_args.args[0][2], raw['url'])
         selected = fetcher.normalize_comments([dict(comment('C1', '2026-01-01', 'Fix'),
-                                                   databaseId=4365784024)])
+                                                   databaseId="4365784024")])
+        self.assertEqual(selected[0]['databaseId'], 4365784024)
         other = [dict(selected[0], reference='C2', databaseId=2)]
         threads = [{'id': 'T1', 'isResolved': False, 'comments': selected},
                    {'id': 'T2', 'isResolved': False, 'comments': other}]
@@ -113,6 +114,17 @@ class FetchUnresolvedReviewThreadsTest(unittest.TestCase):
         for anchor in ('discussion_r', 'discussion_rbad', 'issuecomment-1'):
             with self.subTest(anchor=anchor), self.assertRaises(fetcher.FetchError):
                 fetcher.split_pr_reference(self.metadata['url'] + '#' + anchor)
+
+    def test_normalizes_large_comment_and_review_ids_without_changing_output_types(self):
+        for scalar in (int, str):
+            with self.subTest(scalar=scalar.__name__):
+                raw = comment('C1', '2026-01-01', 'Fix')
+                raw['databaseId'] = scalar(4365784024)
+                raw['pullRequestReview']['databaseId'] = scalar(5636543336)
+                normalized = fetcher.normalize_comments([raw])[0]
+                self.assertEqual(normalized['databaseId'], 4365784024)
+                self.assertIsInstance(normalized['databaseId'], int)
+                self.assertEqual(normalized['reviewReference'], 'pullrequestreview-5636543336')
 
     def test_paginates_threads_and_nested_comments(self) -> None:
         first_thread = thread(
@@ -147,7 +159,7 @@ class FetchUnresolvedReviewThreadsTest(unittest.TestCase):
                     "node": {
                         "comments": {
                             "nodes": [dict(comment("COMMENT_2", "2026-01-01T00:00:01Z", "reply"),
-                                           databaseId=4365784024)],
+                                           databaseId="4365784024")],
                             "pageInfo": {"hasNextPage": False, "endCursor": "comments-2"},
                         }
                     }
