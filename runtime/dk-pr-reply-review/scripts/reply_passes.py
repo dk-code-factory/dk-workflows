@@ -126,8 +126,9 @@ class Controller:
         if self.selection:
             expected = guard.inline.selection_for(self.selection, evidence['threads'])
             require(snapshot.get('selection') == expected, 'snapshot lost selected review')
-            require(any(s['reference'] == self.selection for s in evidence['items']),
-                    'selected review is missing from complete conversation')
+            if self.selection.startswith('pullrequestreview-'):
+                require(any(s['reference'] == self.selection for s in evidence['items']),
+                        'selected review is missing from complete conversation')
         self.evidence = evidence
         observations = self.work.setdefault('evidenceObservations', [])
         number = len(observations) + 1

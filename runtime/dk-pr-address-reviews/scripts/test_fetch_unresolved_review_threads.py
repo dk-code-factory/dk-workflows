@@ -83,6 +83,37 @@ class FetchUnresolvedReviewThreadsTest(unittest.TestCase):
         self.assertEqual(output['threadCount'], 3)
         self.assertEqual(output['itemCount'], 2)  # Full PR evidence remains available.
 
+    def test_comment_url_selects_only_its_thread_and_keeps_full_evidence(self):
+        raw = dict(self.metadata, body='')
+        anchor = 'discussion_r4365784024'
+        with patch.object(fetcher, 'run_gh', return_value=raw) as gh:
+            metadata = fetcher.resolve_pull_request(raw['url'] + '#' + anchor, Path('.'))
+        self.assertEqual(gh.call_args.args[0][2], raw['url'])
+        selected = fetcher.normalize_comments([dict(comment('C1', '2026-01-01', 'Fix'),
+                                                   databaseId=4365784024)])
+        other = [dict(selected[0], reference='C2', databaseId=2)]
+        threads = [{'id': 'T1', 'isResolved': False, 'comments': selected},
+                   {'id': 'T2', 'isResolved': False, 'comments': other}]
+        output = fetcher.build_output(metadata, threads)
+        self.assertEqual(output['selection'], {'commentReference': anchor, 'threadReferences': ['T1']})
+        self.assertEqual(output['threadCount'], 2)
+        self.assertEqual(output['itemCount'], 2)
+        threads[0]['isResolved'] = True
+        self.assertEqual(fetcher.build_output(metadata, threads)['selection'], output['selection'])
+        # A link to a later reply must select the same complete thread.
+        threads[0]['comments'].append(dict(selected[0], reference='C3', databaseId=3))
+        self.assertEqual(fetcher.selection_for('discussion_r3', threads)['threadReferences'], ['T1'])
+
+    def test_missing_or_ambiguous_comment_selection_never_expands_scope(self):
+        selected = [dict(reference='C1', databaseId=4365784024)]
+        for threads in ([], [{'id': 'T1', 'comments': selected}, {'id': 'T2', 'comments': selected}]):
+            with self.subTest(threads=threads):
+                with self.assertRaises(fetcher.FetchError):
+                    fetcher.selection_for('discussion_r4365784024', threads)
+        for anchor in ('discussion_r', 'discussion_rbad', 'issuecomment-1'):
+            with self.subTest(anchor=anchor), self.assertRaises(fetcher.FetchError):
+                fetcher.split_pr_reference(self.metadata['url'] + '#' + anchor)
+
     def test_paginates_threads_and_nested_comments(self) -> None:
         first_thread = thread(
             "THREAD_B",
@@ -115,7 +146,8 @@ class FetchUnresolvedReviewThreadsTest(unittest.TestCase):
                 "data": {
                     "node": {
                         "comments": {
-                            "nodes": [comment("COMMENT_2", "2026-01-01T00:00:01Z", "reply")],
+                            "nodes": [dict(comment("COMMENT_2", "2026-01-01T00:00:01Z", "reply"),
+                                           databaseId=4365784024)],
                             "pageInfo": {"hasNextPage": False, "endCursor": "comments-2"},
                         }
                     }
@@ -149,6 +181,8 @@ class FetchUnresolvedReviewThreadsTest(unittest.TestCase):
             [entry["reference"] for entry in output["items"][1]["conversation"]],
             ["COMMENT_1", "COMMENT_2"],
         )
+        selected = fetcher.build_output(dict(self.metadata, commentReference='discussion_r4365784024'), threads)
+        self.assertEqual(selected['selection']['threadReferences'], ['THREAD_B'])
 
     def test_filters_resolved_threads_and_preserves_reference_and_text(self) -> None:
         unresolved = thread(

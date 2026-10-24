@@ -74,8 +74,8 @@ def identity(pr, repo):
             raise ValueError('--repo conflicts with the PR URL base repository')
         repo, number = resolved, int(parts[3])
         anchor = parsed.fragment
-        if anchor and not re.fullmatch(r'pullrequestreview-\d+', anchor):
-            raise ValueError('unsupported PR anchor; use a pullrequestreview-ID selection or a canonical URL')
+        if anchor and not re.fullmatch(r'(?:pullrequestreview-\d+|discussion_r\d+)', anchor):
+            raise ValueError('unsupported PR anchor; use a review link, inline comment link, or canonical PR URL')
     if repo:
         repo = repository(repo, os.environ.get('GH_HOST', 'github.com'))
     if number is not None:

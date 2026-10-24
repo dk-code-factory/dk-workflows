@@ -22,9 +22,11 @@ def test_run_state_context_normalizes_url_and_number(pr, repo, tmp_path):
     assert env['DK_HOST'] == 'codex' and env['DK_UPDATE_PARENT'] == 'parent'
 
 
-def test_enterprise_context_and_review_selection_stay_explicit(tmp_path):
-    selected = 'https://ghe.example/O/R/pull/2#pullrequestreview-123'
-    args, _, _ = cli.invocation(ROOT, 'replies', ['next'], tmp_path, selected, 'o/r', 'claude', None)
+@pytest.mark.parametrize('anchor', ['pullrequestreview-123', 'discussion_r4365784024'])
+@pytest.mark.parametrize('route', ['replies', 'inline-feedback'])
+def test_enterprise_context_and_review_selection_stay_explicit(tmp_path, anchor, route):
+    selected = 'https://ghe.example/O/R/pull/2#' + anchor
+    args, _, _ = cli.invocation(ROOT, route, ['next'], tmp_path, selected, 'o/r', 'claude', None)
     assert args[args.index('--pr') + 1] == selected.lower()
     with pytest.raises(ValueError, match='review selections'):
         cli.invocation(ROOT, 'decisions', ['context'], tmp_path, selected, None, 'codex', None)

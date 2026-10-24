@@ -149,7 +149,8 @@ def validate(batch, *, require_details=False):
     source_map, threads = sources(evidence)
     selection = batch['snapshot'].get('selection')
     if selection is not None:
-        require(selection == inline.selection_for(selection['reviewReference'], evidence['threads']),
+        reference = selection.get('reviewReference') or selection.get('commentReference')
+        require(selection == inline.selection_for(reference, evidence['threads']),
                 'invalid review selection')
     requests = {}
     request_sources = set()
@@ -159,6 +160,10 @@ def validate(batch, *, require_details=False):
         requests[key] = request
         source = source_map.get(request['source'])
         require(source is not None, 'request source is missing')
+        if selection is not None:
+            require(source.get('threadReference') in selection['threadReferences'] or
+                    source['reference'] == selection.get('reviewReference'),
+                    'request outside selected review or thread')
         excerpt = request['excerpt']
         require(isinstance(excerpt, str) and excerpt.strip() and excerpt in source['text'],
                 'request excerpt must be exact source text')
@@ -206,7 +211,7 @@ def validate(batch, *, require_details=False):
         kind, ref = dest['kind'], dest['reference']
         if selection is not None:
             require(ref in selection['threadReferences'] if kind == 'inline' else
-                    ref == selection['reviewReference'], 'reply outside selected review')
+                    ref == selection.get('reviewReference'), 'reply outside selected review or thread')
         require((kind, ref) not in destinations, 'group replies to the same destination')
         destinations.add((kind, ref))
         body = reply['body']

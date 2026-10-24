@@ -37,8 +37,10 @@ class GitHub:
 
     def snapshot(self, pr, cwd):
         self.inline_reads += 1
-        _, review = guard.inline.split_pr_reference(pr)
-        return guard.inline.build_output(dict(reviewReference=review, owner='owner', repo='repo', number=7, url=PR,
+        _, selection = guard.inline.split_pr_reference(pr)
+        selected = ({'commentReference' if selection.startswith('discussion_r') else 'reviewReference': selection}
+                    if selection else {})
+        return guard.inline.build_output(dict(**selected, owner='owner', repo='repo', number=7, url=PR,
                                              title='Fix', description='', headRefOid=self.head),
                                          copy.deepcopy(self.threads))
 
