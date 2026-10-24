@@ -39,12 +39,12 @@ query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
           comments(first: 100) {
             nodes {
               id
-              databaseId
+              databaseId: fullDatabaseId
               body
               url
               createdAt
               updatedAt
-              pullRequestReview { id databaseId }
+              pullRequestReview { id databaseId: fullDatabaseId }
               author { login }
             }
             pageInfo { hasNextPage endCursor }
@@ -65,12 +65,12 @@ query($threadId: ID!, $cursor: String!) {
       comments(first: 100, after: $cursor) {
         nodes {
           id
-          databaseId
+          databaseId: fullDatabaseId
           body
           url
           createdAt
           updatedAt
-          pullRequestReview { id databaseId }
+          pullRequestReview { id databaseId: fullDatabaseId }
           author { login }
         }
         pageInfo { hasNextPage endCursor }
@@ -121,25 +121,34 @@ def graphql(
 
 
 def split_pr_reference(pr):
-    """Keep a review anchor as selection while passing a canonical URL to gh."""
+    """Keep a review or comment anchor while passing a canonical URL to gh."""
     if not pr or not pr.startswith('https://'):
         return pr, None
     parsed = urlparse(pr)
     reference = parsed.fragment or None
-    if reference and not re.fullmatch(r'pullrequestreview-\d+', reference):
-        raise FetchError('unsupported PR anchor; use a PR URL or pullrequestreview-ID link')
+    if reference and not re.fullmatch(r'(?:pullrequestreview-\d+|discussion_r\d+)', reference):
+        raise FetchError('unsupported PR anchor; use a PR URL, review link, or inline comment link')
     return parsed._replace(fragment='', query='', path=parsed.path.rstrip('/')).geturl(), reference
 
 
-def selection_for(review_reference, threads):
-    return {'reviewReference': review_reference,
-            'threadReferences': sorted(t['id'] for t in threads if any(
-                c.get('reviewReference') == review_reference for c in t['comments']))}
+def selection_for(reference, threads):
+    if isinstance(reference, str) and re.fullmatch(r'pullrequestreview-\d+', reference):
+        return {'reviewReference': reference,
+                'threadReferences': sorted(t['id'] for t in threads if any(
+                    c.get('reviewReference') == reference for c in t['comments']))}
+    if isinstance(reference, str) and re.fullmatch(r'discussion_r\d+', reference):
+        database_id = int(reference.removeprefix('discussion_r'))
+        matches = [t['id'] for t in threads if any(
+            c.get('databaseId') == database_id for c in t['comments'])]
+        if len(matches) != 1:
+            raise FetchError(f'selected inline comment must match exactly one thread: {reference}')
+        return {'commentReference': reference, 'threadReferences': matches}
+    raise FetchError('invalid review or inline comment selection')
 
 
 def resolve_pull_request(pr: str | None, cwd: Path) -> dict[str, Any]:
     arguments = ["pr", "view"]
-    canonical, review_reference = split_pr_reference(pr)
+    canonical, reference = split_pr_reference(pr)
     if canonical:
         arguments.append(canonical)
     arguments.extend(
@@ -159,7 +168,8 @@ def resolve_pull_request(pr: str | None, cwd: Path) -> dict[str, Any]:
     if not isinstance(number, int):
         raise FetchError("pull request metadata has no integer number")
     return {
-        **({"reviewReference": review_reference} if review_reference else {}),
+        **({("commentReference" if reference.startswith('discussion_r') else "reviewReference"): reference}
+           if reference else {}),
         "owner": path_parts[0],
         "repo": path_parts[1],
         "hostname": parsed.hostname or "github.com",
@@ -275,10 +285,13 @@ def normalize_comments(raw_comments: list[Any]) -> list[dict[str, Any]]:
         author = raw_comment.get("author")
         review = raw_comment.get("pullRequestReview") or {}
         review_id = review.get("databaseId")
+        database_id = raw_comment.get("databaseId")
+        if isinstance(database_id, str) and database_id.isdecimal():
+            database_id = int(database_id)
         comments.append(
             {
                 "reference": reference,
-                "databaseId": raw_comment.get("databaseId"),
+                "databaseId": database_id,
                 "author": author.get("login") if isinstance(author, dict) else None,
                 "createdAt": raw_comment.get("createdAt"),
                 "updatedAt": raw_comment.get("updatedAt"),
@@ -345,9 +358,9 @@ def build_output(metadata: dict[str, Any], threads: list[dict[str, Any]]) -> dic
     threads = sorted(threads, key=lambda thread: thread["id"])
     canonical_threads = json.dumps(threads, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     canonical_items = json.dumps(items, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    reference = metadata.get("commentReference") or metadata.get("reviewReference")
     return {
-        **({"selection": selection_for(metadata["reviewReference"], threads)}
-           if metadata.get("reviewReference") else {}),
+        **({"selection": selection_for(reference, threads)} if reference else {}),
         "schemaVersion": 1,
         "complete": True,
         "repository": f"{metadata['owner']}/{metadata['repo']}",

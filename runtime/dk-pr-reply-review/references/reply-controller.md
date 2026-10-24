@@ -87,6 +87,8 @@ Resolution has its own guarded mutation and is directed by `next` as soon as an 
 
 Record **existing** authorization in the run record before resolving. For example, add `resolution_authorization: {"pr": "https://github.com/OWNER/REPO/pull/NUMBER", "selection": "pullrequestreview-ID", "source": "Exact user instruction authorizing resolution"}`. Use `selection: null` for a bare PR URL. An iteration run may cite `dk-pr-iter`'s invoked resolution authorization during initial reply work; it need not wait for final completion. This field records permission already given; it cannot grant permission or broaden the selected review.
 
+For an inline comment link, use `selection: "discussion_rID"` and keep that original URL for every controller call and resume. Only its containing thread can be assessed or mutated, even when other threads share the same review. GitHub Code Quality comments use this ordinary thread workflow; resolving a conversation does not itself prove a Code Quality check has passed.
+
 Read the entire selected thread and current published code. If an adequate answer already exists, do not post another acknowledgement. Otherwise use the existing independently validated publication path, verify the receipt, and call `next` again. Prepare one JSON assessment outside the repository:
 
 ```json

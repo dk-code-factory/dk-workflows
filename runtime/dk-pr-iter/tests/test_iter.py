@@ -390,16 +390,30 @@ def test_complete_thread_audit_keeps_resolved_and_open(monkeypatch, tmp_path):
     assert len(calls) == 2
 
 
-def test_complete_thread_audit_preserves_selected_review(monkeypatch, tmp_path):
-    metadata = {"headRefOid": SHA, "number": 1, "reviewReference": "pullrequestreview-42"}
+@pytest.mark.parametrize('field,reference', [('reviewReference', 'pullrequestreview-42'),
+                                             ('commentReference', 'discussion_r4365784024')])
+def test_complete_thread_audit_preserves_selection(monkeypatch, tmp_path, field, reference):
+    metadata = {"headRefOid": SHA, "number": 1, field: reference}
     all_threads = [{"id": "selected", "isResolved": True,
-                    "comments": [{"reviewReference": "pullrequestreview-42", "text": "request"}]},
+                    "comments": [{"reviewReference": "pullrequestreview-42", "databaseId": 4365784024,
+                                  "text": "request"}]},
                    {"id": "unrelated", "isResolved": False, "comments": []}]
     monkeypatch.setattr(threads.fetcher, "resolve_pull_request", lambda pr, cwd: metadata)
     monkeypatch.setattr(threads.fetcher, "fetch_all_threads", lambda meta, cwd: all_threads)
-    result = threads.snapshot('https://github.com/owner/repo/pull/1#pullrequestreview-42', tmp_path)
+    result = threads.snapshot('https://github.com/owner/repo/pull/1#' + reference, tmp_path)
+    assert result['selection'][field] == reference
     assert result['selection']['threadReferences'] == ['selected']
     assert result['threadCount'] == 2
+
+
+@pytest.mark.parametrize('matches', [0, 2])
+def test_complete_thread_audit_rejects_missing_or_ambiguous_comment(monkeypatch, tmp_path, matches):
+    metadata = {"headRefOid": SHA, "number": 1, "commentReference": "discussion_r4365784024"}
+    all_threads = [{"id": str(i), "comments": [{"databaseId": 4365784024}]} for i in range(matches)]
+    monkeypatch.setattr(threads.fetcher, "resolve_pull_request", lambda pr, cwd: metadata)
+    monkeypatch.setattr(threads.fetcher, "fetch_all_threads", lambda meta, cwd: all_threads)
+    with pytest.raises(threads.fetcher.FetchError, match='exactly one thread'):
+        threads.snapshot('https://github.com/owner/repo/pull/1#discussion_r4365784024', tmp_path)
 
 
 def test_complete_thread_audit_rejects_unstable_snapshots(monkeypatch, tmp_path):

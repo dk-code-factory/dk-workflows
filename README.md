@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.1.18.
+Independent MIT plugin for Claude Code and Codex. Version 1.1.19.
 
 ## Install
 
@@ -136,6 +136,11 @@ can use a full PR URL or `--repo HOST/OWNER/REPO`. `--dry-run` prints the argume
 vector and workflow environment without executing it. The router preserves
 helper exit codes and publication guards. Existing script entrypoints remain
 available. Lifecycle entry/completion still happen once per skill invocation.
+
+`inline-feedback` and `replies` preserve `#pullrequestreview-ID` links to select
+a review, and `#discussion_rID` links to select one thread, including GitHub Code
+Quality findings. Complete PR evidence remains available as context; replies and
+resolution stay within the selection. Resume with the original link.
 
 At lifecycle entry, the receipt supplies `runtime_root` and `completion_script`.
 Use these retained paths for the invocation and its child handoffs. Packages are

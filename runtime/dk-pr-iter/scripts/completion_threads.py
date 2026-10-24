@@ -24,10 +24,10 @@ def snapshot(pr, cwd, attempts=3):
         canonical = json.dumps({"metadata": metadata, "threads": threads}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(canonical.encode()).hexdigest()
         if previous == digest:
+            reference = metadata.get("commentReference") or metadata.get("reviewReference")
             return {"complete": True, "pullRequest": metadata, "threadCount": len(threads),
                     "threadsSha256": digest, "threads": threads,
-                    **({"selection": fetcher.selection_for(metadata["reviewReference"], threads)}
-                       if metadata.get("reviewReference") else {})}
+                    **({"selection": fetcher.selection_for(reference, threads)} if reference else {})}
         previous = digest
     raise fetcher.FetchError("all-thread snapshot changed during pagination; no two consecutive snapshots matched")
 
