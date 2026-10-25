@@ -112,7 +112,8 @@ def set_override(path, value):
 
 def completion_gate(start_head, final_head, live_head, review_complete, actionable, ci_result,
                     ci_verifier=None, *, stage='complete', assessment=None, series_snapshot=None,
-                    preparation=None, pr_url=None, body=None, verification=None, run_record=None):
+                    preparation=None, pr_url=None, body=None, verification=None, run_record=None,
+                    assessment_path=None):
     if stage not in {'review', 'complete'}:
         raise ValueError('stage must be review or complete')
     if not all(isinstance(x, str) and len(x) == 40 and all(c in "0123456789abcdef" for c in x)
@@ -135,7 +136,7 @@ def completion_gate(start_head, final_head, live_head, review_complete, actionab
     except (ValueError, KeyError, TypeError, OSError):
         return 'engineering_verification_invalid'
     try:
-        review = run_state_api.verify_review(run_record, prepared)
+        review = run_state_api.verify_review(run_record, prepared, assessment=assessment, assessment_path=assessment_path)
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
         return 'review_coverage_invalid' if review_complete else 'review_incomplete'
     if not review_complete and not review.get('accepted_failures'):
@@ -265,6 +266,8 @@ def main():
                                      snapshot.get('actual_head', snapshot['head']),
                                      args.review_complete, args.actionable, ci_result, verified,
                                      stage='review', preparation=args.preparation_file,
+                                     assessment=assessment,
+                                     assessment_path=args.series_assessment,
                                      pr_url=args.pr, body=live_scope['body'], verification=args.verification_file,
                                      run_record=args.run_record)
             if result == 'clean' and args.stage == 'complete':
@@ -276,7 +279,8 @@ def main():
                 try:
                     prepared = current_preparation(args.preparation_file, args.run_record, args.pr,
                                                    live_scope['headRefOid'], live_scope['body'])
-                    output['review_coverage'] = run_state_api.verify_review(args.run_record, prepared)
+                    output['review_coverage'] = run_state_api.verify_review(args.run_record, prepared,
+                        assessment=assessment, assessment_path=args.series_assessment)
                 except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as exc:
                     output['review_limitation'] = str(exc)
                     result = output['gate'] = 'review_coverage_invalid'

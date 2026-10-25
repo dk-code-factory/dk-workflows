@@ -11,6 +11,7 @@ import sys
 import importlib.util
 import copy
 import uuid
+from types import SimpleNamespace
 
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 
@@ -20,7 +21,7 @@ CLASSIFICATIONS = {"valid", "already_fixed", "unsupported", "pre_existing"}
 
 from shared.private_state import root, read, write, mutate
 from shared.flaky_tests import Registry, record_flaky
-from shared import review_coverage, review_sessions
+from shared import review_coverage, review_sessions, review_reconciliation
 
 _spec = importlib.util.spec_from_file_location('iteration_preparation',
     next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir()) / 'dk-pr-decisions/scripts/preparation.py')
@@ -42,7 +43,7 @@ def start_run(record, *, resume=False):
     if active:
         snapshot = copy.deepcopy({k: v for k, v in record.items() if k != 'run_history'})
         record.setdefault('run_history', []).append(snapshot)
-    for field in ('cycles', 'cycle_retries', 'repairs', 'review_results', 'review_sessions'):
+    for field in ('cycles', 'cycle_retries', 'repairs', 'review_results', 'review_sessions', 'review_reconciliations'):
         record[field] = []
     record.pop('preparation', None)
     record['iteration_run'] = {'id': uuid.uuid4().hex, 'status': 'active'}
@@ -265,6 +266,10 @@ def current_review(record, prepared):
     return reference, artifact
 
 
+def reconciliation_api():
+    return SimpleNamespace(work_gate=work_gate, current_review=current_review, preparation_api=preparation_api)
+
+
 def accept_review_failures(record, head, reviewers, source, reason):
     """Retain explicit human acceptance without rewriting a failed review as complete."""
     prepared = work_gate(record, head)
@@ -278,7 +283,8 @@ def accept_review_failures(record, head, reviewers, source, reason):
     if not selected or not selected <= eligible:
         raise ValueError('accept only recorded reviewer failures, never reviewers that did not run')
     # This still rejects missing reviewers, guard failures and changed tree/scope.
-    review_coverage.verify(reference, prepared, accepted_failures=eligible)
+    reconciliation = review_reconciliation.coverage_for(record, prepared, reconciliation_api())
+    review_coverage.verify(reference, prepared, accepted_failures=eligible, reconciliation=reconciliation)
     entry = {'iteration_run_id': record['iteration_run']['id'], 'review_artifact': reference,
              'head': artifact['head'], 'tree': artifact['tree'], 'scope': artifact['scope'],
              'reviewers': sorted(selected), 'source': source, 'reason': reason}
@@ -288,7 +294,7 @@ def accept_review_failures(record, head, reviewers, source, reason):
     return entry
 
 
-def verify_review(record_path, prepared):
+def verify_review(record_path, prepared, *, assessment=None, assessment_path=None):
     record = read(Path(record_path), {})
     reference, artifact = current_review(record, prepared)
     acceptances = [entry for entry in record.get('accepted_review_failures', [])
@@ -302,7 +308,12 @@ def verify_review(record_path, prepared):
                 or not entry['reviewers'] or not all(isinstance(v, str) for v in entry['reviewers'])):
             raise ValueError('review failure acceptance lacks human evidence')
     accepted = {name for entry in acceptances for name in entry['reviewers']}
-    artifact = review_coverage.verify(reference, prepared, accepted_failures=accepted)
+    reconciliation = review_reconciliation.coverage_for(record, prepared, reconciliation_api(),
+        assessment=assessment, assessment_path=assessment_path)
+    artifact = review_coverage.verify(reference, prepared, accepted_failures=accepted, reconciliation=reconciliation)
+    if reconciliation:
+        artifact = {**artifact, 'retained_coverage': review_reconciliation.receipt(
+            reconciliation['artifact'], artifact, reused=True)}
     if artifact.get('accepted_failures'):
         artifact['failure_acceptances'] = acceptances
     return verify_findings(record, artifact)
@@ -518,6 +529,9 @@ def main():
     session = sub.add_parser('review-session'); session.add_argument('--head', required=True)
     result = sub.add_parser('review-result')
     result.add_argument('--head', required=True); result.add_argument('--file', required=True)
+    reconcile = sub.add_parser('reconcile-review')
+    reconcile.add_argument('--head', required=True)
+    reconcile.add_argument('--series-assessment', required=True)
     accept = sub.add_parser('accept-review-failures')
     accept.add_argument('--head', required=True)
     accept.add_argument('--reviewer', action='append', required=True)
@@ -567,6 +581,9 @@ def main():
             elif a.command == 'review-session': result = mutate(path, default, lambda d: review_session(d, a.head, path))
             elif a.command == 'review-result':
                 result = mutate(path, default, lambda d: register_review(d, json.loads(Path(a.file).read_text()), a.head))
+            elif a.command == 'reconcile-review':
+                require_head(a.head)
+                result = review_reconciliation.reconcile(path, a.head, a.series_assessment, reconciliation_api())
             elif a.command == 'accept-review-failures':
                 result = mutate(path, default, lambda d: accept_review_failures(
                     d, a.head, a.reviewer, a.source, a.reason))

@@ -60,6 +60,18 @@ Optional statistics may read those records to discover an omitted cycle.
 Historical version-1 artifacts retain their original completion checks in
 the iteration adapter and never supply reusable reviewer checkpoints.
 
+After mandatory iteration series cleanup (including no-op cleanup), a refreshed
+ready preparation may retain version-2 result coverage through the separate
+`run-state reconcile-review --head SHA --series-assessment FILE` gate. This is
+independent semantic evidence, not a session resume or a new reviewer execution.
+It compares all analysis fields and changed evidence with the original reviewed
+preparation's retained copies, requires unchanged hard identities, and binds the
+active run/cycle/attempt, both preparations/scopes and cleanup assessment. The
+original session, result, reviewed head and preparation ID remain immutable.
+Fresh reviews and explicit session resumes retain the strict identity rules above;
+version-1 results cannot use reconciliation. Report the original reviewed head/tree
+and retained reviewers, with zero newly executed reviewers for reconciliation.
+
 
 New provider descriptors include a retained execution binding. The package and
 source hashes are pinned before preparation, and review resolves that binding

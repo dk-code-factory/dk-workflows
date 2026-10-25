@@ -338,6 +338,26 @@ def gate(path, *, pr_url, head_sha, body=None, require_ready=True):
     return loaded
 
 
+def retained(path):
+    """Read historical evidence without consulting refreshable original paths."""
+    path = Path(path).resolve()
+    artifact = read(path)
+    copies = {}
+    for key, source in artifact['sources'].items():
+        target = (path.parent / 'evidence' / key).resolve()
+        if (not target.is_relative_to(path.parent / 'evidence')
+                or file_hash(target) != source['sha256']):
+            raise ValueError('retained preparation evidence changed: ' + key)
+        copies[key] = {'path': str(target), 'sha256': source['sha256']}
+    context = read(copies['context']['path'])
+    raw = read(copies['decisions']['path'])
+    decisions = raw.get('data', raw)
+    outside(path, context['repository'])
+    outside(path, context['checkout'])
+    validate(artifact, context, decisions, check_sources=False)
+    return artifact, context, decisions, copies
+
+
 def verify_completion(path, artifact):
     """Require actual engineering assessment, independent of reviewer convergence and CI."""
     context = read(artifact['sources']['context']['path'])

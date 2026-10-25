@@ -6,6 +6,8 @@ from pathlib import Path
 
 from shared.private_state import read, mutate
 
+PROTECTED_SOURCE_CATEGORIES = frozenset({'issues', 'choices', 'user_instructions', 'rules'})
+
 
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -15,15 +17,15 @@ def git(cwd, *args):
     return subprocess.check_output(['git', *args], cwd=cwd, text=True).strip()
 
 
-def scope(prepared):
-    raw = read(Path(prepared['sources']['decisions']['path']), {})
+def scope(prepared, *, decisions=None):
+    raw = read(Path(prepared['sources']['decisions']['path']), {}) if decisions is None else decisions
     decisions = raw.get('data', raw)
     # Head changes alone are allowed for proven tree-equivalent regrouping.
     return digest({'decisions': {k: v for k, v in decisions.items() if k != 'head_sha'},
                    'analysis': prepared['analysis'], 'reviewers': prepared['reviewers'],
                    'base_sha': prepared['identity']['base_sha'],
                    'scope_sources': {key: value['sha256'] for key, value in prepared['sources'].items()
-                                     if key.split('/')[0] in {'issues', 'choices', 'user_instructions', 'rules'}}})
+                                     if key.split('/')[0] in PROTECTED_SOURCE_CATEGORIES}})
 
 
 def outside(path, context):
@@ -104,13 +106,25 @@ def failures(result):
     return failed
 
 
-def verify(item, prepared, *, accepted_failures=()):
+def verify(item, prepared, *, accepted_failures=(), reconciliation=None):
     """Validate current-tree coverage; callers separately assess remediation."""
     artifact = load(item)
     context = read(Path(prepared['sources']['context']['path']), {})
     tree = git(context['checkout'], 'rev-parse', f"{prepared['identity']['head_sha']}^{{tree}}")
+    current_scope = scope(prepared)
+    if artifact['scope'] != current_scope and reconciliation is not None:
+        from shared import review_reconciliation
+        binding = reconciliation['binding']
+        review_reconciliation.load(reconciliation['artifact'], binding)
+        if (artifact['version'] != 2 or binding['review_artifact'] != {k: item[k] for k in ('path', 'sha256')}
+                or binding['original_scope'] != artifact['scope']
+                or binding['original_preparation_id'] != artifact['preparation_id']
+                or binding['current_preparation_id'] != prepared['preparation_id']
+                or binding['current_scope'] != current_scope or binding['tree'] != tree
+                or binding['final_head'] != prepared['identity']['head_sha']):
+            raise ValueError('reconciliation does not cover this review and preparation')
     if (artifact['pr_url'] != prepared['identity']['pr_url']
-            or artifact['tree'] != tree or artifact['scope'] != scope(prepared)):
+            or artifact['tree'] != tree or (artifact['scope'] != current_scope and reconciliation is None)):
         raise ValueError('final tree or scope lacks review coverage')
     result = artifact['result']
     completed = result['executed_reviewers'] + result['reused_reviewers']

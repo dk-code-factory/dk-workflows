@@ -146,6 +146,16 @@ standalone mode retain explicit local differences without publishing; this alone
 does not require synchronization. Unresolved mandatory publication produces
 `sync_pending` even when a reviewer has no findings.
 
+Refresh preparation normally after mandatory iteration series cleanup, including
+no-op cleanup; do not preserve obsolete analysis solely to keep its scope hash.
+Retain original version directories and their fingerprinted evidence copies.
+When only wording or synchronization differs, the iteration adapter can request
+independent `run-state reconcile-review --head FINAL_SHA --series-assessment FILE`
+evidence against the original reviewed preparation. Substantive or ambiguous
+differences and new review obligations block retained coverage. This never rewrites
+preparation or review identity, waives readiness or extends the review budget.
+Current source freshness and engineering completion verification remain mandatory.
+
 ## Human answers and synchronization
 
 Preserve the exact answer and rationale; add a Decision or explicitly replace one,

@@ -25,6 +25,7 @@ SCRIPT = ROOT / 'scripts/dk.py'
     ('ci-wait', {'result': 'failure'}, 2, 'error', 'helper_failed'),
     ('replies', None, 1, 'error', 'helper_failed'),
     ('run-state', {'status': 'failed'}, 0, 'success', None),
+    ('run-state', {'status': 'blocked', 'reason': 'New review obligation'}, 0, 'blocked', 'review_reconciliation_blocked'),
 ])
 def test_only_known_contracts_are_workflow_blocks(command, data, code, outcome, error):
     assert classification(command, code, data)[:2] == (outcome, error)
