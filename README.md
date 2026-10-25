@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.1.23.
+Independent MIT plugin for Claude Code and Codex. Version 1.2.0.
 
 ## Install
 
@@ -226,3 +226,12 @@ schedule an update. All later manifest reads use that retained copy, including
 when the host removes the original installation during lookup. Entry failures
 without a usable runtime receipt stop work; offline release checks still return
 a retained runtime and token and remain nonblocking.
+
+Preparation v2 retains stable conclusion dependencies and immutable evidence snapshots.
+`prepare --previous-preparation FILE` compares complete Git entries and governing
+sources, reuses proven unchanged conclusions, and batches affected conclusions into
+one reassessment. Identical and supported operational refreshes use zero model calls;
+`--full-analysis` requests full reassessment. The refresh report exposes changed inputs,
+affected/reused IDs and actual call counts. Review coverage, session identities, CI,
+Decisions synchronization and iteration budgets retain their existing gates. See
+[the preparation artifact contract](runtime/dk-pr-decisions/references/preparation.md).

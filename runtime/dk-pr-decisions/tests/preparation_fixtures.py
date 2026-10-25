@@ -33,6 +33,25 @@ def analysis(reviewers=('example',)):
         'sync_required': False, 'sync_reason': ''}
 
 
+def response(value=None):
+    value = value if value is not None else analysis()
+    try:
+        locations = prep.graph_api.conclusions(value)
+    except (KeyError, TypeError, AttributeError):
+        locations = {}
+    return {'analysis': value, 'graph': [
+        {'location': location, 'depends_on': [], 'paths': [{'path': 'transform.py', 'kind': 'file'}],
+         'sources': ['production/0'], 'decisions': []} for location in locations]}
+
+
+def retain(parent, ids=None, unmapped=()):
+    return {'dispositions': [{'id': key, 'action': 'retain', 'reason': 'Inspected changed evidence; boundary still applies'}
+                             for key in (ids if ids is not None else parent['graph'])],
+            'additions': [], 'impacts': [{'change': change, 'affected': [],
+                                        'rationale': 'Inspected the new source against governing conclusions'}
+                                       for change in unmapped]}
+
+
 def descriptor(name, source):
     return {'descriptor_version': 1, 'reviewer': name, 'complete': True, 'missing': [],
             'sources': [{'path': str(source), 'sha256': prep.file_hash(source)}],
@@ -95,4 +114,4 @@ class Package:
 
     def prepare(self, result=None):
         return prep.prepare(self.manifest_path, self.root / 'versions',
-                            analyzer=lambda prompt, checkout: result or analysis())
+                            analyzer=lambda prompt, checkout: response(result or analysis()))

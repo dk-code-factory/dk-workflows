@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import sys
 
 import pytest
@@ -13,7 +14,7 @@ from shared.private_state import read, write
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'dk-pr-decisions/tests'))
-from preparation_fixtures import Package, analysis, descriptor, prep
+from preparation_fixtures import Package, analysis, descriptor, prep, retain
 
 
 def module(name):
@@ -28,12 +29,19 @@ state, completion = module('run_state'), module('completion')
 
 
 class Scenario:
-    def __init__(self, tmp_path, monkeypatch, reviewers=('example',), cycles=5):
+    def __init__(self, tmp_path, monkeypatch, reviewers=('example',), cycles=5, descriptor_links=False):
         self.package = p = Package(tmp_path)
         self.reviewers = list(reviewers)
         if len(reviewers) > 1:
             p.manifest['evidence']['reviewers'] = [str(p.write(name + '-reviewer.json',
                 descriptor(name, p.repo / 'transform.py'))) for name in reviewers]
+        if descriptor_links:
+            self.descriptor_links = []
+            for index, value in enumerate(p.manifest['evidence']['reviewers']):
+                link = p.root / f'reviewer-link-{index}.json'
+                link.symlink_to(p.root / value)
+                self.descriptor_links.append(link)
+            p.manifest['evidence']['reviewers'] = [link.name for link in self.descriptor_links]
         self.git = lambda *args: coverage.git(p.repo, *args)
         self.base = p.head
         (p.repo / 'change.txt').write_text('Reviewed change\n')
@@ -44,6 +52,12 @@ class Scenario:
         p.write('context.json', p.context)
         p.write('decisions.json', p.decisions)
         p.manifest['mode'] = 'iteration'
+        self.feedback('Before cleanup')
+        p.manifest['evidence']['feedback'] = ['feedback.json']
+        p.write('history.json', {'obligation': 'Inspect the supported transform'})
+        p.manifest['evidence']['run_history'] = ['history.json']
+        p.write('rules.json', {'rule': 'Preserve the supported transform'})
+        p.manifest['evidence']['rules'] = ['rules.json']
         p.write('manifest.json', p.manifest)
         self.path = tmp_path / 'run.json'
         self.original_path = p.prepare(analysis(reviewers))['artifact']
@@ -88,6 +102,13 @@ class Scenario:
                 'fields': {key: verdict('fields', key) for key in binding['fields']},
                 'sources': {key: verdict('sources', key) for key in binding['changed_sources']}}
 
+    def feedback(self, status):
+        self.package.write('feedback.json', {
+            'schemaVersion': 1, 'complete': True,
+            'pullRequest': {'url': self.package.context['url'], 'headRefOid': self.package.context['head_sha']},
+            'threads': [], 'threadCount': 0, 'threadsSha256': prep.digest([]),
+            'items': [], 'itemCount': 0, 'itemsSha256': prep.digest([]), 'status': status})
+
     def refresh(self, *, published=True, change=None):
         p = self.package
         if published:
@@ -96,18 +117,34 @@ class Scenario:
         p.context['head_sha'] = p.decisions['head_sha'] = self.head
         p.write('context.json', p.context)
         p.write('decisions.json', p.decisions)
-        p.write('feedback.json', {'status': 'Fresh feedback after cleanup'})
-        p.manifest['evidence']['feedback'] = ['feedback.json']
+        self.feedback('Fresh feedback after cleanup')
         p.manifest['evidence']['prior_preparation'] = [self.original_path]
         p.write('manifest.json', p.manifest)
         result = analysis(self.reviewers)
         result['sync_reason'] = 'Published scope and Decisions are synchronized after cleanup.'
         if change:
             change(result)
-        self.current_path = p.prepare(result)['artifact']
+        def reassess(prompt, checkout):
+            batch = json.JSONDecoder().raw_decode(prompt.split(
+                'REASSESSMENT (one batch, read original changed and governing sources):\n', 1)[1])[0]
+            value = retain(self.original, unmapped=batch['unmapped_changes'])
+            conclusions = prep.graph_api.conclusions(result)
+            original_conclusions = prep.graph_api.conclusions(self.original['analysis'])
+            for item in value['dispositions']:
+                location = self.original['graph'][item['id']]['location']
+                if conclusions[location] != original_conclusions[location]:
+                    item.update(action='replace', value=conclusions[location])
+            return value
+        refreshed = prep.prepare(p.manifest_path, p.root / 'versions',
+            previous_preparation=self.original_path, full_analysis=True, analyzer=reassess)
+        assert refreshed['refresh']['model_call_count'] == 1
+        self.current_path = refreshed['artifact']
         self.current = prep.read(self.current_path)
+        assert self.current['analysis'] == result
+        assert self.current['parent']['preparation_id'] == self.original['preparation_id']
         state.mutate(self.path, {}, lambda record: state.attach_preparation(
-            record, self.current_path, p.context['url'], self.head))
+            record, self.current_path, p.context['url'], self.head,
+            expected_parent=self.original['preparation_id']))
         self.assess_series(published=published)
 
     def assess_series(self, *, published):
@@ -136,6 +173,74 @@ class Scenario:
 @pytest.fixture
 def scenario(tmp_path, monkeypatch):
     return Scenario(tmp_path, monkeypatch)
+
+
+@pytest.mark.parametrize('legacy', [False, True])
+def test_retained_manifest_relative_order_survives_missing_originals(scenario, legacy):
+    s = scenario
+    original, _, _, sources = prep.retained(s.original_path)
+    if legacy:
+        original.pop('reviewer_paths')
+    s.package.manifest_path.unlink()
+    (s.package.root / 'reviewer.json').unlink()
+    assert reconcile.reviewer_order(sources, original, prep) == ['example']
+
+
+@pytest.mark.parametrize('kind', ['missing', 'ambiguous'])
+def test_retained_manifest_reviewer_mapping_must_be_unambiguous(scenario, kind):
+    original, _, _, sources = prep.retained(scenario.original_path)
+    if kind == 'missing':
+        original['sources']['reviewers/0']['path'] += '.unmapped'
+    else:
+        original['sources']['reviewers/1'] = dict(original['sources']['reviewers/0'])
+    with pytest.raises(ValueError, match='uniquely match retained descriptors|ambiguous retained reviewer descriptor path'):
+        reconcile.reviewer_order(sources, original, prep)
+
+
+@pytest.mark.parametrize('reviewed_order', [['other'], ['example', 'example']])
+def test_recorded_order_must_match_the_retained_reviewer_cohort(scenario, reviewed_order):
+    original, _, _, sources = prep.retained(scenario.original_path)
+    with pytest.raises(ValueError, match='cover the prepared reviewers exactly once'):
+        reconcile.reviewer_order(sources, original, prep, reviewed_order=reviewed_order)
+
+
+@pytest.mark.parametrize('reordered', [False, True])
+@pytest.mark.parametrize('current_aliases', [False, True])
+def test_descriptor_links_can_disappear_without_losing_order(tmp_path, monkeypatch, reordered, current_aliases):
+    s = Scenario(tmp_path, monkeypatch, reviewers=('second', 'example'), descriptor_links=True)
+    if not current_aliases:
+        s.package.manifest['evidence']['reviewers'] = [str(link.resolve()) for link in s.descriptor_links]
+    if reordered:
+        s.package.manifest['evidence']['reviewers'].reverse()
+    s.refresh(published=False)
+    assert s.current['reviewer_paths'] == [str(link.resolve()) for link in
+        (reversed(s.descriptor_links) if reordered else s.descriptor_links)]
+    for link in s.descriptor_links:
+        link.unlink()
+    assert prep.gate(s.current_path, pr_url=s.package.context['url'], head_sha=s.head) == s.current
+    assert s.original['reviewers'] == s.current['reviewers']
+    assert prep.retained(s.original_path)[0] == s.original
+    receipt = s.run()
+    if reordered:
+        assert receipt['status'] == 'blocked' and 'ordered reviewers' in receipt['reason']
+        assert s.calls == []
+    else:
+        assert receipt['status'] == 'reconciled' and s.calls == [0]
+        retained = state.verify_review(s.path, s.current)
+        assert retained['preparation_id'] == s.original['preparation_id']
+        assert retained['retained_coverage']['executed_reviewers'] == []
+    assert Path(s.reference['path']).read_bytes() == s.original_bytes
+    assert len(read(s.path, {})['cycles']) == 5
+
+
+def test_legacy_manifest_alias_order_cannot_be_inferred(tmp_path, monkeypatch):
+    s = Scenario(tmp_path, monkeypatch, reviewers=('second', 'example'), descriptor_links=True)
+    original, _, _, sources = prep.retained(s.original_path)
+    original.pop('reviewer_paths')
+    for link in s.descriptor_links:
+        link.unlink()
+    with pytest.raises(ValueError, match='uniquely match retained descriptors; refresh preparation'):
+        reconcile.reviewer_order(sources, original, prep)
 
 
 @pytest.mark.parametrize('published', [True, False])
@@ -207,8 +312,7 @@ def test_identity_changes_never_reach_semantic_provider(scenario, kind):
             'text': 'Change scope', 'source_type': 'local', 'references': [], 'source': 'user',
             'status': 'active', 'publication_status': 'unpublished', 'superseded_by': None}]
     if kind == 'rules':
-        p.write('new-rules.json', {'rule': 'Additional obligations'})
-        p.manifest['evidence']['rules'] = ['new-rules.json']
+        p.write('rules.json', {'rule': 'Additional obligations'})
     if kind == 'reviewers':
         descriptor = prep.read(p.root / 'reviewer.json')
         descriptor['effective_prompt'] = 'Different review instructions'
@@ -257,7 +361,9 @@ def test_tampered_or_stale_evidence_never_supplies_coverage(scenario, kind):
         target = None
     if target:
         if kind.endswith('missing'): target.unlink()
-        else: target.write_text('{}')
+        else:
+            target.chmod(0o600)
+            target.write_text('{}')
     with pytest.raises((ValueError, OSError, KeyError)):
         state.verify_review(s.path, s.current)
 
@@ -494,11 +600,12 @@ def test_identical_preparation_in_new_directory_preserves_disagreement(scenario,
     first = s.run()
     assert first['status'] == 'blocked'
     before = Path(s.current_path)
-    again = s.package.prepare(s.current['analysis'])
-    s.current_path = again['artifact']
+    directory = before.parent.with_name(before.parent.name + '-relocated')
+    shutil.copytree(before.parent, directory)
+    s.current_path = str(directory / before.name)
     assert before != Path(s.current_path)
     assert before.read_bytes() == Path(s.current_path).read_bytes()
-    assert again['preparation_id'] == s.current['preparation_id']
+    assert prep.read(s.current_path)['preparation_id'] == s.current['preparation_id']
     state.mutate(s.path, {}, lambda record: state.attach_preparation(
         record, s.current_path, s.package.context['url'], s.head))
     s.different = None
@@ -511,7 +618,9 @@ def test_identical_preparation_in_new_directory_preserves_disagreement(scenario,
     assert Path(s.reference['path']).read_bytes() == s.original_bytes
     # Ignoring location in terminal identity does not waive the actual retained
     # copy's integrity when the newly attached preparation is used.
-    (Path(s.current_path).parent / 'evidence/feedback/0').write_text('{}')
+    snapshot = Path(s.current_path).parent / 'evidence/feedback/0'
+    snapshot.chmod(0o600)
+    snapshot.write_text('{}')
     with pytest.raises(ValueError):
         s.run()
 
