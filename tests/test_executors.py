@@ -19,7 +19,7 @@ def clean_provider_environment(monkeypatch):
 
 
 @pytest.mark.parametrize('host', ['claude', 'codex', 'command'])
-@pytest.mark.parametrize('configured,expected', [(None, 1200), ('1800', 1800)])
+@pytest.mark.parametrize('configured,expected', [(None, 2400), ('1800', 1800)])
 def test_provider_subprocess_receives_default_or_configured_timeout(
     tmp_path, monkeypatch, host, configured, expected
 ):
