@@ -355,62 +355,82 @@ class Controller:
         require(self.work['phase'] == observation['phase'] and self.work['phase'] != 'done',
                 'run next for the current phase')
         batch = guard.read(batch_path)
-        expected = guard.validate(batch, require_details=True)
+        expected = guard.validate(batch)
         source_map = all_sources(expected)
-        require(batch['snapshot'].get('selection') == guard.read(observation['snapshot']).get('selection'),
+        selection = batch['snapshot'].get('selection')
+        reference = (selection.get('reviewReference') or selection.get('commentReference')) if selection else None
+        require(reference == self.selection,
                 'batch changed selected review')
         allowed = self.selected_sources(expected)
         require(all(r['source'] in allowed and (not r.get('threadReference') or
                     r['threadReference'] in {t['id'] for t in self.selected_threads(expected)})
                     for r in batch['requests']), 'request outside selected review')
-        for request in batch['requests']:
-            answer = self.work.get('answers', {}).get(guard.digest([request['source'], request['excerpt']]))
-            if (request['disposition'] == 'reply' and answer and answer['status'] == 'current' and
-                    answer['sourceFingerprint'] == fingerprint(source_map[request['source']])):
-                find_receipt(expected, answer['receipt'])
-                raise guard.GuardError('request already has a verified answer; retain its mapping and skip it')
-        require(batch['snapshot'] == guard.read(observation['snapshot']) and
-                batch['conversation'] == guard.read(observation['conversation']),
-                'batch must use the latest controller snapshots')
-        kind = 'inline' if self.work['phase'] == 'inline' else 'issue_comment'
-        if kind == 'issue_comment' and any(r['disposition'] == 'reply' and r.get('threadReference')
-                                          for r in batch['requests']):
-            require(self.work['active'] is None, 'correct the active rejection before changing passes')
-            self.work['phase'] = 'inline'
-            self.save()
-            return {'action': 'inline', 'reason': 'new request needs an inline answer; run next again',
-                    'stale_answers': self.stale_answers(expected)}
-        require(all(r['destination']['kind'] == kind for r in batch['replies']),
-                'reply destinations do not match the controller phase')
-        require(not any(r['disposition'] == 'reply' and not r.get('threadReference')
-                        for r in batch['requests']) if kind == 'inline' else True,
-                'hold unmatched requests for the top-level pass')
         verdict = guard.read(verdict_path) if verdict_path else None
         stale_requests = {s['answerKey'] for s in self.stale_answers(expected) if s['requestPresent']}
         held = {answer_state.key(guard, r) for r in batch['requests'] if r['disposition'] == 'held'}
         needs_verdict = bool(batch['replies'] or stale_requests - held)
         if needs_verdict:
             require(verdict is not None, 'independent verdict required for replies or stale request reassessment')
-        if verdict is not None:
-            require(verdict.get('batchSha256') == guard.digest(batch) and
+        if verdict_path is not None:
+            require(isinstance(verdict, dict) and
+                    verdict.get('batchSha256') == guard.digest(batch) and
                     verdict.get('status') in ('approved', 'rejected') and
                     isinstance(verdict.get('validatorAgent'), str) and verdict['validatorAgent'].strip() and
-                    verdict['validatorAgent'] != self.agent, 'invalid or non-independent verdict')
-        if verdict is not None and verdict.get('status') == 'approved':
-            guard.require_approval(batch, verdict)
+                    verdict['validatorAgent'] != self.agent and
+                    type(verdict.get('pass')) is int and verdict['pass'] in (1, 2) and
+                    isinstance(verdict.get('corrections'), list) and
+                    all(isinstance(c, str) and c.strip() for c in verdict['corrections']),
+                    'invalid or non-independent verdict')
+        # A rejection can use an earlier observation, never unrelated evidence.
+        require(expected['pr'] == self.pr and expected['head'] == self.work['head'],
+                'batch belongs to a different PR or pinned head')
+        require(any(o['head'] == expected['head'] and o['phase'] == self.work['phase'] and
+                    batch['snapshot'] == guard.read(o['snapshot']) and
+                    batch['conversation'] == guard.read(o['conversation'])
+                    for o in reversed(self.work['observations'])),
+                'batch must use retained controller snapshots for the current phase')
         active = self.work['active']
         if active is None:
             require(verdict is None or verdict.get('pass') == 1, 'first verdict must be pass 1')
+        else:
+            entry = self.work['history'][active]
+            previous = entry['attempts'][-1]['verdict']
+            require(entry['status'] == 'rejected' and entry['head'] == expected['head'] and
+                    entry['phase'] == self.work['phase'] and previous['pass'] == 1 and verdict is not None and
+                    verdict.get('pass') == 2 and verdict.get('validatorAgent') == previous['validatorAgent'],
+                    'one correction using the same validator is permitted')
+        rejected = verdict is not None and verdict['status'] == 'rejected'
+        if not rejected:
+            guard.validate(batch, require_details=True)
+            if verdict is not None:
+                guard.require_approval(batch, verdict)
+            for request in batch['requests']:
+                answer = self.work.get('answers', {}).get(guard.digest([request['source'], request['excerpt']]))
+                if (request['disposition'] == 'reply' and answer and answer['status'] == 'current' and
+                        answer['sourceFingerprint'] == fingerprint(source_map[request['source']])):
+                    find_receipt(expected, answer['receipt'])
+                    raise guard.GuardError('request already has a verified answer; retain its mapping and skip it')
+            require(batch['snapshot'] == guard.read(observation['snapshot']) and
+                    batch['conversation'] == guard.read(observation['conversation']),
+                    'batch must use the latest controller snapshots')
+            kind = 'inline' if self.work['phase'] == 'inline' else 'issue_comment'
+            if kind == 'issue_comment' and any(r['disposition'] == 'reply' and r.get('threadReference')
+                                              for r in batch['requests']):
+                require(self.work['active'] is None, 'correct the active rejection before changing passes')
+                self.work['phase'] = 'inline'
+                self.save()
+                return {'action': 'inline', 'reason': 'new request needs an inline answer; run next again',
+                        'stale_answers': self.stale_answers(expected)}
+            require(all(r['destination']['kind'] == kind for r in batch['replies']),
+                    'reply destinations do not match the controller phase')
+            require(not any(r['disposition'] == 'reply' and not r.get('threadReference')
+                            for r in batch['requests']) if kind == 'inline' else True,
+                    'hold unmatched requests for the top-level pass')
+        if active is None:
             entry = {'phase': self.work['phase'], 'head': expected['head'], 'status': 'prepared',
                      'attempts': [], 'receipts': []}
             self.work['history'].append(entry)
             self.work['active'] = len(self.work['history']) - 1
-        else:
-            entry = self.work['history'][active]
-            previous = entry['attempts'][-1]['verdict']
-            require(entry['status'] == 'rejected' and previous['pass'] == 1 and verdict is not None and
-                    verdict.get('pass') == 2 and verdict.get('validatorAgent') == previous['validatorAgent'],
-                    'one correction using the same validator is permitted')
         folder = Path(tempfile.mkdtemp(
             prefix=f"batch-{len(self.work['history'])}-pass-{len(entry['attempts']) + 1}-", dir=self.directory))
         saved_batch, saved_verdict, journal = folder / 'batch.json', folder / 'verdict.json', folder / 'journal.json'

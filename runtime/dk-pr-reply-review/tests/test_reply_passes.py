@@ -382,6 +382,232 @@ class ReplyPassesTest(unittest.TestCase):
             self.controller('resumed-agent').publish(path, verdict)
         self.assertEqual(self.github.posts, [])
 
+    def duplicate_batch(self):
+        self.publish(self.inline_batch(self.next()))
+        self.github.threads.append(dict(id='T2', isResolved=False, path='b.py', line=1,
+                                        comments=[dict(reference='C2', reviewReference=None,
+                                                       text='Explain the change.',
+                                                       url=PR + '#discussion_r2')]))
+        self.controller().reconcile()
+        step = self.next()
+        batch = self.inline_batch(step)
+        batch['requests'].append(request('missing', source='C2', excerpt='Explain the change.', thread='T2'))
+        batch['replies'].append(response('missing-reply', ['missing'], reference='T2'))
+        guard.validate(batch)
+        return batch
+
+    def test_duplicate_rejection_recovers_through_existing_cli_after_restart(self):
+        batch = self.duplicate_batch()
+        before = guard.read(self.record)
+        path, verdict = self.folder / 'external-batch.json', self.folder / 'external-verdict.json'
+        guard.write(path, batch)
+        rejected = dict(batchSha256=guard.digest(batch), validatorAgent='validator',
+                        status='rejected', corrections=['Skip the verified answer.'], **{'pass': 1})
+        guard.write(verdict, rejected)
+        # Externally retained artifacts survive reconciliation and a replacement agent.
+        self.controller('resumed-agent').reconcile()
+        args = ['reply_passes.py', '--record', str(self.record), '--pr', PR, '--cwd', str(self.folder),
+                '--agent', 'resumed-agent', 'publish', '--batch', str(path), '--verdict', str(verdict)]
+        with patch.object(passes.sys, 'argv', args), redirect_stdout(io.StringIO()):
+            self.assertEqual(passes.main(), 0)
+        saved = guard.read(self.record)
+        work = saved['reply_workflow']
+        for key in ('phase', 'answers', 'requests', 'knownSources'):
+            self.assertEqual(work[key], before['reply_workflow'][key])
+        self.assertEqual(work['history'][:-1], before['reply_workflow']['history'])
+        for key in ('events', 'cycles', 'local_decisions'):
+            self.assertEqual(saved[key], before[key])
+        attempt = work['history'][-1]['attempts'][0]
+        self.assertEqual(guard.read(attempt['batch']), batch)
+        self.assertEqual(guard.read(attempt['verdictPath']), rejected)
+        self.assertEqual(attempt['verdict'], rejected)
+        self.assertEqual(attempt['batchSha256'], guard.digest(batch))
+        self.assertFalse(Path(attempt['journal']).exists())
+        self.assertEqual(len(self.github.posts), 1)
+        self.controller().reconcile()
+        step = self.next()
+        corrected = copy.deepcopy(batch)
+        corrected.update(snapshot=guard.read(step['snapshot']), conversation=guard.read(step['conversation']))
+        for r in corrected['requests']:
+            if r['id'] in ('inline', 'repeat'):
+                r.update(disposition='skip', reason='Answered at ' + self.github.posts[0]['url'])
+        corrected['replies'] = [corrected['replies'][-1]]
+        self.assertEqual(self.publish(corrected, number=2)['phase'], 'top_level')
+        self.assertEqual(len(self.github.posts), 2)
+        self.assertEqual(len(self.github.threads[0]['comments']), 2)
+        final = guard.read(self.record)['reply_workflow']
+        self.assertEqual([len(h['attempts']) for h in final['history']], [1, 2])
+        self.assertEqual(final['history'][-1]['attempts'][0], attempt)
+        for key, answer in work['answers'].items():
+            for field in ('url', 'body', 'kind', 'reference'):
+                self.assertEqual(final['answers'][key]['receipt'][field], answer['receipt'][field])
+            self.assertEqual(final['answers'][key]['provenance'], 'controller_published')
+
+    def test_earlier_retained_observation_can_record_rejection_but_not_approval(self):
+        old = self.inline_batch(self.next())
+        self.github.comments.append(dict(id=50, body='New feedback.', html_url=PR + '#issuecomment-50'))
+        self.next()
+        with self.assertRaisesRegex(guard.GuardError, 'latest controller snapshots'):
+            self.publish(old)
+        self.assertEqual(guard.read(self.record)['reply_workflow']['history'], [])
+        self.assertEqual(self.publish(old, status='rejected')['action'], 'correct_batch')
+        self.controller().reconcile()
+        with self.assertRaisesRegex(guard.GuardError, 'latest controller snapshots'):
+            self.publish(old, number=2)
+        self.assertEqual(self.publish(self.inline_batch(self.next()), number=2)['action'], 'next')
+        self.assertEqual(len(self.github.posts), 1)
+
+    def test_selected_review_rejection_survives_changed_thread_membership(self):
+        other = copy.deepcopy(self.github.threads[0])
+        other['id'] = 'T2'
+        other['comments'][0].update(reference='C2', text='Another review comment.')
+        self.github.threads.append(other)
+        selected_pr = PR + '#' + REVIEW
+        with patch.object(self, 'controller', side_effect=lambda agent='reply-agent': passes.Controller(
+                guard.read(self.record), self.record, selected_pr, self.folder, agent)):
+            old = self.inline_batch(self.next())
+            self.github.threads.pop()  # Deleted review comment changes derived selection membership.
+            self.next()
+            with self.assertRaisesRegex(guard.GuardError, 'latest controller snapshots'):
+                self.publish(old)
+            self.assertEqual(guard.read(self.record)['reply_workflow']['history'], [])
+            self.assertEqual(self.publish(old, status='rejected')['action'], 'correct_batch')
+            attempt = guard.read(self.record)['reply_workflow']['history'][0]['attempts'][0]
+            self.assertEqual(guard.read(attempt['batch']), old)
+            self.assertEqual(self.github.posts, [])
+            self.controller().reconcile()
+            fresh = self.inline_batch(self.next())
+            self.assertNotEqual(old['snapshot']['selection'], fresh['snapshot']['selection'])
+            self.assertEqual(self.publish(fresh, number=2)['action'], 'next')
+            self.assertEqual(len(self.github.posts), 1)
+
+    def test_empty_correction_still_requires_same_validator_pass_two(self):
+        batch = self.duplicate_batch()
+        self.publish(batch, status='rejected')
+        self.controller().reconcile()
+        step = self.next()
+        held = [request('missing', source='C2', excerpt='Explain the change.', thread='T2',
+                        disposition='held', reason='User decision pending')]
+        empty = self.batch(step, held, [])
+        with self.assertRaisesRegex(guard.GuardError, 'same validator'):
+            self.publish(empty)
+        with self.assertRaisesRegex(guard.GuardError, 'same validator'):
+            self.publish(empty, validator='another-validator', number=2)
+        self.assertEqual(self.publish(empty, number=2)['phase'], 'top_level')
+        self.assertEqual(len(self.github.posts), 1)
+        self.assertEqual(self.next()['outstanding_requests'][0]['disposition'], 'held')
+
+    def test_duplicate_second_rejection_is_permanent_even_with_empty_batch(self):
+        batch = self.duplicate_batch()
+        self.publish(batch, status='rejected')
+        empty = self.batch(self.next(), [], [])
+        self.assertEqual(self.publish(empty, status='rejected', number=2)['action'], 'stop')
+        self.assertEqual(self.next()['action'], 'stop')
+        with self.assertRaisesRegex(guard.GuardError, 'final rejection'):
+            self.controller('resumed-agent').reconcile()
+        with self.assertRaisesRegex(guard.GuardError, 'blocked workflow'):
+            self.publish(batch, status='rejected')
+        self.assertEqual(len(self.github.posts), 1)
+
+    def test_rejection_attempt_limits_survive_reconciliation_and_head_changes(self):
+        batch = self.inline_batch(self.next())
+        with self.assertRaisesRegex(guard.GuardError, 'first verdict'):
+            self.publish(batch, status='rejected', number=2)
+        self.publish(batch, status='rejected')
+        self.controller().reconcile()
+        for number, validator in [(1, 'validator'), (2, 'another-validator'), (3, 'validator')]:
+            with self.subTest(number=number, validator=validator):
+                with self.assertRaises(guard.GuardError):
+                    self.publish(batch, status='rejected', number=number, validator=validator)
+                self.assertEqual(len(guard.read(self.record)['reply_workflow']['history'][0]['attempts']), 1)
+        self.github.head = 'b' * 40
+        self.assertEqual(self.next()['action'], 'reconcile')
+        with self.assertRaisesRegex(guard.GuardError, 'head changed with an outstanding rejection'):
+            self.controller().reconcile()
+        self.assertEqual(self.github.posts, [])
+
+    def test_rejection_requires_matching_retained_pr_head_phase_and_evidence(self):
+        step = self.next()
+        original = self.inline_batch(step)
+        # Internally valid evidence alone is insufficient: it must match a retained observation.
+        foreign = copy.deepcopy(original)
+        foreign['snapshot']['pullRequest']['url'] = PR.replace('/7', '/8')
+        foreign['conversation']['pullRequest']['url'] = PR.replace('/7', '/8')
+        wrong_head = copy.deepcopy(original)
+        wrong_head['snapshot']['pullRequest']['headRefOid'] = 'b' * 40
+        wrong_head['conversation']['pullRequest']['headRefOid'] = 'b' * 40
+        unobserved = copy.deepcopy(original)
+        unobserved['conversation']['pullRequest']['title'] = 'Unobserved title'
+        for label, batch in [('PR', foreign), ('head', wrong_head), ('snapshots', unobserved)]:
+            with self.subTest(label=label):
+                conversation = batch['conversation']
+                conversation['sha256'] = guard.digest({k: v for k, v in conversation.items() if k != 'sha256'})
+                guard.validate(batch)
+                with self.assertRaisesRegex(guard.GuardError, label):
+                    self.publish(batch, status='rejected')
+        self.publish(original)
+        self.next()  # Same PR/head/evidence, observed in a different phase.
+        with self.assertRaisesRegex(guard.GuardError, 'current phase'):
+            self.publish(original, status='rejected')
+        self.assertEqual(len(guard.read(self.record)['reply_workflow']['history']), 1)
+        self.assertEqual(len(self.github.posts), 1)
+
+    def test_rejection_cannot_change_selected_review(self):
+        original = self.inline_batch(self.next())
+        selected_path = self.folder / 'selected-run.json'
+        guard.write(selected_path, {'pr': 7})
+        selected = passes.Controller(guard.read(selected_path), selected_path, PR + '#' + REVIEW,
+                                     self.folder, 'reply-agent')
+        selected.next()
+        path, verdict = self.folder / 'batch.json', self.folder / 'verdict.json'
+        guard.write(path, original)
+        guard.write(verdict, dict(batchSha256=guard.digest(original), validatorAgent='validator',
+                                  status='rejected', corrections=['Skip duplicate.'], **{'pass': 1}))
+        with self.assertRaisesRegex(guard.GuardError, 'selected review'):
+            selected.publish(path, verdict)
+        self.assertEqual(guard.read(selected_path)['reply_workflow']['history'], [])
+
+    def test_malformed_rejections_do_not_create_attempts(self):
+        batch = self.inline_batch(self.next())
+        path, verdict_path = self.folder / 'batch.json', self.folder / 'verdict.json'
+        guard.write(path, batch)
+        valid = dict(batchSha256=guard.digest(batch), validatorAgent='validator', status='rejected',
+                     corrections=['Remove duplicate.'], **{'pass': 1})
+        invalid = [[], 'rejected', 1, None]
+        for key, values in [('batchSha256', ['wrong']), ('validatorAgent', ['', 'reply-agent', None]),
+                            ('status', ['unknown']), ('pass', [0, 3, True, '1']),
+                            ('corrections', [None, 'fix', [None], ['']])]:
+            invalid.extend(dict(valid, **{key: value}) for value in values)
+        invalid.extend({k: v for k, v in valid.items() if k != key} for key in valid)
+        for verdict in invalid:
+            with self.subTest(verdict=verdict):
+                guard.write(verdict_path, verdict)
+                with self.assertRaises(guard.GuardError):
+                    self.controller().publish(path, verdict_path)
+                self.assertEqual(guard.read(self.record)['reply_workflow']['history'], [])
+        guard.write(path, self.batch(self.next(), [], []))
+        guard.write(verdict_path, None)
+        with self.assertRaisesRegex(guard.GuardError, 'invalid or non-independent'):
+            self.controller().publish(path, verdict_path)
+        self.assertEqual(guard.read(self.record)['reply_workflow']['history'], [])
+        self.assertEqual(self.github.posts, [])
+
+    def test_rejection_cannot_replace_uncertain_publication_on_restart(self):
+        batch = self.inline_batch(self.next())
+        self.github.uncertain = True
+        self.publish(batch)
+        before = guard.read(self.record)['reply_workflow']['history']
+        with self.assertRaisesRegex(guard.GuardError, 'blocked workflow'):
+            self.publish(batch, status='rejected')
+        saved = guard.read(self.record)
+        saved['reply_workflow']['blocked'] = None  # Simulate interrupted blocker persistence.
+        guard.write(self.record, saved)
+        with self.assertRaisesRegex(guard.GuardError, 'same validator'):
+            self.publish(batch, status='rejected', number=2)
+        self.assertEqual(guard.read(self.record)['reply_workflow']['history'], before)
+        self.controller().reconcile()
+        self.assertEqual(len(self.github.posts), 1)
+
     def test_controller_rejects_approval_from_reply_agent(self):
         inline = self.inline_batch(self.next())
         with self.assertRaisesRegex(guard.GuardError, 'non-independent'):
