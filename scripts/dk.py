@@ -212,7 +212,7 @@ def dispatch(arguments, result_file=None):
             value = inspect_result(selected.artifact, selected.section, selected.since, selected.limit)
         except (OSError, ValueError, KeyError, IndexError) as exc:
             parser.error(str(exc))
-        print(json.dumps(value, ensure_ascii=False))
+        print(json.dumps(value, ensure_ascii=True))
         return 0
     if args.host not in ('codex', 'claude'):
         parser.error('set --host codex|claude or use the native skill entrypoint environment')

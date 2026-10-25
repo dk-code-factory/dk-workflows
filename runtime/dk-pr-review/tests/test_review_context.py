@@ -34,6 +34,8 @@ if mode=='fail': print('missing PR',file=sys.stderr); sys.exit(1)
 if sys.argv[1]=='api':
  files=[{'filename':'a.py','additions':1,'deletions':1,'status':'modified'},
         {'filename':'b.py','additions':1,'deletions':0,'status':'added'}]
+ if mode=='spaces': files=[{'filename':'a b.py','status':'added'}]
+ if mode=='unusual': files=[{'filename':os.environ['GH_FIXTURE_FILENAME'],'status':'added'}]
  if mode=='large_missing': files=files[:1]
  print(json.dumps([files]))
 elif sys.argv[1:3]==['pr','view']:
@@ -41,12 +43,17 @@ elif sys.argv[1:3]==['pr','view']:
  base=os.environ.get('GH_FIXTURE_BASE_SHA',sha)
  if mode=='moving' and sys.argv[-1]=='headRefOid,baseRefOid': sha='b'*40
  files=[{'path':'a b.py'}] if mode=='spaces' else [{'path':'a.py'},{'path':'b.py'}]
+ if mode=='unusual': files=[{'path':os.environ['GH_FIXTURE_FILENAME']}]
  if mode in ('large_missing','large_truncated'): files=[{'path':'a.py'}]
  print(json.dumps({'number':7,'url':'https://github.com/o/r/pull/7','title':'fixture','body':'test','baseRefName':'main','baseRefOid':base,'headRefName':'topic','headRefOid':sha,'files':files}))
 elif sys.argv[1:3]==['pr','diff']:
- if mode in ('large','large_missing','large_truncated'):
+ if mode in ('large','large_missing','large_truncated') or os.environ.get('GH_FIXTURE_PATCH_KIND')=='large':
   print('HTTP 406: Sorry, the diff exceeded the maximum number of lines (20000)',file=sys.stderr); sys.exit(1)
- if '--name-only' in sys.argv: print('a b.py' if mode=='spaces' else 'a.py\\nb.py')
+ if '--name-only' in sys.argv:
+  print(os.environ['GH_FIXTURE_FILENAME'] if mode=='unusual' else 'a b.py' if mode=='spaces' else 'a.py\\nb.py')
+ elif mode=='unusual':
+  if os.environ.get('GH_FIXTURE_PATCH_KIND')=='series': print('From '+'a'*40+' Mon Sep 17 00:00:00 2001')
+  with open(os.environ['GH_FIXTURE_PATCH']) as source: print(source.read(),end='')
  elif mode=='empty': print('')
  elif mode=='partial': print('diff --git a/a.py b/a.py\\n+one')
  elif mode=='spaces': print('diff --git a/a b.py b/a b.py\\n+one')
@@ -76,7 +83,32 @@ else: sys.exit(2)
         p=self.call('spaces')
         self.assertEqual(p.returncode,0,p.stderr)
         self.assertEqual(json.loads(Path(json.loads(p.stdout)['metadata']).read_text())['files'],
-                         [{'path':'a b.py'}])
+                         [{'path':'a b.py','additions':None,'deletions':None,'changeType':'ADDED'}])
+    def test_git_patch_and_name_records_preserve_unusual_filenames(self):
+        for name in ['review\u2028 notes.py', 'tab\tname.py', 'line\nname.py', 'café\\" notes.py']:
+            base=subprocess.check_output(['git','-C',str(self.root),'rev-parse','HEAD'],text=True).strip()
+            (self.root/name).write_text('pass\n')
+            subprocess.run(['git','-C',str(self.root),'add',name],check=True)
+            subprocess.run(['git','-C',str(self.root),'commit','-qm','unusual filename'],check=True)
+            head=subprocess.check_output(['git','-C',str(self.root),'rev-parse','HEAD'],text=True).strip()
+            for quote_path in ['false', 'true']:
+                with self.subTest(name=name,quote_path=quote_path):
+                    actual=subprocess.check_output(['git','-C',str(self.root),'-c','core.quotePath='+quote_path,
+                                                    'diff','--binary','--full-index',base,head],text=True)
+                    self.assertEqual(review_context.patch_paths(actual,{name}),{name})
+                    source=self.root/'fixture.patch';source.write_text(actual)
+                    self.env.update(GH_FIXTURE_BASE_SHA=base,GH_FIXTURE_SHA=head,
+                                    GH_FIXTURE_FILENAME=name,GH_FIXTURE_PATCH=str(source))
+                    kinds=['patch','series','large'] if quote_path=='false' else ['patch']
+                    for kind in kinds:
+                        with self.subTest(kind=kind):
+                            self.env['GH_FIXTURE_PATCH_KIND']=kind
+                            result=self.call('unusual')
+                            self.assertEqual(result.returncode,0,result.stderr)
+                            context=json.loads(result.stdout)
+                            self.assertEqual(Path(context['patch']).read_text(),actual)
+                            files=json.loads(Path(context['metadata']).read_text())['files']
+                            self.assertEqual([item['path'] for item in files],[name])
     def test_dirty_checkout_is_not_remote_context(self):
         repo=self.root/'work'; repo.mkdir()
         subprocess.run(['git','init','-q',str(repo)],check=True)

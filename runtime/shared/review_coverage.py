@@ -10,7 +10,7 @@ PROTECTED_SOURCE_CATEGORIES = frozenset({'issues', 'choices', 'user_instructions
 
 
 def digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode('utf-8', 'backslashreplace')).hexdigest()
 
 
 def git(cwd, *args):

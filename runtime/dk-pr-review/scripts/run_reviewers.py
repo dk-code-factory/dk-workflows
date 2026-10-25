@@ -268,7 +268,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                                          'For legacy contexts check all live, discussion, and local decisions.'),
                'rules': rules, 'pr_url': context['url'], 'preparation': preparation}
     handoff_path = Path(context['patch']).with_name('handoff.json')
-    handoff_path.write_text(json.dumps(handoff, ensure_ascii=False, indent=2) + '\n')
+    handoff_path.write_text(json.dumps(handoff, ensure_ascii=True, indent=2) + '\n', encoding='utf-8')
     findings = []
     skipped_reviewers = []
     failed_reviewers = []
@@ -293,7 +293,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             if describe_reviewer(provider_map[name]) != preparation['reviewers'][name]:
                 raise ValueError('effective reviewer instructions changed; refresh preparation')
             handoff['reviewer_addendum'] = preparation['analysis']['reviewer_addenda'][name]
-            handoff_path.write_text(json.dumps(handoff, ensure_ascii=False, indent=2) + '\n')
+            handoff_path.write_text(json.dumps(handoff, ensure_ascii=True, indent=2) + '\n', encoding='utf-8')
             provider = provider_map[name]
             skill = skill_path(provider)
             cached = session.cached(name) if session else None
@@ -401,7 +401,7 @@ def main():
     if not config['reviewers']:
         raise ValueError('no PR review agent is configured; use dk-config reviewers set SKILL')
     if args.describe:
-        print(json.dumps({'reviewers': [describe_reviewer(name) for name in config['reviewers']]}, ensure_ascii=False))
+        print(json.dumps({'reviewers': [describe_reviewer(name) for name in config['reviewers']]}, ensure_ascii=True))
         return
     decisions = validate_decisions(context, json.loads(Path(args.decisions_file).read_text()))
     preparation = preparation_api.load(args.preparation_file, context, decisions)
@@ -424,7 +424,7 @@ def main():
                     if describe_reviewer(provider) != preparation['reviewers'][name]:
                         raise ValueError('effective reviewer instructions changed; refresh preparation')
             legacy.legacy_register_review(args.run_record, options['result'], context['head_sha'])
-            print(json.dumps(options['result'], ensure_ascii=False))
+            print(json.dumps(options['result'], ensure_ascii=True))
             return
         args.session_file, args.resume, args.stats_cycle = options['session_file'], options['resume'], options['cycle']
     session = Session(context, preparation, names, path=args.session_file,
@@ -442,7 +442,7 @@ def main():
     result['review_artifact'] = artifact
     if legacy:
         legacy.legacy_register_review(args.run_record, result, context['head_sha'])
-    print(json.dumps(result, ensure_ascii=False))
+    print(json.dumps(result, ensure_ascii=True))
 
 
 if __name__ == '__main__':

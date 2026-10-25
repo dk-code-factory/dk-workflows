@@ -266,7 +266,7 @@ def reconcile(record_path, head, assessment_path, api):
         'using the evidence index, and cite each changed source in its verdict. '
         'equivalent is true only if every verdict is equivalent. Missing evidence blocks equivalence.\n' +
         json.dumps({'binding': binding, 'original_analysis': original['analysis'],
-                    'current_analysis': current['analysis']}, ensure_ascii=False))
+                    'current_analysis': current['analysis']}, ensure_ascii=True))
     comparison = execute_json(prompt, context['checkout'],
                               validate=lambda value: validate_comparison(value, binding))
     # No state lock is held during the model call. Recheck live and retained

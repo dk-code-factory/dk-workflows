@@ -115,7 +115,7 @@ class ResultFile:
                                 ('stderr', self.path.with_name(self.path.name + '.stderr'))]:
                 fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                 created.append(target)
-                self.streams[key] = os.fdopen(fd, 'w', encoding='utf-8')
+                self.streams[key] = os.fdopen(fd, 'w', encoding='utf-8', errors='backslashreplace')
             self.save({'schema_version': 1, 'outcome': 'running', 'artifact': str(self.path)})
         except BaseException:
             self.close()

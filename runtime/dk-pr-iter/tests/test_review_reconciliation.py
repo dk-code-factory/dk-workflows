@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -29,7 +30,8 @@ state, completion = module('run_state'), module('completion')
 
 
 class Scenario:
-    def __init__(self, tmp_path, monkeypatch, reviewers=('example',), cycles=5, descriptor_links=False):
+    def __init__(self, tmp_path, monkeypatch, reviewers=('example',), cycles=5, descriptor_links=False,
+                 extra_filename=None):
         self.package = p = Package(tmp_path)
         self.reviewers = list(reviewers)
         if len(reviewers) > 1:
@@ -45,6 +47,8 @@ class Scenario:
         self.git = lambda *args: coverage.git(p.repo, *args)
         self.base = p.head
         (p.repo / 'change.txt').write_text('Reviewed change\n')
+        if extra_filename is not None:
+            (p.repo / extra_filename).write_text('Reviewed filename transport\n')
         self.git('add', '.')
         self.git('commit', '-qm', 'Reviewed commit')
         self.reviewed_head = self.git('rev-parse', 'HEAD')
@@ -241,6 +245,28 @@ def test_legacy_manifest_alias_order_cannot_be_inferred(tmp_path, monkeypatch):
         link.unlink()
     with pytest.raises(ValueError, match='uniquely match retained descriptors; refresh preparation'):
         reconcile.reviewer_order(sources, original, prep)
+
+
+def test_reconciliation_prompt_roundtrips_non_utf8_git_filename(tmp_path, monkeypatch):
+    filename_bytes = b'filename-\xff.py'
+    filename = os.fsdecode(filename_bytes)
+    s = Scenario(tmp_path, monkeypatch, extra_filename=filename)
+    assert filename in s.original['inputs']['tree']
+    s.refresh(change=lambda value: value['placement']['production']['locations'].append(filename))
+    provider = executors.execute
+    def utf8_provider(prompt, checkout, *, attempt=0):
+        transported = prompt.encode('utf-8').decode('utf-8')
+        payload = json.JSONDecoder().raw_decode(transported[transported.index('{"binding":'):])[0]
+        assert payload['original_analysis'] == s.original['analysis']
+        assert payload['current_analysis'] == s.current['analysis']
+        assert os.fsencode(payload['current_analysis']['placement']['production']['locations'][-1]) == filename_bytes
+        return provider(transported, checkout, attempt=attempt)
+    monkeypatch.setattr(executors, 'execute', utf8_provider)
+    receipt = s.run()
+    assert receipt['status'] == 'reconciled' and receipt['executed_reviewers'] == []
+    assert s.calls == [0] and len(read(s.path, {})['cycles']) == 5
+    assert state.verify_review(s.path, s.current)['preparation_id'] == s.original['preparation_id']
+    assert Path(s.reference['path']).read_bytes() == s.original_bytes
 
 
 @pytest.mark.parametrize('published', [True, False])
