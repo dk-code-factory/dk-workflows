@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.1.19.
+Independent MIT plugin for Claude Code and Codex. Version 1.1.20.
 
 ## Install
 
@@ -93,7 +93,7 @@ Providers return findings or draft content only. DK owns pinned revisions, engin
 
 Command providers receive the evidence handoff through their configured `{handoff}` argument. They receive output instructions on standard input, including validator errors and the prior response on a correction attempt; `DK_PROVIDER_ATTEMPT` starts at 0. Return the declared JSON contract on standard output and diagnostics on standard error. The handoff stays unchanged during correction.
 
-Provider processes have a 20-minute timeout per invocation, including each correction attempt.
+Provider processes have a 40-minute timeout per invocation, including each correction attempt.
 Set `DK_PROVIDER_TIMEOUT_SECONDS` in the environment running the workflow to override it:
 
 ```sh

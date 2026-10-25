@@ -16,7 +16,7 @@ class ProviderExhausted(RuntimeError):
 
 def provider_timeout():
     """Read the per-invocation provider deadline in seconds."""
-    value = os.environ.get('DK_PROVIDER_TIMEOUT_SECONDS', '1200')
+    value = os.environ.get('DK_PROVIDER_TIMEOUT_SECONDS', '2400')
     try:
         seconds = int(value)
     except ValueError:
