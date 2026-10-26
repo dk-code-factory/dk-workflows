@@ -106,11 +106,13 @@ def failures(result):
     return failed
 
 
-def verify(item, prepared, *, accepted_failures=(), reconciliation=None):
+def verify(item, prepared, *, accepted_failures=(), reconciliation=None, checkout=None):
     """Validate current-tree coverage; callers separately assess remediation."""
+    if reconciliation and reconciliation['binding'].get('purpose') == 'cleanup_precheck':
+        raise ValueError('cleanup prechecks cannot supply final review coverage')
     artifact = load(item)
     context = read(Path(prepared['sources']['context']['path']), {})
-    tree = git(context['checkout'], 'rev-parse', f"{prepared['identity']['head_sha']}^{{tree}}")
+    tree = git(checkout or context['checkout'], 'rev-parse', f"{prepared['identity']['head_sha']}^{{tree}}")
     current_scope = scope(prepared)
     if artifact['scope'] != current_scope and reconciliation is not None:
         from shared import review_reconciliation

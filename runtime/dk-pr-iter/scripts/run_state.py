@@ -6,6 +6,7 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 
 import argparse
 import json
 import re
+import subprocess
 from pathlib import Path
 import sys
 import importlib.util
@@ -43,7 +44,7 @@ def start_run(record, *, resume=False):
     if active:
         snapshot = copy.deepcopy({k: v for k, v in record.items() if k != 'run_history'})
         record.setdefault('run_history', []).append(snapshot)
-    for field in ('cycles', 'cycle_retries', 'repairs', 'review_results', 'review_sessions', 'review_reconciliations'):
+    for field in ('cycles', 'cycle_retries', 'repairs', 'review_results', 'review_sessions', 'review_reconciliations', 'cleanup_prechecks'):
         record[field] = []
     record.pop('preparation', None)
     record['iteration_run'] = {'id': uuid.uuid4().hex, 'status': 'active'}
@@ -281,7 +282,7 @@ def current_review(record, prepared):
 
 
 def reconciliation_api():
-    return SimpleNamespace(work_gate=work_gate, current_review=current_review, preparation_api=preparation_api)
+    return SimpleNamespace(work_gate=work_gate, current_review=current_review, preparation_api=preparation_api, verify_findings=verify_findings, review_acceptances=review_acceptances)
 
 
 def accept_review_failures(record, head, reviewers, source, reason):
@@ -308,9 +309,7 @@ def accept_review_failures(record, head, reviewers, source, reason):
     return entry
 
 
-def verify_review(record_path, prepared, *, assessment=None, assessment_path=None):
-    record = read(Path(record_path), {})
-    reference, artifact = current_review(record, prepared)
+def review_acceptances(record, reference, artifact):
     acceptances = [entry for entry in record.get('accepted_review_failures', [])
                    if entry.get('iteration_run_id') == record['iteration_run']['id']
                    and entry.get('review_artifact') == reference
@@ -322,6 +321,13 @@ def verify_review(record_path, prepared, *, assessment=None, assessment_path=Non
                 or not entry['reviewers'] or not all(isinstance(v, str) for v in entry['reviewers'])):
             raise ValueError('review failure acceptance lacks human evidence')
     accepted = {name for entry in acceptances for name in entry['reviewers']}
+    return acceptances, accepted
+
+
+def verify_review(record_path, prepared, *, assessment=None, assessment_path=None):
+    record = read(Path(record_path), {})
+    reference, artifact = current_review(record, prepared)
+    acceptances, accepted = review_acceptances(record, reference, artifact)
     reconciliation = review_reconciliation.coverage_for(record, prepared, reconciliation_api(),
         assessment=assessment, assessment_path=assessment_path)
     artifact = review_coverage.verify(reference, prepared, accepted_failures=accepted, reconciliation=reconciliation)
@@ -544,6 +550,9 @@ def main():
     session = sub.add_parser('review-session'); session.add_argument('--head', required=True)
     result = sub.add_parser('review-result')
     result.add_argument('--head', required=True); result.add_argument('--file', required=True)
+    precheck = sub.add_parser('precheck-cleanup')
+    for arg in ('head', 'candidate-head', 'split-state'):
+        precheck.add_argument('--' + arg, required=True)
     reconcile = sub.add_parser('reconcile-review')
     reconcile.add_argument('--head', required=True)
     reconcile.add_argument('--series-assessment', required=True)
@@ -596,6 +605,11 @@ def main():
             elif a.command == 'review-session': result = mutate(path, default, lambda d: review_session(d, a.head, path))
             elif a.command == 'review-result':
                 result = mutate(path, default, lambda d: register_review(d, json.loads(Path(a.file).read_text()), a.head))
+            elif a.command == 'precheck-cleanup':
+                from shared.cleanup_precheck import precheck
+                require_head(a.head)
+                require_head(a.candidate_head)
+                result = precheck(path, a.head, a.candidate_head, a.split_state, reconciliation_api())
             elif a.command == 'reconcile-review':
                 require_head(a.head)
                 result = review_reconciliation.reconcile(path, a.head, a.series_assessment, reconciliation_api())
@@ -605,7 +619,7 @@ def main():
             elif a.command == "decision": result = mutate(path, default, lambda d: record_local_decision(d, a.text, a.source))
             else: result = mutate(path, default, lambda d: attempt(d, a.command, a.cycle, a.head, getattr(a, "run_id", None)))
         print(json.dumps(result, sort_keys=True))
-    except (ValueError, OSError, json.JSONDecodeError) as exc:
+    except (ValueError, OSError, RuntimeError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
         p.exit(2, f"run_state: {exc}\n")
 
 

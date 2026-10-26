@@ -277,6 +277,88 @@ def json_output(capsys):
     return json.loads(capsys.readouterr().out)
 
 
+@pytest.mark.parametrize('phase', ['initial_scope', 'ci_observation', 'final_series'])
+def test_completion_cli_operational_subprocess_errors_have_diagnostics(tmp_path, monkeypatch, capsys, phase):
+    import sys
+    from shared import ci_policy, github_reads, flaky_actions, flaky_tests
+    monkeypatch.setitem(sys.modules, 'ci_wait', ci)
+    monkeypatch.setattr(completion.series_assessment, 'load', lambda *a: series_evidence())
+    monkeypatch.setattr(ci_policy, 'decide', lambda *a: {'head': SHA, 'result': 'success'})
+    monkeypatch.setattr(flaky_actions, 'GitHub', lambda *a: None)
+    monkeypatch.setattr(flaky_tests, 'Registry', lambda *a: None)
+    reads = []
+    if phase == 'initial_scope':
+        # Exercise the real initial check_output call with a refusing executable.
+        gh = tmp_path / 'gh'
+        gh.write_text('#!' + sys.executable + '\nraise SystemExit(1)\n')
+        gh.chmod(0o700)
+        monkeypatch.setenv('PATH', str(tmp_path))
+        live_scope = module('completion').live_preparation_scope
+        monkeypatch.setattr(completion, 'live_preparation_scope', live_scope)
+    else:
+        def process(argv, **kwargs):
+            if argv[0] == 'git':
+                return subprocess.CompletedProcess(argv, 0, TREE, '')
+            reads.append((argv, kwargs.get('timeout'), github_reads.read_only(argv)))
+            raise subprocess.TimeoutExpired(argv, kwargs['timeout'])
+        monkeypatch.setattr(github_reads.subprocess, 'run', process)
+        ticks = iter([0, 0, 61])
+        monkeypatch.setattr(github_reads.time, 'monotonic', lambda: next(ticks))
+        if phase == 'final_series':
+            monkeypatch.setattr(ci, 'observe', lambda *a: {'head': SHA, 'result': 'success'})
+    stage = 'review' if phase == 'ci_observation' else 'complete'
+    monkeypatch.setattr(sys, 'argv', ['completion.py', '--pr', PR, 'gate', '--stage', stage,
+        '--start-head', OTHER, '--final-head', SHA, '--review-complete', '--series-assessment', 'fixture',
+        '--preparation-file', 'fixture', '--verification-file', 'fixture', '--run-record', 'fixture'])
+    with pytest.raises(SystemExit) as stopped:
+        completion.main()
+    assert stopped.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == '' and captured.err.startswith('completion: ')
+    assert 'Traceback' not in captured.err
+    if phase != 'initial_scope':
+        assert len(reads) == 1 and reads[0][1:] == (60, True)
+
+
+def test_review_precheck_live_error_invalidates_coverage(monkeypatch):
+    from shared import cleanup_precheck
+    def unavailable(*args):
+        raise RuntimeError('Live repository identity changed')
+    monkeypatch.setattr(cleanup_precheck, 'review_for', unavailable)
+    assert completion.completion_gate(OTHER, SHA, SHA, True, False, 'success',
+        stage='review', cleanup_precheck='/private/precheck.json') == 'review_coverage_invalid'
+
+
+@pytest.mark.parametrize('failure_stage', ['gate', 'report'])
+def test_review_precheck_cli_reports_live_errors(monkeypatch, capsys, failure_stage):
+    import json
+    import sys
+    from shared import cleanup_precheck, ci_policy
+    monkeypatch.setitem(sys.modules, 'ci_wait', ci)
+    monkeypatch.setattr(ci, 'observe', lambda *a: {'head': SHA, 'result': 'success'})
+    monkeypatch.setattr(ci_policy, 'decide', lambda *a: {'head': SHA, 'result': 'success', 'blockers': []})
+    calls = []
+    def review(*args):
+        calls.append(args)
+        if failure_stage == 'gate' or len(calls) == 2:
+            raise RuntimeError('Live repository identity changed')
+        return {}
+    monkeypatch.setattr(cleanup_precheck, 'review_for', review)
+    monkeypatch.setattr(sys, 'argv', ['completion.py', '--pr', PR, 'gate', '--stage', 'review',
+        '--start-head', OTHER, '--final-head', SHA, '--review-complete',
+        '--preparation-file', '/private/preparation.json', '--verification-file', '/private/verification.json',
+        '--run-record', '/private/run-record.json', '--cleanup-precheck', '/private/precheck.json'])
+    with pytest.raises(SystemExit) as stopped:
+        completion.main()
+    assert stopped.value.code == 1
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    assert output['gate'] == 'review_coverage_invalid'
+    assert output['review_limitation'] == 'Live repository identity changed'
+    assert not any(output[key] for key in ('review_ready', 'cleanup_ready', 'completion_ready'))
+    assert len(calls) == 2 and captured.err == ''
+
+
 def test_completion_prompt_precedence_and_reset(tmp_path, monkeypatch):
     import subprocess
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))

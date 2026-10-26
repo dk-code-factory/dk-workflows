@@ -902,3 +902,32 @@ def test_code_links_preserve_verified_fork_and_deleted_head_base_fallback(tmp_pa
         assert path.is_file()
         assert scanned['pr']['headRepository'] == state['pr']['headRepository']
 
+
+@pytest.mark.parametrize('representation', ['unified', 'empty', 'legacy'])
+def test_restatement_targets_follow_authoritative_context_records(representation):
+    from shared import decision_restatements
+    url = 'https://github.com/example/fixture/pull/1'
+    local = [{'text': 'Retired transform choice', 'source': 'Original human choice'},
+             {'text': 'Current transform choice', 'source': 'Explicit replacement answer'}]
+    old = mod.record(local[0]['text'], 'local', [], source=local[0]['source'])
+    state = {'pr': {'url': url, 'number': 1, 'headRefOid': 'a' * 40, 'body': ''},
+             'decisions': [], 'manual_decisions': [],
+             'replacements': [{'old': old, 'new_id': mod.decision_id(local[1]['text']), 'raw': None}]}
+    with patch.object(mod, 'gh_json', return_value={'url': url, 'body': '', 'headRefOid': 'a' * 40}):
+        context = mod.decision_context(state, local)
+    context['decisions'] = mod.decision_records(state, context['local_decisions'])
+    assert context['decisions'][0]['status'] == 'superseded'
+    context['live_decisions'] = 'Legacy scope wording'
+    if representation == 'empty':
+        context['decisions'] = []
+    elif representation == 'legacy':
+        context.pop('decisions')
+    analysis = {'boundaries': {'correctness': [{'text': 'Preserve the supported transform'}]}}
+    _, targets = decision_restatements.index(context, context, {}, analysis)
+    expected = ['original/analysis#/boundaries/correctness/0']
+    if representation == 'unified':
+        expected.insert(0, 'original/decisions#/decisions/1')
+    elif representation == 'legacy':
+        expected = ['original/decisions#/local_decisions/0', 'original/decisions#/local_decisions/1',
+                    'original/decisions#/live_decisions', *expected]
+    assert targets == expected

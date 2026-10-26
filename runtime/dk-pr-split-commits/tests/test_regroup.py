@@ -43,7 +43,7 @@ def repo(tmp_path, monkeypatch):
     binpath.mkdir()
     fake = binpath / 'gh'
     fake.write_text('''#!/usr/bin/env python3
-import json, subprocess, sys
+import json, os, subprocess, sys
 remote = REMOTE
 def git(*args):
     return subprocess.check_output(['git', '--git-dir', remote, *args], text=True).strip()
@@ -52,6 +52,13 @@ if sys.argv[1] == 'pr':
     result = dict(number=1, url='https://github.com/tester/repo/pull/1',
                   headRefName='topic', headRefOid=head, baseRefName='target',
                   isCrossRepository=False, headRepository=dict(nameWithOwner='tester/repo'))
+    if os.environ.get('GH_MODERN_IDENTITY'):
+        result['headRepository'] = dict(id='R_fixture', name='repo', nameWithOwner='')
+elif '/pulls/' in sys.argv[-1]:
+    result = dict(number=1, html_url='https://github.com/tester/repo/pull/1',
+        head=dict(sha=head, ref='topic', repo=dict(full_name='tester/repo', name='repo', node_id='R_fixture')),
+        base=dict(sha=git('rev-parse', 'refs/heads/target'), ref='target',
+                  repo=dict(full_name='tester/repo', name='repo', node_id='R_fixture')))
 elif '/git/ref/' in sys.argv[-1]:
     result = dict(object=dict(sha=git('rev-parse', 'refs/heads/target')))
 else:
@@ -77,7 +84,11 @@ def assessment(repo, tmp_path):
     reasons = tmp_path / 'reasons.json'
     reasons.write_text(json.dumps(['Feature and its regression coverage form one coherent change.']))
     output = tmp_path / 'assessment.json'
-    result = repo[-1]('assess', '--review-state', TOKEN, '--reasons-file', str(reasons),
+    flags = []
+    data = json.loads((repo[0] / '.git/pr-split-state.json').read_text())
+    if repo[3]('rev-parse', 'HEAD') == data['original_head']:
+        flags = ['--cleanup-precheck', cleanup_receipt(repo, tmp_path)['path']]
+    result = repo[-1]('assess', *flags, '--review-state', TOKEN, '--reasons-file', str(reasons),
                       '--output', str(output))
     assert result.returncode == 0, result.stderr
     return series.load(output, repo[0])
@@ -122,7 +133,9 @@ def test_regroup_folds_fixup_or_splits_mixed_commit(repo, tmp_path, split_mixed)
         git('commit', '-qm', 'feature with fix')
     result = guard('verify')
     assert result.returncode == 0, result.stderr
-    result = guard('push', '--allow-force-push', '--review-state', TOKEN)
+    precheck = cleanup_receipt(repo, tmp_path)
+    result = guard('push', '--allow-force-push', '--review-state', TOKEN,
+                   '--cleanup-precheck', precheck['path'])
     assert result.returncode == 0, result.stderr
     evidence = assessment(repo, tmp_path)
     assert evidence['outcome'] == 'published'
@@ -154,7 +167,8 @@ def test_interrupted_publication_is_reconciled_without_repush(repo, tmp_path):
     git('reset', '-q', '--soft', base)
     git('commit', '-qm', 'coherent feature')
     final = git('rev-parse', 'HEAD')
-    data.update(publication='pending', final_head=final)
+    receipt = cleanup_receipt(repo, tmp_path)
+    data.update(publication='pending', final_head=final, cleanup_precheck=receipt)
     state_path = work / '.git/pr-split-state.json'
     state_path.write_text(json.dumps(data))
     refused = guard('reconcile')
@@ -173,10 +187,98 @@ def test_assessment_rejects_in_repo_or_incomplete_evidence(repo, tmp_path):
     reasons = tmp_path / 'reasons.json'
     reasons.write_text('[]')
     guard = repo[-1]
-    args = ('--review-state', TOKEN, '--reasons-file', str(reasons))
+    receipt = cleanup_receipt(repo, tmp_path)
+    args = ('--review-state', TOKEN, '--reasons-file', str(reasons), '--cleanup-precheck', receipt['path'])
     assert 'boundary reasons' in guard('assess', *args, '--output', str(tmp_path / 'bad.json')).stderr
     reasons.write_text('["coherent feature"]')
     assert 'outside the repository' in guard('assess', *args, '--output', str(repo[0] / 'evidence.json')).stderr
     assert 'completed split' in guard('assess', '--review-state', encode('split', 1),
                                      '--reasons-file', str(reasons), '--output', str(tmp_path / 'bad.json')).stderr
     assert not (tmp_path / 'bad.json').exists()
+
+
+def cleanup_receipt(repo, tmp_path):
+    """A real exhausted iteration and isolated preparation for this guard's head."""
+    import importlib.util
+    from shared import cleanup_precheck, executors, review_sessions
+    from shared.private_state import write
+    from unittest.mock import patch
+    sys.path.insert(0, str(ROOT / 'dk-pr-decisions/tests'))
+    from preparation_fixtures import Package, analysis, descriptor, prep, retain
+    spec = importlib.util.spec_from_file_location('regroup_run_state', ROOT / 'dk-pr-iter/scripts/run_state.py')
+    state = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(state)
+    work, _, _, git, _ = repo
+    data = json.loads((work / '.git/pr-split-state.json').read_text())
+    directory = tmp_path / 'review-evidence'
+    directory.mkdir()
+    p = Package(directory)
+    isolated = directory / 'reviewed'
+    git('clone', '-q', str(work), str(isolated))
+    subprocess.check_call(['git', '-C', str(isolated), 'checkout', '-q', '--detach', data['original_head']])
+    p.context.update(url=PR, repository=str(work), checkout=str(isolated),
+                     head_sha=data['original_head'], base_sha=data['base'])
+    p.decisions.update(pr_url=PR, head_sha=data['original_head'])
+    p.write('context.json', p.context)
+    p.write('decisions.json', p.decisions)
+    p.manifest['mode'] = 'iteration'
+    p.manifest['evidence']['production'] = [str(isolated / 'a')]
+    p.write('reviewer.json', descriptor('example', isolated / 'a'))
+    p.write('manifest.json', p.manifest)
+    original_path = p.prepare()['artifact']
+    original = prep.read(original_path)
+    record = {}
+    record_path = directory / 'run.json'
+    state.start_run(record)
+    state.attach_preparation(record, original_path, PR, data['original_head'])
+    for _ in range(5): state.next_cycle(record, data['original_head'])
+    binding = state.review_session(record, data['original_head'], record_path)
+    session = review_sessions.Session(p.context, original, ['example'], path=binding['session_file'])
+    result = {'complete': True, 'executed_reviewers': ['example'], 'reused_reviewers': [],
+              'skipped_reviewers': [], 'findings': []}
+    reference = session.finish(result)
+    state.register_review(record, {'review_artifact': reference}, data['original_head'])
+    refreshed = analysis()
+    refreshed['sync_reason'] = 'Feedback refreshed before publication'
+    p.manifest['evidence']['prior_preparation'] = [original_path]
+    p.write('manifest.json', p.manifest)
+    changes = retain(original)
+    for item in changes['dispositions']:
+        if original['graph'][item['id']]['location'] == '/sync_required':
+            item.update(action='replace', value={key: refreshed[key] for key in ('sync_required', 'sync_reason')})
+    current = prep.prepare(p.manifest_path, p.root / 'versions', previous_preparation=original_path,
+                           full_analysis=True, analyzer=lambda *_: changes)['artifact']
+    state.attach_preparation(record, current, PR, data['original_head'],
+                             expected_parent=original['preparation_id'])
+    write(record_path, record)
+    def compare(prompt, checkout, *, attempt=0):
+        binding = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]['binding']
+        def verdict(category, key):
+            evidence = ['original/analysis', 'current/analysis']
+            if category == 'sources':
+                evidence += [side + '/' + key for side in ('original', 'current')
+                             if side + '/' + key in binding['evidence']]
+            return {'verdict': 'equivalent', 'rationale': 'Same engineering meaning', 'evidence': evidence}
+        return json.dumps({'equivalent': True, 'rationale': 'Same reviewed requirements',
+            'fields': {key: verdict('fields', key) for key in binding['fields']},
+            'sources': {key: verdict('sources', key) for key in binding['changed_sources']}, 'decisions': {}})
+    with patch.object(executors, 'execute', compare):
+        receipt = cleanup_precheck.precheck(record_path, data['original_head'], git('rev-parse', 'HEAD'),
+                                            work / '.git/pr-split-state.json', state.reconciliation_api())
+    assert receipt['status'] == 'prechecked', receipt
+    return receipt['precheck']
+
+
+@pytest.mark.parametrize('rewrite', [False, True])
+def test_modern_cli_identity_reaches_guarded_publication(repo, tmp_path, monkeypatch, rewrite):
+    monkeypatch.setenv('GH_MODERN_IDENTITY', 'yes')
+    data = prepare(repo)
+    if rewrite:
+        repo[3]('commit', '--amend', '-qm', 'Coherent cleanup')
+        receipt = cleanup_receipt(repo, tmp_path)
+        result = repo[-1]('push', '--allow-force-push', '--review-state', TOKEN,
+                         '--cleanup-precheck', receipt['path'])
+        assert result.returncode == 0, result.stderr
+    result = assessment(repo, tmp_path)
+    assert result['head_repo'] == 'tester/repo'
+    assert result['reviewed_tree'] == data['original_tree']

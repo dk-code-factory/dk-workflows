@@ -97,3 +97,13 @@ Validation failures identify JSON field pointers, missing/unexpected fields and
 bounded eligible-line samples. One correction remains the limit. Incomplete or
 usage-exhausted responses must have empty findings and a nonempty reason; they
 cannot pass the completed-result validator or become a clean review.
+
+Before iteration cleanup publication, `run-state precheck-cleanup --head REVIEWED_SHA
+--candidate-head CANDIDATE_SHA --split-state FILE` compares the current preparation
+on an isolated reviewed-head checkout directly with the original review. Its
+separate immutable receipt is required for a regroup push or no-op assessment and
+cannot supply completion coverage. Version-2 attestations allow only independently
+mapped, source-verified discussion restatements and operational changes with the
+same engineering meaning; all other protected inputs remain strict. Legacy
+version-1 attestations retain their original restrictions. Final-head refresh and
+reconciliation against the published assessment are still required.

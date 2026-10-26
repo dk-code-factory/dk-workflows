@@ -113,7 +113,9 @@ def set_override(path, value):
 def completion_gate(start_head, final_head, live_head, review_complete, actionable, ci_result,
                     ci_verifier=None, *, stage='complete', assessment=None, series_snapshot=None,
                     preparation=None, pr_url=None, body=None, verification=None, run_record=None,
-                    assessment_path=None):
+                    assessment_path=None, cleanup_precheck=None):
+    if cleanup_precheck and stage != 'review':
+        raise ValueError('cleanup prechecks cannot authorize completion')
     if stage not in {'review', 'complete'}:
         raise ValueError('stage must be review or complete')
     if not all(isinstance(x, str) and len(x) == 40 and all(c in "0123456789abcdef" for c in x)
@@ -136,8 +138,12 @@ def completion_gate(start_head, final_head, live_head, review_complete, actionab
     except (ValueError, KeyError, TypeError, OSError):
         return 'engineering_verification_invalid'
     try:
-        review = run_state_api.verify_review(run_record, prepared, assessment=assessment, assessment_path=assessment_path)
-    except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
+        if cleanup_precheck:
+            from shared.cleanup_precheck import review_for
+            review = review_for(cleanup_precheck, run_record, prepared, run_state_api.reconciliation_api())
+        else:
+            review = run_state_api.verify_review(run_record, prepared, assessment=assessment, assessment_path=assessment_path)
+    except (ValueError, KeyError, TypeError, OSError, RuntimeError, subprocess.SubprocessError):
         return 'review_coverage_invalid' if review_complete else 'review_incomplete'
     if not review_complete and not review.get('accepted_failures'):
         return 'review_incomplete'
@@ -220,6 +226,7 @@ def main():
     gate.add_argument('--review-complete', action='store_true')
     gate.add_argument('--actionable', action='store_true')
     gate.add_argument('--stage', choices=('review', 'complete'), default='complete')
+    gate.add_argument('--cleanup-precheck', help='Prepublication review readiness only; allowed with --stage review')
     gate.add_argument('--series-assessment', help='Verified cleanup artifact outside the repository')
     gate.add_argument('--preparation-file', required=True)
     gate.add_argument('--verification-file', required=True)
@@ -233,6 +240,8 @@ def main():
     try:
         cwd = Path(args.cwd).resolve()
         if args.command == 'gate':
+            if args.cleanup_precheck and args.stage != 'review':
+                raise ValueError('cleanup prechecks cannot authorize completion')
             if not args.pr:
                 raise ValueError('--pr is required for the live completion gate')
             live_scope = live_preparation_scope(args.pr, cwd)
@@ -269,7 +278,8 @@ def main():
                                      assessment=assessment,
                                      assessment_path=args.series_assessment,
                                      pr_url=args.pr, body=live_scope['body'], verification=args.verification_file,
-                                     run_record=args.run_record)
+                                     run_record=args.run_record, cleanup_precheck=args.cleanup_precheck)
+            review_ready = result == 'clean'
             if result == 'clean' and args.stage == 'complete':
                 # Observe series after the CI policy's live provenance checks.
                 live = series_assessment.live_snapshot(args.pr, cwd)
@@ -279,11 +289,20 @@ def main():
                 try:
                     prepared = current_preparation(args.preparation_file, args.run_record, args.pr,
                                                    live_scope['headRefOid'], live_scope['body'])
-                    output['review_coverage'] = run_state_api.verify_review(args.run_record, prepared,
-                        assessment=assessment, assessment_path=args.series_assessment)
-                except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as exc:
+                    if args.cleanup_precheck:
+                        from shared.cleanup_precheck import review_for
+                        output['review_coverage'] = review_for(args.cleanup_precheck, args.run_record, prepared,
+                                                               run_state_api.reconciliation_api())
+                    else:
+                        output['review_coverage'] = run_state_api.verify_review(args.run_record, prepared,
+                            assessment=assessment, assessment_path=args.series_assessment)
+                except (ValueError, KeyError, TypeError, OSError, RuntimeError, subprocess.SubprocessError) as exc:
                     output['review_limitation'] = str(exc)
                     result = output['gate'] = 'review_coverage_invalid'
+                    review_ready = False
+            output.update(review_ready=review_ready,
+                          cleanup_ready=result == 'clean' and (args.stage == 'complete' or bool(args.cleanup_precheck)),
+                          completion_ready=result == 'clean' and args.stage == 'complete')
             print(json.dumps(output, sort_keys=True))
             if result != 'clean':
                 raise SystemExit(1)
@@ -296,7 +315,7 @@ def main():
             override_path(args.scope, cwd, identity).unlink(missing_ok=True)
         scope, prompt = selected(cwd, args.pr)
         print(json.dumps({"source": scope, "prompt": prompt}, ensure_ascii=False))
-    except (OSError, UnicodeError, ValueError, RuntimeError, KeyError, TypeError) as exc:
+    except (OSError, UnicodeError, ValueError, RuntimeError, KeyError, TypeError, subprocess.SubprocessError) as exc:
         parser.exit(2, f"completion: {exc}\n")
 
 

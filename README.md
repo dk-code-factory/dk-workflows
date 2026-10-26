@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.2.0.
+Independent MIT plugin for Claude Code and Codex. Version 1.2.1.
 
 ## Install
 
@@ -112,6 +112,16 @@ Reviewer description, execution and configuration diagnostics reuse one Codex
 plugin inventory within each command invocation. A later invocation reads the
 registry again; selected manifests and skill files are still checked on each
 resolution. This inventory reuse never supplies cached review findings.
+
+Tree-preserving iteration cleanup requires `run-state precheck-cleanup` before a
+regroup push or no-op assessment. Its immutable receipt binds the candidate and
+remote lease to the original review and current preparation; it cannot authorize
+completion. After publication, refresh final-head preparation, reconcile directly
+against the original review, and verify engineering criteria and exact-head CI.
+Version-2 attestations can retain coverage for source-verified discussion
+restatements and operational wording with unchanged engineering meaning. They
+preserve raw fingerprints, immutable results, reviewer packages and cycle budgets.
+Material or ambiguous changes remain blocking, including after cycle five.
 
 Known GitHub read operations retry transient connection and HTTP 5xx failures
 at most three times, with jitter and one shared deadline per read (60 seconds

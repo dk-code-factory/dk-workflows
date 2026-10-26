@@ -720,7 +720,7 @@ class IncrementalPreparationTests(unittest.TestCase):
                         'evidence': refs}
             return json.dumps({'equivalent': True, 'rationale': 'The retained engineering obligations are unchanged',
                 'fields': {key: verdict() for key in binding['fields']},
-                'sources': {key: verdict(key) for key in binding['changed_sources']}})
+                'sources': {key: verdict(key) for key in binding['changed_sources']}, 'decisions': {}})
         with patch.object(executors, 'execute', side_effect=compare), \
                 patch.object(review_reconciliation.series, 'live_snapshot', return_value=live), \
                 patch.object(prep, 'analyze') as model:
