@@ -152,7 +152,7 @@ class IntegrationTests(unittest.TestCase):
         self.env = patch.dict(os.environ, {"XDG_DATA_HOME": str(self.data)})
         self.env.start()
         self.addCleanup(self.env.stop)
-        self.pr = {"number": 3, "title": "Fix", "body": "", "url": "https://github.com/acme/project/pull/3", "headRefOid": "abc"}
+        self.pr = {"number": 3, "title": "Fix", "body": "", "url": "https://github.com/acme/project/pull/3", "headRepository": {"nameWithOwner": "acme/project"}, "headRefOid": "abc"}
         self.meta = {"i1": {**comment("i1"), "kind": "inline", "thread_id": "t"}}
         self.threads = {"t": {"id": "t", "resolved": False, "path": "x.py", "line": 4, "comment_ids": ["i1"]}}
         self.analysis_count = 0

@@ -13,8 +13,9 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 from shared.github_reads import run as github_run
+from shared.pr_identity import resolve
 
-FIELDS = 'number,url,title,body,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,files'
+FIELDS = 'number,url,title,body,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,isCrossRepository,files'
 LARGE_DIFF_ERROR = re.compile(r'diff exceeded the maximum number of lines|20,?000\s+lines|PullRequest\.diff too_large', re.I)
 
 
@@ -79,7 +80,7 @@ def ensure_commit(checkout, sha, root, metadata):
     # come from the base repository, so only try the fork for the head.
     if sha != metadata['headRefOid']:
         raise RuntimeError('PR base is unavailable from the base repository')
-    fork = (metadata.get('headRepository') or {}).get('nameWithOwner')
+    _, _, fork = resolve(metadata, root, api=lambda *args: json.loads(command(['gh', *args], root)))
     if not fork or '/' not in fork:
         raise RuntimeError('PR head is unavailable from the base repository')
     host = urlparse(metadata['url']).hostname
@@ -127,6 +128,8 @@ def fetch(cwd, pr=None):
         raise RuntimeError('PR head SHA is invalid')
     if not re.fullmatch(r'[0-9a-fA-F]{40,64}', metadata['baseRefOid']):
         raise RuntimeError('PR base SHA is invalid')
+    resolve(metadata, cwd, api=lambda *args: json.loads(command(['gh', *args], cwd)),
+            allow_unavailable_head=True)
     if not metadata['files']:
         raise RuntimeError('PR has no changed files')
     try:

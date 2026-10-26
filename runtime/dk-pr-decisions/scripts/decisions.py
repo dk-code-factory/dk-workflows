@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 import argparse
 import base64
+from shared.pr_identity import resolve as resolve_pr_identity
 from shared.executors import check_prompt_size, execute, execute_json, provider_failure
 from shared.repository_scope import inside_checkout
 import hashlib
@@ -531,7 +532,7 @@ def scan(pr_target=None):
     repo_dir = Path.cwd()
     try:
         pr = gh_json(["pr", "view", *([str(pr_target)] if pr_target else []), "--json",
-                      "number,title,body,url,headRefOid,headRepository,baseRefOid,baseRefName,changedFiles"])
+                      "number,title,body,url,headRefOid,headRefName,headRepository,isCrossRepository,baseRefOid,baseRefName,changedFiles"])
     except RuntimeError as exc:
         if "no pull requests found" in str(exc).lower() or "no pull request found" in str(exc).lower():
             raise RuntimeError("No pull request found for the current branch") from exc
@@ -593,8 +594,9 @@ def scan(pr_target=None):
     diff = pr_diff(pr)
     context = {"pr": pr, "diff": diff, "linked_issues": linked_issues(pr.get("body") or "", owner, name, host,
                                                             pr["number"])}
-    head_repo = (pr.get("headRepository") or {}).get("nameWithOwner") or f"{owner}/{name}"
-    links = code_links(diff, f"{url.scheme}://{host}/{head_repo}", pr["headRefOid"])
+    _, base_repo, head_repo = resolve_pr_identity(pr, repo_dir, api=lambda *args: gh_json(list(args)),
+                                                allow_unavailable_head=True)
+    links = code_links(diff, f"{url.scheme}://{host}/{head_repo or base_repo}", pr["headRefOid"])
     status_changed = any(tid in old_threads and old_threads[tid]["resolved"] != thread["resolved"]
                          for tid, thread in threads.items())
     context_changed = bool(prior) and (prior.get("pr", {}).get("body") != pr.get("body")
@@ -847,10 +849,10 @@ def suggest_from_code(state, path):
     if previous.get('head') == head:
         return previous['items']
     pr = state['pr']
-    parts = urlparse(pr['url']).path.strip('/').split('/')
     diff = pr_diff(pr)
-    head_repo = (pr.get('headRepository') or {}).get('nameWithOwner') or '/'.join(parts[:2])
-    links = code_links(diff, f"{urlparse(pr['url']).scheme}://{urlparse(pr['url']).hostname}/{head_repo}", head)
+    _, base_repo, head_repo = resolve_pr_identity(pr, Path.cwd(), api=lambda *args: gh_json(list(args)),
+                                                allow_unavailable_head=True)
+    links = code_links(diff, f"{urlparse(pr['url']).scheme}://{urlparse(pr['url']).hostname}/{head_repo or base_repo}", head)
     # Keep complete evidence outside the request, including after a provider failure.
     # A unique directory prevents concurrent discoveries from replacing each other's inputs.
     evidence_dir = Path(tempfile.mkdtemp(prefix='code-evidence-', dir=Path(path).resolve().parent))

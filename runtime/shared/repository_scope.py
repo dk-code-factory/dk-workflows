@@ -91,7 +91,7 @@ def identities(root, pr=None):
     root = Path(root).resolve()
     if pr:
         try:
-            result = github_run(['gh', 'pr', 'view', pr, '--json', 'url,headRepository'],
+            result = github_run(['gh', 'pr', 'view', pr, '--json', 'number,url,headRepository,headRefOid,headRefName,isCrossRepository'],
                                     cwd=root, capture_output=True, text=True, timeout=15)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise RuntimeError('could not resolve PR repository identities') from exc
@@ -103,17 +103,10 @@ def identities(root, pr=None):
             raise RuntimeError('PR repository metadata is invalid') from exc
         if not isinstance(metadata, dict):
             raise RuntimeError('PR repository metadata is invalid')
-        parsed = urlparse(metadata.get('url') or '')
-        parts = parsed.path.strip('/').split('/')
-        if not parsed.hostname or len(parts) != 4 or parts[2] != 'pull':
-            raise RuntimeError('PR URL does not identify its base repository')
-        base = normalize_remote(f'https://{parsed.hostname}/{parts[0]}/{parts[1]}.git')
-        head_repo = (metadata.get('headRepository') or {}).get('nameWithOwner')
-        if not head_repo:
-            raise RuntimeError('PR head repository is unavailable')
-        head = normalize_remote(f'https://{parsed.hostname}/{head_repo}.git')
-        if not head or not base:
-            raise RuntimeError('PR repository identity is incomplete')
+        from shared.pr_identity import resolve
+        host, base_repo, head_repo = resolve(metadata, root)
+        base = normalize_remote(f'https://{host}/{base_repo}.git')
+        head = normalize_remote(f'https://{host}/{head_repo}.git')
         return [head] if head == base else [head, base]
     primary = repository(root)
     parent = upstream(root, primary)
