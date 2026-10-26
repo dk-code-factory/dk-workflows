@@ -61,5 +61,12 @@
       "source": "local-skills/shared",
       "commit": "57382c9a8cf574e221891b6777d4ea8892956266"
     }
+  ],
+  "owned_changes": [
+    {
+      "source": "dk-code-factory/dk-workflows",
+      "version": "1.2.0",
+      "description": "Incremental preparation, conclusion graph, immutable evidence lineage, refresh validation and regression coverage."
+    }
   ]
 }

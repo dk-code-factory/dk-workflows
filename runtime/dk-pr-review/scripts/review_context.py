@@ -4,9 +4,9 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 import argparse
+import codecs
 import json
 import re
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -27,11 +27,14 @@ def command(args, cwd):
 
 def patch_paths(patch, expected):
     paths = set()
-    for line in patch.splitlines():
+    for line in patch.split('\n'):
         if line.startswith('diff --git '):
-            parts = shlex.split(line)
-            if len(parts) == 4 and parts[3].startswith('b/'):
-                paths.add(parts[3][2:])
+            quoted = re.search(r' ("(?:[^"\\]|\\.)*")$', line)
+            if quoted:
+                raw = quoted[1][1:-1].encode('utf-8', 'surrogateescape')
+                path = codecs.escape_decode(raw)[0].decode('utf-8', 'surrogateescape')
+                if path.startswith('b/'):
+                    paths.add(path[2:])
             else:
                 paths.update(path for path in expected if line.endswith(' b/' + path))
     return paths
@@ -134,8 +137,7 @@ def fetch(cwd, pr=None):
             raise
         patch = None
         large_diff = True
-    names = set() if large_diff else set(command(['gh', 'pr', 'diff', *target, '--name-only'], cwd).splitlines())
-    expected = complete_files(cwd, metadata) if large_diff else {item.get('path') for item in metadata['files']} | names
+    expected = complete_files(cwd, metadata)
     if None in expected:
         raise RuntimeError('PR metadata has an invalid file path')
     if not large_diff:

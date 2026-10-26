@@ -67,8 +67,20 @@ def finish_run(record, status, reason):
     return active
 
 
-def attach_preparation(record, path, pr_url, head):
+def attach_preparation(record, path, pr_url, head, *, expected_parent=None):
     artifact = preparation_api.gate(path, pr_url=pr_url, head_sha=head, require_ready=False)
+    parent = artifact.get('parent')
+    expected = parent['preparation_id'] if parent else None
+    active = record.get('preparation', {}).get('id')
+    run = record.get('iteration_run', {})
+    initial = (active is None and run.get('id') and run.get('status') == 'active' and
+               not any(item.get('iteration_run_id') == run['id'] for item in record.get('preparations', [])))
+    if expected_parent is not None and expected_parent != expected and not (
+            active == artifact['preparation_id'] and expected_parent == active):
+        raise ValueError('preparation expected parent differs from its lineage')
+    if active != artifact['preparation_id'] and not initial and (
+            active != expected or parent is None and record.get('preparations')):
+        raise ValueError('active preparation changed; refresh from the current preparation')
     if artifact['mode'] != 'iteration':
         raise ValueError('iteration requires iteration preparation')
     raw = preparation_api.read(artifact['sources']['decisions']['path'])
@@ -78,6 +90,8 @@ def attach_preparation(record, path, pr_url, head):
     item = {'path': str(Path(path).resolve()), 'id': artifact['preparation_id'],
             'head': head, 'pr_url': pr_url,
             'local_decisions_hash': preparation_api.digest(record.get('local_decisions', []))}
+    if run.get('id'):
+        item['iteration_run_id'] = run['id']
     history = record.setdefault('preparations', [])
     if item not in history:
         history.append(item)
@@ -508,6 +522,7 @@ def main():
     prep.add_argument('--file', required=True)
     prep.add_argument('--pr-url', required=True)
     prep.add_argument('--head', required=True)
+    prep.add_argument('--expected-parent')
     gate = sub.add_parser('work-gate')
     gate.add_argument('--head', required=True)
     fix = sub.add_parser('fix-plan')
@@ -565,7 +580,7 @@ def main():
                 result = mutate(path, default, lambda d: finish_run(d, a.status, a.reason))
             elif a.command == 'review-assess':
                 result = reviewer_assessments(read(path, default), a.repo, json.loads(Path(a.file).read_text()))
-            elif a.command == 'preparation': result = mutate(path, default, lambda d: attach_preparation(d, a.file, a.pr_url, a.head))
+            elif a.command == 'preparation': result = mutate(path, default, lambda d: attach_preparation(d, a.file, a.pr_url, a.head, expected_parent=a.expected_parent))
             elif a.command == 'work-gate':
                 artifact = work_gate(read(path, default), a.head)
                 result = {'gate': 'ready', 'preparation_id': artifact['preparation_id']}

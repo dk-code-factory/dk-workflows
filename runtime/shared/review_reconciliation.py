@@ -24,13 +24,44 @@ def leaves(value, pointer=''):
     return {pointer: value}
 
 
-def reviewer_order(sources, prepared, preparation_api):
-    keys = sorted((key for key in sources if key.startswith('reviewers/')),
-                  key=lambda key: int(key.split('/')[1]))
-    descriptors = [preparation_api.read(sources[key]['path']) for key in keys]
-    if any(value != prepared['reviewers'].get(value.get('reviewer')) for value in descriptors):
-        raise ValueError('retained reviewer descriptors differ from preparation')
-    return [value['reviewer'] for value in descriptors]
+def reviewer_order(sources, prepared, preparation_api, *, reviewed_order=None):
+    # Read descriptors from verified retained copies. The immutable reviewed
+    # session preserves its original order even after manifest aliases disappear.
+    descriptors = {}
+    for key, source in prepared['sources'].items():
+        if not key.startswith('reviewers/'):
+            continue
+        path = source['path']
+        if path in descriptors:
+            raise ValueError('ambiguous retained reviewer descriptor path: ' + path)
+        descriptor = preparation_api.read(sources[key]['path'])
+        if descriptor != prepared['reviewers'].get(descriptor.get('reviewer')):
+            raise ValueError('retained reviewer descriptors differ from preparation')
+        descriptors[path] = descriptor
+    if reviewed_order is None:
+        # Stable source slots cannot determine the refreshed manifest's order.
+        paths = prepared.get('reviewer_paths')
+        if 'reviewer_paths' not in prepared:
+            # Older artifacts have no captured alias bindings. Keep their exact
+            # manifest mapping; never infer lost order from citation slot names.
+            manifest = preparation_api.read(sources['manifest']['path'])
+            declared = manifest.get('evidence', {}).get('reviewers')
+            if not isinstance(declared, list) or not declared or any(not isinstance(v, str) or not v for v in declared):
+                raise ValueError('retained manifest requires ordered reviewer descriptor paths')
+            base = Path(prepared['sources']['manifest']['path']).parent
+            paths = [str((base / value).resolve()) for value in declared]
+        if not isinstance(paths, list) or any(not isinstance(path, str) for path in paths):
+            raise ValueError('retained preparation requires ordered reviewer descriptor paths')
+        if len(set(paths)) != len(paths) or set(paths) != descriptors.keys():
+            raise ValueError('retained manifest reviewer paths do not uniquely match retained descriptors; refresh preparation')
+        order = [descriptors[path]['reviewer'] for path in paths]
+    else:
+        order = reviewed_order
+    if (not isinstance(order, list) or any(not isinstance(name, str) for name in order)
+            or len(set(order)) != len(order) or set(order) != prepared['reviewers'].keys()
+            or sorted(descriptor['reviewer'] for descriptor in descriptors.values()) != sorted(order)):
+        raise ValueError('retained reviewer descriptors do not cover the prepared reviewers exactly once')
+    return order
 
 
 def snapshot(record, head, assessment_path, api, *, live=False):
@@ -49,12 +80,11 @@ def snapshot(record, head, assessment_path, api, *, live=False):
         raise ValueError('retained preparation differs from active or reviewed preparation')
     if original['mode'] != 'iteration':
         raise ValueError('cleanup reconciliation requires iteration preparation')
-    old_order = reviewer_order(old_sources, original, api.preparation_api)
-    order = reviewer_order(sources, current, api.preparation_api)
     identity = result['session_identity']
+    old_order = reviewer_order(old_sources, original, api.preparation_api, reviewed_order=identity['reviewers'])
+    order = reviewer_order(sources, current, api.preparation_api)
     original_scope = coverage.scope(original, decisions=old_decisions)
     if (identity['base'] != original['identity']['base_sha']
-            or identity['reviewers'] != old_order
             or original_scope != result['scope']
             or original['identity']['head_sha'] != result['head']
             or original['identity']['pr_url'] != result['pr_url']):
@@ -236,7 +266,7 @@ def reconcile(record_path, head, assessment_path, api):
         'using the evidence index, and cite each changed source in its verdict. '
         'equivalent is true only if every verdict is equivalent. Missing evidence blocks equivalence.\n' +
         json.dumps({'binding': binding, 'original_analysis': original['analysis'],
-                    'current_analysis': current['analysis']}, ensure_ascii=False))
+                    'current_analysis': current['analysis']}, ensure_ascii=True))
     comparison = execute_json(prompt, context['checkout'],
                               validate=lambda value: validate_comparison(value, binding))
     # No state lock is held during the model call. Recheck live and retained

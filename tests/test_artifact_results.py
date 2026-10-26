@@ -59,3 +59,34 @@ def test_invalid_private_store_prevents_mutation(tmp_path):
         env=env, text=True, capture_output=True)
     assert result.returncode == 2 and json.loads(result.stdout)['error_code'] == 'artifact_storage'
     assert not (tmp_path / 'data').exists()
+
+
+def test_lossless_review_result_roundtrips_compact_full_and_paged_router_output(tmp_path):
+    plugin = tmp_path / 'plugin'
+    plugin.mkdir()
+    message = 'Inspect café and ' + os.fsdecode(b'odd-\xff.py')
+    review = {'complete': True, 'findings': [{'severity': 'Minor', 'path': 'transform.py', 'line': 1,
+               'message': message, 'fix': 'Keep byte-exact paths'}], 'skipped_reviewers': [],
+              'executed_reviewers': ['fixture'], 'reused_reviewers': []}
+    helper = plugin / 'review.py'
+    helper.write_text('print(' + repr(json.dumps(review)) + ')\n')
+    router = tmp_path / 'router.py'
+    router.write_text('import importlib.util\nfrom pathlib import Path\n'
+                      f'spec=importlib.util.spec_from_file_location("router",{str(CLI)!r})\n'
+                      'cli=importlib.util.module_from_spec(spec);spec.loader.exec_module(cli)\n'
+                      f'cli.ROOT=Path({str(plugin)!r})\n'
+                      'cli.ROUTES={"reviewers":("review.py",None,None,False)}\n'
+                      'raise SystemExit(cli.main())\n')
+    artifact = tmp_path / 'result.json'
+    common = [sys.executable, str(router), '--host', 'codex', '--cwd', str(tmp_path)]
+    compact = subprocess.run([*common, '--result-file', str(artifact), 'reviewers'], capture_output=True, check=True)
+    receipt = json.loads(compact.stdout.decode('utf-8'))
+    assert receipt['outcome'] == 'success' and receipt['artifact'] == str(artifact)
+    retained = artifact.read_bytes()
+    assert json.loads(retained.decode('utf-8'))['data'] == review
+    assert 'café'.encode('utf-8') in retained and b'\\udcff' in retained
+    native = subprocess.run([*common, '--full', 'reviewers'], capture_output=True, check=True)
+    assert json.loads(native.stdout.decode('utf-8')) == review
+    page = subprocess.run([sys.executable, str(router), 'result', '--artifact', str(artifact),
+                           '--section', '/findings/0/message'], capture_output=True, check=True)
+    assert json.loads(page.stdout.decode('utf-8'))['value'] == message

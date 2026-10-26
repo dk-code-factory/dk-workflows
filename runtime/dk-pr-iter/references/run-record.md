@@ -61,7 +61,7 @@ preparation evidence so recording a cycle or event does not invalidate its own i
 The active run record remains mutable; `work-gate` separately detects new local choices.
 
 ```text
-run_state.py --repo HOST/OWNER/REPO --pr NUMBER preparation --file PREPARATION.json --pr-url PR_URL --head SHA
+run_state.py --repo HOST/OWNER/REPO --pr NUMBER preparation --file PREPARATION.json --pr-url PR_URL --head SHA [--expected-parent PARENT_ID]
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER work-gate --head SHA
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER assess --ref REF --head SHA --preparation-id ID --disposition within_scope|outside_scope|decision_blocked --evidence SOURCE --reason TEXT
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER fix-plan --ref REF --head SHA
@@ -70,6 +70,14 @@ run_state.py --repo HOST/OWNER/REPO --pr NUMBER fix-plan --ref REF --head SHA
 `preparations` retains registration history; `preparation` points to the current one.
 Registration checks that existing local choices are included. It may retain a
 blocked artifact to record scope holds; only a ready artifact authorizes work.
+A fresh run's first valid registration may carry child or migration lineage from a
+previous run. Registration history records its `iteration_run_id`; after that first
+binding, activations require the expected active parent and reject competing siblings.
+Refresh from the current preparation using `--previous-preparation`, including full
+reassessment. A parentless artifact cannot replace an existing binding; an explicit
+`--expected-parent` cannot substitute for artifact lineage. Repeating a binding is
+idempotent only while that same artifact remains active. Registration remains one locked mutation
+and preserves the existing run and review budgets.
 `assessments` retains immutable scope dispositions keyed by feedback reference, code
 head and preparation ID, with sources and rationale. A later preparation can change
 scope at the same code head without erasing the previous assessment or classification.
@@ -156,3 +164,5 @@ explicit session/result contract.
 ## Accepted reviewer failures
 
 `accept-review-failures --head SHA --reviewer NAME [--reviewer NAME ...] --source EXACT_HUMAN_INSTRUCTION_OR_SOURCE --reason TEXT` appends `accepted_review_failures`. Each entry retains the active iteration ID, immutable review-artifact reference, reviewed head/tree/scope, exact reviewer names, human source and rationale. Apply prior applicable human acceptance without asking again. Only recorded provider failures/exhaustion can be accepted, after all configured reviewers were accounted for. Evidence/checkout/instruction guards and unrun reviewers cannot be accepted. History survives restart, but a different active run/result/tree/scope does not inherit permission. Gates preserve `complete: false` and return accepted failure names plus their source records; report these separately from successful/reused reviews. Findings, CI, preparation and series cleanup remain mandatory.
+
+Incremental preparation children carry an expected parent ID. Registration compares it with the active preparation under the run-record lock; reconcile concurrent siblings instead of overwriting the newer active artifact. Typed operational snapshots and zero-call refresh behavior follow the preparation contract.

@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from preparation_fixtures import Package, ROOT, analysis, prep
+from preparation_fixtures import Package, ROOT, analysis, prep, response, retain
 
 
 def module(name, relative):
@@ -27,6 +27,54 @@ class PreparationTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.package = Package(self.temp.name)
 
+    def empty_feedback(self):
+        identity = {'url': self.package.context['url'], 'headRefOid': self.package.head}
+        inline = {'schemaVersion': 1, 'complete': True, 'pullRequest': identity,
+                  'threads': [], 'threadCount': 0, 'threadsSha256': prep.digest([]),
+                  'items': [], 'itemCount': 0, 'itemsSha256': prep.digest([])}
+        conversation = {'complete': True, 'pullRequest': identity, 'reviews': [], 'reviewCount': 0,
+                        'comments': [], 'commentCount': 0, 'items': [], 'itemCount': 0}
+        conversation['sha256'] = prep.digest(conversation)
+        return inline, conversation
+
+    def test_complete_feedback_requires_pinned_identity_and_supported_collections_before_model(self):
+        package = self.package
+        package.manifest['evidence']['feedback'] = ['feedback.json']
+        package.write('manifest.json', package.manifest)
+        malformed = [{'complete': True}, {'complete': False, 'items': []}]
+        for snapshot in self.empty_feedback():
+            fields = ('pullRequest', 'items', 'itemCount') + (
+                ('threads', 'threadCount', 'threadsSha256', 'itemsSha256') if 'threads' in snapshot else
+                ('reviews', 'reviewCount', 'comments', 'commentCount', 'sha256'))
+            malformed.extend({k: v for k, v in snapshot.items() if k != field} for field in fields)
+            for field, changed in (('url', package.context['url'] + '0'), ('headRefOid', 'wrong-head')):
+                malformed.append({**snapshot, 'pullRequest': {**snapshot['pullRequest'], field: changed}})
+            malformed.append({**snapshot, 'items': None})
+            malformed.append({**snapshot, 'itemCount': 1})
+            malformed.append({**snapshot, 'schemaVersion': 99})
+        for snapshot in malformed:
+            if 'sha256' in snapshot:
+                snapshot['sha256'] = prep.digest({k: v for k, v in snapshot.items() if k != 'sha256'})
+        for snapshot in self.empty_feedback():
+            field = 'threadsSha256' if 'threads' in snapshot else 'sha256'
+            malformed.append({**snapshot, field: 'invalid fingerprint'})
+        for number, snapshot in enumerate(malformed):
+            package.write('feedback.json', snapshot)
+            with self.subTest(number=number), patch.object(prep, 'analyze') as model:
+                with self.assertRaisesRegex(ValueError, 'feedback'):
+                    prep.prepare(package.manifest_path, package.root / 'versions')
+                model.assert_not_called()
+
+    def test_empty_complete_inline_and_conversation_feedback_are_valid(self):
+        package = self.package
+        package.write('inline.json', self.empty_feedback()[0])
+        package.write('conversation.json', self.empty_feedback()[1])
+        package.manifest['evidence']['feedback'] = ['inline.json', 'conversation.json']
+        package.write('manifest.json', package.manifest)
+        result = package.prepare()
+        self.assertEqual(result['readiness'], 'ready')
+        self.assertEqual(result['refresh']['model_call_count'], 1)
+
     def test_complete_sources_local_choices_and_standalone_no_mutations(self):
         package = self.package
         choice = {'text': 'Keep encoding scope narrow', 'source': 'Exact human answer: encoding only'}
@@ -38,7 +86,7 @@ class PreparationTests(unittest.TestCase):
         before = prep.git(package.repo, 'rev-parse', 'HEAD')
         def model(prompt, checkout):
             prompts.append(prompt)
-            return analysis()
+            return response()
         result = prep.prepare(package.manifest_path, package.root / 'versions', analyzer=model)
         artifact = prep.load(result['artifact'], package.context, package.decisions)
         self.assertEqual(result['readiness'], 'ready')
@@ -53,25 +101,92 @@ class PreparationTests(unittest.TestCase):
 
     def test_cli_uses_real_model_subprocess_and_preserves_api(self):
         package = self.package
-        package.write('response.json', analysis())
+        odd_directory = os.fsdecode(b'odd-\xff')
+        odd_path = odd_directory + '/' + os.fsdecode(b'file-\xfe.py')
+        target = package.repo / odd_path
+        target.parent.mkdir()
+        target.write_text('value = 1\n')
+        def commit():
+            prep.git(package.repo, 'add', '-A')
+            prep.git(package.repo, 'commit', '-qm', 'Lossless filename fixture')
+            package.head = prep.git(package.repo, 'rev-parse', 'HEAD')
+            package.context['head_sha'] = package.head
+            package.decisions['head_sha'] = package.head
+            package.write('context.json', package.context)
+            package.write('decisions.json', package.decisions)
+        commit()
+        initial_response = response()
+        for node in initial_response['graph']:
+            if node['location'] == '/boundaries/correctness/0':
+                node['paths'].append({'path': odd_directory, 'kind': 'subtree'})
+        package.write('response.json', initial_response)
         binary = package.root / 'bin'
         binary.mkdir()
         model = binary / 'codex'
-        model.write_text('#!/usr/bin/env python3\nimport os, pathlib, sys\n'
+        model.write_text('#!/usr/bin/env python3\nimport json, os, pathlib, sys\n'
                          'prompt = sys.stdin.read()\n'
+                         'prompt.encode("utf-8", errors="strict")\n'
                          'assert "read-only" in prompt and "INPUT INDEX" in prompt\n'
+                         'contract = pathlib.Path(prompt.split("RESPONSE CONTRACT: ", 1)[1].splitlines()[0])\n'
+                         'assert contract.is_absolute() and "## Reassessment response" in contract.read_text()\n'
+                         'with open(os.environ["MODEL_CALLS"], "a") as calls: calls.write(json.dumps(prompt) + "\\n")\n'
                          'pathlib.Path(sys.argv[sys.argv.index("-o")+1]).write_text(pathlib.Path(os.environ["MODEL_RESPONSE"]).read_text())\n')
         model.chmod(0o755)
+        calls = package.root / 'model-calls.jsonl'
         env = {**os.environ, 'PATH': str(binary) + os.pathsep + os.environ['PATH'],
-               'MODEL_RESPONSE': str(package.root / 'response.json')}
-        result = subprocess.run([sys.executable, str(ROOT / 'dk-pr-decisions/scripts/decisions.py'),
-                                 'prepare', '--input-manifest', str(package.manifest_path),
-                                 '--output-dir', str(package.root / 'versions')], env=env,
-                                text=True, capture_output=True)
-        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-        response = json.loads(result.stdout)
-        self.assertEqual((response['schema_version'], response['command'], response['status']), (2, 'prepare', 'ok'))
-        self.assertEqual(response['data']['readiness'], 'ready')
+               'DK_HOST': 'codex', 'MODEL_RESPONSE': str(package.root / 'response.json'), 'MODEL_CALLS': str(calls)}
+        def invoke(*args):
+            result = subprocess.run([sys.executable, str(ROOT / 'dk-pr-decisions/scripts/decisions.py'),
+                                     'prepare', '--input-manifest', str(package.manifest_path),
+                                     '--output-dir', str(package.root / 'versions'), *args], env=env,
+                                    text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            receipt = json.loads(result.stdout)
+            self.assertEqual((receipt['schema_version'], receipt['command'], receipt['status']), (2, 'prepare', 'ok'))
+            self.assertEqual(receipt['data']['readiness'], 'ready')
+            return receipt['data']
+        first = invoke()
+        self.assertEqual((first['refresh']['mode'], first['refresh']['model_call_count']), ('initial', 1))
+        initial_calls = calls.read_bytes()
+        self.assertEqual(len(initial_calls.splitlines()), 1)
+        unchanged = invoke('--previous-preparation', first['artifact'])
+        self.assertEqual((unchanged['refresh']['mode'], unchanged['refresh']['model_call_count']), ('unchanged', 0))
+        self.assertEqual(unchanged['artifact'], first['artifact'])
+        self.assertEqual(unchanged['preparation_id'], first['preparation_id'])
+        self.assertEqual(calls.read_bytes(), initial_calls)
+
+        parent = prep.read(first['artifact'])
+        package.write('response.json', {
+            'dispositions': [{'id': key, 'action': 'retain', 'reason': 'Full inspection confirms the existing conclusion'}
+                             for key in parent['graph']], 'additions': [], 'impacts': []})
+        full = invoke('--previous-preparation', first['artifact'], '--full-analysis')
+        self.assertEqual((full['refresh']['mode'], full['refresh']['model_call_count']), ('full', 1))
+        self.assertNotEqual(full['artifact'], first['artifact'])
+        refreshed = prep.read(full['artifact'])
+        self.assertEqual(refreshed['parent']['preparation_id'], first['preparation_id'])
+        self.assertEqual(refreshed['analysis'], parent['analysis'])
+        prompts = [json.loads(line) for line in calls.read_text().splitlines()]
+        self.assertEqual(len(prompts), 2)
+        self.assertIn('REASSESSMENT', prompts[-1])
+        self.assertIn('"full_reassessment": true', prompts[-1])
+        self.assertIn(first['artifact'], prompts[-1])
+        self.assertIn(odd_path, refreshed['inputs']['tree'])
+        self.assertEqual(os.fsencode(odd_path), b'odd-\xff/file-\xfe.py')
+        target.write_text('value = 2\n')
+        commit()
+        package.write('response.json', retain(refreshed))
+        changed = invoke('--previous-preparation', full['artifact'])
+        self.assertEqual((changed['refresh']['mode'], changed['refresh']['model_call_count']), ('incremental', 1))
+        self.assertEqual(changed['refresh']['changed_paths'], [odd_path])
+        boundary = next(key for key, node in refreshed['graph'].items() if node['location'] == '/boundaries/correctness/0')
+        self.assertIn(boundary, changed['refresh']['affected_conclusions'])
+        saved = prep.load(changed['artifact'], package.context, package.decisions)
+        self.assertIn(odd_path, saved['inputs']['tree'])
+        self.assertEqual(saved['analysis'], refreshed['analysis'])
+        self.assertEqual(invoke('--previous-preparation', changed['artifact'])['refresh']['model_call_count'], 0)
+        prompts = [json.loads(line) for line in calls.read_text(encoding='utf-8').splitlines()]
+        self.assertEqual(len(prompts), 3)
+        self.assertIn(json.dumps(odd_path), prompts[-1])
 
     def test_missing_evidence_and_material_instructions_block_before_model(self):
         for category in prep.EVIDENCE:
@@ -120,7 +235,7 @@ class PreparationTests(unittest.TestCase):
     def test_native_analysis_corrects_invalid_fields_before_readiness(self):
         invalid = analysis()
         invalid['worker_instructions'] = ['Preserve the supported transform']
-        with patch('shared.executors.execute', side_effect=[json.dumps(invalid), json.dumps(analysis())]) as model:
+        with patch('shared.executors.execute', side_effect=[json.dumps(response(invalid)), json.dumps(response())]) as model:
             result = prep.prepare(self.package.manifest_path, self.package.root / 'versions')
         artifact = prep.load(result['artifact'], self.package.context, self.package.decisions)
         self.assertEqual(artifact['readiness'], 'ready')
@@ -212,10 +327,43 @@ class PreparationTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 self.package.prepare(bad)
 
+    def test_ordered_reviewer_paths_are_fingerprinted_and_cover_descriptors(self):
+        artifact = prep.read(self.package.prepare()['artifact'])
+        expected = [artifact['sources']['reviewers/0']['path']]
+        self.assertEqual(artifact['reviewer_paths'], expected)
+        for paths in (None, {}, [], [None], ['missing'], expected * 2):
+            bad = {**artifact, 'reviewer_paths': paths}
+            with self.subTest(paths=paths):
+                with self.assertRaisesRegex(ValueError, 'identity mismatch'):
+                    prep.validate(bad, self.package.context, self.package.decisions)
+                bad['preparation_id'] = prep.digest({k: v for k, v in bad.items() if k != 'preparation_id'})
+                with self.assertRaisesRegex(ValueError, 'ordered reviewer paths'):
+                    prep.validate(bad, self.package.context, self.package.decisions)
+
+    def test_refresh_records_order_for_legacy_v2_without_model(self):
+        first = self.package.prepare()
+        legacy = prep.read(first['artifact'])
+        legacy.pop('reviewer_paths')
+        legacy['preparation_id'] = prep.digest({k: v for k, v in legacy.items() if k != 'preparation_id'})
+        Path(first['artifact']).chmod(0o600)
+        Path(first['artifact']).write_text(json.dumps(legacy))
+        self.assertEqual(prep.historical(first['artifact']), legacy)
+        with patch.object(prep, 'analyze') as model:
+            result = prep.prepare(self.package.manifest_path, self.package.root / 'versions',
+                                  previous_preparation=first['artifact'])
+        model.assert_not_called()
+        fresh = prep.load(result['artifact'], self.package.context, self.package.decisions)
+        self.assertNotEqual(result['artifact'], first['artifact'])
+        self.assertEqual(result['refresh']['mode'], 'operational')
+        self.assertEqual(result['refresh']['model_call_count'], 0)
+        self.assertEqual(fresh['reviewer_paths'], [fresh['sources']['reviewers/0']['path']])
+        self.assertEqual(fresh['parent']['preparation_id'], legacy['preparation_id'])
+        self.assertEqual(fresh['analysis'], legacy['analysis'])
+
     def test_changes_during_analysis_and_in_repo_output_are_rejected(self):
         def mutate(prompt, checkout):
             self.package.write('user.json', {'instruction': 'Changed during analysis'})
-            return analysis()
+            return response()
         with self.assertRaisesRegex(ValueError, 'source changed during analysis'):
             prep.prepare(self.package.manifest_path, self.package.root / 'versions', analyzer=mutate)
         with patch.object(prep, 'analyze') as model, self.assertRaisesRegex(ValueError, 'outside the repository'):
@@ -254,7 +402,9 @@ class PreparationTests(unittest.TestCase):
         package.write('decisions.json', package.decisions)
         package.manifest['evidence']['prior_preparation'] = [saved['artifact']]
         package.write('manifest.json', package.manifest)
-        refreshed = package.prepare()
+        refreshed = prep.prepare(package.manifest_path, package.root / 'versions',
+                                 previous_preparation=saved['artifact'],
+                                 analyzer=lambda *_: retain(prep.read(saved['artifact'])))
         state.attach_preparation(record, refreshed['artifact'], package.context['url'], package.head)
         state.assess(record, 'feedback-1', package.head, refreshed['preparation_id'], 'within_scope',
                      'Exact human answer', 'New condition permits this remedy')
@@ -372,13 +522,34 @@ class PreparationTests(unittest.TestCase):
                   'body': '', 'verification': verification_path, 'run_record': record_path}
         self.assertEqual(completion.completion_gate(*args, **kwargs), 'clean')
         record = state.read(Path(record_path), {})
-        other_analysis = analysis()
-        other_analysis['worker_instructions'] += ' Record the routine placement rationale.'
-        other = package.prepare(other_analysis)
+        def refresh_instructions(previous, instructions):
+            parent = prep.read(previous['artifact'])
+            change = retain(parent)
+            for item in change['dispositions']:
+                if parent['graph'][item['id']]['location'] == '/worker_instructions':
+                    item.update(action='replace', value=instructions)
+            return prep.prepare(package.manifest_path, package.root / 'versions', previous_preparation=previous['artifact'],
+                                full_analysis=True, analyzer=lambda *_: change)
+        instructions = analysis()['worker_instructions']
+        other = refresh_instructions(saved, instructions + ' Record the routine placement rationale.')
         state.attach_preparation(record, other['artifact'], package.context['url'], package.head)
         package.write('run-record.json', record)
         self.assertEqual(completion.completion_gate(*args, **kwargs), 'preparation_invalid')
-        state.attach_preparation(record, saved['artifact'], package.context['url'], package.head)
+        restored = refresh_instructions(other, instructions)
+        state.attach_preparation(record, restored['artifact'], package.context['url'], package.head)
+        state.next_cycle(record, package.head)
+        binding = state.review_session(record, package.head, record_path)
+        package.write('run-record.json', record)
+        session = Session(package.context, prep.read(restored['artifact']), ['example'], path=binding['session_file'])
+        item = session.finish({'complete': True, 'findings': [], 'executed_reviewers': ['example'],
+                               'reused_reviewers': [], 'skipped_reviewers': []})
+        state.register_review(record, {'review_artifact': item}, package.head)
+        package.write('run-record.json', record)
+        verification = prep.read(verification_path)
+        verification['preparation_id'] = restored['preparation_id']
+        package.write('verification.json', verification)
+        kwargs['preparation'] = restored['artifact']
+        self.assertEqual(completion.completion_gate(*args, **kwargs), 'clean')
         state.record_local_decision(record, 'New human scope condition', 'Exact answer requiring scope synchronization')
         package.write('run-record.json', record)
         with self.assertRaisesRegex(ValueError, 'local decisions changed'):
@@ -387,7 +558,7 @@ class PreparationTests(unittest.TestCase):
             self.assertEqual(completion.completion_gate(*args, **{**kwargs, 'stage': stage}), 'preparation_invalid')
         argv = ['completion.py', '--cwd', str(package.repo), '--pr', package.context['url'], 'gate',
                 '--stage', 'review', '--start-head', package.head, '--final-head', package.head,
-                '--preparation-file', saved['artifact'], '--verification-file', str(verification_path),
+                '--preparation-file', restored['artifact'], '--verification-file', str(verification_path),
                 '--run-record', str(record_path), '--review-complete']
         with patch.object(sys, 'argv', argv), \
              patch.object(completion, 'live_preparation_scope', return_value={'body': '', 'headRefOid': package.head}), \

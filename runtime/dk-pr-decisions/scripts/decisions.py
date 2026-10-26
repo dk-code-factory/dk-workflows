@@ -1179,6 +1179,8 @@ def cli():
     prepare_cmd = sub.add_parser('prepare', help='Reconcile engineering preparation from original evidence')
     prepare_cmd.add_argument('--input-manifest', required=True)
     prepare_cmd.add_argument('--output-dir', required=True)
+    prepare_cmd.add_argument('--previous-preparation')
+    prepare_cmd.add_argument('--full-analysis', action='store_true')
     for name in ('add', 'replace'):
         add = sub.add_parser(name, help='Record a choice locally; use publish to update GitHub')
         add.add_argument('--json', required=True, help='JSON object with text and references')
@@ -1189,12 +1191,13 @@ def cli():
     if args.command == 'prepare':
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         from preparation import prepare
-        data = prepare(args.input_manifest, args.output_dir)
+        data = prepare(args.input_manifest, args.output_dir,
+                       previous_preparation=args.previous_preparation, full_analysis=args.full_analysis)
         if args.pr:
             artifact = json.loads(Path(data['artifact']).read_text())
             if artifact['identity']['pr_url'] != args.pr:
                 raise ValueError('preparation manifest PR differs from --pr')
-        print(json.dumps(envelope(args.command, data), ensure_ascii=False))
+        print(json.dumps(envelope(args.command, data), ensure_ascii=True))
         return
     state, path = load_cache(args.pr) if args.command in ('list', 'publish') else scan(args.pr)
     publication = None
@@ -1241,7 +1244,7 @@ def main():
     try:
         cli()
     except (RuntimeError, ValueError, KeyError, TypeError, OSError) as exc:
-        print(json.dumps(envelope(None, error={'code': type(exc).__name__, 'message': str(exc)}), ensure_ascii=False))
+        print(json.dumps(envelope(None, error={'code': type(exc).__name__, 'message': str(exc)}), ensure_ascii=True))
         return 1
     return 0
 

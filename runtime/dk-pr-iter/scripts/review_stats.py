@@ -28,7 +28,7 @@ DISPOSITIONS = {'actionable', 'excluded', 'deferred', 'fixed', 'unknown'}
 
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'),
-                                     ensure_ascii=False).encode()).hexdigest()[:24]
+                                     ensure_ascii=False).encode('utf-8', 'backslashreplace')).hexdigest()[:24]
 
 
 def normalize_repo(repo):
@@ -395,7 +395,7 @@ def _write_report(path, text):
     import tempfile
     fd, temp = tempfile.mkstemp(dir=path.parent, prefix='.report-')
     try:
-        with os.fdopen(fd, 'w') as stream:
+        with os.fdopen(fd, 'w', encoding='utf-8', errors='backslashreplace') as stream:
             stream.write(text)
             stream.flush()
             os.fsync(stream.fileno())

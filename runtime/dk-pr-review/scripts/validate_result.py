@@ -10,21 +10,26 @@ from pathlib import Path
 
 
 def added_lines(patch):
+    import codecs
     import re
     changed = {}
     path = None
     line = None
-    for raw in patch.splitlines():
+    for raw in patch.split('\n'):
         if raw.startswith('diff --git '):
             path, line = None, None
-        elif raw.startswith('+++ b/'):
-            path = raw[6:]
+        elif line is None and raw.startswith(('+++ b/', '+++ "b/')):
+            filename = raw[4:].split('\t', 1)[0]
+            if filename.startswith('"'):
+                quoted = filename[1:-1].encode('utf-8', 'surrogateescape')
+                filename = codecs.escape_decode(quoted)[0].decode('utf-8', 'surrogateescape')
+            path = filename[2:]
             changed.setdefault(path, set())
         elif raw.startswith('@@'):
             match = re.search(r'\+(\d+)(?:,\d+)?', raw)
             line = int(match.group(1)) if match else None
         elif path and line is not None:
-            if raw.startswith('+') and not raw.startswith('+++'):
+            if raw.startswith('+'):
                 changed[path].add(line)
                 line += 1
             elif raw.startswith(' '):
