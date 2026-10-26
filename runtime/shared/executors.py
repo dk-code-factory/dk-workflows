@@ -48,11 +48,32 @@ def execute_json(prompt, checkout, *, validate=None, executor=None, correction_i
                       '\nPrior response:\n' + raw)
 
 
-def provider_failure(detail):
+MAX_PROVIDER_ERROR_CHARS = 8192
+
+
+def check_prompt_size(prompt, limit):
+    size = len(json.dumps(prompt, ensure_ascii=True))
+    if size > limit:
+        raise ValueError(f'Provider request too large ({size} serialized characters; '
+                         f'limit {limit}). Retain evidence in files and '
+                         'supply paths with bounded reading instructions before retrying.')
+
+
+def provider_failure(detail, prompt=None, fallback='Provider execution failed'):
+    if prompt:
+        # Text-mode subprocess capture normalizes CRLF and lone CR to LF.
+        for text in dict.fromkeys((prompt, prompt.replace('\r\n', '\n').replace('\r', '\n'))):
+            for echoed in (text, json.dumps(text, ensure_ascii=False)[1:-1],
+                           json.dumps(text, ensure_ascii=True)[1:-1]):
+                detail = detail.replace(echoed, '[provider input omitted]')
     authentication = re.search(r'authentication failed|not authenticated|unauthorized|invalid credentials|'
                                r'(?:invalid|expired|revoked) (?:oauth |access |auth(?:entication)? )?token', detail, re.I)
     exhausted = re.search(r'usage limit (?:reached|exceeded)|(?:hit|reached) your (?:session )?limit|'
                          r'(?:out of|no|insufficient) (?:credits|tokens)|tokens? exhausted', detail, re.I)
+    detail = detail.strip() or fallback
+    if len(detail) > MAX_PROVIDER_ERROR_CHARS:
+        half = (MAX_PROVIDER_ERROR_CHARS - 40) // 2
+        detail = detail[:half] + '\n[provider output truncated]\n' + detail[-half:]
     if exhausted and not authentication:
         raise ProviderExhausted(detail)
     raise RuntimeError(detail)
@@ -157,14 +178,14 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
                        cwd=checkout, env=env, timeout=timeout, telemetry_prompt=prompt,
                        telemetry_attempt=attempt, telemetry_provider=host, telemetry_output=output)
         if proc.returncode:
-            provider_failure('\n'.join(filter(None, (proc.stderr, proc.stdout))).strip() or f'{host} execution failed')
+            provider_failure('\n'.join(filter(None, (proc.stderr, proc.stdout))), prompt=prompt, fallback=f'{host} execution failed')
         if host == 'codex':
             if not output.is_file():
                 raise RuntimeError('Codex did not produce a final response')
             return output.read_text()
         envelope = json.loads(proc.stdout)
         if envelope.get('is_error') or envelope.get('subtype') != 'success':
-            provider_failure(envelope.get('result') or json.dumps(envelope))
+            provider_failure(envelope.get('result') or json.dumps(envelope), prompt=prompt, fallback='Claude execution failed')
         result = envelope.get('result')
         if not isinstance(result, str) or not result.strip():
             raise RuntimeError('Claude did not produce a final response')
@@ -190,6 +211,6 @@ def invoke(binding, handoff_path, checkout, prompt, *, attempt=0):
                        telemetry_prompt=prompt, telemetry_attempt=attempt,
                        telemetry_provider='command')
         if proc.returncode:
-            provider_failure('\n'.join(filter(None, (proc.stderr, proc.stdout))).strip() or 'Command provider failed')
+            provider_failure('\n'.join(filter(None, (proc.stderr, proc.stdout))), prompt=prompt, fallback='Command provider failed')
         return proc.stdout
     return execute(prompt, checkout, resolved=resolved, attempt=attempt)
