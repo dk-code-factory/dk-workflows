@@ -113,3 +113,162 @@ def test_managed_retention_exception_is_not_reported_as_optional_update_failure(
     monkeypatch.setattr(manager, 'update_process', Mock(side_effect=RuntimeError('retained runtime changed')))
     with pytest.raises(RuntimeError, match='retained runtime changed'):
         manager.managed_update({'bundle_digest': 'pinned'}, {}, 'entry')
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+def test_unrelated_native_requests_preserve_acceptance_above_discovery_limit(tmp_path, monkeypatch, host):
+    monkeypatch.setenv('DK_HOST', host)
+    prompt = '\u2603' * 160000
+    assert len(json.dumps(prompt)) > 900_000
+
+    def run(argv, **kwargs):
+        assert kwargs['input'] == prompt
+        if host == 'codex':
+            Path(argv[argv.index('-o') + 1]).write_text('provider result')
+        return subprocess.CompletedProcess(argv, 0,
+            json.dumps({'subtype': 'success', 'result': 'provider result'}), '')
+
+    process = Mock(side_effect=run)
+    monkeypatch.setattr(executors.subprocess, 'run', process)
+    assert executors.execute(prompt, tmp_path) == 'provider result'
+    process.assert_called_once()
+
+
+def test_explicit_size_check_uses_serialized_characters_and_inclusive_boundary():
+    prompt = '\u2603"\n'
+    serialized_size = len(json.dumps(prompt))
+    assert serialized_size > len(prompt)
+    executors.check_prompt_size(prompt, serialized_size)
+    executors.check_prompt_size('small request', 100)
+    with pytest.raises(ValueError, match='Provider request too large.*Retain evidence in files'):
+        executors.check_prompt_size(prompt, serialized_size - 1)
+
+
+@pytest.mark.parametrize('escaped', [False, True])
+@pytest.mark.parametrize('diagnostic,prompt_phrase,expected', [
+    ('Input exceeds maximum length.', '', RuntimeError),
+    ('transport failure.', 'usage limit reached', RuntimeError),
+    ('usage limit reached.', 'authentication failed', executors.ProviderExhausted),
+])
+def test_provider_error_redacts_prompt_and_bounds_output(
+    tmp_path, monkeypatch, escaped, diagnostic, prompt_phrase, expected
+):
+    monkeypatch.setenv('DK_HOST', 'codex')
+    prompt = ('private evidence \"\n\u2603' + prompt_phrase) * 1000
+    echo = json.dumps(prompt, ensure_ascii=True)[1:-1] if escaped else prompt
+    stderr = diagnostic + ' ' + echo + 'x' * 20000 + ' transport failure'
+    monkeypatch.setattr(executors.subprocess, 'run', Mock(return_value=
+        subprocess.CompletedProcess([], 1, '', stderr)))
+    with pytest.raises(expected) as failure:
+        executors.execute(prompt, tmp_path)
+    assert type(failure.value) is expected
+    message = str(failure.value)
+    assert len(message) <= executors.MAX_PROVIDER_ERROR_CHARS
+    assert 'private evidence' not in message
+    assert diagnostic in message
+    assert 'transport failure' in message
+
+
+def test_claude_error_envelope_redacts_prompt_and_bounds_output(tmp_path, monkeypatch):
+    monkeypatch.setenv('DK_HOST', 'claude')
+    prompt = 'private evidence "\n\u2603' * 1000
+    envelope = {'subtype': 'error_during_execution', 'is_error': True,
+                'result': 'Input exceeds maximum length. ' + prompt + 'x' * 20000 + ' transport failure'}
+    monkeypatch.setattr(executors.subprocess, 'run', Mock(return_value=
+        subprocess.CompletedProcess([], 0, json.dumps(envelope), '')))
+    with pytest.raises(RuntimeError) as failure:
+        executors.execute(prompt, tmp_path)
+    message = str(failure.value)
+    assert len(message) <= executors.MAX_PROVIDER_ERROR_CHARS
+    assert 'private evidence' not in message
+    assert 'Input exceeds maximum length' in message
+    assert 'transport failure' in message
+
+
+def test_bounded_error_preserves_exhaustion_and_authentication_classification():
+    with pytest.raises(executors.ProviderExhausted) as failure:
+        executors.provider_failure('x' * 20000 + ' usage limit reached ' + 'x' * 20000)
+    assert len(str(failure.value)) <= executors.MAX_PROVIDER_ERROR_CHARS
+    with pytest.raises(RuntimeError) as failure:
+        executors.provider_failure('usage limit reached ' + 'x' * 20000 + ' authentication failed')
+    assert type(failure.value) is RuntimeError
+
+
+@pytest.mark.parametrize('host', ['codex', 'command'])
+@pytest.mark.parametrize('boundary', ['leading', 'trailing'])
+@pytest.mark.parametrize('newline', ['\n', '\r\n', '\r'])
+@pytest.mark.parametrize('echo_mode', ['raw', 'json', 'normalized-json'])
+@pytest.mark.parametrize('diagnostic,prompt_phrase,expected', [
+    ('usage limit reached', 'authentication failed', executors.ProviderExhausted),
+    ('authentication failed', 'usage limit reached', RuntimeError),
+])
+def test_boundary_echo_redaction_through_real_text_capture(
+    tmp_path, monkeypatch, host, boundary, newline, echo_mode, diagnostic, prompt_phrase, expected
+):
+    monkeypatch.setenv('DK_HOST', 'codex')
+    prompt = ' \t' + newline + 'private evidence "\u2603 ' + prompt_phrase + newline + ' \t'
+    provider = tmp_path / 'echo_provider.py'
+    provider.write_text('''import json,sys
+prompt = sys.stdin.buffer.read().decode()
+if sys.argv[1] == 'normalized-json':
+    prompt = prompt.replace('\\r\\n', '\\n').replace('\\r', '\\n')
+echo = prompt if sys.argv[1] == 'raw' else json.dumps(prompt)[1:-1]
+diagnostic = sys.argv[3]
+detail = echo + '\\n' + diagnostic if sys.argv[2] == 'leading' else diagnostic + '\\n' + echo
+sys.stderr.buffer.write(detail.encode())
+sys.exit(1)
+''')
+    provider_argv = [sys.executable, str(provider), echo_mode, boundary, diagnostic]
+    run_local = subprocess.run
+    captured = []
+
+    def run(argv, **kwargs):
+        if 'input' not in kwargs:
+            return run_local(argv, **kwargs)
+        assert kwargs['input'] == prompt
+        if host == 'codex':
+            assert argv[:2] == ['codex', 'exec']
+        proc = run_local(provider_argv if host == 'codex' else argv, **kwargs)
+        captured.append(proc.stderr)
+        return proc
+
+    monkeypatch.setattr(executors.subprocess, 'run', run)
+    with pytest.raises(expected) as failure:
+        if host == 'command':
+            executors.invoke({'command': [*provider_argv, '{handoff}']},
+                             tmp_path / 'handoff.json', tmp_path, prompt)
+        else:
+            executors.execute(prompt, tmp_path)
+    assert type(failure.value) is expected
+    echo = prompt if echo_mode == 'json' else prompt.replace('\r\n', '\n').replace('\r', '\n')
+    if echo_mode != 'raw':
+        echo = json.dumps(echo)[1:-1]
+    assert echo in captured[0]
+    message = str(failure.value)
+    assert message == message.strip()
+    assert diagnostic in message
+    assert '[provider input omitted]' in message
+    assert 'private evidence' not in message
+    assert prompt_phrase not in message
+    assert len(message) <= executors.MAX_PROVIDER_ERROR_CHARS
+
+
+@pytest.mark.parametrize('host,envelope,expected', [
+    ('codex', False, 'codex execution failed'),
+    ('claude', False, 'claude execution failed'),
+    ('command', False, 'Command provider failed'),
+    ('claude', True, 'Claude execution failed'),
+])
+def test_whitespace_only_failure_preserves_adapter_context(tmp_path, monkeypatch, host, envelope, expected):
+    monkeypatch.setenv('DK_HOST', host if host != 'command' else 'codex')
+    stdout = json.dumps({'subtype': 'error_during_execution', 'is_error': True, 'result': ' \n\t'}) if envelope else ' \n\t'
+    monkeypatch.setattr(executors.subprocess, 'run', Mock(return_value=
+        subprocess.CompletedProcess([], 0 if envelope else 1, stdout, '\n \t')))
+    with pytest.raises(RuntimeError) as failure:
+        if host == 'command':
+            executors.invoke({'command': [sys.executable, '{handoff}']},
+                             tmp_path / 'handoff.json', tmp_path, 'review evidence')
+        else:
+            executors.execute('review evidence', tmp_path)
+    assert type(failure.value) is RuntimeError
+    assert str(failure.value) == expected
