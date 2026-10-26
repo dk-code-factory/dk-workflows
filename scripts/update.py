@@ -38,6 +38,7 @@ def resource_hash(path):
 
 def resource_manifest(root):
     root = Path(root).resolve()
+    sealed = (root / BUNDLE_MARKER).is_file()
     files = {}
     def walk(folder, relative, ancestors, record=True):
         resolved = folder.resolve()
@@ -45,6 +46,9 @@ def resource_manifest(root):
             raise RetentionError('Runtime contains an escaping or cyclic directory link')
         for path in sorted(folder.iterdir()):
             if path.name in BUNDLE_SKIP:
+                continue
+            if (not sealed and folder == root and path.name == '.in_use'
+                    and path.is_dir() and not path.is_symlink()):
                 continue
             name = relative / path.name
             target = path.resolve()
