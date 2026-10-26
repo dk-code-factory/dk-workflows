@@ -13,6 +13,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / 'scripts' / 'decisions.py'
 spec = importlib.util.spec_from_file_location('decisions', SCRIPT)
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
+from shared import executors
 
 
 class DecisionTests(unittest.TestCase):
@@ -91,6 +92,40 @@ class DecisionTests(unittest.TestCase):
         with patch.object(mod, 'gh_json', return_value={'url': url, 'body': '', 'headRefOid': 'a'*40}):
             result = mod.decision_context(state)
         self.assertEqual(result['local_decisions'], [{'text': 'Keep schema stable', 'source': 'user chose stable schema'}])
+
+    def test_normal_diff_preserves_patch_when_pinned_refs_are_unchanged(self):
+        pr = {'url': 'https://github.com/o/r/pull/2', 'baseRefOid': 'a'*40,
+              'baseRefName': 'main', 'headRefOid': 'b'*40}
+        live = {key: pr[key] for key in ('baseRefOid', 'baseRefName', 'headRefOid')}
+        diff = 'diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -0,0 +1 @@\n+x\n'
+        with patch.object(mod, 'run', return_value=diff) as run, \
+             patch.object(mod, 'gh_json', return_value=live) as gh:
+            self.assertEqual(mod.pr_diff(pr), diff)
+        run.assert_called_once_with(['gh', 'pr', 'diff', '2', '--repo', 'o/r'])
+        gh.assert_called_once_with(['pr', 'view', '2', '--repo', 'o/r',
+                                    '--json', mod.DIFF_SNAPSHOT_FIELDS])
+
+    def test_normal_diff_ref_changes_stop_discovery_before_retention_or_provider_start(self):
+        pr = {'url': 'https://github.com/o/r/pull/2', 'baseRefOid': 'a'*40,
+              'baseRefName': 'main', 'headRefOid': 'b'*40}
+        for key, changed in (('baseRefOid', 'c'*40), ('baseRefName', 'release'),
+                             ('headRefOid', 'd'*40)):
+            with self.subTest(changed=key), tempfile.TemporaryDirectory() as td:
+                state = {'pr': dict(pr), 'decisions': [{'text': 'Keep API', 'references': ['user']}]}
+                path = Path(td) / 'state.json'
+                original = json.dumps(state)
+                path.write_text(original)
+                live = {field: pr[field] for field in ('baseRefOid', 'baseRefName', 'headRefOid')}
+                live[key] = changed
+                with patch.object(mod, 'run', return_value='patch from changed refs'), \
+                     patch.object(mod, 'gh_json', return_value=live), \
+                     patch.object(mod, 'execute') as provider:
+                    with self.assertRaisesRegex(RuntimeError, 'base or head changed'):
+                        mod.suggest_from_code(state, path)
+                provider.assert_not_called()
+                self.assertEqual(path.read_text(), original)
+                self.assertEqual(json.dumps(state), original)
+                self.assertEqual(list(Path(td).iterdir()), [path])
 
     def test_large_diff_uses_pinned_local_three_dot_diff(self):
         base, head = 'a'*40, 'b'*40
@@ -250,17 +285,306 @@ class DecisionTests(unittest.TestCase):
     def test_code_suggestions_are_cached_and_never_publish(self):
         link = 'https://github.com/o/r/blob/' + 'a'*40 + '/x.py#L4'
         state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'number': 2,
-                        'headRefOid': 'a'*40}, 'decisions': []}
+                        'headRefOid': 'a'*40, 'baseRefOid': 'b'*40, 'baseRefName': 'main'}, 'decisions': []}
+        live = {key: state['pr'][key] for key in ('baseRefOid', 'baseRefName', 'headRefOid')}
         diff = 'diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -0,0 +4,1 @@\n+cache = {}\n'
         with tempfile.TemporaryDirectory() as td:
             path = Path(td)/'state.json'
             with patch.object(mod, 'run', return_value=diff), patch.object(mod, 'execute', return_value=json.dumps({'decisions': [
-                    {'text': 'Use a cache', 'references': [link]}]})), \
+                    {'text': 'Use a cache', 'references': [link]}]})) as model, \
+                 patch.object(mod, 'gh_json', return_value=live), \
                  patch.object(mod, 'publish') as publish:
                 result = mod.suggest_from_code(state, path)
                 self.assertEqual(result, mod.suggest_from_code(state, path))
+                model.assert_called_once()
                 publish.assert_not_called()
             self.assertEqual(json.loads(path.read_text())['code_suggestions']['head'], 'a'*40)
+
+    def test_large_code_discovery_uses_retained_complete_evidence(self):
+        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40},
+                 'decisions': [{'text': 'Preserve API', 'references': ['user choice']}]}
+        diff = ('diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -0,0 +1,1 @@\n+'
+                + 'large patch \" \u2603 ' * 100000 + '\n')
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / 'state.json'
+            def model(prompt, checkout):
+                self.assertLess(len(json.dumps(prompt)), 20000)
+                self.assertNotIn('large patch', prompt)
+                manifest = json.loads((checkout / 'manifest.json').read_text())
+                self.assertEqual(manifest['head_sha'], 'a'*40)
+                for artifact in manifest['artifacts'].values():
+                    content = Path(artifact['path']).read_text()
+                    self.assertEqual(mod.hashlib.sha256(content.encode()).hexdigest(), artifact['sha256'])
+                self.assertEqual((checkout / 'diff.patch').read_text(), diff)
+                self.assertEqual(json.loads((checkout / 'existing-decisions.json').read_text()), state['decisions'])
+                links = json.loads((checkout / 'code-permalinks.json').read_text())
+                self.assertEqual(links['paths'], {'x.py': [[1, 1]]})
+                return '{"decisions": []}'
+            with patch.object(mod, 'pr_diff', return_value=diff), patch.object(mod, 'execute', side_effect=model):
+                self.assertEqual(mod.suggest_from_code(state, path), [])
+            retained, = Path(td).glob('code-evidence-*')
+            self.assertEqual((retained / 'diff.patch').read_text(), diff)
+
+    def test_failed_discovery_retains_evidence_and_existing_choices(self):
+        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40},
+                 'decisions': [{'text': 'Keep API', 'references': ['user']}],
+                 'code_suggestions': {'head': 'b'*40, 'items': []}}
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / 'state.json'
+            original = json.dumps(state)
+            path.write_text(original)
+            with patch.object(mod, 'pr_diff', return_value='complete diff'), \
+                 patch.object(mod, 'execute', side_effect=RuntimeError('provider failed')):
+                with self.assertRaisesRegex(RuntimeError, 'Code evidence retained at'):
+                    mod.suggest_from_code(state, path)
+            self.assertEqual(path.read_text(), original)
+            self.assertEqual(json.dumps(state), original)
+            retained, = Path(td).glob('code-evidence-*')
+            self.assertEqual((retained / 'diff.patch').read_text(), 'complete diff')
+
+    def test_invalid_code_responses_retain_diagnostics_and_preserve_choices(self):
+        reason = 'Inspection unavailable: permission denied reading diff.patch'
+        link = 'https://github.com/o/r/blob/' + 'a'*40 + '/x.py#L1'
+        valid = {'text': 'Keep API', 'references': [link]}
+        cases = [('plain failure', reason, reason), ('malformed JSON', '{"error": ' + reason, reason),
+                 ('empty reply', '', 'Analysis returned no diagnostic text'),
+                 ('whitespace reply', ' \n\t', 'Analysis returned no diagnostic text'),
+                 ('nested JSON recursion', '[' * 10000 + '0' + ']' * 10000, 'recursion')]
+        for name, value in [('error object', {'error': reason}), ('string', reason), ('null', None),
+                            ('list', []), ('integer', 7), ('boolean', True), ('missing decisions', {}),
+                            ('extra key', {'decisions': [], 'error': reason}),
+                            ('null decisions', {'decisions': None}), ('object decisions', {'decisions': {}}),
+                            ('string decisions', {'decisions': 'partial'})]:
+            cases.append((name, json.dumps(value), reason if 'error' in name or name == 'string' or name == 'extra key'
+                          else 'Invalid code suggestion result'))
+        for name, item in [('null item', None), ('list item', []), ('string item', 'partial'),
+                           ('missing text', {'references': [link]}), ('extra item key', {**valid, 'error': reason})]:
+            cases.append((name, json.dumps({'decisions': [item]}), 'Code suggestion lacks exact evidence'))
+        for value in (None, True, 7, [], {}, '', ' \t', 'first\nsecond', 'first\rsecond'):
+            cases.append(('invalid text ' + repr(value), json.dumps({'decisions': [{**valid, 'text': value}]}),
+                          'Code suggestion lacks exact evidence'))
+        for value in (None, link, {}, [], [None], [True], [{}], [[]], ['https://example.com/invented']):
+            cases.append(('invalid references ' + repr(value), json.dumps({'decisions': [{**valid, 'references': value}]}),
+                          'Code suggestion lacks exact evidence'))
+        cases.append(('partial result', json.dumps({'decisions': [valid, {'text': 'partial', 'references': [[]]}]}),
+                      'Code suggestion lacks exact evidence'))
+        cases.append(('quota text in invalid decision', json.dumps({'decisions': [
+            {'text': 'usage limit reached', 'references': [[]]}]}), 'Code suggestion lacks exact evidence'))
+        diff = 'diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -0,0 +1 @@\n+keep_api()\n'
+        for name, response, explanation in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as td:
+                state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40},
+                         'decisions': [{'text': 'Preserve choice', 'references': ['user']}],
+                         'code_suggestions': {'head': 'b'*40, 'items': [valid]}}
+                original = json.dumps(state)
+                path = Path(td) / 'state.json'
+                path.write_text(original)
+                with patch.object(mod, 'pr_diff', return_value=diff), \
+                     patch.object(mod, 'execute', return_value=response):
+                    with self.assertRaises(RuntimeError) as failure:
+                        mod.suggest_from_code(state, path)
+                self.assertIs(type(failure.exception), RuntimeError)
+                message = str(failure.exception)
+                retained, = Path(td).glob('code-evidence-*')
+                self.assertIn(str(retained / 'manifest.json'), message)
+                self.assertIn(str(retained / 'failed-response.txt'), message)
+                self.assertIn(explanation, message)
+                self.assertLess(len(message), executors.MAX_PROVIDER_ERROR_CHARS + 1000)
+                self.assertEqual((retained / 'failed-response.txt').read_text(), response)
+                self.assertEqual((retained / 'diff.patch').read_text(), diff)
+                self.assertEqual(path.read_text(), original)
+                self.assertEqual(json.dumps(state), original)
+
+    def test_invalid_code_response_excerpt_is_bounded_redacted_and_not_exhaustion(self):
+        for mode in ('raw', 'unicode-json', 'ascii-json'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as td:
+                state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40}, 'decisions': []}
+                path = Path(td) / 'state.json'
+                original = json.dumps(state)
+                path.write_text(original)
+                replies = []
+                def model(request, checkout):
+                    reason = 'Inspection unavailable: usage limit reached while reading evidence'
+                    if mode == 'raw':
+                        response = reason + '\n' + request + 'x' * 100000 + '\ninspection failed'
+                    else:
+                        response = json.dumps({'error': reason, 'echo': request, 'padding': 'x' * 100000},
+                                              ensure_ascii=mode == 'ascii-json')
+                    replies.append(response)
+                    return response
+                with patch.object(mod, 'pr_diff', return_value='complete diff'), \
+                     patch.object(mod, 'language_review_instructions', return_value='private prompt marker "\u2603\r\n'), \
+                     patch.object(mod, 'execute', side_effect=model):
+                    with self.assertRaises(RuntimeError) as failure:
+                        mod.suggest_from_code(state, path)
+                self.assertIs(type(failure.exception), RuntimeError)
+                message = str(failure.exception)
+                self.assertIn('Inspection unavailable: usage limit reached', message)
+                self.assertIn('[provider input omitted]', message)
+                self.assertNotIn('private prompt marker', message)
+                self.assertIn('[provider output truncated]', message)
+                retained, = Path(td).glob('code-evidence-*')
+                self.assertIn(str(retained / 'manifest.json'), message)
+                self.assertLess(len(message), executors.MAX_PROVIDER_ERROR_CHARS + 1000)
+                self.assertEqual((retained / 'failed-response.txt').read_bytes(), replies[0].encode('utf-8'))
+                self.assertEqual(retained.stat().st_mode & 0o077, 0)
+                self.assertEqual(path.read_text(), original)
+                self.assertEqual(json.dumps(state), original)
+
+    def test_failed_response_write_does_not_replace_inspection_failure_or_manifest(self):
+        reason = 'Inspection unavailable: authentication failed for evidence access'
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / 'state.json'
+            state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40}, 'decisions': []}
+            original = json.dumps(state)
+            path.write_text(original)
+            write_text = Path.write_text
+            def write(artifact, text, **kwargs):
+                if artifact.name == 'failed-response.txt':
+                    raise OSError('diagnostic storage unavailable')
+                return write_text(artifact, text, **kwargs)
+            with patch.object(mod, 'pr_diff', return_value='complete diff'), \
+                 patch.object(mod, 'execute', return_value=json.dumps({'error': reason})), \
+                 patch.object(Path, 'write_text', write):
+                with self.assertRaises(RuntimeError) as failure:
+                    mod.suggest_from_code(state, path)
+            self.assertIs(type(failure.exception), RuntimeError)
+            retained, = Path(td).glob('code-evidence-*')
+            self.assertIn(reason, str(failure.exception))
+            self.assertIn(str(retained / 'manifest.json'), str(failure.exception))
+            self.assertIn('could not be retained', str(failure.exception))
+            self.assertFalse((retained / 'failed-response.txt').exists())
+            self.assertEqual(path.read_text(), original)
+            self.assertEqual(json.dumps(state), original)
+
+    def test_code_execute_exceptions_keep_identity_type_and_context(self):
+        for exception in (RuntimeError('transport failed'), ValueError('invalid provider setup'),
+                          executors.ProviderExhausted('usage limit reached')):
+            with self.subTest(kind=type(exception).__name__), tempfile.TemporaryDirectory() as td:
+                state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40}, 'decisions': []}
+                path = Path(td) / 'state.json'
+                original = json.dumps(state)
+                path.write_text(original)
+                reason = str(exception)
+                with patch.object(mod, 'pr_diff', return_value='complete diff'), \
+                     patch.object(mod, 'execute', side_effect=exception):
+                    with self.assertRaises(type(exception)) as failure:
+                        mod.suggest_from_code(state, path)
+                self.assertIs(failure.exception, exception)
+                self.assertIs(type(failure.exception), type(exception))
+                retained, = Path(td).glob('code-evidence-*')
+                self.assertIn(reason, str(failure.exception))
+                self.assertIn(str(retained / 'manifest.json'), str(failure.exception))
+                self.assertFalse((retained / 'failed-response.txt').exists())
+                self.assertEqual(path.read_text(), original)
+                self.assertEqual(json.dumps(state), original)
+
+    def test_code_discovery_rejects_oversized_serialized_request_before_provider_start(self):
+        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40},
+                 'decisions': [{'text': 'Keep API', 'references': ['user']}]}
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / 'state.json'
+            original = json.dumps(state)
+            path.write_text(original)
+            # Unicode escaping alone exceeds the limit; raw input remains smaller.
+            with patch.object(mod, 'pr_diff', return_value='complete diff'), \
+                 patch.object(mod, 'language_review_instructions', return_value='\u2603' * 160000), \
+                 patch.object(executors.subprocess, 'run') as process:
+                with self.assertRaisesRegex(ValueError, 'Provider request too large.*Code evidence retained at'):
+                    mod.suggest_from_code(state, path)
+            process.assert_not_called()
+            self.assertEqual(path.read_text(), original)
+            self.assertEqual(json.dumps(state), original)
+            retained, = Path(td).glob('code-evidence-*')
+            self.assertEqual((retained / 'diff.patch').read_text(), 'complete diff')
+
+    def test_code_discovery_reads_retained_evidence_through_real_executor(self):
+        diff = ('diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -0,0 +1,2 @@\n+'
+                + 'large patch " \u2603 ' * 100000 + '\n+LATE_PATCH_MARKER\n')
+        link = 'https://github.com/o/r/blob/' + 'a'*40 + '/x.py#L2'
+        candidate = {'text': 'Keep late patch behavior', 'references': [link]}
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            provider = root / 'provider.py'
+            provider.write_text('''import hashlib,json,os,sys
+from pathlib import Path
+prompt = sys.stdin.read()
+manifest = json.loads(Path('manifest.json').read_text())
+assert json.loads(prompt.split('EVIDENCE MANIFEST JSON:\\n', 1)[1]) == manifest
+if os.environ['TEST_CODE_EVIDENCE_ACCESS'] == 'unavailable':
+    print('Complete inspection unavailable: code evidence access denied', file=sys.stderr)
+    sys.exit(1)
+if os.environ['TEST_CODE_EVIDENCE_ACCESS'] in ('plain-response', 'error-response'):
+    response = 'Complete inspection unavailable: code evidence access denied'
+    if os.environ['TEST_CODE_EVIDENCE_ACCESS'] == 'error-response':
+        response = json.dumps({'error': response})
+    Path(sys.argv[sys.argv.index('-o') + 1]).write_text(response)
+    sys.exit(0)
+for artifact in manifest['artifacts'].values():
+    content = Path(artifact['path']).read_text()
+    assert hashlib.sha256(content.encode()).hexdigest() == artifact['sha256']
+patch = Path(manifest['artifacts']['diff.patch']['path']).read_text()
+assert patch.index('LATE_PATCH_MARKER') > 1_000_000
+links = json.loads(Path(manifest['artifacts']['code-permalinks.json']['path']).read_text())
+assert links['paths']['x.py'] == [[1, 2]]
+assert json.loads(Path('existing-decisions.json').read_text())[0]['text'] == 'Keep API'
+result = {'decisions': [{'text': 'Keep late patch behavior',
+                        'references': [links['prefix'] + 'x.py#L2']}]}
+Path(sys.argv[sys.argv.index('-o') + 1]).write_text(json.dumps(result))
+''')
+            run_local = subprocess.run
+            def run_provider(argv, **kwargs):
+                self.assertEqual(argv[:2], ['codex', 'exec'])
+                self.assertEqual(Path(argv[argv.index('-C') + 1]), kwargs['cwd'])
+                return run_local([sys.executable, str(provider), *argv[1:]], **kwargs)
+            for access in ('available', 'unavailable', 'plain-response', 'error-response'):
+                with self.subTest(access=access):
+                    state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40},
+                             'decisions': [{'text': 'Keep API', 'references': ['user']}]}
+                    path = root / (access + '.json')
+                    original = json.dumps(state)
+                    path.write_text(original)
+                    with patch.object(mod, 'pr_diff', return_value=diff), \
+                         patch.object(executors, 'managed_update', return_value=None), \
+                         patch.object(executors.subprocess, 'run', side_effect=run_provider), \
+                         patch.dict(os.environ, {'DK_HOST': 'codex',
+                                                 'TEST_CODE_EVIDENCE_ACCESS': access, 'DK_REVIEW_STATS_TRACE': ''}):
+                        if access == 'available':
+                            self.assertEqual(mod.suggest_from_code(state, path), [candidate])
+                            self.assertEqual(json.loads(path.read_text())['code_suggestions']['items'], [candidate])
+                        else:
+                            with self.assertRaisesRegex(RuntimeError, 'Complete inspection unavailable.*Code evidence retained at') as failure:
+                                mod.suggest_from_code(state, path)
+                            if access != 'unavailable':
+                                self.assertIn('failed-response.txt', str(failure.exception))
+                            self.assertEqual(path.read_text(), original)
+                            self.assertEqual(json.dumps(state), original)
+                    self.assertEqual(state['decisions'], [{'text': 'Keep API', 'references': ['user']}])
+            for retained in root.glob('code-evidence-*'):
+                self.assertEqual((retained / 'diff.patch').read_text(), diff)
+
+    def test_suggest_preserves_default_code_and_explicit_source_dispatch(self):
+        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40}}
+        for selection, expected in (([], ['code']), (['--source', 'code'], ['code']),
+                                    (['--source', 'description'], ['description']),
+                                    (['--source', 'all'], ['code', 'description'])):
+            with self.subTest(selection=selection):
+                calls = []
+                def discover(source):
+                    calls.append(source)
+                    return [{'text': source + ' candidate', 'references': [state['pr']['url']]}]
+                with patch.object(sys, 'argv', ['decisions.py', 'suggest', *selection]), \
+                     patch.object(mod, 'scan', return_value=(state, Path('unused.json'))), \
+                     patch.object(mod, 'suggest_from_code', side_effect=lambda *_: discover('code')), \
+                     patch.object(mod, 'suggest_from_description', side_effect=lambda *_: discover('description')), \
+                     patch.object(mod, 'publish') as publish, \
+                     patch('sys.stdout', new_callable=io.StringIO) as output:
+                    mod.cli()
+                self.assertEqual(calls, expected)
+                candidates = json.loads(output.getvalue())['data']['decisions']
+                self.assertEqual([item['source_type'] for item in candidates], expected)
+                self.assertTrue(all(item['status'] == 'candidate' for item in candidates))
+                publish.assert_not_called()
 
     def test_manual_add_records_once_without_publishing(self):
         ref = 'https://github.com/o/r/pull/2#issuecomment-1'
