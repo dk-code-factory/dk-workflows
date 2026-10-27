@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.5.2",
+      "description": "Recover interrupted Decisions publication outcomes after head/title changes, route PR reads by full host URL, and keep offline legacy reads free of migration writes, with recovery, host-routing and persistence regression coverage."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.5.0",
       "description": "Tool-owned lifecycle entry, typed recovery actions, durable publication intents and receipts, guarded branch/review/CI publication, and shorter host procedures."
     },
