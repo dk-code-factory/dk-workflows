@@ -223,7 +223,7 @@ def test_prepared_native_reviewer_survives_registry_replacement(tmp_path, monkey
         with pytest.raises(ValueError, match='disagree'):
             runner.describe_reviewer(selection)
         incompatible = {'execution': runtime_bundles.retained_binding(resolved)}
-        with pytest.raises(ValueError, match='procedure or version changed'):
+        with pytest.raises(ValueError, match='disagree'):
             with bindings.pinned_bindings({bindings.key(selection): incompatible}):
                 pass
     manifest_path.write_text(json.dumps(manifest))

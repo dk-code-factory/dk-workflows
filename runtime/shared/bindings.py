@@ -63,7 +63,7 @@ _PINNED_BINDINGS = ContextVar('dk_pinned_bindings', default={})
 def validate_version(registry_version, manifest):
     """A version is optional on either side; compare only declared versions."""
     declared = manifest.get('version')
-    if registry_version is not None and declared is not None and registry_version != declared:
+    if registry_version is not None and 'version' in manifest and registry_version != declared:
         raise ValueError('Installed version and manifest disagree; refresh the host installation')
 
 
