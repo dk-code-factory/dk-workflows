@@ -271,8 +271,8 @@ def pr_diff(pr):
     owner, repo, _, number = parts
     target = f"{owner}/{repo}"
     try:
-        diff = run(["gh", "pr", "diff", number, "--repo", target])
-        live = gh_json(["pr", "view", number, "--repo", target, "--json", DIFF_SNAPSHOT_FIELDS])
+        diff = run(["gh", "pr", "diff", pr["url"]])
+        live = gh_json(["pr", "view", pr["url"], "--json", DIFF_SNAPSHOT_FIELDS])
         if any(live.get(key) != pr.get(key) for key in (
                 "baseRefOid", "baseRefName", "headRefOid")):
             raise RuntimeError("PR base or head changed while fetching the pinned diff")
@@ -292,7 +292,7 @@ def pr_diff(pr):
             raise RuntimeError(f"GitHub diff failed and pinned PR refs are incomplete: {original_error}") from original_error
 
         def check_live():
-            live = gh_json(["pr", "view", number, "--repo", target, "--json", DIFF_SNAPSHOT_FIELDS])
+            live = gh_json(["pr", "view", pr["url"], "--json", DIFF_SNAPSHOT_FIELDS])
             if any(live.get(key) != value for key, value in expected.items()):
                 raise RuntimeError("PR base or head changed while fetching the pinned diff")
             return live
@@ -773,8 +773,7 @@ def _publish(state, decisions, description=None, description_review_state=None, 
     pr = state['pr']
     parts = urlparse(pr['url']).path.strip('/').split('/')
     host = urlparse(pr['url']).hostname
-    live = gh_json(['pr', 'view', str(pr['number']), '--repo', '/'.join(parts[:2]),
-                    '--json', 'body,title,headRefOid'])
+    live = gh_json(['pr', 'view', pr['url'], '--json', 'body,title,headRefOid'])
     def save():
         current = state.get('publication_intent')
         if current:
@@ -842,8 +841,7 @@ def _publish(state, decisions, description=None, description_review_state=None, 
                           '-f', 'body=' + updated])
         if result.get('body') != updated:
             raise RuntimeError('GitHub returned a different PR body')
-        live = gh_json(['pr', 'view', str(pr['number']), '--repo', '/'.join(parts[:2]),
-                        '--json', 'body,title,headRefOid'])
+        live = gh_json(['pr', 'view', pr['url'], '--json', 'body,title,headRefOid'])
         if not same(intent['snapshot'], updated):
             raise RuntimeError('Publication could not be verified against live head, title and body')
     except MetadataConflict:
@@ -869,9 +867,7 @@ def compact(state):
 def decision_context(state, local_decisions=None):
     """Export settled constraints without publishing the PR body."""
     pr = state['pr']
-    parts = urlparse(pr['url']).path.strip('/').split('/')
-    live = gh_json(['pr', 'view', str(pr['number']), '--repo', '/'.join(parts[:2]),
-                    '--json', 'url,body,headRefOid'])
+    live = gh_json(['pr', 'view', pr['url'], '--json', 'url,body,headRefOid'])
     if (live.get('url') != pr['url'] or live.get('body') != pr.get('body')
             or live.get('headRefOid') != pr['headRefOid']):
         raise RuntimeError('PR body or head changed during decision context fetch; retry')

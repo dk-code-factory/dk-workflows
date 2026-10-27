@@ -38,6 +38,8 @@ Existing Decisions entries are read as Markdown blocks, including multiline bull
 
 `scan`, `context`, `suggest`, `add`, and `replace` refresh the PR and discussions and may run model analysis. They may write the private cache but do not edit GitHub. `list` is entirely offline. `publish` loads the cache and checks live GitHub state without rerunning analysis. `scan --publish` combines refresh and publication when both are requested.
 
+PR view and diff reads use the full PR URL, including verification and diff fallback checks, so the requested GitHub host governs routing even when the default `GH_HOST` differs. REST writes remain explicitly host-qualified.
+
 Code suggestions are bound to the head SHA. Description suggestions are bound to the complete PR body hash. Selecting either requires the exact cached `{text, references}` object and a matching current snapshot. Discussion choices require exact current comment or review URLs. A PR URL alone is accepted only for an exact current description suggestion.
 
 `replace` requires an active ID from `list` or `context`. It stages the new choice and marks the old record superseded locally. Publication verifies that the exact original Markdown entry remains, then moves it into a collapsed history block within Decisions and adds the new choice. History includes the original record and replacement ID; unrelated body text is preserved. Repeated publication is idempotent. Replaced choices that were never published are also included in history, so replacement chains survive cache loss. If the original entry changes, reconcile the replacement before publishing; do not overwrite the external edit.

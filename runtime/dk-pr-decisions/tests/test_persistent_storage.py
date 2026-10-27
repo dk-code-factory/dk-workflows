@@ -37,11 +37,13 @@ def gh(args):
     data = live()
     if args[0] == 'api':
         assert '-X' in args and args[args.index('-X') + 1] == 'PATCH'
+        assert args[args.index('--hostname') + 1] == data['pr']['url'].split('/')[2], args
         data['pr']['body'] = args[-1].removeprefix('body=')
         live_path.write_text(json.dumps(data))
         pause('publication')
         return data['pr']
     assert args[:2] == ['pr', 'view'], args
+    assert args[2] == data['pr']['url'] and '--repo' not in args, args
     pause('snapshot')
     time.sleep(float(os.environ.get('TEST_SCAN_DELAY', '0')))
     return data['pr']
@@ -151,6 +153,20 @@ def test_isolation_and_exclusive_root(harness):
     assert harness.invoke('list', DK_PR_DECISIONS_HOME=other, code=1)['status'] == 'error'
     assert not Path(other).exists()
     assert harness.path() == harness.root / 'persistent/v3/github.com/base/project/pr-34.json'
+
+
+def test_enterprise_publication_and_context_ignore_conflicting_default_host(harness):
+    live = json.loads(harness.live.read_text())
+    url = URL.replace('github.com', 'github.example')
+    live['pr']['url'] = url
+    harness.update(**live)
+    overrides = {'url': url, 'GH_HOST': 'github.com'}
+    harness.add('Enterprise choice', **overrides)
+    result = harness.invoke('publish', **overrides)
+    assert result['status'] == 'ok' and result['publication']['updated'] is True
+    context = harness.invoke('context', **overrides)['data']
+    assert context['pr_url'] == url and context['verified'] is True
+    assert [r['text'] for r in context['decisions']] == ['Enterprise choice']
 
 
 def test_competing_adds_and_refreshes_do_not_lose_changes(harness):
