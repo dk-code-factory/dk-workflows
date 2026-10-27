@@ -13,9 +13,12 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'runtime'))
 from shared.command_results import ResultFile, receipt, default_path, inspect_result
-from shared import cli_reference
+from shared import cli_reference, invocations
+from shared.diagnostics import Diagnostic, emit
 
-ARTIFACT_DEFAULTS = {'run-state', 'replies', 'reviewers', 'conversation', 'inline-feedback'}
+ARTIFACT_DEFAULTS = {'run-state', 'replies', 'reviewers', 'conversation', 'inline-feedback',
+                     'edit-pr', 'post-review', 'publication-actions', 'branch-publish',
+                     'split', 'decisions'}
 # Each row is a packaged script, cwd argument placement, PR argument, repo argument.
 ROUTES = {
     'config': ('runtime/dk-config/scripts/repo_rules.py', 'before', 'url', False),
@@ -30,6 +33,9 @@ ROUTES = {
     'completion': ('runtime/dk-pr-iter/scripts/completion.py', 'before', 'url', False),
     'completion-threads': ('runtime/dk-pr-iter/scripts/completion_threads.py', 'before', 'url', False),
     'edit-pr': ('runtime/dk-pr-description/scripts/pr_edit_guard.py', None, 'positional', False),
+    'post-review': ('runtime/dk-pr-post-review/scripts/post_review.py', None, 'url', False),
+    'publication-actions': ('runtime/dk-pr-iter/scripts/publication_actions.py', 'before', 'url', False),
+    'branch-publish': ('runtime/dk-pr-iter/scripts/branch_publish.py', 'before', 'url', False),
     'description-decisions': ('runtime/dk-pr-description/scripts/decisions.py', None, None, False),
     'report-comments': ('runtime/dk-pr-read-comments/scripts/report_pr_comments.py', None, 'url', False),
     'replies': ('runtime/dk-pr-reply-review/scripts/reply_passes.py', 'before', 'url', False),
@@ -147,7 +153,7 @@ def early_context(arguments):
     """Find storage context before parsing, stopping at the native helper boundary."""
     context = {}
     index = 0
-    options = {'--cwd', '--pr', '--repo', '--host', '--parent', '--result-file', '--reference'}
+    options = {'--cwd', '--pr', '--repo', '--host', '--parent', '--result-file', '--reference', '--invocation'}
     while index < len(arguments):
         option, separator, value = arguments[index].partition('=')
         if option in options:
@@ -177,9 +183,53 @@ def dispatch(arguments, result_file=None):
     parser.add_argument('--result-file', help='Retain full private diagnostics and print a typed terminal receipt')
     parser.add_argument('--full', action='store_true', help='Print native helper output instead of automatic artifact receipts')
     parser.add_argument('--reference', default=os.environ.get('DK_CLI_REFERENCE'), help='Shared versioned CLI reference for help discovery')
-    parser.add_argument('command', choices=['commands', 'reference', 'result', *ROUTES])
+    parser.add_argument('--invocation', help='Retained begin receipt supplying runtime, host, token and CLI reference')
+    parser.add_argument('command', choices=['begin', 'end', 'commands', 'reference', 'result', *ROUTES])
     parser.add_argument('arguments', nargs=argparse.REMAINDER)
     args = parser.parse_args(arguments)
+    if args.invocation:
+        try:
+            value = invocations.load(args.invocation)
+        except (ValueError, OSError, RuntimeError) as exc:
+            parser.error(str(exc))
+        supplied = early_context(arguments)
+        for field, key in [('host', 'host'), ('parent', 'token'), ('reference', 'reference')]:
+            if '--' + field in supplied and getattr(args, field) != value[key]:
+                parser.error('--' + field + ' conflicts with --invocation')
+            setattr(args, field, value.get(key))
+    if args.command in ('begin', 'end'):
+        selected_parser = Parser(description='Retained workflow lifecycle ' + args.command)
+        if args.command == 'begin':
+            selected_parser.add_argument('--skill', required=True)
+        else:
+            selected_parser.add_argument('--reason')
+        selected = selected_parser.parse_args(args.arguments)
+        if args.dry_run:
+            print(json.dumps({'command': args.command, 'host': args.host,
+                              'invocation': args.invocation, **vars(selected)}))
+            return 0
+        if args.command == 'begin':
+            if args.host not in ('codex', 'claude'):
+                parser.error('begin requires --host codex|claude')
+            previous = Path.cwd()
+            try:
+                os.chdir(args.cwd)
+                value = invocations.begin(ROOT, ROUTES, args.host, selected.skill, Path.cwd(), args.parent)
+            except Diagnostic:
+                raise
+            except (ValueError, OSError, RuntimeError) as exc:
+                parser.error(str(exc))
+            finally:
+                os.chdir(previous)
+        else:
+            if not args.invocation:
+                parser.error('end requires --invocation FILE returned by begin')
+            try:
+                value = invocations.end(args.invocation, selected.reason)
+            except (ValueError, OSError, RuntimeError) as exc:
+                parser.error(str(exc))
+        print(json.dumps(value, sort_keys=True))
+        return 0
     if args.full and args.result_file:
         parser.error('--full cannot be combined with --result-file')
     if args.command == 'reference':
@@ -245,6 +295,21 @@ def dispatch(arguments, result_file=None):
 def main():
     arguments = sys.argv[1:]
     context = early_context(arguments)
+    if context.get('--invocation'):
+        try:
+            value = invocations.load(context['--invocation'])
+            retained = Path(value['runtime_root'])
+            if retained.resolve() != ROOT:
+                status = subprocess.run([sys.executable, str(retained / 'scripts/dk.py'), *arguments]).returncode
+                return status if status >= 0 else 128 - status
+        except (ValueError, OSError, RuntimeError) as exc:
+            print(json.dumps({**receipt('error', 'invocation_error',
+                'Restore the invocation receipt and retained runtime before continuing.', None, 2,
+                message=str(exc), action={'kind': 'agent_task',
+                    'task': 'Inspect the invocation receipt and lifecycle recovery details; restore the retained runtime.',
+                    'artifacts': [context['--invocation'], str(ROOT / 'common/recovery.md')]}),
+                'dispatched': False}))
+            return 2
     artifact = None
     automatic = (context.get('command') in ARTIFACT_DEFAULTS and not context.get('--full')
                  and not context.get('--dry-run') and not any(x in ('--help', '-h') for x in arguments))
@@ -252,7 +317,9 @@ def main():
         try:
             context['--result-file'] = str(default_path())
         except ValueError as exc:
-            print(json.dumps({**receipt('error', 'artifact_storage', str(exc), None, 2)}))
+            print(json.dumps({**receipt('error', 'artifact_storage', 'Correct private artifact storage before dispatch.', None, 2,
+                message=str(exc), action={'kind': 'agent_task', 'task': 'Restore writable absolute private workflow storage.',
+                                          'artifacts': []}), 'dispatched': False}))
             return 2
     if '--result-file' in context:
         try:
@@ -260,35 +327,47 @@ def main():
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
             print(json.dumps({**receipt('error', 'artifact_storage',
                 'Choose a new writable private artifact path before running the helper.', None, 2),
-                'message': str(exc)}))
+                'message': str(exc)[:512], 'dispatched': False,
+                'action': {'kind': 'agent_task', 'task': 'Choose a new writable private artifact path outside the repository and plugin.',
+                           'artifacts': [context['--result-file']]}}))
             return 2
     try:
         with redirect_stdout(artifact.streams['stdout']) if artifact else nullcontext():
             code = dispatch(arguments, artifact)
         if artifact is not None:
             result = (artifact.terminal if artifact.streams['result'].closed
-                      else artifact.finish(None, code))
+                      else artifact.finish_safely(None, code))
             print(json.dumps(result, sort_keys=True))
         return code
+    except Diagnostic as exc:
+        if artifact is not None:
+            try:
+                artifact.streams['stdout'].write(json.dumps(exc.envelope()))
+                result = artifact.finish(context.get('command'), 2)
+            except OSError as storage:
+                result = artifact.storage_failure(storage, original=exc, action=exc.action)
+            print(json.dumps(result, sort_keys=True))
+        else:
+            emit(exc)
+        return 2
     except InvocationError as exc:
         if artifact is not None:
-            print(json.dumps(artifact.finish(None, 2, error=str(exc)), sort_keys=True))
+            print(json.dumps(artifact.finish_safely(None, 2, error=str(exc)), sort_keys=True))
         else:
             print(f'dk.py: {exc}', file=sys.stderr)
         return 2
     except SystemExit as exc:
         if artifact is not None:
-            print(json.dumps(artifact.finish(None, exc.code or 0), sort_keys=True))
+            print(json.dumps(artifact.finish_safely(None, exc.code or 0), sort_keys=True))
             return exc.code or 0
         raise
     except OSError as exc:
+        code = artifact.exit_code if artifact and artifact.exit_code is not None else 2
         if artifact is None:
             print(f'dk.py: {exc}', file=sys.stderr)
         else:
-            print(json.dumps({**receipt('error', 'artifact_storage',
-                'Inspect retained files and reconcile any executed mutation before resuming.',
-                str(artifact.path), 2), 'message': str(exc)}))
-        return 2
+            print(json.dumps(artifact.storage_failure(exc, code)))
+        return code
     finally:
         if artifact is not None:
             artifact.close()

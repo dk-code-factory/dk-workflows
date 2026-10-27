@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 from shared import private_state
+from shared.diagnostics import command as recovery_command, human
 
 spec = importlib.util.spec_from_file_location('reply_batch', Path(__file__).with_name('reply_batch.py'))
 guard = importlib.util.module_from_spec(spec)
@@ -542,6 +543,14 @@ def main():
             return getattr(controller, args.command)()
 
         result = private_state.mutate(path, {}, run)
+        if result.get('action') in {'stop', 'reconcile'}:
+            diagnostic = result.setdefault('diagnostic', {})
+            diagnostic.update(code='reply_' + result['action'], message=result.get('reason', ''),
+                action=(human('The independent validator rejected publication; report the retained verdict.', path)
+                        if result['action'] == 'stop' else recovery_command([
+                            sys.executable, str(Path(__file__).resolve()), '--record', str(path),
+                            '--pr', args.pr, '--cwd', str(args.cwd.resolve()), '--agent', args.agent,
+                            'reconcile'], path)))
         print(json.dumps(result, ensure_ascii=False))
         return 1 if result['action'] in ('stop', 'reconcile') else 0
     except (OSError, ValueError, KeyError, TypeError, guard.inline.FetchError, guard.top.FetchError) as exc:

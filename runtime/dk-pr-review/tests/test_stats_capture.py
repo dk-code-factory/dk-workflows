@@ -65,7 +65,7 @@ def test_capture_before_aggregation_and_independent_review_session(pinned):
     with patch.object(runner, 'run_skill_reviewer', side_effect=fake) as calls:
         result = runner.review(context, names, '', decisions, '', prep, stats=stats)
     assert calls.call_count == 2
-    assert result == {'complete': True, 'findings': [{**finding(), 'reviewers': names}], 'skipped_reviewers': [], 'executed_reviewers': names, 'reused_reviewers': []}
+    assert result == {'complete': True, 'outcome': 'completed', 'findings': [{**finding(), 'reviewers': names}], 'skipped_reviewers': [], 'executed_reviewers': names, 'reused_reviewers': []}
     data = api.ledger('github.com/o/r')
     reviews = data['runs'][stats.run_id]['reviews']
     assert len({rev['findings'][0]['id'] for rev in reviews.values()}) == 2

@@ -38,7 +38,7 @@ def competing_writer(path, ready, proceed, queue):
         api.save_state(current, Path(path))
         queue.put({'error': 'stale writer committed'})
     except api.MetadataConflict as exc:
-        queue.put({'code': exc.code, 'proposal': exc.proposal_path})
+        queue.put({'code': exc.code, 'proposal': exc.proposal_path, 'action': exc.action})
 
 
 def test_stale_process_preserves_choices_intents_and_history(tmp_path):
@@ -62,6 +62,9 @@ def test_stale_process_preserves_choices_intents_and_history(tmp_path):
         process.join(10)
         assert process.exitcode == 0
         assert result['code'] == 'metadata_conflict'
+        assert result['action']['kind'] == 'command'
+        assert result['action']['argv'][-2:] == ['publish', '--reconcile']
+        assert result['proposal'] in result['action']['artifacts']
         assert path.read_bytes() == committed
         proposal = read(Path(result['proposal']), {})
         assert proposal['proposal']['decisions'][0]['text'] == 'Stale choice'
@@ -207,9 +210,12 @@ def test_full_workflow_operational_refresh_resume_and_completion(tmp_path, monke
     assert len(read(record_path, {})['cycles']) == 1
     # A completed immutable result and the earlier verification survive another counter refresh.
     history['operational']['cycles'] = 2
+    history['operational']['publication_receipts'] = [{'kind': 'ci-rerun', 'head_sha': package.head,
+        'outcome': 'verified', 'artifact': str(tmp_path / 'retained-operation.json')}]
     package.write('history.json', history)
     final = prep.prepare(package.manifest_path, package.versions, previous_preparation=fresh['artifact'])
     assert final['engineering_id'] == first['engineering_id']
+    assert final['refresh']['model_call_count'] == 0
     state_api.attach_preparation(record, final['artifact'], package.context['url'], package.head)
     write(record_path, record)
     assert state_api.verify_review(record_path, prep.read(final['artifact']))['preparation_id'] == fresh['preparation_id']
@@ -217,6 +223,10 @@ def test_full_workflow_operational_refresh_resume_and_completion(tmp_path, monke
         stage='review', preparation=final['artifact'], run_record=record_path,
         pr_url=package.context['url'], body='', verification=verification) == 'clean'
     assert len(record['cycles']) == 1
+    before_stage = copy.deepcopy(record)
+    assert state_api.next_stage(record, package.head, record_path)['stage'] == 'engineering_verification'
+    assert state_api.next_stage(record, package.head, record_path, verification=verification)['stage'] == 'cleanup'
+    assert record == before_stage
 
 
 def test_durable_captures_survive_export_and_checkout_removal_live_rules_still_block(tmp_path):

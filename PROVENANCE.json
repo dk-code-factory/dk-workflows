@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.5.0",
+      "description": "Tool-owned lifecycle entry, typed recovery actions, durable publication intents and receipts, guarded branch/review/CI publication, and shorter host procedures."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.3.0",
       "description": "Persistent Decisions storage, per-PR transactions, retained agreement evidence and independent-run recovery regressions."
     },
