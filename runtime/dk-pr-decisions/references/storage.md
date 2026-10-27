@@ -65,6 +65,12 @@ may seed it without altering the legacy file. Pending publication remains blocki
 default root, the former `dk-pr-read-comments` cache is still migrated on refresh.
 An explicit root never searches the default or former report store.
 
+Offline `list` reads the validated legacy snapshot directly when the v3 record is
+absent. It creates no directories, locks, v3 records or migration receipts and
+leaves legacy bytes and modification times unchanged, including pending publication
+evidence. A v3 record always takes precedence; an invalid selected record fails
+without fallback. Publication and refresh retain migration on their existing paths.
+
 Before workflows start, stop writers and seed an **empty** persistent root by
 copying the contents of the existing `dk-pr-decisions` root, retaining the
 host/owner/repository hierarchy and private permissions. Include all companion

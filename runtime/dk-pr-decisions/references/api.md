@@ -36,7 +36,7 @@ Existing Decisions entries are read as Markdown blocks, including multiline bull
 
 ## Refresh and publication
 
-`scan`, `context`, `suggest`, `add`, and `replace` refresh the PR and discussions and may run model analysis. They may write the private cache but do not edit GitHub. `list` is entirely offline. `publish` loads the cache and checks live GitHub state without rerunning analysis. `scan --publish` combines refresh and publication when both are requested.
+`scan`, `context`, `suggest`, `add`, and `replace` refresh the PR and discussions and may run model analysis. They may write the private cache but do not edit GitHub. `list` is entirely offline: it reads a validated legacy snapshot directly when no v3 record exists, without creating directories, locks, records or migration receipts. A v3 record takes precedence; corruption blocks the read without fallback. `publish` loads the cache and checks live GitHub state without rerunning analysis. `scan --publish` combines refresh and publication when both are requested.
 
 PR view and diff reads use the full PR URL, including verification and diff fallback checks, so the requested GitHub host governs routing even when the default `GH_HOST` differs. REST writes remain explicitly host-qualified.
 

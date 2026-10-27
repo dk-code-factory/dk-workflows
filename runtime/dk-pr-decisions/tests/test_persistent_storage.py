@@ -338,21 +338,59 @@ def test_temporary_imports_and_report_share_storage_without_publication(harness)
     assert json.loads(harness.live.read_text())['pr']['body'] == ''
 
 
-def test_offline_list_has_no_writes_or_lock_creation(harness):
+@pytest.mark.parametrize('legacy', [False, True])
+@pytest.mark.parametrize('receipt', ['absent', 'pending', 'corrupt'])
+def test_offline_list_has_no_writes_or_lock_creation(harness, legacy, receipt):
     harness.add('Saved')
-    harness.path().with_name(harness.path().name + '.lock').unlink()
     root = harness.root / 'persistent'
-    before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in root.rglob('*') if p.is_file()}
+    path = harness.path()
+    if receipt != 'absent':
+        state = json.loads(path.read_text())
+        state['publication_intent'] = {'id': 'uncertain', 'status': 'pending',
+                                      'snapshot': dict(state['pr']), 'body': 'Attempted body'}
+        state['publication_history'] = [state['publication_intent']]
+        if receipt == 'corrupt':
+            state['publication_intent'] = 'corrupt receipt'
+        path.write_text(json.dumps(state))
+    if legacy:
+        old = root / core.storage.identity(URL)
+        old.parent.mkdir(parents=True)
+        shutil.copy2(path, old)
+        shutil.rmtree(root / 'v3')
+    else:
+        path.with_name(path.name + '.lock').unlink()
+    def snapshot():
+        return {p: (p.read_bytes() if p.is_file() else None, p.stat().st_mtime_ns)
+                for p in [root, *root.rglob('*')]}
+    before = snapshot()
     bin_dir = harness.root / 'bin'
     bin_dir.mkdir()
     (bin_dir / 'git').symlink_to(shutil.which('git'))
     result = subprocess.run([sys.executable, str(SCRIPT), '--pr', URL, 'list'],
                             env=dict(harness.env, PATH=str(bin_dir)), cwd=harness.root,
                             text=True, capture_output=True)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == (1 if receipt == 'corrupt' else 0), result.stderr
     result = json.loads(result.stdout)
-    assert result['data']['cached'] is True
-    assert before == {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in root.rglob('*') if p.is_file()}
+    if receipt == 'corrupt':
+        assert 'restore a valid backup' in result['error']['message']
+    else:
+        assert result['data']['cached'] is True
+        assert [r['text'] for r in result['data']['decisions']] == ['Saved']
+    assert snapshot() == before
+
+
+def test_offline_list_prefers_v3_and_never_falls_back_from_corruption(harness):
+    harness.add('Current choice')
+    legacy = harness.root / 'persistent' / core.storage.identity(URL)
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text('{corrupt legacy record')
+    assert harness.invoke('list')['data']['decisions'][0]['text'] == 'Current choice'
+    shutil.copy2(harness.path(), legacy)
+    harness.path().write_text('{corrupt v3 record')
+    before = harness.path().read_bytes()
+    result = harness.invoke('list', code=1)
+    assert 'restore a valid backup' in result['error']['message']
+    assert harness.path().read_bytes() == before
 
 
 @pytest.mark.parametrize('value', ['', 'relative', 'file', 'blocked', 'repository', 'symlink'])

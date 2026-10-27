@@ -1132,13 +1132,15 @@ def validated_cache(path, pr_url):
     return state
 
 
-def load_cache(pr_url):
+def load_cache(pr_url, *, migrate=True):
     path = cache_path(pr_url)
     if not path.exists():
         legacy = storage.cache_path(pr_url, versioned=False)
         if not legacy.exists():
             raise ValueError('No cached decisions; run scan first')
         state = validated_cache(legacy, pr_url)
+        if not migrate:
+            return state, legacy
         state['revision'] = 0
         save_state(state, path)
     return validated_cache(path, pr_url), path
@@ -1334,7 +1336,8 @@ def _cli():
 
 
 def execute_command(args):
-    state, path = load_cache(args.pr) if args.command in ('list', 'publish') else scan(args.pr)
+    state, path = (load_cache(args.pr, migrate=args.command != 'list')
+                   if args.command in ('list', 'publish') else scan(args.pr))
     publication = None
     if args.command == 'context':
         local = []
