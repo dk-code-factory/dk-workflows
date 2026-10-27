@@ -2,8 +2,13 @@
 
 Within each cycle the shared runner executes independent configured reviewers
 concurrently with separate immutable handoffs and telemetry, then aggregates in
-configured order. It drains all launched workers before the cycle can return or
-propagate interruption. Review-and-fix cycles and their budgets remain sequential.
+configured order. Interruption aborts this invocation's in-flight provider
+transport and prevents later provider or correction launches, then waits for
+actual reviewer cleanup and checkpoint work before releasing session ownership.
+Completed checkpoints remain reusable; unfinished reviewers remain unknown and
+are rerun on exact-evidence resume rather than counted as provider failures.
+Genuine failures observed before interruption retain their classification.
+Review-and-fix cycles and their budgets remain sequential.
 
 After initial fixes, perform at most **five** sequential review-and-fix cycles. Give each cycle to a **new agent** working from a freshly pinned current PR head via [dk-pr-review](../../dk-pr-review/procedure.md); do not reuse a previous cycle's agent. Pass the saved thread snapshot and complete conversation artifact as scope evidence only when their head matches the current PR head; refresh them once when needed. Pass the current decision context, preparation artifact paths with both preparation_id and engineering_id, retained runtime and parent lifecycle context, and a concise summary, including unpublished discussion decisions and local choices. The review coordinator consumes the same boundaries and discovers per-reviewer addenda; it must not replace them with unconstrained review instructions. The review agent still pins its own current remote diff. Before delegation, allocate the cycle's session with `run_state.py review-session --head SHA` and give its returned `session_file` to dk-pr-review as `--session-file`. Each new cycle or authorized usage retry gets a fresh session. Only resume an interrupted session explicitly with `--resume`; never reuse completed sessions as a new cycle. The reviewer runner uses the same mandatory session and provenance contract as standalone review. Optional statistics may read iteration state to discover an omitted cycle. Save its JSON and register it with `run_state.py review-result --head SHA --file RESULT.json`. Iteration separately validates the active run/cycle/attempt, registered session result and finding assessments at completion. Use `review-finding:` plus `shared.review_coverage.digest(finding)` as each aggregated finding reference for ordinary validity and scope assessments; retain those assessments in the run record before completion. Verify findings and fix actionable in-scope work, then commit and push. Stop early on a complete review with no actionable in-scope fixes. Incomplete review is a blocker unless the human explicitly accepts its recorded provider failures as described below; never call it a clean review. Record cycle starts before delegation so a resumed run cannot exceed the cap.
 

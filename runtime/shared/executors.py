@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import selectors
 import shutil
 import subprocess
 import sys
@@ -69,26 +70,81 @@ def run_provider(argv, **kwargs):
     with scope.lock:
         scope.check()
         process = subprocess.Popen(argv, **kwargs)
-    deadline = time.monotonic() + timeout if timeout is not None else None
-    partial = None
+    buffers = {}
     error = None
+    def partial(stream):
+        data = buffers.get(stream)
+        return bytes(data) if data else None
+    def output(stream):
+        if stream is None:
+            return None
+        data = bytes(buffers[stream])
+        if getattr(stream, 'encoding', None):
+            return data.decode(stream.encoding, stream.errors).replace('\r\n', '\n').replace('\r', '\n')
+        return data
     try:
-        while True:
-            scope.check()
-            remaining = max(0, deadline - time.monotonic()) if deadline is not None else .1
-            try:
-                stdout, stderr = process.communicate(request, timeout=min(.1, remaining))
-                return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
-            except subprocess.TimeoutExpired as exc:
-                partial = exc
-                request = None
-                if deadline is not None and time.monotonic() >= deadline:
-                    raise subprocess.TimeoutExpired(argv, timeout, output=exc.output, stderr=exc.stderr) from None
+        deadline = time.monotonic() + timeout if timeout is not None else None
+        payload = request if request is not None else b''
+        if request is not None and getattr(process.stdin, 'encoding', None):
+            payload = request.encode(process.stdin.encoding, process.stdin.errors)
+        payload, offset = memoryview(payload), 0
+        with selectors.DefaultSelector() as selector:
+            def close(stream):
+                selector.unregister(stream)
+                try:
+                    stream.close()
+                except BrokenPipeError:
+                    pass
+            for stream in (process.stdout, process.stderr):
+                if stream:
+                    buffers[stream] = bytearray()
+                    os.set_blocking(stream.fileno(), False)
+                    selector.register(stream, selectors.EVENT_READ)
+            if process.stdin:
+                if payload:
+                    os.set_blocking(process.stdin.fileno(), False)
+                    selector.register(process.stdin, selectors.EVENT_WRITE)
+                else:
+                    process.stdin.close()
+            while selector.get_map() or process.poll() is None:
+                scope.check()
+                remaining = deadline - time.monotonic() if deadline is not None else .1
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(argv, timeout, output=partial(process.stdout),
+                                                    stderr=partial(process.stderr))
+                interval = min(.1, remaining)
+                if not selector.get_map():
+                    try:
+                        process.wait(timeout=interval)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    continue
+                for key, mask in selector.select(interval):
+                    stream = key.fileobj
+                    try:
+                        if mask & selectors.EVENT_WRITE:
+                            try:
+                                offset += os.write(stream.fileno(), payload[offset:offset + 32768])
+                            except BrokenPipeError:
+                                close(stream)
+                            else:
+                                if offset == len(payload):
+                                    close(stream)
+                        else:
+                            data = os.read(stream.fileno(), 32768)
+                            if data:
+                                buffers[stream].extend(data)
+                            else:
+                                close(stream)
+                    except BlockingIOError:
+                        pass
+        return subprocess.CompletedProcess(argv, process.returncode,
+                                           output(process.stdout), output(process.stderr))
     except BaseException as exc:
         error = exc
         if isinstance(exc, ProviderCancelled):
-            exc.stdout = partial.output if partial else None
-            exc.stderr = partial.stderr if partial else None
+            exc.stdout = partial(process.stdout)
+            exc.stderr = partial(process.stderr)
         raise
     finally:
         if process.poll() is None:

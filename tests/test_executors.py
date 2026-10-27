@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import os
 import threading
@@ -373,6 +374,77 @@ def test_cancelled_scope_prevents_another_provider_or_correction_start(tmp_path,
     executors.managed_update.assert_not_called()
 
 
+@pytest.mark.parametrize('prompt', ['', 'large UTF-8 prompt: \u2603\r\n' * 20000], ids=['empty', 'large-utf8'])
+def test_cancellable_transport_delivers_input_with_output_backpressure(tmp_path, prompt):
+    provider = tmp_path / 'slow_reader.py'
+    provider.write_text('import hashlib,json,sys,time\ntime.sleep(.3)\n'
+                        'sys.stderr.write("startup" * 50000)\nsys.stderr.flush()\n'
+                        'data=sys.stdin.buffer.read()\n'
+                        'print(json.dumps({"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()}))\n')
+    with executors.provider_cancellation():
+        result = executors.run_provider([sys.executable, str(provider)], input=prompt,
+                                        text=True, capture_output=True, timeout=5)
+    assert result.returncode == 0
+    assert json.loads(result.stdout) == {'bytes': len(prompt.encode()),
+                                        'sha256': hashlib.sha256(prompt.encode()).hexdigest()}
+    assert result.stderr == 'startup' * 50000
+
+
+def test_cancellable_transport_preserves_streamed_output_while_provider_keeps_working(tmp_path):
+    provider = tmp_path / 'output.py'
+    provider.write_text('import sys,time\nsys.stdout.buffer.write(b"x" * (4 * 1024 * 1024))\n'
+                        'sys.stdout.flush()\ntime.sleep(.35)\n'
+                        'sys.stdout.buffer.write(b"\\r\\nfinished\\r")\n'
+                        'sys.stderr.buffer.write("diagnostic: \\u2603\\r\\n".encode())\n')
+    with executors.provider_cancellation():
+        result = executors.run_provider([sys.executable, str(provider)], input='prompt',
+                                        text=True, capture_output=True, timeout=5)
+    assert result.returncode == 0
+    assert result.stdout == 'x' * (4 * 1024 * 1024) + '\nfinished\n'
+    assert result.stderr == 'diagnostic: \u2603\n'
+
+
+def test_cancellation_closes_owned_pipes_without_waiting_for_an_inherited_writer(tmp_path):
+    provider = tmp_path / 'provider.py'
+    ready, release, finished = [tmp_path / name for name in ('ready', 'release', 'finished')]
+    descendant = ('import sys,time\nfrom pathlib import Path\n'
+                  'release,finished=map(Path,sys.argv[1:])\n'
+                  'deadline=time.monotonic()+10\n'
+                  'while not release.exists() and time.monotonic()<deadline: time.sleep(.01)\n'
+                  'finished.write_text("finished")\n')
+    provider.write_text('import subprocess,sys,time\nfrom pathlib import Path\n'
+                        f'subprocess.Popen([sys.executable,"-c",{descendant!r},{str(release)!r},{str(finished)!r}])\n'
+                        f'Path({str(ready)!r}).write_text("ready")\ntime.sleep(30)\n')
+    outcome = []
+    def execute():
+        try:
+            executors.run_provider([sys.executable, str(provider)], input='prompt',
+                                   text=True, capture_output=True, timeout=30)
+        except executors.ProviderCancelled as exc:
+            outcome.append(exc)
+    with executors.provider_cancellation() as scope:
+        context = copy_context()
+        thread = threading.Thread(target=context.run, args=(execute,))
+        thread.start()
+        try:
+            deadline = time.monotonic() + 5
+            while not ready.exists():
+                assert time.monotonic() < deadline
+                time.sleep(.01)
+            scope.cancel()
+            thread.join(timeout=5)
+            assert not thread.is_alive() and len(outcome) == 1
+            assert not finished.exists()
+        finally:
+            release.write_text('release')
+            scope.cancel()
+            thread.join(timeout=5)
+            deadline = time.monotonic() + 5
+            while not finished.exists():
+                assert time.monotonic() < deadline
+                time.sleep(.01)
+
+
 def test_cancellation_is_local_to_the_owned_transport_scope(tmp_path):
     provider = tmp_path / 'provider.py'
     provider.write_text('''import sys, time
@@ -432,8 +504,7 @@ def test_native_cancellation_finishes_managed_lifecycle_before_worker_returns(tm
         try:
             executors.execute('Controlled offline native transport', tmp_path)
         except executors.ProviderCancelled as exc:
-            outcome.append(exc)
-            assert [call.args[2] for call in lifecycle.call_args_list] == ['entry', 'complete']
+            outcome.append((exc, [call.args[2] for call in lifecycle.call_args_list]))
     with executors.provider_cancellation() as scope:
         context = copy_context()
         thread = threading.Thread(target=context.run, args=(execute,))
@@ -446,6 +517,7 @@ def test_native_cancellation_finishes_managed_lifecycle_before_worker_returns(tm
             scope.cancel()
             thread.join(timeout=5)
             assert not thread.is_alive() and len(outcome) == 1
+            assert outcome[0][1] == ['entry', 'complete']
         finally:
             scope.cancel()
             thread.join(timeout=5)
