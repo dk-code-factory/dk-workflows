@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.5.0.
+Independent MIT plugin for Claude Code and Codex. Version 1.5.1.
 
 ## Install
 
@@ -170,6 +170,34 @@ or interpreter scripts. Ordinary external data and output arguments keep their
 original paths. Drafting corrections share one retained binding for the whole
 operation. Interpreter and host installations remain runtime prerequisites.
 Completed review reuse follows the same retained binding checks as execution.
+
+When Codex exits zero, response-file write diagnostics and missing or unreadable
+responses stop execution with `provider_output_failed`, before JSON correction.
+Nonzero exits retain their ordinary provider-error classification. Repair storage
+capacity, quota or permissions before retrying manually. A complete response on
+stdout does not recover a failed response file. Genuine JSON/schema failures
+still receive at most one correction.
+
+These zero-exit response-file failures retain `provider-output-failure.json` in a
+private workflow directory under
+`${XDG_STATE_HOME:-~/.local/state}/dk-code-factory/workflows/`,
+independently of optional review telemetry. It contains invocation metadata,
+return status, complete stdout/stderr, and available response bytes in
+`response_base64` (or `response_read_error` when unavailable). Directories use
+`0700` and evidence files use `0600`. If persistence also fails, the error reports
+both failures and the original provider temporary directory is retained. Inspect
+the reported evidence path; remove that failure's evidence directory manually
+when no longer needed. Retained diagnostics may contain private model output.
+
+Provider temporary files continue to honor `TMPDIR`. To move them off a full or
+quota-constrained temporary filesystem, set a writable private directory before
+launching the helper so nested providers inherit it:
+
+```sh
+mkdir -p "$HOME/.local/state/dk-code-factory/tmp"
+chmod 700 "$HOME/.local/state/dk-code-factory/tmp"
+export TMPDIR="$HOME/.local/state/dk-code-factory/tmp"
+```
 
 Add `--result-file /ABSOLUTE/PRIVATE/result.json` before the helper name for a
 typed terminal receipt. Its `outcome` distinguishes `success`, expected workflow

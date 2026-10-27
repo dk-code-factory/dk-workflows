@@ -1,13 +1,18 @@
 """Host execution shared by review, preparation, Decisions and drafting."""
+import base64
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 from shared.bindings import current_host, resolve
+from shared.diagnostics import Diagnostic, task
+from shared.private_state import write
 from shared.reviewer_telemetry import capture
+from shared.workflow_storage import allocate
 
 
 class ProviderExhausted(RuntimeError):
@@ -59,13 +64,24 @@ def check_prompt_size(prompt, limit):
                          'supply paths with bounded reading instructions before retrying.')
 
 
-def provider_failure(detail, prompt=None, fallback='Provider execution failed'):
+def redact_provider_input(detail, prompt, *, whole_lines=False):
     if prompt:
         # Text-mode subprocess capture normalizes CRLF and lone CR to LF.
         for text in dict.fromkeys((prompt, prompt.replace('\r\n', '\n').replace('\r', '\n'))):
             for echoed in (text, json.dumps(text, ensure_ascii=False)[1:-1],
                            json.dumps(text, ensure_ascii=True)[1:-1]):
-                detail = detail.replace(echoed, '[provider input omitted]')
+                if whole_lines:
+                    start = '' if echoed.startswith(('\r', '\n')) else '^'
+                    end = '' if echoed.endswith(('\r', '\n')) else r'(?=\r?$)'
+                    detail = re.sub(start + re.escape(echoed) + end,
+                                    '\n[provider input omitted]\n', detail, flags=re.M)
+                else:
+                    detail = detail.replace(echoed, '[provider input omitted]')
+    return detail
+
+
+def provider_failure(detail, prompt=None, fallback='Provider execution failed'):
+    detail = redact_provider_input(detail, prompt)
     authentication = re.search(r'authentication failed|not authenticated|unauthorized|invalid credentials|'
                                r'(?:invalid|expired|revoked) (?:oauth |access |auth(?:entication)? )?token', detail, re.I)
     exhausted = re.search(r'usage limit (?:reached|exceeded)|(?:hit|reached) your (?:session )?limit|'
@@ -184,11 +200,49 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None):
         return execute_process(managed_context + prompt, checkout, host, env, resolved, attempt, timeout)
     finally:
         if token:
-            managed_update(resolved, env, 'complete', token)
+            original = sys.exception()
+            try:
+                managed_update(resolved, env, 'complete', token)
+            except Exception as exc:
+                if not isinstance(original, Diagnostic) or original.code != 'provider_output_failed':
+                    raise
+                original.args = (str(original) + '; lifecycle completion also failed: ' + str(exc),)
+
+
+def codex_write_failed(stderr, output, prompt):
+    """Match the CLI diagnostic, not quoted examples or errors for other paths."""
+    paths = {str(output), json.dumps(str(output), ensure_ascii=False),
+             json.dumps(str(output), ensure_ascii=True)}
+    detail = redact_provider_input(stderr, prompt, whole_lines=True)
+    return any(line.startswith(f'Failed to write last message file {path}: ')
+               for line in detail.splitlines() for path in paths)
+
+
+def output_failure(output, proc, checkout, argv, attempt, timeout, reason):
+    """Retain transport evidence independently of optional reviewer telemetry."""
+    response, read_error, permission_error = None, None, None
+    try:
+        output.chmod(0o600)
+    except OSError as exc:
+        permission_error = str(exc)
+    try:
+        response = base64.b64encode(output.read_bytes()).decode('ascii')
+    except OSError as exc:
+        read_error = str(exc)
+    evidence = allocate(repository=checkout) / 'provider-output-failure.json'
+    write(evidence, {'provider': 'codex', 'argv': argv, 'checkout': str(checkout),
+                     'attempt': attempt, 'timeout_seconds': timeout, 'output_path': str(output),
+                     'reason': reason, 'returncode': proc.returncode,
+                     'stdout': proc.stdout, 'stderr': proc.stderr,
+                     'response_base64': response, 'response_read_error': read_error,
+                     'response_permission_error': permission_error})
+    return evidence
 
 
 def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
-    with tempfile.TemporaryDirectory(prefix='dk-provider-') as temp:
+    temp = tempfile.mkdtemp(prefix='dk-provider-')
+    retain_temp = False
+    try:
         output = Path(temp) / 'result.txt'
         if host == 'codex':
             argv = ['codex', 'exec', '--ephemeral', '--sandbox', 'read-only', '--skip-git-repo-check',
@@ -204,9 +258,26 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
         if proc.returncode:
             provider_failure('\n'.join(filter(None, (proc.stderr, proc.stdout))), prompt=prompt, fallback=f'{host} execution failed')
         if host == 'codex':
-            if not output.is_file():
-                raise RuntimeError('Codex did not produce a final response')
-            return output.read_text()
+            if codex_write_failed(proc.stderr, output, prompt):
+                reason = 'Codex failed to write the requested response file'
+            else:
+                try:
+                    return output.read_text()
+                except (OSError, UnicodeError) as exc:
+                    reason = 'Codex response file could not be read: ' + str(exc)
+            retain_temp = True
+            try:
+                evidence = output_failure(output, proc, checkout, argv, attempt, timeout, reason)
+            except Exception as exc:
+                evidence = Path(temp)
+                reason += '; diagnostic persistence also failed: ' + str(exc)
+            else:
+                retain_temp = False
+            raise Diagnostic('provider_output_failed', reason + f'. Retained evidence: {evidence}. '
+                             'Repair storage capacity, quota or permissions before retrying manually.',
+                             task('Inspect the retained evidence and repair storage capacity, quota or permissions. '
+                                  'Use a writable private TMPDIR if needed, then retry manually.', evidence),
+                             outcome='error')
         envelope = json.loads(proc.stdout)
         if envelope.get('is_error') or envelope.get('subtype') != 'success':
             provider_failure(envelope.get('result') or json.dumps(envelope), prompt=prompt, fallback='Claude execution failed')
@@ -214,6 +285,14 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
         if not isinstance(result, str) or not result.strip():
             raise RuntimeError('Claude did not produce a final response')
         return result
+    finally:
+        if not retain_temp:
+            original = sys.exception()
+            try:
+                shutil.rmtree(temp)
+            except OSError:
+                if original is None:
+                    raise
 
 
 def invoke(binding, handoff_path, checkout, prompt, *, attempt=0):
