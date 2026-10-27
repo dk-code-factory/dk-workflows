@@ -9,6 +9,7 @@ from test_stats_capture import pinned as original_pinned, finding, runner, respo
 from stats_capture import api
 from shared.review_sessions import Session, result_artifact
 from shared import review_coverage
+from preparation_fixtures import interrupt_after_checkpoint
 
 
 @pytest.fixture
@@ -60,7 +61,8 @@ def test_coordinator_failure_preserves_completed_checkpoint_for_following_resume
     context, decisions, prep, names, git = pinned
     session = Session(context, prep, names)
     with session.execution(), patch.object(runner, 'run_skill_reviewer',
-            side_effect=responses(names, [{'findings': [finding()]}, KeyboardInterrupt()])):
+            side_effect=interrupt_after_checkpoint(names[0], {'findings': [finding()]},
+                lambda: session.cached(names[0]) is not None)):
         with pytest.raises(KeyboardInterrupt):
             runner.review(context, names, '', decisions, '', prep, session=session)
     before = json.loads(session.path.read_text())

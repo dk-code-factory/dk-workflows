@@ -8,15 +8,16 @@ import hashlib
 import importlib.util
 import json
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
 import tempfile
 import time
-from contextlib import nullcontext
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager, nullcontext
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutureWaitTimeout
 from contextvars import copy_context
-from threading import Event, RLock
+from threading import Event, RLock, current_thread, main_thread
 from shared.private_state import write
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -99,6 +100,25 @@ def run(args, cwd=None):
     if proc.returncode:
         raise RuntimeError((proc.stderr or proc.stdout).strip() or f'{args[0]} failed')
     return proc.stdout
+
+
+@contextmanager
+def _defer_review_sigint():
+    """Keep default CLI interruption from escaping task-ownership cleanup."""
+    received = [False]
+    armed = (current_thread() is main_thread()
+             and signal.getsignal(signal.SIGINT) is signal.default_int_handler)
+    def observed(signum, frame):
+        received[0] = True
+    if armed:
+        previous = signal.signal(signal.SIGINT, observed)
+    try:
+        yield received
+    finally:
+        if armed:
+            signal.signal(signal.SIGINT, previous)
+            if received[0] and not isinstance(sys.exception(), KeyboardInterrupt):
+                raise KeyboardInterrupt()
 
 
 def validate_decisions(context, decisions):
@@ -374,7 +394,13 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                 try:
                     unchanged()
                 except Exception as guard_error:
-                    exc, guard_failure = guard_error, True
+                    if not shared_guard:
+                        original = f'{type(exc).__name__}: {exc}'
+                        print(f'Reviewer {name}: {original}; shared guard: {guard_error}', file=sys.stderr)
+                        exc = RuntimeError(f'{guard_error}; original reviewer error: {original}')
+                    else:
+                        exc = guard_error
+                    guard_failure = True
                     shared_guard = True
                 if worker_stats and guard_failure and not shared_guard:
                     worker_stats.safe(worker_stats.finish, 'failed', reason=str(exc),
@@ -397,40 +423,65 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
         # Every worker needs its own Context, carrying retained bindings and the
         # invocation's registry snapshot. Actual task acknowledgements protect
         # ownership even when SIGINT interrupts Python's thread-join bookkeeping.
-        pool = ThreadPoolExecutor(max_workers=len(jobs))
-        interruption = None
-        try:
-            futures = {pool.submit(copy_context().run, execute, name): name for name in jobs}
-            for future in as_completed(futures):
-                name = futures[future]
-                results[name] = future.result()
-                failure = results[name][1]
-                if failure and not failure['shared_guard']:
-                    # Only the coordinator finalizes failures it observes. Workers
-                    # draining after interruption retain unknown attempts and traces.
-                    if session:
-                        session.record(name, 'failed', reason=failure['reason'])
-                    worker_stats = jobs[name]['stats']
-                    if worker_stats and not failure['guard_failure']:
-                        worker_stats.safe(worker_stats.finish, 'failed', reason=failure['reason'],
-                                          duration_seconds=jobs[name]['duration_seconds'])
-        finally:
-            cancel = isinstance(sys.exception(), KeyboardInterrupt)
-            while True:
-                try:
-                    with launch_lock:
-                        launches_closed = True
-                    if cancel and cancellation:
+        with _defer_review_sigint() as interrupted:
+            pool = ThreadPoolExecutor(max_workers=len(jobs))
+            interruption = None
+            try:
+                futures = {}
+                for name in jobs:
+                    if interrupted[0]:
+                        raise KeyboardInterrupt()
+                    futures[pool.submit(copy_context().run, execute, name)] = name
+                pending = dict(futures)
+                while pending:
+                    if interrupted[0]:
+                        raise KeyboardInterrupt()
+                    ready = iter(as_completed(pending, timeout=.1))
+                    while pending:
+                        try:
+                            future = next(ready)
+                        except (StopIteration, FutureWaitTimeout):
+                            break
+                        name = pending.pop(future)
+                        results[name] = future.result()
+                        if interrupted[0]:
+                            raise KeyboardInterrupt()
+                        failure = results[name][1]
+                        if failure and not failure['shared_guard']:
+                            # The coordinator records observed session/provider failures.
+                            # Workers finalize known reviewer-specific storage statistics;
+                            # interrupted unfinished provider attempts remain unknown.
+                            if session:
+                                session.record(name, 'failed', reason=failure['reason'])
+                            worker_stats = jobs[name]['stats']
+                            if worker_stats and not failure['guard_failure']:
+                                worker_stats.safe(worker_stats.finish, 'failed', reason=failure['reason'],
+                                                  duration_seconds=jobs[name]['duration_seconds'])
+            finally:
+                cancel = interrupted[0] or isinstance(sys.exception(), KeyboardInterrupt)
+                cancel_sent = False
+                def request_cancel():
+                    nonlocal cancel_sent
+                    if cancellation and (cancel or interrupted[0]) and not cancel_sent:
                         cancellation.cancel()
-                    pool.shutdown(wait=False, cancel_futures=True)
-                    for job in jobs.values():
-                        if job.get('started'):
-                            job['finished'].wait()
-                    break
-                except KeyboardInterrupt as exc:
-                    interruption, cancel = exc, True
-            if interruption:
-                raise interruption
+                        cancel_sent = True
+                while True:
+                    try:
+                        with launch_lock:
+                            launches_closed = True
+                        request_cancel()
+                        pool.shutdown(wait=False, cancel_futures=True)
+                        for job in jobs.values():
+                            if job.get('started'):
+                                while not job['finished'].wait(.1):
+                                    request_cancel()
+                        break
+                    except KeyboardInterrupt as exc:
+                        interruption, cancel = exc, True
+                if interruption:
+                    raise interruption
+                if interrupted[0] and not isinstance(sys.exception(), KeyboardInterrupt):
+                    raise KeyboardInterrupt()
 
     guard_failures = []
     for name in reviewers:

@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from preparation_fixtures import Package, analysis, descriptor, prep, response, retain
+from preparation_fixtures import Package, analysis, descriptor, prep, response, retain, interrupt_after_checkpoint
 from test_preparation import module
 from shared import review_coverage, review_sessions
 from shared.command_results import classification
@@ -234,10 +234,8 @@ def test_full_workflow_operational_refresh_resume_and_completion(tmp_path, monke
     monkeypatch.setattr(runner, 'describe_reviewer', lambda name: prepared['reviewers'][name])
     monkeypatch.setattr(runner, 'skill_path', lambda name: package.repo / 'transform.py')
     session = review_sessions.Session(package.context, prepared, names, path=binding['session_file'])
-    def reviewer(name, *args):
-        if name == names[1]:
-            raise KeyboardInterrupt()
-        return {'findings': []}
+    reviewer = interrupt_after_checkpoint(names[0], {'findings': []},
+                                          lambda: session.cached(names[0]) is not None)
     with session.execution(), patch.object(runner, 'run_skill_reviewer', side_effect=reviewer):
         with pytest.raises(KeyboardInterrupt):
             runner.review(package.context, names, '', package.decisions, '', prepared, session=session)

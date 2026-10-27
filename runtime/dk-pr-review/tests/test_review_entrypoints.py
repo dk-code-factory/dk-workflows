@@ -13,6 +13,7 @@ from shared import review_coverage as coverage
 from shared import private_state
 from shared.private_state import read, write
 from shared.review_sessions import Session, result_artifact
+from preparation_fixtures import interrupt_after_checkpoint
 
 
 spec = importlib.util.spec_from_file_location('entrypoint_iteration_state',
@@ -116,8 +117,15 @@ def test_main_resumes_checkpoint_after_interrupt_before_aggregate_finish(
     else:
         session_path = tmp_path / 'session.json'
         options = ['--session-file', session_path]
-    with patch.object(runner, 'run_skill_reviewer',
-            side_effect=responses(names, [{'findings': [finding()]}, KeyboardInterrupt()])) as providers:
+    sessions = []
+    def create_session(*args, **kwargs):
+        session = Session(*args, **kwargs)
+        sessions.append(session)
+        return session
+    with patch.object(runner, 'Session', side_effect=create_session), \
+            patch.object(runner, 'run_skill_reviewer',
+            side_effect=interrupt_after_checkpoint(names[0], {'findings': [finding()]},
+                lambda: sessions[0].cached(names[0]) is not None)) as providers:
         with pytest.raises(KeyboardInterrupt):
             main_call(*options)
     assert sorted(call.args[0] for call in providers.call_args_list) == sorted(names)

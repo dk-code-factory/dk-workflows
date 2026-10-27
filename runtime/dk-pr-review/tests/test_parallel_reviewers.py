@@ -8,7 +8,7 @@ import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -163,8 +163,8 @@ def test_all_workers_drain_and_successful_checkpoints_survive(pinned, failure):
         if failure == 'storage' and name == names[0] and status == 'completed':
             raise OSError('mandatory checkpoint unavailable')
         return original_record(name, status, **kwargs)
-    def completions(futures):
-        for future in completed(futures):
+    def completions(futures, **kwargs):
+        for future in completed(futures, **kwargs):
             if failure != 'interrupt' and not release.is_set():
                 assert pending.is_set() and not finished.is_set()
                 release.set()
@@ -246,7 +246,7 @@ def test_coordinator_interruption_drains_workers_before_unlocking_session(pinned
         started.wait(timeout=5)
         assert release.wait(timeout=5)
         return {'findings': [finding()]}
-    def interrupted(futures):
+    def interrupted(futures, **kwargs):
         started.wait(timeout=5)
         assert all(not future.done() for future in futures)
         interrupting.set()
@@ -309,6 +309,7 @@ time.sleep(60)
     outcome = process_context.Queue()
     def review():
         os.setpgrp()
+        signal.signal(signal.SIGINT, signal.default_int_handler)
         try:
             with session.execution():
                 runner.review(context, providers, '', decisions, '', prep, stats=stats, session=session)
@@ -359,8 +360,8 @@ def test_failure_observed_before_a_later_interruption_remains_a_failure(pinned):
         pending.set()
         assert release.wait(timeout=5)
         return {'findings': [finding()]}
-    def interrupted(futures):
-        yield next(completed(futures))
+    def interrupted(futures, **kwargs):
+        yield next(completed(futures, **kwargs))
         assert json.loads(session.path.read_text())['reviews'][names[0]]['status'] == 'failed'
         raise KeyboardInterrupt()
     with session.execution(), patch.object(runner, 'ThreadPoolExecutor', Pool), \
@@ -374,14 +375,20 @@ def test_failure_observed_before_a_later_interruption_remains_a_failure(pinned):
     assert session.cached(names[1]) == {'findings': [finding()]}
 
 
-def test_interrupted_submit_keeps_ownership_of_a_task_without_a_returned_future(pinned):
+@pytest.mark.parametrize('interrupt', ['exception', 'signal'])
+def test_interrupted_submit_keeps_ownership_of_a_task_without_a_returned_future(pinned, interrupt):
     context, decisions, prep, names, git = pinned
     session = Session(context, prep, names)
     pending, release, finished = threading.Event(), threading.Event(), threading.Event()
+    deferred = threading.Event()
     class Pool(runner.ThreadPoolExecutor):
         def submit(self, *args, **kwargs):
-            super().submit(*args, **kwargs)
+            future = super().submit(*args, **kwargs)
             assert pending.wait(timeout=5)
+            if interrupt == 'signal':
+                os.kill(os.getpid(), signal.SIGINT)
+                deferred.set()
+                return future
             raise KeyboardInterrupt()
         def shutdown(self, **kwargs):
             assert not finished.is_set()
@@ -392,12 +399,125 @@ def test_interrupted_submit_keeps_ownership_of_a_task_without_a_returned_future(
         assert release.wait(timeout=5)
         finished.set()
         return {'findings': []}
-    with session.execution(), patch.object(runner, 'ThreadPoolExecutor', Pool), \
-            patch.object(runner, 'run_skill_reviewer', side_effect=provider) as calls:
-        with pytest.raises(KeyboardInterrupt):
-            runner.review(context, names, '', decisions, '', prep, session=session)
-        assert finished.is_set() and session.cached(names[0]) == {'findings': []}
+    previous = signal.getsignal(signal.SIGINT)
+    try:
+        if interrupt == 'signal':
+            signal.signal(signal.SIGINT, signal.default_int_handler)
+        with session.execution(), patch.object(runner, 'ThreadPoolExecutor', Pool), \
+                patch.object(runner, 'run_skill_reviewer', side_effect=provider) as calls:
+            with pytest.raises(KeyboardInterrupt):
+                runner.review(context, names, '', decisions, '', prep, session=session)
+            assert finished.is_set() and session.cached(names[0]) == {'findings': []}
+        if interrupt == 'signal':
+            assert deferred.is_set() and signal.getsignal(signal.SIGINT) is signal.default_int_handler
+    finally:
+        signal.signal(signal.SIGINT, previous)
     assert [call.args[0] for call in calls.call_args_list] == names[:1]
+
+
+@pytest.mark.parametrize('policy', [signal.SIG_IGN, signal.SIG_DFL, lambda *args: None],
+                         ids=['ignored', 'os-default', 'custom'])
+def test_review_does_not_override_other_signal_policies(monkeypatch, policy):
+    install = Mock()
+    monkeypatch.setattr(signal, 'getsignal', lambda signum: policy)
+    monkeypatch.setattr(signal, 'signal', install)
+    with runner._defer_review_sigint() as interrupted:
+        assert interrupted == [False]
+    install.assert_not_called()
+
+
+def test_non_main_review_does_not_install_a_signal_handler(monkeypatch):
+    install = Mock()
+    monkeypatch.setattr(signal, 'signal', install)
+    observed = []
+    def review():
+        with runner._defer_review_sigint() as interrupted:
+            observed.append(interrupted[:])
+    thread = threading.Thread(target=review)
+    thread.start()
+    thread.join(timeout=5)
+    assert observed == [[False]] and not thread.is_alive()
+    install.assert_not_called()
+
+
+@pytest.mark.parametrize('outcome', ['failed', 'exhausted', 'mixed-guard'])
+def test_reverse_completion_preserves_failure_skip_order_and_guard_precedence(pinned, outcome):
+    context, decisions, prep, names, git = pinned
+    session = Session(context, prep, names)
+    started, release = threading.Barrier(2), threading.Event()
+    completed, order = runner.as_completed, []
+    record = session.record
+    def provider(name, *args):
+        started.wait(timeout=5)
+        if name == names[0]:
+            assert release.wait(timeout=5)
+        if outcome == 'exhausted':
+            return {'status': 'tokens_exhausted', 'findings': [], 'message': 'limit ' + name}
+        if outcome == 'mixed-guard' and name == names[1]:
+            return {'findings': []}
+        raise RuntimeError('provider ' + name)
+    def store(name, status, **kwargs):
+        if outcome == 'mixed-guard' and name == names[1] and status == 'completed':
+            raise OSError('checkpoint ' + name)
+        return record(name, status, **kwargs)
+    def reverse(futures, **kwargs):
+        for future in completed(futures, **kwargs):
+            name = futures[future]
+            order.append(name)
+            if not release.is_set():
+                assert name == names[1]
+                release.set()
+            yield future
+    with session.execution(), patch.object(session, 'record', side_effect=store), \
+            patch.object(runner, 'as_completed', side_effect=reverse), \
+            patch.object(runner, 'run_skill_reviewer', side_effect=provider):
+        result = runner.review(context, names, '', decisions, '', prep, session=session)
+    assert order == names[::-1]
+    if outcome == 'exhausted':
+        assert [entry['reviewer'] for entry in result['skipped_reviewers']] == names
+        assert [entry['reason'] for entry in result['skipped_reviewers']] == ['limit ' + name for name in names]
+    elif outcome == 'mixed-guard':
+        assert result['guard_failure'] and result['failed_reviewer'] == names[1]
+        assert result['reason'] == 'checkpoint ' + names[1]
+        assert [entry['reviewer'] for entry in result['failed_reviewers']] == names[:1]
+    else:
+        assert result['failed_reviewer'] == names[0] and result['reason'] == 'provider ' + names[0]
+        assert [entry['reviewer'] for entry in result['failed_reviewers']] == names
+
+
+@pytest.mark.parametrize('source', ['provider', 'storage'])
+def test_shared_guard_retains_original_provider_or_storage_diagnostic(pinned, capsys, source):
+    context, decisions, prep, names, git = pinned
+    session = Session(context, prep, names)
+    started = threading.Barrier(2)
+    changed, storing = threading.Event(), threading.Event()
+    record = session.record
+    original = 'original ' + source + ' diagnostic'
+    def provider(name, *args):
+        started.wait(timeout=5)
+        if name == names[1]:
+            if source == 'storage':
+                assert storing.wait(timeout=5)
+            (Path(context['checkout']) / 'provider-cache').write_text('changed')
+            changed.set()
+            return {'findings': []}
+        if source == 'provider':
+            assert changed.wait(timeout=5)
+            raise RuntimeError(original)
+        return {'findings': []}
+    def store(name, status, **kwargs):
+        if source == 'storage' and name == names[0] and status == 'completed':
+            storing.set()
+            assert changed.wait(timeout=5)
+            raise OSError(original)
+        return record(name, status, **kwargs)
+    with session.execution(), patch.object(session, 'record', side_effect=store), \
+            patch.object(runner, 'run_skill_reviewer', side_effect=provider):
+        result = runner.review(context, names, '', decisions, '', prep, session=session)
+    assert result['guard_failure'] and 'failed_reviewer' not in result
+    assert original in result['reason'] and original in capsys.readouterr().err
+    assert 'failed_reviewers' not in result and result['findings'] == []
+    assert all(session.cached(name) is None for name in names)
 
 
 @pytest.mark.parametrize('terminal', ['completed', 'incomplete', 'exhausted', 'storage'])
@@ -440,10 +560,13 @@ def test_interrupts_during_storage_error_drain_never_release_session_early(pinne
     session = Session(context, prep, names)
     process_context = multiprocessing.get_context('fork')
     pending, release, finished = [process_context.Event() for _ in range(3)]
+    cancelled_event = process_context.Event()
+    signals_seen = process_context.Value('i', 0, lock=False)
     observations = process_context.Queue()
-    record, cancel = session.record, executors.ProviderCancellation.cancel
+    record, cancel, install_signal = session.record, executors.ProviderCancellation.cancel, signal.signal
     def review():
         os.setpgrp()
+        signal.signal(signal.SIGINT, signal.default_int_handler)
         class Pool(runner.ThreadPoolExecutor):
             def shutdown(self, **kwargs):
                 observations.put('draining')
@@ -462,11 +585,19 @@ def test_interrupts_during_storage_error_drain_never_release_session_early(pinne
             return record(name, status, **kwargs)
         def cancelled(scope):
             cancel(scope)
-            observations.put('cancelled')
+            cancelled_event.set()
+        def installed(signum, handler):
+            if signum == signal.SIGINT and callable(handler) and handler is not signal.default_int_handler:
+                def observed(*args):
+                    signals_seen.value += 1
+                    return handler(*args)
+                return install_signal(signum, observed)
+            return install_signal(signum, handler)
         try:
             with session.execution(), patch.object(runner, 'ThreadPoolExecutor', Pool), \
                     patch.object(session, 'record', side_effect=store), \
                     patch.object(executors.ProviderCancellation, 'cancel', cancelled), \
+                    patch.object(signal, 'signal', side_effect=installed), \
                     patch.object(runner, 'run_skill_reviewer', side_effect=provider):
                 runner.review(context, names, '', decisions, '', prep, session=session)
         except BaseException as exc:
@@ -475,14 +606,16 @@ def test_interrupts_during_storage_error_drain_never_release_session_early(pinne
     process.start()
     try:
         assert observations.get(timeout=5) == 'draining'
-        for _ in range(2):
+        for expected in (1, 2):
             os.kill(process.pid, signal.SIGINT)
-            assert observations.get(timeout=5) == 'cancelled'
+            deadline = time.monotonic() + 5
+            while signals_seen.value < expected:
+                assert time.monotonic() < deadline
+                time.sleep(.005)
+            assert cancelled_event.wait(timeout=5)
             with pytest.raises(ValueError, match='already executing'), session.execution():
                 pass
             assert not finished.is_set()
-            # A repeated drain attempt may report its shutdown before waiting.
-            assert observations.get(timeout=5) == 'draining'
         release.set()
         assert observations.get(timeout=5) == ('KeyboardInterrupt', True)
         process.join(timeout=5)

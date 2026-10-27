@@ -499,6 +499,11 @@ def test_native_cancellation_finishes_managed_lifecycle_before_worker_returns(tm
     monkeypatch.setenv('DK_HOST', 'codex')
     lifecycle = Mock(return_value={'token': 'owned-invocation'})
     monkeypatch.setattr(executors, 'managed_update', lifecycle)
+    transport = executors.run_provider
+    def controlled_transport(argv, **kwargs):
+        assert argv[:2] == ['codex', 'exec']
+        return transport([sys.executable, str(provider)], **kwargs)
+    monkeypatch.setattr(executors, 'run_provider', controlled_transport)
     outcome = []
     def execute():
         try:
@@ -521,6 +526,22 @@ def test_native_cancellation_finishes_managed_lifecycle_before_worker_returns(tm
         finally:
             scope.cancel()
             thread.join(timeout=5)
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+def test_model_guard_blocks_unmocked_native_launch_in_cancellation_scope(tmp_path, monkeypatch, host):
+    marker = tmp_path / 'launched'
+    executable = tmp_path / host
+    executable.write_text(f'#!{sys.executable}\nfrom pathlib import Path\nimport sys,json\n'
+                          f'Path({str(marker)!r}).write_text("launched")\n'
+                          'if "-o" in sys.argv: Path(sys.argv[sys.argv.index("-o")+1]).write_text("fixture")\n'
+                          'print(json.dumps({"subtype":"success","result":"fixture"}))\n')
+    executable.chmod(0o755)
+    monkeypatch.setenv('PATH', str(tmp_path) + os.pathsep + os.environ['PATH'])
+    monkeypatch.setenv('DK_HOST', host)
+    with executors.provider_cancellation(), pytest.raises(AssertionError, match='unmocked model execution'):
+        executors.execute('Controlled guard regression', tmp_path)
+    assert not marker.exists()
 
 
 
