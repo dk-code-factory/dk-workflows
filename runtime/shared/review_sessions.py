@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from shared.private_state import root, read, mutate
 from shared import review_coverage as coverage
+from shared.engineering_identity import engineering_id
 
 
 def directory(pr_url):
@@ -23,8 +24,9 @@ def outside(path, context):
 
 
 def identity(context, prepared, reviewers, scope='', rules=''):
+    field = 'engineering_id' if prepared.get('preparation_version', 1) >= 3 else 'preparation_id'
     return {'pr_url': context['url'], 'head': context['head_sha'],
-        'base': prepared['identity']['base_sha'], 'preparation_id': prepared['preparation_id'],
+        'base': prepared['identity']['base_sha'], field: engineering_id(prepared),
         'tree': coverage.git(context['checkout'], 'rev-parse', f"{context['head_sha']}^{{tree}}"),
         'scope': coverage.scope(prepared), 'scope_text': coverage.digest(scope),
         'rules_text': coverage.digest(rules), 'reviewers': list(reviewers)}
@@ -32,22 +34,36 @@ def identity(context, prepared, reviewers, scope='', rules=''):
 
 class Session:
     def __init__(self, context, prepared, reviewers, *, path=None, resume=False, scope='', rules=''):
+        version = 2 if prepared.get('preparation_version', 1) >= 3 else 1
+        if version == 2:
+            if (any(context[k] != prepared['identity'][field] for k, field in (
+                    ('url', 'pr_url'), ('head_sha', 'head_sha'), ('base_sha', 'base_sha')))
+                    or list(reviewers) != prepared['reviewer_order']):
+                raise ValueError('review session has changed evidence; refresh preparation')
+            context = coverage.validate_current(prepared)
         self.context, self.prepared = context, prepared
         if resume and path is None:
             raise ValueError('resuming requires --session-file')
-        self.path = outside(path or directory(context['url']) / (uuid.uuid4().hex + '.json'), context)
+        base = Path(prepared['workflow_dir']) / 'review-sessions' if version == 2 else directory(context['url'])
+        self.path = outside(path or base / (uuid.uuid4().hex + '.json'), context)
         self.execution_lock = self.path.with_name(self.path.name + '.execution.lock')
         self.validate_storage()
         self.identity = identity(context, prepared, reviewers, scope, rules)
-        default = {'session_version': 1, 'id': uuid.uuid4().hex, 'identity': self.identity,
+        default = {'session_version': version, 'id': uuid.uuid4().hex, 'identity': self.identity,
                    'status': 'active', 'reviews': {}, 'results': []}
         def initialize(old):
             if resume:
-                if (old.get('session_version') != 1 or old.get('identity') != self.identity
+                if old.get('session_version') != version:
+                    raise ValueError('legacy session contract; resume through its retained runtime')
+                if (old.get('identity') != self.identity
                         or old.get('status') not in {'active', 'incomplete'}):
                     raise ValueError('review session is missing, finished or has changed evidence; start fresh')
             elif old != default:
                 raise ValueError('session file already exists; explicitly resume interrupted work')
+            if version == 2:
+                reference = {'preparation_id': prepared['preparation_id'], 'engineering_id': engineering_id(prepared)}
+                if reference not in old.setdefault('preparations', []):
+                    old['preparations'].append(reference)
             return old['id']
         self.id = mutate(self.path, {} if resume else default, initialize)
 
@@ -146,11 +162,11 @@ class Session:
 
 def result_artifact(session_path, item):
     session = read(Path(session_path), {})
-    if (session.get('session_version') != 1 or not session.get('results')
+    if (session.get('session_version') not in {1, 2} or not session.get('results')
             or session['results'][-1] != item):
         raise ValueError('result is not the latest registered result of this review session')
     artifact = coverage.load(item)
-    if (artifact.get('version') != 2
+    if (artifact.get('version') != session['session_version'] + 1
             or artifact['session_id'] != session.get('id')
             or artifact['session_identity'] != session.get('identity')
             or session.get('status') != ('completed' if artifact['result']['complete'] else 'incomplete')):

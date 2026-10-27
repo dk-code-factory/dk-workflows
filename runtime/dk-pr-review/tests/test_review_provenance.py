@@ -153,6 +153,9 @@ def test_legacy_main_validates_effective_selection_before_completed_reuse(
     preparation_path = root / 'preparation.json'
     write(preparation_path, prepared)
     record = {}
+    from preparation_fixtures import promote
+    promote(prepared, context, decisions)
+    write(preparation_path, prepared)
     state.start_run(record)
     state.attach_preparation(record, preparation_path, context['url'], context['head_sha'])
     state.next_cycle(record, context['head_sha'])

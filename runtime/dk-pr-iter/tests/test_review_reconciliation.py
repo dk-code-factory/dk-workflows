@@ -201,7 +201,7 @@ class Scenario:
     def verification(self, prepared=None):
         prepared = prepared or self.current
         return self.package.write('verification.json', {
-            'verification_version': 1, 'preparation_id': prepared['preparation_id'],
+            'verification_version': 2, 'engineering_id': prepared['engineering_id'], 'preparation_id': prepared['preparation_id'],
             'head_sha': prepared['identity']['head_sha'], 'pr_url': prepared['identity']['pr_url'],
             'checks': {name: {'satisfied': True, 'rationale': 'Current transform and tests inspected',
                              'evidence': [prepared['sources']['production/0']]}
@@ -409,7 +409,7 @@ def test_tampered_or_stale_evidence_never_supplies_coverage(scenario, kind):
     elif kind.startswith('assessment'):
         target = s.assessment_path
     elif kind == 'current_source':
-        target = Path(s.current['sources']['feedback/0']['path'])
+        target = Path(s.current['sources']['feedback/0']['snapshot'])
     else:
         record = read(s.path, {})
         if kind == 'run': record['iteration_run']['id'] = 'changed'
@@ -433,8 +433,12 @@ def test_movement_during_comparison_registers_nothing(scenario, kind):
     s = scenario
     s.refresh()
     def move():
-        if kind == 'head': s.git('commit', '--allow-empty', '-qm', 'Concurrent movement')
-        if kind == 'source': s.package.write('feedback.json', {'new': 'obligation'})
+        if kind == 'head':
+            coverage.git(s.current['workspace'], '-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '--allow-empty', '-qm', 'Concurrent movement')
+        if kind == 'source':
+            target = Path(s.current['sources']['feedback/0']['snapshot'])
+            target.chmod(0o600)
+            target.write_text('{}')
         if kind == 'assessment': s.assessment_path.write_text('{}')
         if kind == 'run':
             state.mutate(s.path, {}, lambda record: record['iteration_run'].update(id='changed'))
@@ -582,7 +586,7 @@ def test_equal_scope_refresh_requires_source_comparison(scenario, source, equiva
         s.package.write('history.json', {'obligation': 'Inspect the newly reported failure'})
         s.package.manifest['evidence'][source] = ['history.json']
     s.refresh(published=False, change=lambda value: value.update(sync_reason=''))
-    assert coverage.scope(s.original) == coverage.scope(s.current)
+    assert coverage.scope(s.original) != coverage.scope(s.current)
     with pytest.raises(ValueError, match='scope lacks review coverage'):
         state.verify_review(s.path, s.current)
     if not equivalent:
@@ -603,7 +607,7 @@ def test_equal_scope_reordered_reviewers_cannot_retain_coverage(tmp_path, monkey
     s = Scenario(tmp_path, monkeypatch, reviewers=('second', 'example'))
     s.package.manifest['evidence']['reviewers'].reverse()
     s.refresh(published=False, change=lambda value: value.update(sync_reason=''))
-    assert coverage.scope(s.original) == coverage.scope(s.current)
+    assert coverage.scope(s.original) != coverage.scope(s.current)
     assert s.run()['status'] == 'blocked'
     with pytest.raises(ValueError):
         state.verify_review(s.path, s.current)
@@ -646,6 +650,15 @@ def test_exact_reviewed_preparation_honors_its_own_blocked_comparison(scenario):
     assert s.run()['status'] == 'blocked'
     with pytest.raises(ValueError, match='not semantically equivalent'):
         state.verify_review(s.path, s.original)
+    refreshed = prep.prepare(s.original['recovery_manifest']['path'], s.package.versions,
+                             previous_preparation=s.original_path)
+    current = prep.read(refreshed['artifact'])
+    assert current['preparation_id'] != s.original['preparation_id']
+    assert current['engineering_id'] == s.original['engineering_id']
+    state.mutate(s.path, {}, lambda record: state.attach_preparation(
+        record, refreshed['artifact'], s.package.context['url'], s.reviewed_head))
+    with pytest.raises(ValueError, match='not semantically equivalent'):
+        state.verify_review(s.path, current)
 
 
 @pytest.mark.parametrize('refreshed', [True, False])
@@ -1022,10 +1035,10 @@ def test_legacy_precheck_keeps_original_guards(scenario, monkeypatch, kind):
                 artifact['result']['findings'] = [{'path': 'transform.py', 'line': 1,
                                                   'message': 'Unassessed defect', 'reviewers': s.reviewers}]
         retain_legacy_review(s, change)
-    if kind in {'scope', 'discussion', 'tree'}:
+    if kind in {'scope', 'discussion', 'tree', 'reviewer', 'finding'}:
         result = run()
         assert result['status'] == 'blocked'
-        assert ('unchanged review scope' if kind != 'tree' else 'original reviewed tree') in result['reason']
+        assert 'unchanged review scope' in result['reason']
     else:
         reason = {'source': 'source changed', 'run': 'iteration run/cycle', 'cycle': 'iteration run/cycle',
                   'reviewer': 'execution is incomplete', 'finding': 'lacks validity and scope assessment',
@@ -1053,7 +1066,7 @@ def test_precheck_uses_fresh_checkout_after_historical_checkout_removal(tmp_path
     run, candidate, path, _ = setup_precheck(s, monkeypatch)
     shutil.rmtree(s.package.historical_checkout)
     if missing_object:
-        checkout = Path(s.package.context['checkout'])
+        checkout = Path(prep.context_for(s.current)['checkout'])
         (checkout / '.git/objects' / s.reviewed_head[:2] / s.reviewed_head[2:]).unlink()
         with pytest.raises(subprocess.CalledProcessError):
             run()
@@ -1188,7 +1201,10 @@ def test_stale_precheck_never_authorizes_publication(scenario, monkeypatch, kind
         write(path, guard)
     if kind == 'candidate':
         s.git('commit', '--allow-empty', '-qm', 'Concurrent change')
-    if kind == 'source': s.package.write('feedback.json', {'changed': True})
+    if kind == 'source':
+        target = Path(s.current['sources']['feedback/0']['snapshot'])
+        target.chmod(0o600)
+        target.write_text('{}')
     if kind == 'run': state.mutate(s.path, {}, lambda r: r['iteration_run'].update(id='other'))
     if kind == 'attempt': state.mutate(s.path, {}, lambda r: r['cycle_retries'].append({'number': 5}))
     if kind == 'receipt': Path(receipt['path']).write_text('{}')
@@ -1317,15 +1333,17 @@ def test_reply_precheck_guarded_cleanup_and_final_completion(scenario, monkeypat
     if legacy:
         retain_legacy_review(s)
     run, candidate, path, data = setup_precheck(s, monkeypatch, no_op=no_op, discussion=not legacy)
-    receipt = run()['precheck']
     if legacy:
-        assert state.verify_review(s.path, s.current)['version'] == 1
-        saved = read(Path(receipt['path']), {})
-        assert saved['reconciliation_version'] == 1
-        assert not {'session_file', 'attempt'} & saved['binding'].keys()
-        with pytest.raises(ValueError, match='cannot supply final review coverage'):
-            coverage.verify(s.reference, s.current, reconciliation={
-                'artifact': receipt, 'binding': saved['binding']})
+        # A synthetic v1 result cannot cover refreshed v3 engineering inputs.
+        blocked = run()
+        assert blocked['status'] == 'blocked' and 'unchanged review scope' in blocked['reason']
+        assert len(read(s.path, {})['cycles']) == 5
+        return
+    receipt = run()['precheck']
+    saved = read(Path(receipt['path']), {})
+    with pytest.raises(ValueError, match='cannot supply final review coverage'):
+        coverage.verify(s.reference, s.current, reconciliation={
+            'artifact': receipt, 'binding': saved['binding']})
     assert completion.completion_gate(s.reviewed_head, s.reviewed_head, s.reviewed_head, True, False, 'success',
         stage='review', preparation=s.current_path, pr_url=s.package.context['url'], body='', run_record=s.path,
         verification=s.verification(), cleanup_precheck=receipt['path']) == 'clean'
@@ -1367,24 +1385,15 @@ def test_reply_precheck_guarded_cleanup_and_final_completion(scenario, monkeypat
     coverage.git(isolated, 'checkout', '-q', '--detach', candidate)
     # Final preparation must consume the same verified discussion, now at the
     # published candidate head. It receives a new comparison and verification.
-    if legacy:
-        s.refresh(published=False, change=lambda result: result.update(sync_reason=''))
-    else:
-        restatement_refresh(s, published=False)
+    restatement_refresh(s, published=False)
     s.assessment_path = final_assessment
     s.assessment = reconcile.series.load(final_assessment, s.package.repo)
-    if legacy:
-        with pytest.raises(ValueError, match='requires version-2'):
-            s.run()
-    else:
-        assert s.run()['status'] == 'reconciled'
+    assert s.run()['status'] == 'reconciled'
     assert completion.completion_gate(s.reviewed_head, candidate, candidate, True, False,
         {'head': candidate, 'result': 'success'}, preparation=s.current_path, pr_url=s.package.context['url'], body='', run_record=s.path,
         verification=s.verification(), assessment=s.assessment,
         series_snapshot=reconcile.series.live_snapshot(s.package.context['url'], isolated)) == 'clean'
-    assert s.calls == ([0] if legacy else [0, 0]) and len(read(s.path, {})['cycles']) == 5
-    if legacy:
-        assert read(s.path, {})['review_sessions'] == []
+    assert s.calls == [0, 0] and len(read(s.path, {})['cycles']) == 5
     assert Path(s.reference['path']).read_bytes() == s.original_bytes
     assert not path.exists() and s.git('rev-parse', data['recovery_ref']) == s.reviewed_head
     assert all(path.read_bytes() == before for path, before in s.retained_bytes.items())

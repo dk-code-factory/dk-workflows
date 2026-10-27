@@ -23,6 +23,9 @@ CLASSIFICATIONS = {"valid", "already_fixed", "unsupported", "pre_existing"}
 from shared.private_state import root, read, write, mutate
 from shared.flaky_tests import Registry, record_flaky
 from shared import review_coverage, review_sessions, review_reconciliation
+from shared.engineering_identity import engineering_id, compatible_reference
+from shared import bindings
+from shared.workflow_storage import allocate
 
 _spec = importlib.util.spec_from_file_location('iteration_preparation',
     next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir()) / 'dk-pr-decisions/scripts/preparation.py')
@@ -36,6 +39,8 @@ def start_run(record, *, resume=False):
     if resume:
         if not active or active['status'] != 'active':
             raise ValueError('no active iteration run to resume')
+        if active.get('contract_version') != 2:
+            raise ValueError('legacy active run; resume through its retained runtime')
         return active
     if active and active['status'] == 'active':
         raise ValueError('iteration run is active; resume or finish it before starting another')
@@ -47,7 +52,8 @@ def start_run(record, *, resume=False):
     for field in ('cycles', 'cycle_retries', 'repairs', 'review_results', 'review_sessions', 'review_reconciliations', 'cleanup_prechecks'):
         record[field] = []
     record.pop('preparation', None)
-    record['iteration_run'] = {'id': uuid.uuid4().hex, 'status': 'active'}
+    record['iteration_run'] = {'id': uuid.uuid4().hex, 'status': 'active',
+                               'contract_version': 2, 'workflow_dir': str(allocate())}
     return record['iteration_run']
 
 
@@ -69,7 +75,12 @@ def finish_run(record, status, reason):
 
 
 def attach_preparation(record, path, pr_url, head, *, expected_parent=None):
+    run = record.get('iteration_run', {})
+    if run and run.get('contract_version') != 2:
+        raise ValueError('legacy active run; use its retained runtime')
     artifact = preparation_api.gate(path, pr_url=pr_url, head_sha=head, require_ready=False)
+    if run.get('contract_version') == 2 and artifact.get('preparation_version') != 3:
+        raise ValueError('fresh runs require preparation v3; legacy runs use their retained runtime')
     parent = artifact.get('parent')
     expected = parent['preparation_id'] if parent else None
     active = record.get('preparation', {}).get('id')
@@ -84,11 +95,12 @@ def attach_preparation(record, path, pr_url, head, *, expected_parent=None):
         raise ValueError('active preparation changed; refresh from the current preparation')
     if artifact['mode'] != 'iteration':
         raise ValueError('iteration requires iteration preparation')
-    raw = preparation_api.read(artifact['sources']['decisions']['path'])
+    raw = preparation_api.read(preparation_api.source_path(artifact, 'decisions'))
     decisions = raw.get('data', raw)
     if any(choice not in decisions['local_decisions'] for choice in record.get('local_decisions', [])):
         raise ValueError('preparation omits run-record local choices')
     item = {'path': str(Path(path).resolve()), 'id': artifact['preparation_id'],
+            'engineering_id': engineering_id(artifact),
             'head': head, 'pr_url': pr_url,
             'local_decisions_hash': preparation_api.digest(record.get('local_decisions', []))}
     if run.get('id'):
@@ -101,6 +113,9 @@ def attach_preparation(record, path, pr_url, head, *, expected_parent=None):
 
 
 def work_gate(record, head, *, require_ready=True):
+    active = record.get('iteration_run', {})
+    if active and active.get('contract_version') != 2:
+        raise ValueError('legacy active run; use its retained runtime')
     if record.get('iteration_run') and record['iteration_run']['status'] != 'active':
         raise ValueError('iteration run is finished; start a new run')
     item = record.get('preparation')
@@ -124,22 +139,23 @@ def assess(record, ref, head, preparation_id, disposition, evidence, reason):
     if disposition not in {'within_scope', 'outside_scope', 'decision_blocked'} or not all((ref, evidence, reason)):
         raise ValueError('scope assessment requires disposition, evidence and rationale')
     item = {'reference': ref, 'head': head, 'preparation_id': preparation_id,
+            'engineering_id': engineering_id(artifact),
             'disposition': disposition, 'evidence': evidence, 'reason': reason}
     entries = record.setdefault('assessments', [])
-    old = next((entry for entry in entries if all(entry[k] == item[k]
-                for k in ('reference', 'head', 'preparation_id'))), None)
-    if old and old != item:
+    old = next((entry for entry in entries if entry['reference'] == ref and entry['head'] == head
+                and compatible_reference(entry, artifact)), None)
+    if old and any(old[k] != item[k] for k in ('disposition', 'evidence', 'reason')):
         raise ValueError('assessment already recorded; refresh preparation to reassess')
     if not old:
         entries.append(item)
-    return item
+    return old or item
 
 
 def fix_plan(record, ref, head):
     artifact = work_gate(record, head, require_ready=False)
     assessment = next((item for item in record.get('assessments', [])
                        if item['reference'] == ref and item['head'] == head
-                       and item['preparation_id'] == artifact['preparation_id']), None)
+                       and compatible_reference(item, artifact)), None)
     if not assessment:
         raise ValueError('scope and remediation-depth assessment required before a fix')
     # Scope is evaluated first. A small pre-existing defect never overrides an exclusion.
@@ -194,7 +210,9 @@ def append_unique(record, field, item, key):
 
 def next_cycle(record, head):
     require_head(head)
-    work_gate(record, head)
+    prepared = work_gate(record, head)
+    with bindings.pinned_bindings(prepared['reviewers']):
+        pass
     number = len(record.setdefault("cycles", [])) + 1
     if number > 5:
         raise ValueError("five review cycles exhausted")
@@ -221,8 +239,9 @@ def review_session(record, head, record_path):
     entries = record.setdefault('review_sessions', [])
     item = next((v for v in entries if all(v[k] == value for k, value in identity.items())), None)
     if item is None:
+        directory = record.get('iteration_run', {}).get('workflow_dir', str(Path(record_path).resolve().parent))
         item = {**identity, 'head': head, 'session_file': str(
-            Path(record_path).resolve().parent / 'review-sessions' / (uuid.uuid4().hex + '.json'))}
+            Path(directory) / 'review-sessions' / (uuid.uuid4().hex + '.json'))}
         entries.append(item)
     if item['head'] != head:
         raise ValueError('iteration review session head changed')
@@ -244,7 +263,7 @@ def register_review(record, output, head):
                    for key in ('path', 'sha256'))):
         raise ValueError('review_artifact requires nonempty string path and sha256')
     artifact = review_sessions.result_artifact(binding['session_file'], item)
-    if (artifact['head'] != head or artifact['preparation_id'] != prepared['preparation_id']
+    if (artifact['head'] != head or not compatible_reference(artifact, prepared)
             or artifact['pr_url'] != prepared['identity']['pr_url']):
         raise ValueError('review result differs from the active preparation')
     registered = {**item, **identity, 'session_file': binding['session_file']}
@@ -345,7 +364,9 @@ def verify_findings(record, artifact):
         classification = record.get('threads', {}).get(ref, {}).get(artifact['head'])
         assessment = next((a for a in record.get('assessments', [])
                            if a['reference'] == ref and a['head'] == artifact['head']
-                           and a['preparation_id'] == artifact['preparation_id']), None)
+                           and (a.get('engineering_id') == artifact.get('engineering_id')
+                                if artifact.get('version') == 3 else
+                                a['preparation_id'] == artifact['preparation_id'])), None)
         if not classification or not assessment:
             raise ValueError('review finding lacks validity and scope assessment: ' + ref)
         if assessment['disposition'] == 'decision_blocked' or (
@@ -361,7 +382,7 @@ def legacy_review_options(record_path, context, prepared, reviewers, scope, rule
     head = context['head_sha']
     def allocate(record):
         current = work_gate(record, head)
-        if current['preparation_id'] != prepared['preparation_id']:
+        if engineering_id(current) != engineering_id(prepared):
             raise ValueError('legacy review preparation differs from the active iteration record')
         item = review_session(record, head, record_path)
         if stats_cycle is not None and stats_cycle != item['cycle']:
@@ -382,6 +403,8 @@ def legacy_review_options(record_path, context, prepared, reviewers, scope, rule
             result['reused_reviewers'] = result['executed_reviewers'] + result['reused_reviewers']
             result['executed_reviewers'] = []
             result.update(review_session={'id': session['id'], 'path': str(path)}, review_artifact=item)
+            if artifact.get('version') == 3:
+                result.update(preparation_id=artifact['preparation_id'], engineering_id=artifact['engineering_id'])
             options['result'] = result
     return options
 
@@ -389,7 +412,7 @@ def legacy_review_options(record_path, context, prepared, reviewers, scope, rule
 def legacy_register_review(record_path, result, head):
     record_path = Path(record_path)
     prepared = work_gate(read(record_path, {}), head)
-    context = read(Path(prepared['sources']['context']['path']), {})
+    context = preparation_api.context_for(prepared)
     return mutate(review_coverage.storage_path(record_path, context), {},
                   lambda record: register_review(record, result, head))
 
@@ -592,7 +615,8 @@ def main():
             elif a.command == 'preparation': result = mutate(path, default, lambda d: attach_preparation(d, a.file, a.pr_url, a.head, expected_parent=a.expected_parent))
             elif a.command == 'work-gate':
                 artifact = work_gate(read(path, default), a.head)
-                result = {'gate': 'ready', 'preparation_id': artifact['preparation_id']}
+                result = {'gate': 'ready', 'preparation_id': artifact['preparation_id'],
+                          'engineering_id': engineering_id(artifact)}
             elif a.command == 'assess': result = mutate(path, default, lambda d: assess(d, a.ref, a.head, a.preparation_id, a.disposition, a.evidence, a.reason))
             elif a.command == 'fix-plan': result = fix_plan(read(path, default), a.ref, a.head)
             elif a.command == "thread": result = mutate(path, default, lambda d: classify(d, a.ref, a.head, a.classification, a.evidence, a.reason, a.production_lines))

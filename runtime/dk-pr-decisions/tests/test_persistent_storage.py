@@ -109,7 +109,7 @@ def harness(tmp_path, monkeypatch):
             live.write_text(json.dumps(data))
 
         def path(self):
-            return Path(env['DK_PR_DECISIONS_HOME']) / core.storage.identity(URL)
+            return Path(env['DK_PR_DECISIONS_HOME']) / 'v3' / core.storage.identity(URL)
 
     result = Harness()
     result.env, result.live, result.root = env, live, tmp_path
@@ -150,7 +150,7 @@ def test_isolation_and_exclusive_root(harness):
     other = str(harness.root / 'empty-store')
     assert harness.invoke('list', DK_PR_DECISIONS_HOME=other, code=1)['status'] == 'error'
     assert not Path(other).exists()
-    assert harness.path() == harness.root / 'persistent/github.com/base/project/pr-34.json'
+    assert harness.path() == harness.root / 'persistent/v3/github.com/base/project/pr-34.json'
 
 
 def test_competing_adds_and_refreshes_do_not_lose_changes(harness):
@@ -160,12 +160,26 @@ def test_competing_adds_and_refreshes_do_not_lose_changes(harness):
                                        '--user-instruction', f'Exact instruction {i}', TEST_SCAN_DELAY='.04'))
         if i % 2 == 0:
             processes.append(harness.start('scan', TEST_SCAN_DELAY='.04'))
+    conflicts = []
     for process in processes:
-        harness.finish(process)
+        out, err = process.communicate(timeout=15)
+        assert not err, err
+        result = json.loads(out)
+        assert process.returncode in (0, 1), result
+        if process.returncode:
+            assert result['error']['code'] == 'metadata_conflict'
+            proposal = json.loads(Path(result['error']['proposal_path']).read_text())
+            conflicts.append(proposal)
+    # Explicitly inspect and reapply retained choices against the latest revision.
+    for proposal in conflicts:
+        request = proposal['request']
+        if request['command'] == 'add':
+            choice = json.loads(request['json'])
+            harness.add(choice['text'], request['user_instruction'])
     records = harness.invoke('context')['data']['decisions']
     assert {r['text'] for r in records} == {f'Choice {i}' for i in range(8)}
     assert {r['source'] for r in records} == {f'Exact instruction {i}' for i in range(8)}
-    assert json.loads(harness.path().read_text())['run_number'] == 13
+    assert json.loads(harness.path().read_text())['revision'] > 0
 
 
 def test_competing_replacements_preserve_one_chain_across_restarts(harness):
@@ -238,7 +252,8 @@ def test_uncertain_publication_receipt_survives_kill_and_refresh(harness):
     intent = state['publication_intent']
     assert intent['status'] == 'pending'
     assert state['publication_history'][-1] == intent
-    harness.invoke('scan')
+    blocked = harness.invoke('scan', code=1)
+    assert blocked['error']['code'] == 'metadata_conflict'
     assert json.loads(harness.path().read_text())['publication_intent'] == intent
     result = harness.invoke('publish', '--reconcile')
     assert result['publication']['reconciled'] == 'published'
@@ -292,7 +307,7 @@ def test_temporary_imports_and_report_share_storage_without_publication(harness)
 
 def test_offline_list_has_no_writes_or_lock_creation(harness):
     harness.add('Saved')
-    harness.path().with_suffix('.lock').unlink()
+    harness.path().with_name(harness.path().name + '.lock').unlink()
     root = harness.root / 'persistent'
     before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in root.rglob('*') if p.is_file()}
     bin_dir = harness.root / 'bin'
@@ -360,7 +375,7 @@ def test_default_legacy_paths_and_private_synchronized_writes(tmp_path, monkeypa
     monkeypatch.delenv('DK_PR_DECISIONS_HOME', raising=False)
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
     path = core.cache_path(URL)
-    assert path == tmp_path / 'data/dk-pr-decisions/github.com/base/project/pr-34.json'
+    assert path == tmp_path / 'data/dk-pr-decisions/v3/github.com/base/project/pr-34.json'
     with patch.object(core.storage, 'sync_directory', wraps=core.storage.sync_directory) as sync:
         core.atomic_write(path, '{}\n')
     assert path.stat().st_mode & 0o777 == 0o600
@@ -369,4 +384,4 @@ def test_default_legacy_paths_and_private_synchronized_writes(tmp_path, monkeypa
     assert sync.call_args_list[-1].args == (path.parent,)
     monkeypatch.delenv('XDG_DATA_HOME')
     with patch.object(Path, 'home', return_value=tmp_path):
-        assert core.cache_path(URL) == tmp_path / '.local/share/dk-pr-decisions' / core.storage.identity(URL)
+        assert core.cache_path(URL) == tmp_path / '.local/share/dk-pr-decisions/v3' / core.storage.identity(URL)

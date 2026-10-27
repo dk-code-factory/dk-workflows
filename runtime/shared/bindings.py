@@ -60,6 +60,13 @@ def codex_plugins():
 _PINNED_BINDINGS = ContextVar('dk_pinned_bindings', default={})
 
 
+def validate_version(registry_version, manifest):
+    """A version is optional on either side; compare only declared versions."""
+    declared = manifest.get('version')
+    if registry_version is not None and 'version' in manifest and registry_version != declared:
+        raise ValueError('Installed version and manifest disagree; refresh the host installation')
+
+
 @contextmanager
 def pinned_bindings(descriptors):
     from shared.runtime_bundles import verify, verify_binding
@@ -82,8 +89,8 @@ def pinned_bindings(descriptors):
             raise ValueError('invalid retained reviewer binding')
         procedure, manifest = manifest_skill(Path(value['root']), value['executor'],
                                              *value['binding']['skill'].split(':'))
-        if (str(procedure) != value['procedure'] or (value.get('version') is not None
-                and manifest.get('version', value['version']) != value['version'])):
+        validate_version(value.get('version'), manifest)
+        if str(procedure) != value['procedure']:
             raise ValueError('retained reviewer procedure or version changed')
         pinned[name] = value
     token = _PINNED_BINDINGS.set(pinned)
@@ -207,8 +214,7 @@ def resolve(value):
                          f'Install the plugin for {host}, or remove ambiguous installations.')
     identity, root, record = matches[0]
     procedure, manifest = manifest_skill(root, host, namespace, name)
-    if record.get('version') and record['version'] != manifest.get('version', record['version']):
-        raise ValueError('Installed version and manifest disagree; refresh the host installation')
+    validate_version(record.get('version'), manifest)
     return {'binding': binding, 'identity': key(binding), 'executor': host, 'plugin_id': identity,
             'root': str(root.resolve()), 'procedure': str(procedure), 'version': record.get('version')}
 

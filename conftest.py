@@ -13,3 +13,8 @@ def prevent_unmocked_model_calls(monkeypatch):
             raise AssertionError('Fixture attempted an unmocked model execution')
         return original(argv, *args, **kwargs)
     monkeypatch.setattr(subprocess, 'run', run)
+
+
+@pytest.fixture(autouse=True)
+def private_workflow_state(tmp_path_factory, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path_factory.mktemp("workflow-state")))

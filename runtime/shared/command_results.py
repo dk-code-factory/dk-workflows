@@ -71,6 +71,9 @@ def classification(command, code, data):
     elif command == 'replies' and value.get('action') in {'stop', 'reconcile'}:
         reason = 'reply_' + value['action']
     elif command == 'decisions':
+        error = value.get('error') or {}
+        if value.get('status') == 'error' and error.get('code') == 'metadata_conflict':
+            return 'blocked', 'metadata_conflict', error.get('next_action', 'Reconcile the retained proposal explicitly.')
         payload = value.get('data')
         if isinstance(payload, dict) and payload.get('readiness') in {'needs_decision', 'sync_pending'}:
             reason = payload['readiness']

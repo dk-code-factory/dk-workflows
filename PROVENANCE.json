@@ -72,6 +72,11 @@
       "source": "dk-code-factory/dk-workflows",
       "version": "1.2.0",
       "description": "Incremental preparation, conclusion graph, immutable evidence lineage, refresh validation and regression coverage."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
+      "version": "1.4.0",
+      "description": "Fresh workflow metadata contracts: consistent plugin versions, revision-checked Decisions and publication ownership, engineering compatibility identity, durable captures and isolated checkouts, host guidance and regression coverage."
     }
   ]
 }

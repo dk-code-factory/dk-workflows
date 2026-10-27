@@ -202,6 +202,7 @@ def test_legacy_main_rejects_record_lock_before_allocation_even_with_wrong_cycle
         storage_layout, main_call, tmp_path, root):
     context, decisions, prepared, names = storage_layout
     path = iteration_record(tmp_path, context, prepared, cycle=2)
+    context = runner.preparation_api.context_for(prepared)
     before_record = path.read_bytes()
     before_roots = {key: (Path(context[key]) / 'x.py').read_bytes()
                     for key in ('repository', 'checkout')}
@@ -221,6 +222,7 @@ def test_legacy_main_rechecks_record_lock_before_registration(
         storage_layout, main_call, tmp_path, root):
     context, decisions, prepared, names = storage_layout
     path = iteration_record(tmp_path, context, prepared, cycle=2)
+    context = runner.preparation_api.context_for(prepared)
     before_roots = {key: (Path(context[key]) / 'x.py').read_bytes()
                     for key in ('repository', 'checkout')}
     allocated_record = None

@@ -152,7 +152,7 @@ class IntegrationTests(unittest.TestCase):
         self.env = patch.dict(os.environ, {"XDG_DATA_HOME": str(self.data)})
         self.env.start()
         self.addCleanup(self.env.stop)
-        self.pr = {"number": 3, "title": "Fix", "body": "", "url": "https://github.com/acme/project/pull/3", "headRepository": {"nameWithOwner": "acme/project"}, "headRefOid": "abc"}
+        self.pr = {"number": 3, "title": "Fix", "body": "", "url": "https://github.com/acme/project/pull/3", "headRepository": {"nameWithOwner": "acme/project"}, "headRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         self.meta = {"i1": {**comment("i1"), "kind": "inline", "thread_id": "t"}}
         self.threads = {"t": {"id": "t", "resolved": False, "path": "x.py", "line": 4, "comment_ids": ["i1"]}}
         self.analysis_count = 0
@@ -180,7 +180,7 @@ class IntegrationTests(unittest.TestCase):
             self.last_payload = payload
             head_repo = (self.pr.get("headRepository") or {}).get("nameWithOwner") or "acme/project"
             self.assertEqual(payload["code_permalinks"], {
-                "prefix": f"https://github.com/{head_repo}/blob/abc/", "paths": {"x.py": [[4, 4]]}})
+                "prefix": f"https://github.com/{head_repo}/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/", "paths": {"x.py": [[4, 4]]}})
             return json.dumps({"decisions": [{"text": "Keep a cache", "references": [comment("i1")["url"]]}],
                                "thread_summaries": [{"thread_id": t["id"], "summary": "Discusses the cache."}
                                                     for t in payload["threads_to_summarize"]]})
@@ -205,11 +205,11 @@ class IntegrationTests(unittest.TestCase):
         return {cid: f"Text for {cid}" for cid in ids}
 
     def state_path(self):
-        return self.data / "dk-pr-decisions" / "github.com" / "acme" / "project" / "pr-3.json"
+        return mod.cache_path(self.pr['url'])
 
     def test_compact_context_reuses_current_checkpoint(self):
         first = json.loads(self.invoke(context_json=True))
-        self.assertEqual(first['head_sha'], 'abc')
+        self.assertEqual(first['head_sha'], 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
         self.assertEqual(first['threads'][0]['summary'], 'Discusses the cache.')
         self.assertEqual(len(first['decisions']), 1)
         self.assertEqual(self.analysis_count, 1)
@@ -305,13 +305,13 @@ class IntegrationTests(unittest.TestCase):
         self.pr["headRepository"] = {"nameWithOwner": "contributor/project"}
         self.invoke()
         self.assertEqual(self.last_payload["code_permalinks"]["prefix"],
-                         "https://github.com/contributor/project/blob/abc/")
+                         "https://github.com/contributor/project/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/")
 
     def test_legacy_cache_migrates_without_code_decisions(self):
         self.invoke()
         state = json.loads(self.state_path().read_text())
         state['decisions'].append({'text': 'Code-derived choice', 'references': [
-            'https://github.com/acme/project/blob/abc/x.py#L4']})
+            'https://github.com/acme/project/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/x.py#L4']})
         legacy = self.data / 'dk-pr-read-comments' / 'github.com' / 'acme' / 'project' / 'pr-3.json'
         legacy.parent.mkdir(parents=True)
         legacy.write_text(json.dumps(state))

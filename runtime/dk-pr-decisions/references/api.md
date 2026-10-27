@@ -55,8 +55,8 @@ All former top-level command results now live under `data`; publication results 
 
 `prepare --input-manifest FILE --output-dir PRIVATE_DIR [--previous-preparation FILE] [--full-analysis]` delegates to
 `scripts/preparation.py` without a discussion scan or any publication. It preserves
-this API v2 envelope; `data` contains `artifact`, `preparation_id`, `readiness` and a `refresh` report.
-The artifact has its own `preparation_version: 2`; read
+this API v2 envelope; `data` contains `artifact`, `preparation_id`, `engineering_id`, `readiness` and a `refresh` report.
+The artifact has its own `preparation_version: 3`; read
 [the preparation contract](preparation.md) for complete evidence, semantic analysis,
 question retention, placement, proportionate tests, and downstream gates.
 `verified: true` retains its original provenance/freshness meaning.
@@ -74,3 +74,24 @@ results retain `status: pending` with `publication.reason`, even if the pending 
 array is empty. Dependent iteration stays `sync_pending` until live publication,
 context and preparation agree. Existing scan/list/context/add/replace/suggest
 commands and unified decision records retain their contracts.
+
+
+## Revision conflicts and pending publication
+
+The API envelope remains v2. Fresh records use private `dk-pr-decisions/v3/` storage
+and a monotonically increasing `revision`. Every commit compares the loaded revision
+under the existing file lock. Network and model calls run outside the lock. A stale
+writer receives `status: error`, `error.code: metadata_conflict`,
+`error.proposal_path` and `error.next_action`. The proposal retains the attempted
+update, expected/current revisions, record path and diagnostics. The stable CLI
+classifies it as a workflow block. Read the proposal and current state, reconcile
+any pending intent, and explicitly reapply the intended change against the current
+revision. Never merge, retry or replay publication automatically.
+
+Publication commits its owning operation's intent before GitHub mutation. A pending
+intent rejects competing writers, including refresh, additions and suggestions.
+Its owner can finish; after interruption use `publish --reconcile` to verify applied
+or unapplied state without replaying the mutation. Pending legacy intents remain
+blockers after import. Import validates the selected legacy snapshot and leaves its
+original file untouched. Existing interrupted workflows use their retained runtime;
+there is no bulk migration of active runs or immutable evidence.

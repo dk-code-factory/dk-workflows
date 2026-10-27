@@ -75,9 +75,11 @@ def check_access(path, *, directory=False):
                              'and directory traversal access to DK_PR_DECISIONS_HOME')
 
 
-def cache_path(pr_url):
+def cache_path(pr_url, *, versioned=True):
     relative = identity(pr_url)
     base = root()
+    if versioned:
+        base = base / 'v3'
     path = validate_location(base / relative)
     if not path.is_relative_to(base):
         raise ValueError('Decisions record escapes the configured root through a symlink; '

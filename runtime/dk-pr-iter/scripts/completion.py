@@ -42,7 +42,7 @@ def current_preparation(path, run_record, pr_url, head, body):
     if not isinstance(record, dict):
         raise ValueError('iteration run record must be an object')
     current = run_state_api.work_gate(record, head)
-    if (current['preparation_id'] != prepared['preparation_id']
+    if (preparation_api.engineering_id(current) != preparation_api.engineering_id(prepared)
             or current['identity']['pr_url'] != pr_url):
         raise ValueError('completion preparation differs from the active run record')
     return prepared

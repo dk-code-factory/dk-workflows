@@ -113,7 +113,7 @@ remain significant. Exact supported exceptions:
 
 ## Stored artifact and verification
 
-Immutable `preparation_version:2` artifacts retain `analysis`, graph/retired IDs,
+Immutable `preparation_version:3` artifacts retain `analysis`, graph/retired IDs,
 input fingerprints, reviewer descriptors, readiness, PR/base/head/body/Decisions
 identity, parent path/ID/hash and migration provenance. Snapshots are fingerprinted
 and read-only outside the repo. Historical validation checks retained integrity and
@@ -126,10 +126,27 @@ binding/identity changes, affected/reused conclusions, explanations and actual
 remain outside binding analysis. Tree-equivalent review reuse preserves original
 provenance only when existing scope/rules/Decisions/instruction/base checks pass.
 
-Completion verification has `verification_version:1`, current `preparation_id`,
+Completion verification has `verification_version:2`, originating `preparation_id`,
+runtime-computed `engineering_id`,
 `pr_url`, `head_sha`, and `checks` for `behavior`, `placement`, `test_sufficiency`,
 `compatibility`, `complexity`. Each check contains boolean `satisfied`, `rationale`,
 and nonempty `evidence`: `{"path":"ABSOLUTE_PATH","sha256":"FILE_HASH"}`.
 Inspection reports, code and test results qualify; missing, false or stale evidence
 blocks completion. Both stages use the same current preparation, verification and
 mutable run record; an immutable history snapshot cannot replace live choices.
+
+
+The complete artifact fingerprint is `preparation_id`; its runtime-computed
+`engineering_id` is the compatibility key. Store both. The latter excludes supported
+operational metadata, storage paths, reports and verified lineage, retaining unknown
+fields as governing. Reviewer order is explicit in `reviewer_order`. Sources retain
+`path`, `sha256`, immutable `snapshot`, and `mode` (`capture` or `live`). See the
+preparation procedure for capture defaults and manifest `source_modes` overrides.
+Never accept a supplied engineering ID without recomputation and current evidence
+and binding validation. Completion verification v2 remains reusable across an
+operational refresh with identical engineering identity and head; its preparation
+reference remains unchanged. Use workflow-owned evidence captures for verification
+reports intended to survive original export removal. Legacy verification v1 belongs
+to the retained legacy runtime. Fresh artifacts never rewrite historical checkpoints.
+
+`recovery_manifest` and `recovery_context` retain verified path/hash references to runnable private recovery inputs. Captured sources record `origin_identity`; recovery manifests carry `source_origins` to preserve identity while relocating captures. These declared storage fields do not govern engineering compatibility.

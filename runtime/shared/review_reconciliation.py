@@ -149,7 +149,9 @@ def snapshot(record, head, assessment_path, api, *, live=False, version=2, prech
     else:
         from shared import cleanup_precheck
         _, accepted = api.review_acceptances(record, reference, result)
-        reviewed = coverage.verify(reference, {**original, 'sources': old_sources},
+        reviewed_preparation = (original if original.get('preparation_version', 1) >= 3
+                                else {**original, 'sources': old_sources})
+        reviewed = coverage.verify(reference, reviewed_preparation,
                                    accepted_failures=accepted, checkout=checkout)
         api.verify_findings(record, reviewed)
         assessment_binding = cleanup_precheck.identity(precheck, context, result, current, live=live)
@@ -376,6 +378,18 @@ def coverage_for(record, prepared, api, *, assessment=None, assessment_path=None
         # Only the current preparation can supply retained coverage; unrelated
         # historical evidence is never a fallback for a damaged current entry.
         if item.get('current_preparation_id') != prepared['preparation_id']:
+            if prepared.get('preparation_version', 1) >= 3:
+                from shared.engineering_identity import engineering_id
+                prior = next((p for p in record.get('preparations', [])
+                              if p['id'] == item.get('current_preparation_id')), {})
+                if prior.get('engineering_id') == engineering_id(prepared):
+                    saved = read(Path(item['path']), {})
+                    if coverage.digest(saved) != item['sha256'] or not saved.get('binding'):
+                        raise ValueError('reconciliation evidence is missing or malformed')
+                    if saved['binding'].get('review_artifact') == reference:
+                        load(item, saved['binding'], require_equivalent=False)
+                        if not saved['comparison']['equivalent']:
+                            raise ValueError('preparations are not semantically equivalent: ' + saved['comparison']['rationale'])
             continue
         saved = read(Path(item['path']), {})
         if (not isinstance(saved, dict) or coverage.digest(saved) != item['sha256']
@@ -397,12 +411,14 @@ def coverage_for(record, prepared, api, *, assessment=None, assessment_path=None
                 or api.preparation_api.file_hash(assessment_path) != binding['assessment']['sha256']):
             raise ValueError('completion must use the same fingerprinted cleanup assessment')
         if assessment is not None and assessment != series.load(binding['assessment']['path'],
-                api.preparation_api.read(prepared['sources']['context']['path'])['checkout']):
+                api.preparation_api.context_for(prepared)['checkout']):
             raise ValueError('completion must use the reconciled cleanup assessment')
         return {'artifact': item, 'binding': binding}
-    # Equal scope does not fingerprint feedback, operational sources or reviewer
-    # order. Refreshed preparations require reconciliation even at identical scope.
-    if (result.get('preparation_id') == prepared['preparation_id']
+    # Legacy scope omits feedback and reviewer order. Fresh engineering identity
+    # covers them, so an unchanged-head operational refresh can retain coverage.
+    from shared.engineering_identity import compatible_reference
+    if (compatible_reference(result, prepared)
+            and (result.get('version') != 3 or result['head'] == prepared['identity']['head_sha'])
             and result['scope'] == coverage.scope(prepared)):
         return None
     raise ValueError('final tree or scope lacks review coverage; reconcile after cleanup or review within the existing budget')

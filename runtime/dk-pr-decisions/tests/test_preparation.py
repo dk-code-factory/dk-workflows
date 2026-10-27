@@ -509,7 +509,7 @@ class PreparationTests(unittest.TestCase):
         package.write('run-record.json', record)
         self.assertEqual(completion.completion_gate(*args, stage='review', preparation=saved['artifact'],
                                                    pr_url=package.context['url']), 'run_record_missing')
-        verification = {'verification_version': 1, 'preparation_id': saved['preparation_id'],
+        verification = {'verification_version': 2, 'engineering_id': saved['engineering_id'], 'preparation_id': saved['preparation_id'],
                         'pr_url': package.context['url'], 'head_sha': package.head,
                         'checks': {name: {'satisfied': True, 'rationale': 'Inspected current transform and unit evidence',
                                           'evidence': [{'path': str(package.repo / 'transform.py'),
@@ -553,7 +553,7 @@ class PreparationTests(unittest.TestCase):
         check = {'satisfied': True, 'rationale': 'Inspected the supported behavior and its boundaries',
                  'evidence': [{'path': str(source), 'sha256': prep.file_hash(source)}]}
         verification_path = package.write('verification.json', {
-            'verification_version': 1, 'preparation_id': saved['preparation_id'],
+            'verification_version': 2, 'engineering_id': saved['engineering_id'], 'preparation_id': saved['preparation_id'],
             'pr_url': package.context['url'], 'head_sha': package.head,
             'checks': {name: check for name in ('behavior', 'placement', 'test_sufficiency', 'compatibility', 'complexity')}})
         args = (package.head, package.head, package.head, True, False, 'success')

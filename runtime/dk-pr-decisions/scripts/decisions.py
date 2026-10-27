@@ -18,9 +18,32 @@ import re
 import subprocess
 import sys
 import tempfile
+import copy
+import uuid
+from contextvars import ContextVar
 from pathlib import Path
 from urllib.parse import quote, urlparse
 from shared.github_reads import run as github_run
+from shared.private_state import mutate, write
+from shared.workflow_storage import allocate
+
+_OPERATION = ContextVar('decisions_operation', default=None)
+_REQUEST = ContextVar('decisions_request', default=None)
+
+
+class MetadataConflict(ValueError):
+    code = 'metadata_conflict'
+
+    def __init__(self, state, path, current, reason):
+        directory = allocate()
+        self.proposal_path = str(directory / 'decisions-proposal.json')
+        self.next_action = ('Read the retained proposal and current Decisions record; reconcile pending '
+                            'publication with publish --reconcile, then explicitly reapply the intended update '
+                            'against the current revision. Do not replay publication.')
+        write(Path(self.proposal_path), {'proposal': state, 'current_revision': current.get('revision', 0),
+              'expected_revision': state.get('revision', 0), 'record': str(path),
+              'request': _REQUEST.get(), 'reason': reason, 'next_action': self.next_action})
+        super().__init__(reason)
 
 GH_HOST = "github.com"
 
@@ -521,14 +544,13 @@ cache_path = storage.cache_path
 
 @contextmanager
 def transaction(pr_target=None):
-    # Discovery only locates the lock. Fetch the working snapshot under the lock.
+    # Resolve the operation identity; only the final revision check holds a lock.
     storage.root()
     pr_url = pr_target
     if not isinstance(pr_url, str) or not pr_url.startswith('https://'):
         pr_url = gh_json(['pr', 'view', *([str(pr_target)] if pr_target else []),
                           '--json', 'url'])['url']
-    with storage.lock(pr_url):
-        yield pr_url
+    yield pr_url
 
 
 def scan(pr_target=None):
@@ -561,16 +583,19 @@ def _scan(pr_target):
     if not viewer:
         raise RuntimeError("Could not identify the authenticated GitHub user")
     state_path = cache_path(pr['url'])
-    # Legacy report migration is default-store only. An explicit root is exclusive.
     legacy_path = None
     if 'DK_PR_DECISIONS_HOME' not in os.environ:
-        legacy_path = storage.root().parent / 'dk-pr-read-comments' / storage.identity(pr['url'])
-        legacy_path = storage.validate_location(legacy_path)
-    source_path = state_path
-    if not state_path.exists() and legacy_path is not None and legacy_path.exists():
-        source_path = legacy_path
+        legacy_path = storage.validate_location(storage.root().parent / 'dk-pr-read-comments' / storage.identity(pr['url']))
+    previous_path = storage.cache_path(pr['url'], versioned=False)
+    candidates = [state_path, previous_path] + ([legacy_path] if legacy_path is not None else [])
+    source_path = next((p for p in candidates if p.exists()), state_path)
     prior = storage.read(source_path, pr['url'], missing=True)
+    importing = source_path != state_path and source_path.exists()
     migrating = source_path == legacy_path
+    if importing:
+        prior['revision'] = 0
+    if (prior.get('publication_intent') or {}).get('status') == 'pending':
+        raise MetadataConflict(prior, state_path, prior, 'Publication is pending; explicitly reconcile before refreshing')
     if migrating:
         discussion_urls = {comment.get('url') for comment in prior.get('comments', {}).values()}
         prior['decisions'] = [item for item in prior.get('decisions', [])
@@ -623,7 +648,8 @@ def _scan(pr_target):
     manual = [item for item in prior.get('manual_decisions', [])
               if decision_id(item['text']) not in superseded]
     decisions = decisions + [item for item in manual if item not in decisions]
-    state = {"version": 2, "run_number": run_number, "pr": pr, "viewer": viewer,
+    state = {**prior, "version": 2, "revision": prior.get('revision', 0),
+             "run_number": run_number, "pr": pr, "viewer": viewer,
              "linked_issues": context["linked_issues"],
              "comments": comments, "threads": threads, "decisions": decisions,
              "summaries": {k: v for k, v in summaries.items() if k in threads},
@@ -639,7 +665,7 @@ def _scan(pr_target):
              "code_suggestions": prior.get('code_suggestions', {}) if prior.get('pr', {}).get('headRefOid') == pr['headRefOid'] else {}}
     retain_agreements(state)
     # Commit only after every API page, body, and analysis has succeeded.
-    atomic_write(state_path, json.dumps(state, ensure_ascii=False, indent=2) + "\n")
+    save_state(state, state_path)
     return state, state_path
 
 
@@ -723,7 +749,17 @@ def compose_publication(state, decisions, description=None, description_review_s
 
 
 def publish(state, decisions, description=None, description_review_state=None, *, persist=None, reconcile=False):
+    token = _OPERATION.set({'id': uuid.uuid4().hex, 'reconcile': reconcile})
+    try:
+        return _publish(state, decisions, description, description_review_state, persist=persist, reconcile=reconcile)
+    finally:
+        _OPERATION.reset(token)
+
+
+def _publish(state, decisions, description=None, description_review_state=None, *, persist=None, reconcile=False):
     """One compare-before-write body publisher, with durable intent and live reconciliation."""
+    if state.get('storage_version') == 3 and persist is None:
+        raise ValueError('Fresh Decisions publication requires durable intent persistence')
     superseded = {r['id'] for r in decision_records(state) if r['status'] == 'superseded'}
     decisions = [item for item in decisions if decision_id(item['text']) not in superseded]
     pending_intent = state.get('publication_intent')
@@ -776,7 +812,8 @@ def publish(state, decisions, description=None, description_review_state=None, *
     if reconciled or reconcile:
         return {'updated': False, 'pending': decisions,
                 'reason': 'Current choices or description remain pending. Publish explicitly after review.'}
-    intent = {'snapshot': {key: pr[key] for key in ('body', 'title', 'headRefOid') if key in pr},
+    intent = {'operation_id': _OPERATION.get()['id'],
+              'snapshot': {key: pr[key] for key in ('body', 'title', 'headRefOid') if key in pr},
               'body': updated, 'status': 'pending'}
     intent['id'] = hashlib.sha256((json.dumps(intent, sort_keys=True) +
                                   str(len(state.get('publication_history', [])))).encode()).hexdigest()[:20]
@@ -793,6 +830,8 @@ def publish(state, decisions, description=None, description_review_state=None, *
                         '--json', 'body,title,headRefOid'])
         if not same(intent['snapshot'], updated):
             raise RuntimeError('Publication could not be verified against live head, title and body')
+    except MetadataConflict:
+        raise
     except Exception as exc:
         intent['error'] = str(exc)
         save()
@@ -926,7 +965,7 @@ def suggest_from_code(state, path):
             raise RuntimeError(f'{exc}. Analysis response: {diagnostic}{response_note} '
                                f'Code evidence retained at {evidence_dir / "manifest.json"}.') from None
     state['code_suggestions'] = {'head': head, 'items': result['decisions']}
-    atomic_write(path, json.dumps(state, ensure_ascii=False, indent=2) + '\n')
+    save_state(state, path)
     return result['decisions']
 
 
@@ -1073,13 +1112,49 @@ def apply_replacements(body, replacements):
     return body
 
 
+def validated_cache(path, pr_url):
+    state = storage.read(path, pr_url)
+    if type(state.get('revision', 0)) is not int or state.get('revision', 0) < 0:
+        raise ValueError('Invalid Decisions revision; reconcile through its retained runtime')
+    decision_records(state)
+    return state
+
+
 def load_cache(pr_url):
     path = cache_path(pr_url)
-    return storage.read(path, pr_url), path
+    if not path.exists():
+        legacy = storage.cache_path(pr_url, versioned=False)
+        if not legacy.exists():
+            raise ValueError('No cached decisions; run scan first')
+        state = validated_cache(legacy, pr_url)
+        state['revision'] = 0
+        save_state(state, path)
+    return validated_cache(path, pr_url), path
 
 
 def save_state(state, path):
-    atomic_write(path, json.dumps(state, ensure_ascii=False, indent=2) + '\n')
+    expected = state.get('revision', 0)
+    if type(expected) is not int or expected < 0:
+        raise ValueError('Decisions revision must be a nonnegative integer')
+    proposed = copy.deepcopy(state)
+    proposed.setdefault('version', 2)
+    operation = _OPERATION.get() or {}
+    def commit(current):
+        pending = current.get('publication_intent') or {}
+        if current.get('revision', 0) != expected:
+            raise MetadataConflict(proposed, path, current, 'Decisions revision changed during this operation')
+        if (pending.get('status') == 'pending' and not operation.get('reconcile')
+                and (not operation.get('id') or pending.get('operation_id') != operation['id'])):
+            raise MetadataConflict(proposed, path, current, 'Publication is pending and owned by another operation')
+        current.clear()
+        current.update(proposed, storage_version=3, revision=expected + 1)
+        return current['revision']
+    path = storage.validate_location(Path(path))
+    storage.check_access(path)
+    storage.private_directory(path.parent)
+    state['revision'] = mutate(path, {}, commit)
+    storage.sync_directory(path.parent)
+    state['storage_version'] = 3
 
 
 def active_choices(state):
@@ -1197,7 +1272,7 @@ class Parser(argparse.ArgumentParser):
         raise ValueError(message)
 
 
-def cli():
+def _cli():
     parser = Parser(description='Analyze and explicitly publish PR decisions')
     parser.add_argument('--pr', help='Full PR URL (required for list and publish)')
     sub = parser.add_subparsers(dest='command', required=True)
@@ -1226,6 +1301,7 @@ def cli():
         if name == 'replace':
             add.add_argument('--id', required=True, help='Active decision ID to supersede')
     args = parser.parse_args()
+    _REQUEST.set(vars(args))
     if args.command == 'prepare':
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         from preparation import prepare
@@ -1287,11 +1363,22 @@ def execute_command(args):
     print(json.dumps(envelope(args.command, data, publication), ensure_ascii=False))
 
 
+def cli():
+    token = _REQUEST.set(None)
+    try:
+        return _cli()
+    finally:
+        _REQUEST.reset(token)
+
+
 def main():
     try:
         cli()
     except (RuntimeError, ValueError, KeyError, TypeError, OSError) as exc:
-        print(json.dumps(envelope(None, error={'code': type(exc).__name__, 'message': str(exc)}), ensure_ascii=True))
+        error = {'code': getattr(exc, 'code', type(exc).__name__), 'message': str(exc)}
+        if isinstance(exc, MetadataConflict):
+            error.update(proposal_path=exc.proposal_path, next_action=exc.next_action)
+        print(json.dumps(envelope(None, error=error), ensure_ascii=True))
         return 1
     return 0
 

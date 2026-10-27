@@ -15,8 +15,10 @@ import subprocess
 import tempfile
 
 from shared import preparation_graph as graph_api
+from shared.engineering_identity import engineering_id, compatible_reference
+from shared.workflow_storage import allocate, owned
 
-VERSION = 2
+VERSION = 3
 DIMENSIONS = ('correctness', 'remediation_depth', 'performance', 'compatibility', 'complexity')
 EVIDENCE = ('issues', 'feedback', 'choices', 'user_instructions', 'run_history',
             'questions', 'prior_preparation', 'rules', 'production', 'tests', 'ci', 'reviewers')
@@ -108,6 +110,28 @@ def collect(manifest_path):
         raise ValueError('preparation requires a clean isolated checkout')
     sources = {key: {'path': str(Path(value).resolve()), 'sha256': file_hash(value)}
                for key, value in paths.items()}
+    modes = manifest.get('source_modes', {})
+    if (not isinstance(modes, dict) or set(modes) - set(sources)
+            or any(mode not in {'capture', 'live'} for mode in modes.values())):
+        raise ValueError('source_modes must map indexed source keys to capture or live')
+    for key, source in sources.items():
+        category = key.split('/')[0]
+        captured = (key in {'manifest', 'context', 'decisions', 'metadata', 'patch'}
+                    or category in {'reviewers', 'prior_preparation'}
+                    or category in {'production', 'tests'} and
+                    Path(source['path']).is_relative_to(Path(context['checkout'])))
+        if category == 'feedback':
+            value = read(source['path'])
+            captured |= value.get('complete') is True
+        source['mode'] = modes.get(key, 'capture' if captured else 'live')
+    origins = manifest.get('source_origins', {})
+    if (not isinstance(origins, dict) or set(origins) - set(sources)
+            or any(not text(value) or sources[key]['mode'] != 'capture' for key, value in origins.items())):
+        raise ValueError('source_origins requires captured source keys and nonempty original identities')
+    for key, source in sources.items():
+        if source['mode'] == 'capture':
+            source['origin_identity'] = origins.get(key) or graph_api.source_identity(
+                key, source, context['checkout'], Path(source['path']).read_bytes())
     prior = []
     for value in evidence['prior_preparation']:
         prior_path = path(value)
@@ -242,8 +266,9 @@ def readiness(analysis):
 
 
 def policy():
+    import shared.engineering_identity as engineering
     return digest({str(p.name): file_hash(p) for p in (
-        Path(__file__), Path(graph_api.__file__),
+        Path(__file__), Path(graph_api.__file__), Path(engineering.__file__),
         Path(__file__).resolve().parents[1] / 'references/preparation.md',
         Path(__file__).resolve().parents[1] / 'references/preparation-contract.md')})
 
@@ -292,6 +317,7 @@ def reassessment_prompt(prompt, parent_path, parent, paths, changed_sources, sel
 
 def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=None, full_analysis=False):
     manifest, context, decisions, sources, descriptors, prior = collect(manifest_path)
+    collection_sources = dict(sources)
     # Capture collection order before rebinding citation slots. Manifest aliases
     # can disappear after publication; retained paths must not resolve them again.
     reviewer_paths = [source['path'] for key, source in sources.items() if key.startswith('reviewers/')]
@@ -467,7 +493,7 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
                   graph_api.conclusions(parent['analysis'])[parent['graph'][k]['location']]),
               'model_call_count': calls, 'phases': phases if parent and not migration else []}
     # Return the selected immutable artifact only when every live binding is exact.
-    if (parent and not force_full and mode == 'operational' and parent['identity'] == identity
+    if (parent and parent['preparation_version'] == VERSION and not force_full and mode == 'operational' and parent['identity'] == identity
             and parent['inputs'] == current and
             parent.get('reviewer_paths') == reviewer_paths and
             {k: (v['path'], v['sha256']) for k, v in parent['sources'].items()} ==
@@ -475,9 +501,18 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
         validate(parent, context, decisions, require_ready=False)
         report['mode'] = 'unchanged'
         return {'artifact': str(Path(previous_preparation).resolve()), 'preparation_id': parent['preparation_id'],
-                'readiness': parent['readiness'], 'refresh': report}
-    version_dir = Path(tempfile.mkdtemp(prefix='preparation-', dir=_output_directory(output_dir)))
+                'engineering_id': engineering_id(parent), 'readiness': parent['readiness'], 'refresh': report}
+    workflow_dir = (owned(parent['workflow_dir']) if parent and parent.get('workflow_dir') else
+                    owned(context['workflow_dir']) if context.get('workflow_dir') else
+                    allocate(repository=context.get('repository', context['checkout'])))
+    outside(workflow_dir, context.get('repository', context['checkout']))
+    outside(workflow_dir, context['checkout'])
+    version_dir = Path(tempfile.mkdtemp(prefix='preparation-', dir=workflow_dir))
     try:
+        workspace = version_dir / 'checkout'
+        git(context['checkout'], 'clone', '--quiet', '--no-hardlinks', '--no-checkout',
+            context['checkout'], str(workspace))
+        git(workspace, 'checkout', '--quiet', '--detach', context['head_sha'])
         for key, source in sources.items():
             target = version_dir / 'evidence' / key
             target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -487,18 +522,56 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
             target.write_bytes(content)
             os.chmod(target, 0o400)
             source['snapshot'] = str(target)
+        # Retain a directly usable collection manifest, not only its old aliases.
+        # Live inputs keep their original paths; captured inputs use private copies.
+        from shared.private_state import write
+        recovered_context = {**context, 'checkout': str(workspace),
+                             'metadata': sources['metadata']['snapshot'], 'patch': sources['patch']['snapshot'],
+                             'workflow_dir': str(workflow_dir), 'context_file': str(version_dir / 'context.json')}
+        context_path = version_dir / 'context.json'
+        write(context_path, recovered_context)
+        recovery = {**manifest, 'context': str(context_path), 'decisions': sources['decisions']['snapshot'],
+                    'evidence': {}, 'source_modes': {}, 'source_origins': {}}
+        for key in ('manifest', 'context', 'decisions', 'metadata', 'patch'):
+            recovery['source_modes'][key] = sources[key]['mode']
+            if sources[key]['mode'] == 'capture':
+                recovery['source_origins'][key] = sources[key]['origin_identity']
+        for category, values in manifest['evidence'].items():
+            recovery['evidence'][category] = []
+            for index, value in enumerate(values):
+                original = str((Path(manifest_path).resolve().parent / value).resolve())
+                key = category + '/' + str(index)
+                source = collection_sources[key]
+                recovery['evidence'][category].append(source['snapshot'] if source['mode'] == 'capture' else original)
+                recovery['source_modes'][key] = source['mode']
+                if source['mode'] == 'capture':
+                    recovery['source_origins'][key] = source['origin_identity']
+        # Reviewer instruction sources are collected from the preserved descriptor.
+        for key, source in collection_sources.items():
+            if key.startswith('reviewer-source/'):
+                recovery['source_modes'][key] = source['mode']
+                if source['mode'] == 'capture':
+                    recovery['source_origins'][key] = source['origin_identity']
+        manifest_target = version_dir / 'manifest.json'
+        write(manifest_target, recovery)
+        context_path.chmod(0o400)
+        manifest_target.chmod(0o400)
         artifact = {'preparation_version': VERSION, 'mode': manifest['mode'], 'identity': identity,
+                    'workflow_dir': str(workflow_dir), 'workspace': str(workspace),
+                    'recovery_manifest': {'path': str(manifest_target), 'sha256': file_hash(manifest_target)},
+                    'recovery_context': {'path': str(context_path), 'sha256': file_hash(context_path)},
+                    'reviewer_order': list(descriptors),
                     'sources': sources, 'reviewers': descriptors, 'reviewer_paths': reviewer_paths, 'analysis': result,
                     'graph': graph, 'retired_ids': retired, 'inputs': current,
                     'parent': ({'preparation_id': parent['preparation_id'],
                                 'path': str(Path(previous_preparation).resolve()), 'sha256': parent_hash,
                                 'migration': migration} if parent else None),
                     'refresh': report, 'readiness': readiness(result)}
+        artifact['engineering_id'] = engineering_id(artifact)
         artifact['preparation_id'] = digest(artifact)
         validate(artifact, context, decisions, require_ready=False)
         unchanged()
         target = version_dir / 'preparation.json'
-        from shared.private_state import write
         write(target, artifact)
         os.chmod(target, 0o400)
     except BaseException:
@@ -506,16 +579,11 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
         shutil.rmtree(version_dir)
         raise
     return {'artifact': str(target), 'preparation_id': artifact['preparation_id'],
-            'readiness': artifact['readiness'], 'refresh': report}
-
-
-def _output_directory(path):
-    path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    return path
+            'engineering_id': engineering_id(artifact), 'readiness': artifact['readiness'], 'refresh': report}
 
 
 def validate(artifact, context, decisions, *, require_ready=True, check_sources=True):
-    if not isinstance(artifact, dict) or artifact.get('preparation_version') not in {1, VERSION}:
+    if not isinstance(artifact, dict) or artifact.get('preparation_version') not in {1, 2, VERSION}:
         raise ValueError('unsupported preparation artifact')
     if artifact.get('mode') not in {'standalone', 'iteration'}:
         raise ValueError('invalid preparation mode')
@@ -542,7 +610,7 @@ def validate(artifact, context, decisions, *, require_ready=True, check_sources=
         if not isinstance(descriptor, dict) or descriptor.get('reviewer') != name or descriptor.get('complete') is not True:
             raise ValueError('preparation reviewer adaptation is incomplete')
     validate_analysis(artifact['analysis'], artifact['sources'], artifact['reviewers'])
-    if artifact['preparation_version'] == VERSION:
+    if artifact['preparation_version'] >= 2:
         if 'reviewer_paths' in artifact:
             paths = artifact['reviewer_paths']
             expected_paths = [source['path'] for key, source in sources.items() if key.startswith('reviewers/')]
@@ -570,7 +638,8 @@ def validate(artifact, context, decisions, *, require_ready=True, check_sources=
                 raise ValueError('invalid preparation governing input fingerprint')
             if same_policy:
                 content = Path(source['snapshot']).read_bytes()
-                expected_input = {'identity': graph_api.source_identity(key, source, context['checkout'], content),
+                original_context = read(sources['context']['snapshot'])
+                expected_input = {'identity': graph_api.source_identity(key, source, original_context['checkout'], content),
                                   'governing': digest(graph_api.semantic(key, content))}
                 if expected_input != fingerprint:
                     raise ValueError('preparation governing input fingerprint mismatch')
@@ -592,9 +661,40 @@ def validate(artifact, context, decisions, *, require_ready=True, check_sources=
             if file_hash(context[field]) != sources[field]['sha256']:
                 raise ValueError(f'preparation source identity mismatch: supplied {field} differs from prepared evidence')
         for source in artifact['sources'].values():
+            if artifact['preparation_version'] >= 3 and source.get('mode') == 'capture':
+                continue
             if file_hash(source['path']) != source['sha256']:
                 raise ValueError('preparation source changed; refresh preparation')
+    if artifact['preparation_version'] >= 3:
+        for key in ('recovery_manifest', 'recovery_context'):
+            reference = artifact.get(key, {})
+            if not Path(reference.get('path', '')).is_absolute() or file_hash(reference['path']) != reference.get('sha256'):
+                raise ValueError('workflow recovery capture changed: ' + key)
+        if artifact.get('engineering_id') != engineering_id(artifact):
+            raise ValueError('preparation engineering identity mismatch')
+        if (set(artifact.get('reviewer_order', [])) != set(artifact['reviewers'])
+                or len(artifact['reviewer_order']) != len(artifact['reviewers'])):
+            raise ValueError('invalid ordered reviewer identity')
+        if any(source.get('mode') not in {'capture', 'live'} for source in sources.values()):
+            raise ValueError('preparation source requires capture/live classification')
+        if check_sources:
+            from shared.bindings import pinned_bindings
+            with pinned_bindings(artifact['reviewers']):
+                pass
     return artifact
+
+
+def source_path(artifact, key):
+    source = artifact['sources'][key]
+    return source['snapshot'] if artifact.get('preparation_version', 1) >= 3 else source['path']
+
+
+def context_for(artifact):
+    context = read(source_path(artifact, 'context'))
+    if artifact.get('preparation_version', 1) >= 3:
+        context.update(checkout=artifact['workspace'],
+                       patch=source_path(artifact, 'patch'), metadata=source_path(artifact, 'metadata'))
+    return context
 
 
 def load(path, context, decisions, **kwargs):
@@ -606,8 +706,8 @@ def load(path, context, decisions, **kwargs):
 def gate(path, *, pr_url, head_sha, body=None, require_ready=True):
     """For work/completion gates: recover authoritative context from retained sources."""
     artifact = read(path)
-    context = read(artifact['sources']['context']['path'])
-    raw = read(artifact['sources']['decisions']['path'])
+    context = context_for(artifact)
+    raw = read(source_path(artifact, 'decisions'))
     decisions = raw.get('data', raw)
     if context['url'] != pr_url or context['head_sha'] != head_sha:
         raise ValueError('preparation PR or head mismatch')
@@ -631,7 +731,7 @@ def retained(path):
                 or file_hash(target) != source['sha256']):
             raise ValueError('retained preparation evidence changed: ' + key)
         copies[key] = {'path': str(target), 'sha256': source['sha256']}
-    context = read(copies['context']['path'])
+    context = context_for(artifact)
     raw = read(copies['decisions']['path'])
     decisions = raw.get('data', raw)
     outside(path, context['repository'])
@@ -642,11 +742,13 @@ def retained(path):
 
 def verify_completion(path, artifact):
     """Require actual engineering assessment, independent of reviewer convergence and CI."""
-    context = read(artifact['sources']['context']['path'])
+    context = context_for(artifact)
     outside(path, context.get('repository', context['checkout']))
     value = read(path)
-    if (value.get('verification_version') != 1
-            or value.get('preparation_id') != artifact['preparation_id']
+    version = 2 if artifact.get('preparation_version', 1) >= 3 else 1
+    if (value.get('verification_version') != version
+            or not compatible_reference(value, artifact)
+            or not text(value.get('preparation_id'))
             or value.get('head_sha') != artifact['identity']['head_sha']
             or value.get('pr_url') != artifact['identity']['pr_url']):
         raise ValueError('engineering verification identity is stale')
