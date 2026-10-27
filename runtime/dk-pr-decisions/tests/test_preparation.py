@@ -27,6 +27,51 @@ class PreparationTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.package = Package(self.temp.name)
 
+    def test_codex_output_failure_blocks_preparation_without_changing_iteration_history(self):
+        package = self.package
+        state = module('output_failure_state', 'dk-pr-iter/scripts/run_state.py')
+        record = {}
+        state.start_run(record)
+        record['cycles'] = [{'number': 1, 'head': package.head}]
+        record['repairs'] = [{'cycle': 1, 'number': 1}]
+        record['run_history'] = [{'cycles': [{'number': 5}], 'outcome': 'limited'}]
+        record_path = package.write('run-record.json', record)
+        original = record_path.read_bytes()
+        package.manifest['mode'] = 'iteration'
+        package.manifest['evidence']['run_history'] = ['run-record.json']
+        package.write('manifest.json', package.manifest)
+        binary = package.root / 'bin'
+        binary.mkdir()
+        model = binary / 'codex'
+        calls = package.root / 'model-calls.txt'
+        model.write_text('#!/usr/bin/env python3\nimport json,pathlib,sys\n'
+                         f'with pathlib.Path({str(calls)!r}).open("a") as f: f.write("call\\n")\n'
+                         'output = pathlib.Path(sys.argv[sys.argv.index("-o") + 1])\n'
+                         'output.write_text(\'{"partial":\')\n'
+                         f'print({json.dumps(response())!r})\n'
+                         'print(f"Failed to write last message file {json.dumps(str(output))}: Disk quota exceeded", file=sys.stderr)\n')
+        model.chmod(0o755)
+        env = {**os.environ, 'PATH': str(binary) + os.pathsep + os.environ['PATH'], 'DK_HOST': 'codex'}
+        env.pop('DK_REVIEW_STATS_TRACE', None)
+        versions_before = sorted(package.versions.iterdir())
+        result = subprocess.run([sys.executable, str(ROOT / 'dk-pr-decisions/scripts/decisions.py'),
+                                 'prepare', '--input-manifest', str(package.manifest_path),
+                                 '--output-dir', str(package.versions)], env=env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(receipt['status'], 'error')
+        self.assertEqual(receipt['error']['code'], 'provider_output_failed')
+        self.assertFalse(receipt['publication']['updated'])
+        self.assertIn('Repair storage', receipt['error']['message'])
+        self.assertNotIn('readiness', result.stdout)
+        self.assertNotIn('Model JSON invalid', result.stdout)
+        self.assertEqual(calls.read_text(), 'call\n')
+        self.assertEqual(record_path.read_bytes(), original)
+        self.assertEqual(sorted(package.versions.iterdir()), versions_before)
+        with self.assertRaisesRegex(ValueError, 'preparation required'):
+            state.next_cycle(record, package.head)
+        self.assertEqual(record_path.read_bytes(), original)
+
     def empty_feedback(self):
         identity = {'url': self.package.context['url'], 'headRefOid': self.package.head}
         inline = {'schemaVersion': 1, 'complete': True, 'pullRequest': identity,
