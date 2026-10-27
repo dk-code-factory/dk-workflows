@@ -25,12 +25,12 @@ All commands return one JSON object:
 - `text`: choice text, without the generated `**Choice:**` prefix.
 - `source_type`: `description`, `discussion`, `code`, `user`, or `local`.
 - `references`: exact source URLs; empty for a directly authorized user choice or local handoff.
-- `source`: user instruction, local evidence, description snapshot hash, or null when references supply the source.
+- `source`: exact user instruction, local evidence, retained description/discussion evidence (JSON text including the original snapshot), or null when only references are available in older records. Changed or deleted discussion sources include original agreement evidence alongside current comments (null for deleted comments), so preparation must reconcile the change.
 - `status`: `active`, `candidate`, or `superseded`.
 - `publication_status`: `published` or `unpublished`, based on the fetched/cached description.
 - `superseded_by`: replacement ID for historical entries, otherwise null.
 
-Existing Decisions entries are read as Markdown blocks, including multiline bullets and standalone paragraphs. Their text is preserved rather than rewritten by analysis. Entries from discussions that have identical normalized text share an ID with the corresponding description entry. Different wording remains distinct; reconcile a changed agreement explicitly with `replace`.
+Existing Decisions entries are read as Markdown blocks, including multiline bullets and standalone paragraphs. Their text is preserved rather than rewritten by analysis. Entries from discussions that have identical normalized text share an ID with the corresponding description entry. Different wording remains distinct; reconcile a changed agreement explicitly with `replace`. Saved agreements survive source edits and deletion; repeated recording preserves the first evidence. Missing evidence in an older cache cannot be reconstructed retroactively.
 
 `context` includes `pr_url`, `head_sha`, `body_hash`, and `verified` in `data`, plus the unified records. It retains `live_decisions`, `discussion_decisions`, and `local_decisions` as compatibility evidence. Use active unified records for current constraints; the raw live section can contain superseded history. `list` describes a cached snapshot and makes no freshness claim. `suggest` returns candidates only; use `add` or `replace` to select one before publication.
 
@@ -46,7 +46,7 @@ The live body/head comparison is best effort, not an atomic GitHub compare-and-s
 
 ## Migration
 
-Previously `scan` and `add` published automatically. Now use `scan --publish`, or run `publish` after `scan`, `add`, or `replace`. Previously `list` refreshed; now run `scan` when fresh data is needed. Existing cache files remain readable.
+Previously `scan` and `add` published automatically. Now use `scan --publish`, or run `publish` after `scan`, `add`, or `replace`. Previously `list` refreshed; now run `scan` when fresh data is needed. Existing cache files remain readable. See the [storage contract](storage.md) for an exclusive persistent root, migration and recovery.
 
 All former top-level command results now live under `data`; publication results always live under `publication`. Consumers should inspect `schema_version` and `status` before reading `data`. The PR review runner accepts the new context envelope and legacy context files.
 

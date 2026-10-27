@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.2.1.
+Independent MIT plugin for Claude Code and Codex. Version 1.3.0.
 
 ## Install
 
@@ -245,3 +245,13 @@ one reassessment. Identical and supported operational refreshes use zero model c
 affected/reused IDs and actual call counts. Review coverage, session identities, CI,
 Decisions synchronization and iteration budgets retain their existing gates. See
 [the preparation artifact contract](runtime/dk-pr-decisions/references/preparation.md).
+
+Decisions can persist across independent runs by setting `DK_PR_DECISIONS_HOME` to
+an absolute private directory shared by those runs. It is the complete cache root:
+`<root>/<host>/<base-owner>/<base-repo>/pr-<number>.json`, including fork PRs.
+When unset, the default remains `${XDG_DATA_HOME:-~/.local/share}/dk-pr-decisions`.
+Explicit stores are exclusive; invalid or repository-local paths fail without
+fallback. Hosts provide persistent storage and access. See the
+[Decisions storage contract](runtime/dk-pr-decisions/references/storage.md) for
+seeding, migration, locking and interruption recovery. Recovered choices require
+live context refresh and engineering preparation before dependent work.

@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
 import pytest
@@ -535,6 +536,8 @@ Path(sys.argv[sys.argv.index('-o') + 1]).write_text(json.dumps(result))
 ''')
             run_local = subprocess.run
             def run_provider(argv, **kwargs):
+                if argv[0] == 'git':
+                    return run_local(argv, **kwargs)
                 self.assertEqual(argv[:2], ['codex', 'exec'])
                 self.assertEqual(Path(argv[argv.index('-C') + 1]), kwargs['cwd'])
                 return run_local([sys.executable, str(provider), *argv[1:]], **kwargs)
@@ -575,6 +578,7 @@ Path(sys.argv[sys.argv.index('-o') + 1]).write_text(json.dumps(result))
                     calls.append(source)
                     return [{'text': source + ' candidate', 'references': [state['pr']['url']]}]
                 with patch.object(sys, 'argv', ['decisions.py', 'suggest', *selection]), \
+                     patch.object(mod, 'transaction', return_value=nullcontext(state['pr']['url'])), \
                      patch.object(mod, 'scan', return_value=(state, Path('unused.json'))), \
                      patch.object(mod, 'suggest_from_code', side_effect=lambda *_: discover('code')), \
                      patch.object(mod, 'suggest_from_description', side_effect=lambda *_: discover('description')), \
@@ -596,6 +600,7 @@ Path(sys.argv[sys.argv.index('-o') + 1]).write_text(json.dumps(result))
             path = Path(td)/'state.json'
             argv = ['decisions.py', 'add', '--json', json.dumps(item)]
             with patch.object(sys, 'argv', argv), patch.object(mod, 'scan', return_value=(state, path)), \
+                 patch.object(mod, 'transaction', return_value=nullcontext('https://github.com/o/r/pull/2')), \
                  patch.object(mod, 'publish', return_value={'updated': True, 'pending': []}) as publish, \
                  patch('sys.stdout', new_callable=io.StringIO):
                 mod.cli()
@@ -610,6 +615,7 @@ Path(sys.argv[sys.argv.index('-o') + 1]).write_text(json.dumps(result))
                  'code_suggestions': {}}
         with tempfile.TemporaryDirectory() as td:
             with patch.object(sys, 'argv', ['decisions.py', 'add', '--json', json.dumps(item)]), \
+                 patch.object(mod, 'transaction', return_value=nullcontext('https://github.com/o/r/pull/2')), \
                  patch.object(mod, 'scan', return_value=(state, Path(td)/'state.json')):
                 with self.assertRaisesRegex(ValueError, 'exact discussion or code source'):
                     mod.cli()
