@@ -12,6 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 import tempfile
+import time
 from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
@@ -326,6 +327,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
         for index, (name, job) in enumerate(jobs.items()):
             job['path'] = directory / f'{index}.json'
             write(job['path'], job['handoff'])
+            job['stats'] = stats.fork() if stats else None
             if session:
                 session.record(name, 'running')
 
@@ -333,8 +335,9 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
 
     def execute(name):
         job = jobs[name]
-        worker_stats = stats.fork() if stats else None
+        worker_stats = job['stats']
         checking = False
+        shared_guard = False
         try:
             with worker_stats.invocation(name, job['handoff'], preparation['reviewers'][name]) if worker_stats else nullcontext():
                 result = run_skill_reviewer(provider_map[name], job['skill'], job['path'], checkout)
@@ -343,8 +346,10 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             # worker or the coordinator has been interrupted.
             with checkpoint_lock:
                 checking = True
+                shared_guard = True
                 unchanged()
                 checking = False
+                shared_guard = False
                 validate_response(result, lines)
                 status = {'tokens_exhausted': 'exhausted', 'incomplete': 'incomplete'}.get(
                     result.get('status'), 'completed')
@@ -356,18 +361,17 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                     worker_stats.safe(worker_stats.finish, status, result, result.get('message'))
             return result, None
         except Exception as exc:
+            if worker_stats:
+                job['duration_seconds'] = time.monotonic() - worker_stats.start
             with checkpoint_lock:
                 guard_failure = checking
                 try:
                     unchanged()
                 except Exception as guard_error:
                     exc, guard_failure = guard_error, True
-                if session:
-                    session.record(name, 'failed', reason=str(exc))
-                if worker_stats:
-                    worker_stats.safe(worker_stats.finish, 'failed', reason=str(exc))
+                    shared_guard = True
             return None, {'reviewer': name, 'status': 'failed', 'reason': str(exc),
-                          'guard_failure': guard_failure}
+                          'guard_failure': guard_failure, 'shared_guard': shared_guard}
 
     if jobs:
         # Every worker needs its own Context, carrying retained bindings and the
@@ -383,9 +387,20 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
         result, failure = results[name]
         if failure:
             if failure['guard_failure']:
+                if session and not failure['shared_guard']:
+                    session.record(name, 'failed', reason=failure['reason'])
                 guard_failures.append(failure)
             else:
-                failed_reviewers.append({k: v for k, v in failure.items() if k != 'guard_failure'})
+                # Finalize provider failures only after normal coordinator drain.
+                # An interrupted run retains unknown attempts and raw traces.
+                if session:
+                    session.record(name, 'failed', reason=failure['reason'])
+                worker_stats = jobs[name]['stats']
+                if worker_stats:
+                    worker_stats.safe(worker_stats.finish, 'failed', reason=failure['reason'],
+                                      duration_seconds=jobs[name]['duration_seconds'])
+                failed_reviewers.append({k: v for k, v in failure.items()
+                                         if k not in ('guard_failure', 'shared_guard')})
             continue
         if result.get('status') == 'tokens_exhausted':
             skipped_reviewers.append({'reviewer': name, 'reason': result['message']})
@@ -406,7 +421,8 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
     findings.sort(key=lambda x: (('Major', 'Minor', 'Nit').index(x['severity']), x['path'], x['line']))
     if guard_failures or failed_reviewers:
         first = (guard_failures or failed_reviewers)[0]
-        return outcome({'complete': False, 'failed_reviewer': first['reviewer'],
+        return outcome({'complete': False,
+                        **({} if first.get('shared_guard') else {'failed_reviewer': first['reviewer']}),
                         'reason': first['reason'], 'findings': findings,
                         **({'guard_failure': True} if guard_failures else {}),
                         'skipped_reviewers': skipped_reviewers})

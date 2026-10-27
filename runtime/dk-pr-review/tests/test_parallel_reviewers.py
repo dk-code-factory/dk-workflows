@@ -1,5 +1,8 @@
 """Real command-provider rendezvous and durable concurrent review evidence."""
 import json
+import multiprocessing
+import os
+import signal
 import sys
 import threading
 import time
@@ -149,24 +152,46 @@ def test_all_workers_drain_and_successful_checkpoints_survive(pinned, failure):
     context, decisions, prep, names, git = pinned
     session = Session(context, prep, names)
     rendezvous = threading.Barrier(2)
+    pending = threading.Event()
+    release = threading.Event()
+    shutdown = threading.Event()
     finished = threading.Event()
     original_record = session.record
+    completed = runner.as_completed
     def record(name, status, **kwargs):
         if failure == 'storage' and name == names[0] and status == 'completed':
             raise OSError('mandatory checkpoint unavailable')
         return original_record(name, status, **kwargs)
+    def completions(futures):
+        for future in completed(futures):
+            if failure != 'interrupt' and not release.is_set():
+                assert pending.is_set() and not finished.is_set()
+                release.set()
+            yield future
+    class Pool(runner.ThreadPoolExecutor):
+        def shutdown(self, wait=True, **kwargs):
+            if failure == 'interrupt':
+                assert pending.is_set() and not finished.is_set()
+                shutdown.set()
+                release.set()
+                assert wait
+            return super().shutdown(wait=wait, **kwargs)
     def provider(name, *args):
         rendezvous.wait(timeout=5)
         if name == names[0]:
+            assert pending.wait(timeout=5)
             if failure == 'interrupt':
                 raise KeyboardInterrupt()
             if failure == 'provider':
                 raise RuntimeError('provider unavailable')
             return {'findings': []}
-        time.sleep(.1)
+        pending.set()
+        assert release.wait(timeout=5)
         finished.set()
         return {'findings': [finding()]}
     with session.execution(), patch.object(session, 'record', side_effect=record), \
+            patch.object(runner, 'ThreadPoolExecutor', Pool), \
+            patch.object(runner, 'as_completed', side_effect=completions), \
             patch.object(runner, 'run_skill_reviewer', side_effect=provider):
         if failure == 'interrupt':
             with pytest.raises(KeyboardInterrupt):
@@ -176,6 +201,7 @@ def test_all_workers_drain_and_successful_checkpoints_survive(pinned, failure):
             assert result['outcome'] == ('guard_failed' if failure == 'storage' else 'provider_failed')
             assert result['findings'] == [{**finding(), 'reviewers': names[1:]}]
     assert finished.is_set()
+    assert shutdown.is_set() == (failure == 'interrupt')
     assert session.cached(names[1]) == {'findings': [finding()]}
     resumed = Session(context, prep, names, path=session.path, resume=True)
     with resumed.execution(), patch.object(runner, 'run_skill_reviewer', return_value={'findings': []}) as provider:
@@ -207,20 +233,109 @@ def test_coordinator_interruption_drains_workers_before_unlocking_session(pinned
     context, decisions, prep, names, git = pinned
     session = Session(context, prep, names)
     started = threading.Barrier(3)
+    release = threading.Event()
+    interrupting = threading.Event()
+    draining = threading.Event()
+    class Pool(runner.ThreadPoolExecutor):
+        def shutdown(self, wait=True, **kwargs):
+            assert interrupting.is_set()
+            draining.set()
+            release.set()
+            assert wait
+            return super().shutdown(wait=wait, **kwargs)
     def provider(name, *args):
         started.wait(timeout=5)
-        time.sleep(.1)
+        assert release.wait(timeout=5)
         return {'findings': [finding()]}
     def interrupted(futures):
         started.wait(timeout=5)
+        assert all(not future.done() for future in futures)
+        interrupting.set()
         raise KeyboardInterrupt()
     with session.execution(), patch.object(runner, 'as_completed', side_effect=interrupted), \
+            patch.object(runner, 'ThreadPoolExecutor', Pool), \
             patch.object(runner, 'run_skill_reviewer', side_effect=provider):
         with pytest.raises(KeyboardInterrupt):
             runner.review(context, names, '', decisions, '', prep, session=session)
         assert all(session.cached(name) == {'findings': [finding()]} for name in names)
+        assert draining.is_set()
     resumed = Session(context, prep, names, path=session.path, resume=True)
     with resumed.execution(), patch.object(runner, 'run_skill_reviewer') as provider:
         result = runner.review(context, names, '', decisions, '', prep, session=resumed)
     provider.assert_not_called()
     assert result['complete'] and result['reused_reviewers'] == names
+
+
+@pytest.mark.parametrize('reuse', [False, True])
+def test_shared_checkout_guard_does_not_blame_an_observer_or_trust_tainted_results(pinned, reuse):
+    context, decisions, prep, names, git = pinned
+    session = Session(context, prep, names)
+    if reuse:
+        session.record(names[0], 'completed', {'findings': [finding()]})
+    stats = for_iteration(context, prep, names, cycle=1, attempt='shared-guard')
+    started = threading.Barrier(1 if reuse else 2)
+    changed = threading.Event()
+    def provider(name, *args):
+        started.wait(timeout=5)
+        if name == names[1]:
+            (Path(context['checkout']) / 'provider-cache').write_text('untracked')
+            changed.set()
+        assert changed.wait(timeout=5)
+        return {'findings': [finding()]}
+    with session.execution(), patch.object(runner, 'run_skill_reviewer', side_effect=provider):
+        result = runner.review(context, names, '', decisions, '', prep, stats=stats, session=session)
+    assert result['outcome'] == 'guard_failed'
+    assert result['findings'] == ([{**finding(), 'reviewers': names[:1]}] if reuse else [])
+    assert 'failed_reviewer' not in result and 'failed_reviewers' not in result
+    assert session.cached(names[0]) == ({'findings': [finding()]} if reuse else None)
+    assert session.cached(names[1]) is None
+    reviews = api.ledger(stats.repo)['runs'][stats.run_id]['reviews']
+    assert reviews[names[0]]['status'] == ('not_run' if reuse else 'running')
+    assert reviews[names[1]]['status'] == 'running'
+
+
+def test_process_group_interruption_does_not_count_terminated_providers_as_failures(commands):
+    context, decisions, prep, providers, names, root = commands(('ok', 'ok'))
+    Path(providers[0]['command'][1]).write_text('''import sys, time
+from pathlib import Path
+name, root = sys.argv[2], Path(sys.argv[4])
+(root / (name + '-started')).write_text('ready')
+time.sleep(60)
+''')
+    session = Session(context, prep, names)
+    stats = for_iteration(context, prep, names, cycle=1, attempt='sigint')
+    process_context = multiprocessing.get_context('fork')
+    outcome = process_context.Queue()
+    def review():
+        os.setpgrp()
+        try:
+            with session.execution():
+                runner.review(context, providers, '', decisions, '', prep, stats=stats, session=session)
+        except KeyboardInterrupt:
+            outcome.put('interrupted')
+        else:
+            outcome.put('returned')
+    process = process_context.Process(target=review)
+    process.start()
+    try:
+        deadline = time.monotonic() + 10
+        while len(list(root.glob('*-started'))) != 2:
+            assert process.is_alive() and time.monotonic() < deadline
+            time.sleep(.01)
+        os.killpg(process.pid, signal.SIGINT)
+        process.join(timeout=10)
+        assert not process.is_alive() and process.exitcode == 0
+        assert outcome.get(timeout=1) == 'interrupted'
+    finally:
+        if process.is_alive():
+            os.killpg(process.pid, signal.SIGKILL)
+            process.join(timeout=5)
+        outcome.close()
+    history = json.loads(session.path.read_text())
+    assert all(review['status'] == 'running' for review in history['reviews'].values())
+    assert all(session.cached(name) is None for name in names)
+    reviews = api.ledger(stats.repo)['runs'][stats.run_id]['reviews']
+    assert all(review['status'] == 'running' for review in reviews.values())
+    traces = [json.loads(path.read_text()) for path in stats.directory.glob('*-execution.json')]
+    assert len(traces) == 2
+    assert all(trace['attempts'][0]['returncode'] == -signal.SIGINT for trace in traces)

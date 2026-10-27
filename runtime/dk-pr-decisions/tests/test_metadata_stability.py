@@ -234,7 +234,11 @@ def test_full_workflow_operational_refresh_resume_and_completion(tmp_path, monke
     monkeypatch.setattr(runner, 'describe_reviewer', lambda name: prepared['reviewers'][name])
     monkeypatch.setattr(runner, 'skill_path', lambda name: package.repo / 'transform.py')
     session = review_sessions.Session(package.context, prepared, names, path=binding['session_file'])
-    with session.execution(), patch.object(runner, 'run_skill_reviewer', side_effect=[{'findings': []}, KeyboardInterrupt]):
+    def reviewer(name, *args):
+        if name == names[1]:
+            raise KeyboardInterrupt()
+        return {'findings': []}
+    with session.execution(), patch.object(runner, 'run_skill_reviewer', side_effect=reviewer):
         with pytest.raises(KeyboardInterrupt):
             runner.review(package.context, names, '', package.decisions, '', prepared, session=session)
     old = read(session.path, {})

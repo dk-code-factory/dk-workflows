@@ -111,13 +111,13 @@ class Capture:
         self.update_sidecar()
         api.render_reports()
 
-    def finish(self, status, result=None, reason=None):
+    def finish(self, status, result=None, reason=None, duration_seconds=None):
         raw = self.safe(api.retain, self.repo, 'results', {'run_id': self.run_id,
                                'reviewer': self.name, 'result': result, 'reason': reason})
         trace = read(self.trace, {'attempts': []})
         attempts = trace['attempts']
         # Leaf execution totals are informative only; parent wall time is counted once.
-        metadata = {'duration_seconds': time.monotonic() - self.start,
+        metadata = {'duration_seconds': time.monotonic() - self.start if duration_seconds is None else duration_seconds,
                     'prompt_fingerprint': self.prompt_fingerprint,
                     'artifacts': [p for p in (self.artifact, raw, str(self.trace) if self.trace.exists() else None) if p],
                     'correction_retries': max(a['attempt'] for a in attempts) if attempts else None,
@@ -192,10 +192,11 @@ class OfflineCapture:
     def raw(self, value):
         self.save('raw', {'run_id': self.run_id, 'reviewer': self.name, 'stdout': value})
 
-    def finish(self, status, result=None, reason=None):
+    def finish(self, status, result=None, reason=None, duration_seconds=None):
         self.save('record-review', {'run_id': self.run_id, 'reviewer': self.name, 'status': status,
             'findings': result['findings'] if status == 'completed' else [],
-            'duration_seconds': time.monotonic() - self.start, 'reason': reason,
+            'duration_seconds': time.monotonic() - self.start if duration_seconds is None else duration_seconds,
+            'reason': reason,
             'artifacts': [str(self.trace)] if self.trace.exists() else []})
 
     def failure(self, name, reason):
