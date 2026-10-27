@@ -17,6 +17,7 @@ from stats_capture import Capture, for_iteration, api
 from preparation_fixtures import artifact
 from shared.reviewer_telemetry import ENV, capture, trace_path
 from shared.review_sessions import Session
+from shared import executors
 
 
 def responses(names, values):
@@ -146,11 +147,8 @@ def test_execution_corrections_retained_without_nested_double_counting(pinned, m
         Path(args[args.index('-o') + 1]).write_text(responses.pop(0))
         return subprocess.CompletedProcess(
             args, 0, '', 'model: exposed-model\nuser\nreview\ntokens used\n7\n')
-    # Only replace model execution; git validation still uses real subprocesses.
-    real_run = subprocess.run
-    def execute(args, *a, **k):
-        return fake(args, *a, **k) if args[0] == 'codex' else real_run(args, *a, **k)
-    with patch.object(runner.subprocess, 'run', side_effect=execute):
+    # Replace the owned provider transport; git validation stays real.
+    with patch.object(executors, 'run_provider', side_effect=fake):
         result = runner.review(context, names[:1], '', decisions, '', prep, stats=stats)
     assert result['complete']
     rev = api.ledger(stats.repo)['runs'][stats.run_id]['reviews'][names[0]]

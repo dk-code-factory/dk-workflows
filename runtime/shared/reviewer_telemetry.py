@@ -111,7 +111,7 @@ def capture(function, *args, telemetry_prompt, telemetry_attempt, telemetry_prov
                  'model': getattr(result, 'model', None), 'usage': getattr(result, 'usage', None),
                  'stdout': output_text(getattr(evidence, 'stdout', None)),
                  'stderr': output_text(getattr(evidence, 'stderr', None)),
-                 'returncode': getattr(result, 'returncode', None), 'error': error,
+                 'returncode': getattr(evidence, 'returncode', None), 'error': error,
                  'error_type': type(failure).__name__ if failure else None,
                  'timeout_seconds': getattr(failure, 'timeout', None)}
         try:

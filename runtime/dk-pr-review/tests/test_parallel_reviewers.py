@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -174,7 +175,6 @@ def test_all_workers_drain_and_successful_checkpoints_survive(pinned, failure):
                 assert pending.is_set() and not finished.is_set()
                 shutdown.set()
                 release.set()
-                assert wait
             return super().shutdown(wait=wait, **kwargs)
     def provider(name, *args):
         rendezvous.wait(timeout=5)
@@ -241,7 +241,6 @@ def test_coordinator_interruption_drains_workers_before_unlocking_session(pinned
             assert interrupting.is_set()
             draining.set()
             release.set()
-            assert wait
             return super().shutdown(wait=wait, **kwargs)
     def provider(name, *args):
         started.wait(timeout=5)
@@ -294,8 +293,10 @@ def test_shared_checkout_guard_does_not_blame_an_observer_or_trust_tainted_resul
     assert reviews[names[1]]['status'] == 'running'
 
 
-def test_process_group_interruption_does_not_count_terminated_providers_as_failures(commands):
+@pytest.mark.parametrize(('target', 'count'), [('group', 2), ('controller', 1), ('controller', 2)])
+def test_interruption_does_not_count_terminated_providers_as_failures(commands, target, count):
     context, decisions, prep, providers, names, root = commands(('ok', 'ok'))
+    providers, names = providers[:count], names[:count]
     Path(providers[0]['command'][1]).write_text('''import sys, time
 from pathlib import Path
 name, root = sys.argv[2], Path(sys.argv[4])
@@ -319,10 +320,10 @@ time.sleep(60)
     process.start()
     try:
         deadline = time.monotonic() + 10
-        while len(list(root.glob('*-started'))) != 2:
+        while len(list(root.glob('*-started'))) != count:
             assert process.is_alive() and time.monotonic() < deadline
             time.sleep(.01)
-        os.killpg(process.pid, signal.SIGINT)
+        (os.killpg if target == 'group' else os.kill)(process.pid, signal.SIGINT)
         process.join(timeout=10)
         assert not process.is_alive() and process.exitcode == 0
         assert outcome.get(timeout=1) == 'interrupted'
@@ -337,8 +338,8 @@ time.sleep(60)
     reviews = api.ledger(stats.repo)['runs'][stats.run_id]['reviews']
     assert all(review['status'] == 'running' for review in reviews.values())
     traces = [json.loads(path.read_text()) for path in stats.directory.glob('*-execution.json')]
-    assert len(traces) == 2
-    assert all(trace['attempts'][0]['returncode'] == -signal.SIGINT for trace in traces)
+    assert len(traces) == count
+    assert all(trace['attempts'][0]['returncode'] in (-signal.SIGINT, -signal.SIGKILL) for trace in traces)
 
 
 def test_failure_observed_before_a_later_interruption_remains_a_failure(pinned):
@@ -371,3 +372,127 @@ def test_failure_observed_before_a_later_interruption_remains_a_failure(pinned):
     assert reviews[names[0]]['status'] == 'failed'
     assert reviews[names[1]]['status'] == 'completed'
     assert session.cached(names[1]) == {'findings': [finding()]}
+
+
+def test_interrupted_submit_keeps_ownership_of_a_task_without_a_returned_future(pinned):
+    context, decisions, prep, names, git = pinned
+    session = Session(context, prep, names)
+    pending, release, finished = threading.Event(), threading.Event(), threading.Event()
+    class Pool(runner.ThreadPoolExecutor):
+        def submit(self, *args, **kwargs):
+            super().submit(*args, **kwargs)
+            assert pending.wait(timeout=5)
+            raise KeyboardInterrupt()
+        def shutdown(self, **kwargs):
+            assert not finished.is_set()
+            release.set()
+            return super().shutdown(**kwargs)
+    def provider(*args):
+        pending.set()
+        assert release.wait(timeout=5)
+        finished.set()
+        return {'findings': []}
+    with session.execution(), patch.object(runner, 'ThreadPoolExecutor', Pool), \
+            patch.object(runner, 'run_skill_reviewer', side_effect=provider) as calls:
+        with pytest.raises(KeyboardInterrupt):
+            runner.review(context, names, '', decisions, '', prep, session=session)
+        assert finished.is_set() and session.cached(names[0]) == {'findings': []}
+    assert [call.args[0] for call in calls.call_args_list] == names[:1]
+
+
+@pytest.mark.parametrize('terminal', ['completed', 'incomplete', 'exhausted', 'storage'])
+def test_terminal_analytics_measure_provider_end_and_finish_after_storage_failure(pinned, terminal):
+    context, decisions, prep, names, git = pinned
+    names = names[:1]
+    session = Session(context, prep, names)
+    stats = for_iteration(context, prep, names, cycle=1, attempt=terminal)
+    clock = threading.local()
+    timer = SimpleNamespace(monotonic=lambda: getattr(clock, 'value', 0))
+    finish, record = Capture.finish, session.record
+    def provider(*args):
+        clock.value = 10
+        if terminal in ('completed', 'storage'):
+            return {'findings': []}
+        return {'status': 'tokens_exhausted' if terminal == 'exhausted' else terminal,
+                'findings': [], 'message': terminal}
+    def delayed_finish(self, *args, **kwargs):
+        clock.value = 100
+        return finish(self, *args, **kwargs)
+    def store(name, status, **kwargs):
+        if terminal == 'storage' and status == 'completed':
+            raise OSError('checkpoint unavailable')
+        return record(name, status, **kwargs)
+    with session.execution(), patch.object(runner, 'time', timer), \
+            patch.object(sys.modules[Capture.__module__], 'time', timer), \
+            patch.object(Capture, 'finish', delayed_finish), \
+            patch.object(session, 'record', side_effect=store), \
+            patch.object(runner, 'run_skill_reviewer', side_effect=provider):
+        result = runner.review(context, names, '', decisions, '', prep, stats=stats, session=session)
+    review = api.ledger(stats.repo)['runs'][stats.run_id]['reviews'][names[0]]
+    assert review['duration_seconds'] == 10
+    assert review['status'] == ('failed' if terminal == 'storage' else terminal)
+    if terminal == 'storage':
+        assert result['guard_failure'] and session.cached(names[0]) is None
+
+
+def test_interrupts_during_storage_error_drain_never_release_session_early(pinned):
+    context, decisions, prep, names, git = pinned
+    session = Session(context, prep, names)
+    process_context = multiprocessing.get_context('fork')
+    pending, release, finished = [process_context.Event() for _ in range(3)]
+    observations = process_context.Queue()
+    record, cancel = session.record, executors.ProviderCancellation.cancel
+    def review():
+        os.setpgrp()
+        class Pool(runner.ThreadPoolExecutor):
+            def shutdown(self, **kwargs):
+                observations.put('draining')
+                return super().shutdown(**kwargs)
+        def provider(name, *args):
+            if name == names[0]:
+                assert pending.wait(timeout=5)
+                return {'findings': []}
+            pending.set()
+            assert release.wait(timeout=10)
+            finished.set()
+            return {'findings': [finding()]}
+        def store(name, status, **kwargs):
+            if name == names[0] and status in ('completed', 'failed'):
+                raise OSError('persistent checkpoint failure')
+            return record(name, status, **kwargs)
+        def cancelled(scope):
+            cancel(scope)
+            observations.put('cancelled')
+        try:
+            with session.execution(), patch.object(runner, 'ThreadPoolExecutor', Pool), \
+                    patch.object(session, 'record', side_effect=store), \
+                    patch.object(executors.ProviderCancellation, 'cancel', cancelled), \
+                    patch.object(runner, 'run_skill_reviewer', side_effect=provider):
+                runner.review(context, names, '', decisions, '', prep, session=session)
+        except BaseException as exc:
+            observations.put((type(exc).__name__, finished.is_set()))
+    process = process_context.Process(target=review)
+    process.start()
+    try:
+        assert observations.get(timeout=5) == 'draining'
+        for _ in range(2):
+            os.kill(process.pid, signal.SIGINT)
+            assert observations.get(timeout=5) == 'cancelled'
+            with pytest.raises(ValueError, match='already executing'), session.execution():
+                pass
+            assert not finished.is_set()
+            # A repeated drain attempt may report its shutdown before waiting.
+            assert observations.get(timeout=5) == 'draining'
+        release.set()
+        assert observations.get(timeout=5) == ('KeyboardInterrupt', True)
+        process.join(timeout=5)
+        assert process.exitcode == 0
+        assert session.cached(names[1]) == {'findings': [finding()]}
+        with session.execution():
+            pass
+    finally:
+        release.set()
+        if process.is_alive():
+            os.killpg(process.pid, signal.SIGKILL)
+            process.join(timeout=5)
+        observations.close()

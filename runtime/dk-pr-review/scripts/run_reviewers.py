@@ -16,7 +16,7 @@ import time
 from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
-from threading import RLock
+from threading import Event, RLock
 from shared.private_state import write
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -27,7 +27,7 @@ from shared.reviewer_telemetry import capture, transport
 from shared import bindings
 from shared.runtime_bundles import retained_binding, retain
 from shared.review_sessions import Session
-from shared.executors import invoke, ProviderExhausted
+from shared.executors import invoke, ProviderExhausted, provider_cancellation
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())
 _spec = importlib.util.spec_from_file_location('decision_api', ROOT/'dk-pr-decisions/scripts/decisions.py')
@@ -256,11 +256,11 @@ def review(context, reviewers, scope, decisions, rules, preparation, stats=None,
         context = preparation_api.context_for(preparation)
     decisions = validate_decisions(context, decisions)
     preparation = preparation_api.validate(preparation, context, decisions)
-    with bindings.pinned_bindings(preparation['reviewers']):
-        return _review(context, reviewers, scope, decisions, rules, preparation, stats, session)
+    with bindings.pinned_bindings(preparation['reviewers']), provider_cancellation() as cancellation:
+        return _review(context, reviewers, scope, decisions, rules, preparation, stats, session, cancellation)
 
 
-def _review(context, reviewers, scope, decisions, rules, preparation, stats=None, session=None):
+def _review(context, reviewers, scope, decisions, rules, preparation, stats=None, session=None, cancellation=None):
     provider_map = {bindings.key(value): value for value in reviewers}
     reviewers = list(provider_map)
     if any(name not in preparation['reviewers'] for name in reviewers):
@@ -328,19 +328,26 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             job['path'] = directory / f'{index}.json'
             write(job['path'], job['handoff'])
             job['stats'] = stats.fork() if stats else None
+            job['finished'] = Event()
             if session:
                 session.record(name, 'running')
 
     checkpoint_lock = RLock()
+    launch_lock = RLock()
+    launches_closed = False
 
-    def execute(name):
+    def run_reviewer(name):
         job = jobs[name]
         worker_stats = job['stats']
         checking = False
         shared_guard = False
         try:
             with worker_stats.invocation(name, job['handoff'], preparation['reviewers'][name]) if worker_stats else nullcontext():
-                result = run_skill_reviewer(provider_map[name], job['skill'], job['path'], checkout)
+                try:
+                    result = run_skill_reviewer(provider_map[name], job['skill'], job['path'], checkout)
+                finally:
+                    if worker_stats:
+                        job['duration_seconds'] = time.monotonic() - worker_stats.start
             # Serialize guard checks and mandatory checkpoint writes. Each worker
             # persists its evidence before its future completes, even if another
             # worker or the coordinator has been interrupted.
@@ -358,11 +365,10 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                     session.record(name, status, result=result if status == 'completed' else None,
                                    reason=result.get('message'))
                 if worker_stats:
-                    worker_stats.safe(worker_stats.finish, status, result, result.get('message'))
+                    worker_stats.safe(worker_stats.finish, status, result, result.get('message'),
+                                      duration_seconds=job['duration_seconds'])
             return result, None
         except Exception as exc:
-            if worker_stats:
-                job['duration_seconds'] = time.monotonic() - worker_stats.start
             with checkpoint_lock:
                 guard_failure = checking
                 try:
@@ -370,14 +376,30 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                 except Exception as guard_error:
                     exc, guard_failure = guard_error, True
                     shared_guard = True
+                if worker_stats and guard_failure and not shared_guard:
+                    worker_stats.safe(worker_stats.finish, 'failed', reason=str(exc),
+                                      duration_seconds=job['duration_seconds'])
             return None, {'reviewer': name, 'status': 'failed', 'reason': str(exc),
                           'guard_failure': guard_failure, 'shared_guard': shared_guard}
 
+    def execute(name):
+        job = jobs[name]
+        with launch_lock:
+            if launches_closed:
+                return None, None
+            job['started'] = True
+        try:
+            return run_reviewer(name)
+        finally:
+            job['finished'].set()
+
     if jobs:
         # Every worker needs its own Context, carrying retained bindings and the
-        # invocation's registry snapshot. Exiting this block always drains all
-        # launched workers before session/lifecycle completion or error propagation.
-        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        # invocation's registry snapshot. Actual task acknowledgements protect
+        # ownership even when SIGINT interrupts Python's thread-join bookkeeping.
+        pool = ThreadPoolExecutor(max_workers=len(jobs))
+        interruption = None
+        try:
             futures = {pool.submit(copy_context().run, execute, name): name for name in jobs}
             for future in as_completed(futures):
                 name = futures[future]
@@ -392,6 +414,23 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                     if worker_stats and not failure['guard_failure']:
                         worker_stats.safe(worker_stats.finish, 'failed', reason=failure['reason'],
                                           duration_seconds=jobs[name]['duration_seconds'])
+        finally:
+            cancel = isinstance(sys.exception(), KeyboardInterrupt)
+            while True:
+                try:
+                    with launch_lock:
+                        launches_closed = True
+                    if cancel and cancellation:
+                        cancellation.cancel()
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    for job in jobs.values():
+                        if job.get('started'):
+                            job['finished'].wait()
+                    break
+                except KeyboardInterrupt as exc:
+                    interruption, cancel = exc, True
+            if interruption:
+                raise interruption
 
     guard_failures = []
     for name in reviewers:

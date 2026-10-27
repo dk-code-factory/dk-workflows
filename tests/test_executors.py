@@ -1,5 +1,10 @@
 import base64
 import json
+import os
+import threading
+import time
+from contextlib import nullcontext
+from contextvars import copy_context
 from pathlib import Path
 import subprocess
 import sys
@@ -334,7 +339,8 @@ def test_explicit_native_timeout_takes_precedence(tmp_path, monkeypatch):
     assert process.call_args.args[-1] == 30
 
 
-def test_command_timeout_is_enforced_by_real_subprocess(tmp_path, monkeypatch):
+@pytest.mark.parametrize('scoped', [False, True])
+def test_command_timeout_is_enforced_by_real_subprocess(tmp_path, monkeypatch, scoped):
     monkeypatch.setenv('DK_HOST', 'codex')
     monkeypatch.setenv('DK_PROVIDER_TIMEOUT_SECONDS', '1')
     provider = tmp_path / 'slow_provider.py'
@@ -342,7 +348,8 @@ def test_command_timeout_is_enforced_by_real_subprocess(tmp_path, monkeypatch):
                         'print("provider waiting", file=sys.stderr, flush=True)\ntime.sleep(30)\n')
     trace = tmp_path / 'command-trace.json'
     monkeypatch.setenv('DK_REVIEW_STATS_TRACE', str(trace))
-    with pytest.raises(subprocess.TimeoutExpired) as failure:
+    with executors.provider_cancellation() if scoped else nullcontext(), \
+            pytest.raises(subprocess.TimeoutExpired) as failure:
         executors.invoke({'command': [sys.executable, str(provider), '{handoff}']},
                          tmp_path / 'handoff.json', tmp_path, 'Review evidence')
     assert failure.value.timeout == 1
@@ -351,6 +358,97 @@ def test_command_timeout_is_enforced_by_real_subprocess(tmp_path, monkeypatch):
     assert attempt['stdout'] == 'partial command review\n'
     assert attempt['stderr'] == 'provider waiting\n'
     assert attempt['error_type'] == 'TimeoutExpired'
+
+
+def test_cancelled_scope_prevents_another_provider_or_correction_start(tmp_path, monkeypatch):
+    process = Mock(side_effect=AssertionError('provider must not start'))
+    monkeypatch.setattr(executors.subprocess, 'Popen', process)
+    with executors.provider_cancellation() as scope:
+        scope.cancel()
+        with pytest.raises(executors.ProviderCancelled):
+            executors.run_provider(['provider'], text=True, capture_output=True)
+        with pytest.raises(executors.ProviderCancelled):
+            executors.invoke({'command': ['provider']}, tmp_path / 'handoff', tmp_path, 'correction', attempt=1)
+    process.assert_not_called()
+    executors.managed_update.assert_not_called()
+
+
+def test_cancellation_is_local_to_the_owned_transport_scope(tmp_path):
+    provider = tmp_path / 'provider.py'
+    provider.write_text('''import sys, time
+from pathlib import Path
+root, name = Path(sys.argv[1]), sys.argv[2]
+(root / (name + '-ready')).write_text('ready')
+while not (root / (name + '-release')).exists():
+    time.sleep(.01)
+print(name)
+''')
+    scopes, outcomes = {}, {}
+    def execute(name):
+        with executors.provider_cancellation() as scope:
+            scopes[name] = scope
+            try:
+                outcomes[name] = executors.run_provider(
+                    [sys.executable, str(provider), str(tmp_path), name],
+                    text=True, capture_output=True, timeout=30)
+            except executors.ProviderCancelled as exc:
+                outcomes[name] = exc
+    threads = [threading.Thread(target=execute, args=(name,)) for name in ('first', 'second')]
+    for thread in threads:
+        thread.start()
+    try:
+        deadline = time.monotonic() + 5
+        while len(list(tmp_path.glob('*-ready'))) != 2:
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+        scopes['first'].cancel()
+        threads[0].join(timeout=5)
+        assert not threads[0].is_alive()
+        assert isinstance(outcomes['first'], executors.ProviderCancelled)
+        assert not scopes['second'].cancelled.is_set()
+        assert 'second' not in outcomes
+        (tmp_path / 'second-release').write_text('release')
+        threads[1].join(timeout=5)
+        assert outcomes['second'].returncode == 0 and outcomes['second'].stdout == 'second\n'
+    finally:
+        for scope in scopes.values():
+            scope.cancel()
+        for thread in threads:
+            thread.join(timeout=5)
+
+
+def test_native_cancellation_finishes_managed_lifecycle_before_worker_returns(tmp_path, monkeypatch):
+    provider = tmp_path / 'codex'
+    ready = tmp_path / 'ready'
+    provider.write_text(f'#!{sys.executable}\nfrom pathlib import Path\nimport time\n'
+                        f'Path({str(ready)!r}).write_text("ready")\ntime.sleep(30)\n')
+    provider.chmod(0o755)
+    monkeypatch.setenv('PATH', str(tmp_path) + os.pathsep + os.environ['PATH'])
+    monkeypatch.setenv('DK_HOST', 'codex')
+    lifecycle = Mock(return_value={'token': 'owned-invocation'})
+    monkeypatch.setattr(executors, 'managed_update', lifecycle)
+    outcome = []
+    def execute():
+        try:
+            executors.execute('Controlled offline native transport', tmp_path)
+        except executors.ProviderCancelled as exc:
+            outcome.append(exc)
+            assert [call.args[2] for call in lifecycle.call_args_list] == ['entry', 'complete']
+    with executors.provider_cancellation() as scope:
+        context = copy_context()
+        thread = threading.Thread(target=context.run, args=(execute,))
+        thread.start()
+        try:
+            deadline = time.monotonic() + 5
+            while not ready.exists():
+                assert time.monotonic() < deadline
+                time.sleep(.01)
+            scope.cancel()
+            thread.join(timeout=5)
+            assert not thread.is_alive() and len(outcome) == 1
+        finally:
+            scope.cancel()
+            thread.join(timeout=5)
 
 
 
