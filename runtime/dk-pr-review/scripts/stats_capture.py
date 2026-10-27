@@ -4,16 +4,17 @@ from pathlib import Path
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 import importlib.util
 import json
-import os
 import sys
 import time
+from copy import copy
 from contextlib import contextmanager
 from pathlib import Path
+from threading import RLock
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())
 sys.path.insert(0, str(ROOT))
 from shared.private_state import read, mutate
-from shared.reviewer_telemetry import ENV
+from shared.reviewer_telemetry import select_trace
 
 spec = importlib.util.spec_from_file_location('review_stats_v1', ROOT / 'dk-pr-iter/scripts/review_stats.py')
 api = importlib.util.module_from_spec(spec)
@@ -41,6 +42,7 @@ def iteration_state(repo, pr):
 
 class Capture:
     def __init__(self, context, preparation, reviewers, cycle=None, attempt=None):
+        self.lock = RLock()
         self.context, self.preparation, self.reviewers = context, preparation, reviewers
         self.repo, pr = api.pr_identity(context['url'])
         outside_checkout(api.ledger_path(self.repo), context)
@@ -67,10 +69,15 @@ class Capture:
 
     def safe(self, function, *args, **kwargs):
         try:
-            return function(*args, **kwargs)
+            with self.lock:
+                return function(*args, **kwargs)
         except Exception as exc:
             self.warning(exc)
             return None
+
+    def fork(self):
+        # Invocation fields belong to one worker; ledger and sidecar share a lock.
+        return copy(self)
 
     def update_sidecar(self):
         self.sidecar.write_text(json.dumps({'api_version': 1, 'repository': self.repo,
@@ -81,20 +88,13 @@ class Capture:
     def invocation(self, name, handoff, descriptor):
         review = self.run['reviews'][name]
         trace = self.directory / (review['id'] + '-execution.json')
-        old = os.environ.get(ENV)
-        os.environ[ENV] = str(trace)
         self.trace, self.name, self.start = trace, name, time.monotonic()
         self.prompt_fingerprint = api.digest({'descriptor': descriptor, 'handoff': handoff})
         self.artifact = self.safe(self.retain_sources, handoff, descriptor)
         self.safe(api.record_review, self.repo, self.run_id, name, status='running',
                   prompt_fingerprint=self.prompt_fingerprint)
-        try:
+        with select_trace(str(trace)):
             yield
-        finally:
-            if old is None:
-                os.environ.pop(ENV, None)
-            else:
-                os.environ[ENV] = old
 
     def retain_sources(self, handoff, descriptor):
         snapshot = {'handoff': handoff, 'descriptor': descriptor,
@@ -151,6 +151,7 @@ def for_iteration(context, preparation, reviewers, cycle=None, attempt=None):
 class OfflineCapture:
     """Retain replay inputs beside the external handoff if private storage fails."""
     def __init__(self, context, preparation, reviewers, cycle, attempt):
+        self.lock = RLock()
         self.directory = Path(context['patch']).parent / 'review-stats-recovery'
         outside_checkout(self.directory, context)
         self.context = context
@@ -163,9 +164,13 @@ class OfflineCapture:
 
     def safe(self, function, *args, **kwargs):
         try:
-            return function(*args, **kwargs)
+            with self.lock:
+                return function(*args, **kwargs)
         except Exception as exc:
             print(f'review stats missing data; recovery: {self.directory}: {exc}', file=sys.stderr)
+
+    def fork(self):
+        return copy(self)
 
     def save(self, category, payload):
         path = self.directory / (category + '-' + api.digest(payload) + '.json')
@@ -176,16 +181,9 @@ class OfflineCapture:
     def invocation(self, name, handoff, descriptor):
         self.name, self.start = name, time.monotonic()
         self.trace = self.directory / (api.digest([self.run_id, name]) + '-execution.json')
-        old = os.environ.get(ENV)
-        os.environ[ENV] = str(self.trace)
         self.safe(self.sources, handoff, descriptor)
-        try:
+        with select_trace(str(self.trace)):
             yield
-        finally:
-            if old is None:
-                os.environ.pop(ENV, None)
-            else:
-                os.environ[ENV] = old
 
     def sources(self, handoff, descriptor):
         return self.save('sources', {'handoff': handoff, 'descriptor': descriptor,

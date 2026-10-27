@@ -15,8 +15,18 @@ sys.path.insert(0, str(ROOT / 'dk-pr-decisions/tests'))
 import run_reviewers as runner
 from stats_capture import Capture, for_iteration, api
 from preparation_fixtures import artifact
-from shared.reviewer_telemetry import ENV, capture
+from shared.reviewer_telemetry import ENV, capture, trace_path
 from shared.review_sessions import Session
+
+
+def responses(names, values):
+    by_name = dict(zip(names, values))
+    def respond(name, *args):
+        value = by_name[runner.bindings.key(name)]
+        if isinstance(value, BaseException):
+            raise value
+        return value
+    return respond
 
 
 @pytest.fixture
@@ -58,7 +68,7 @@ def test_capture_before_aggregation_and_independent_review_session(pinned):
     context, decisions, prep, names, git = pinned
     stats = Capture(context, prep, names, cycle=1)
     def fake(name, skill, handoff_path, checkout):
-        assert os.environ[ENV].endswith('-execution.json')
+        assert trace_path().endswith('-execution.json')
         # A configured parent owns all observations, including nested skills.
         assert json.loads(handoff_path.read_text())['reviewer_addendum']
         return {'findings': [finding()]}
@@ -95,8 +105,8 @@ def test_partial_failure_retains_completed_and_later_reviewers(pinned, monkeypat
     prep['preparation_id'] = runner.preparation_api.digest({k: v for k, v in prep.items() if k != 'preparation_id'})
     names.append(third)
     stats = Capture(context, prep, names, cycle=1)
-    with patch.object(runner, 'run_skill_reviewer', side_effect=[
-            {'findings': [finding()]}, {'bad': True}, {'findings': []}]):
+    with patch.object(runner, 'run_skill_reviewer', side_effect=responses(names, [
+            {'findings': [finding()]}, {'bad': True}, {'findings': []}])):
         result = runner.review(context, names, '', decisions, '', prep, stats=stats)
     assert not result['complete']
     reviews = api.ledger(stats.repo)['runs'][stats.run_id]['reviews']
@@ -112,7 +122,7 @@ def test_exhaustion_and_analytics_failure_do_not_change_review_contract(pinned, 
     context, decisions, prep, names, git = pinned
     stats = Capture(context, prep, names, cycle=1)
     exhausted = {'status': 'tokens_exhausted', 'findings': [], 'message': 'usage limit reached'}
-    with patch.object(runner, 'run_skill_reviewer', side_effect=[exhausted, {'findings': []}]):
+    with patch.object(runner, 'run_skill_reviewer', side_effect=responses(names, [exhausted, {'findings': []}])):
         result = runner.review(context, names, '', decisions, '', prep, stats=stats)
     assert result['complete']
     assert result['skipped_reviewers'] == [{'reviewer': names[0], 'reason': 'usage limit reached'}]
@@ -190,7 +200,9 @@ def test_nested_provider_execution_does_not_duplicate_telemetry(pinned, monkeypa
     trace = Path(context['patch']).parent / 'trace.json'
     monkeypatch.setenv(ENV, str(trace))
     def provider():
-        assert ENV not in os.environ
+        assert os.environ[ENV] == str(trace)
+        assert trace_path() is None
+        capture(lambda: None, telemetry_prompt="nested", telemetry_attempt=0)
         return subprocess.CompletedProcess(['provider'], 0, 'result', '')
     capture(provider, telemetry_prompt='review', telemetry_attempt=0)
     assert os.environ[ENV] == str(trace)

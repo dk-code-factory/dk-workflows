@@ -5,10 +5,29 @@ import os
 import re
 import sys
 import time
+import subprocess
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from shared.private_state import mutate
 
 ENV = 'DK_REVIEW_STATS_TRACE'
+_INHERIT = object()
+_TRACE = ContextVar('dk_review_stats_trace', default=_INHERIT)
+
+
+def trace_path():
+    value = _TRACE.get()
+    return os.environ.get(ENV) if value is _INHERIT else value
+
+
+@contextmanager
+def select_trace(path):
+    token = _TRACE.set(path)
+    try:
+        yield
+    finally:
+        _TRACE.reset(token)
 
 
 def output_text(value):
@@ -50,7 +69,7 @@ def provider_metadata(result, provider):
 
 def transport(result):
     """Keep external command errors/output without counting inclusive execution again."""
-    path = os.environ.get(ENV)
+    path = trace_path()
     if path:
         try:
             event = {key: getattr(result, key, None) for key in ('stdout', 'stderr', 'returncode')}
@@ -61,7 +80,12 @@ def transport(result):
 
 def capture(function, *args, telemetry_prompt, telemetry_attempt, telemetry_provider=None,
             telemetry_output=None, **kwargs):
-    path = os.environ.get(ENV)
+    path = trace_path()
+    # Strip instrumentation only from the child environment. Process-wide
+    # environment mutation would redirect concurrent reviewers' observations.
+    if function is subprocess.run or kwargs.get('env') is not None:
+        kwargs['env'] = dict(kwargs.get('env') if kwargs.get('env') is not None else os.environ)
+        kwargs['env'].pop(ENV, None)
     if not path:
         return function(*args, **kwargs)
     start = time.monotonic()
@@ -70,11 +94,8 @@ def capture(function, *args, telemetry_prompt, telemetry_attempt, telemetry_prov
     failure = None
     # The configured adapter owns this trace. Its provider process may launch
     # native subreviewers with inclusive totals; do not instrument those again.
-    os.environ.pop(ENV, None)
+    token = _TRACE.set(None)
     try:
-        if kwargs.get('env') is not None:
-            kwargs['env'] = dict(kwargs['env'])
-            kwargs['env'].pop(ENV, None)
         result = function(*args, **kwargs)
         return result
     except Exception as exc:
@@ -82,7 +103,7 @@ def capture(function, *args, telemetry_prompt, telemetry_attempt, telemetry_prov
         failure = exc
         raise
     finally:
-        os.environ[ENV] = path
+        _TRACE.reset(token)
         evidence = result if result is not None else failure
         event = {'attempt': telemetry_attempt, 'duration_seconds': time.monotonic() - start,
                  'prompt_fingerprint': hashlib.sha256(telemetry_prompt.encode()).hexdigest(),

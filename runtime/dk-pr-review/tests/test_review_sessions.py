@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from test_stats_capture import pinned as original_pinned, finding, runner
+from test_stats_capture import pinned as original_pinned, finding, runner, responses
 from stats_capture import api
 from shared.review_sessions import Session, result_artifact
 from shared import review_coverage
@@ -30,7 +30,7 @@ def test_interrupted_review_reuses_completed_provider_without_analytics(pinned, 
     path = Path(context['patch']).parent / 'session.json'
     session = Session(context, prep, names, path=path)
     with session.execution(), patch.object(runner, 'run_skill_reviewer',
-            side_effect=[{'findings': [finding()]}, RuntimeError('provider unavailable')]):
+            side_effect=responses(names, [{'findings': [finding()]}, RuntimeError('provider unavailable')])):
         first = runner.review(context, names, '', decisions, '', prep, session=session)
         first_item = session.finish(first)
     assert not first['complete'] and first['executed_reviewers'] == names[:1]
@@ -60,7 +60,7 @@ def test_coordinator_failure_preserves_completed_checkpoint_for_following_resume
     context, decisions, prep, names, git = pinned
     session = Session(context, prep, names)
     with session.execution(), patch.object(runner, 'run_skill_reviewer',
-            side_effect=[{'findings': [finding()]}, KeyboardInterrupt]):
+            side_effect=responses(names, [{'findings': [finding()]}, KeyboardInterrupt()])):
         with pytest.raises(KeyboardInterrupt):
             runner.review(context, names, '', decisions, '', prep, session=session)
     before = json.loads(session.path.read_text())
@@ -148,12 +148,12 @@ def test_resumed_main_preserves_statistics_comparison_cohort(pinned, monkeypatch
         return real_run(args, cwd)
     monkeypatch.setattr(runner, 'run', run)
     monkeypatch.setattr(sys, 'argv', argv)
-    with patch.object(runner, 'run_skill_reviewer', side_effect=[
-            {'findings': [finding()]}, RuntimeError('provider interrupted'), {'findings': []}]) as calls:
+    with patch.object(runner, 'run_skill_reviewer', side_effect=responses(names, [
+            {'findings': [finding()]}, RuntimeError('provider interrupted'), {'findings': []}])) as calls:
         runner.main()
     first = json.loads(capsys.readouterr().out)
     assert not first['complete'] and first['executed_reviewers'] == [names[0], names[2]]
-    assert [call.args[0] for call in calls.call_args_list] == names
+    assert sorted(call.args[0] for call in calls.call_args_list) == sorted(names)
     first_run = json.loads((directory / 'review-stats.json').read_text())['run_id']
 
     monkeypatch.setattr(sys, 'argv', [*argv, '--resume'])

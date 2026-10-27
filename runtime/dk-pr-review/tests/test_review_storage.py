@@ -226,9 +226,9 @@ def test_legacy_main_rechecks_record_lock_before_registration(
     before_roots = {key: (Path(context[key]) / 'x.py').read_bytes()
                     for key in ('repository', 'checkout')}
     allocated_record = None
-    def provider(*args):
+    def provider(name, *args):
         nonlocal allocated_record
-        if allocated_record is None:
+        if name == names[0]:
             allocated_record = path.read_bytes()
             lock = path.with_name(path.name + '.lock')
             lock.unlink()

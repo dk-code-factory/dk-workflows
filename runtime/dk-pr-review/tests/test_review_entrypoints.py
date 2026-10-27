@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from test_review_sessions import pinned
-from test_stats_capture import pinned as original_pinned, finding, runner
+from test_stats_capture import responses, pinned as original_pinned, finding, runner
 from shared import review_coverage as coverage
 from shared import private_state
 from shared.private_state import read, write
@@ -74,7 +74,7 @@ def test_legacy_main_allocates_registers_and_returns_completed_session(main_call
     with patch.object(runner, 'run_skill_reviewer', return_value={'findings': []}) as providers, \
             patch.object(runner, 'for_iteration', return_value=None) as capture:
         result = main_call('--run-record', path)
-    assert [call.args[0] for call in providers.call_args_list] == names
+    assert sorted(call.args[0] for call in providers.call_args_list) == sorted(names)
     assert capture.call_args.args[3] == 2
     assert result['complete'] and result['executed_reviewers'] == names
     assert result['reused_reviewers'] == [] and result['skipped_reviewers'] == []
@@ -117,10 +117,10 @@ def test_main_resumes_checkpoint_after_interrupt_before_aggregate_finish(
         session_path = tmp_path / 'session.json'
         options = ['--session-file', session_path]
     with patch.object(runner, 'run_skill_reviewer',
-            side_effect=[{'findings': [finding()]}, KeyboardInterrupt]) as providers:
+            side_effect=responses(names, [{'findings': [finding()]}, KeyboardInterrupt()])) as providers:
         with pytest.raises(KeyboardInterrupt):
             main_call(*options)
-    assert [call.args[0] for call in providers.call_args_list] == names
+    assert sorted(call.args[0] for call in providers.call_args_list) == sorted(names)
     if route == 'legacy':
         record = read(run_path, {})
         assert record['review_results'] == []
@@ -138,7 +138,7 @@ def test_main_resumes_checkpoint_after_interrupt_before_aggregate_finish(
         options.append('--resume')
     with patch.object(runner, 'run_skill_reviewer', return_value={'findings': []}) as providers:
         result = main_call(*options)
-    assert [call.args[0] for call in providers.call_args_list] == names[1:]
+    assert sorted(call.args[0] for call in providers.call_args_list) == sorted(names[1:])
     assert result['complete'] and result['executed_reviewers'] == names[1:]
     assert result['reused_reviewers'] == names[:1] and result['skipped_reviewers'] == []
     assert result['findings'] == [{**finding(), 'reviewers': names[:1]}]
@@ -202,7 +202,7 @@ def test_mandatory_write_failure_cannot_complete_or_cache_failed_reviewer(pinned
             patch.object(runner, 'run_skill_reviewer', return_value={'findings': []}) as providers:
         with pytest.raises(OSError, match='mandatory write unavailable'), session.execution():
             runner.review(context, names, '', decisions, '', prepared, session=session)
-    assert broken and [call.args[0] for call in providers.call_args_list] == names
+    assert broken and sorted(call.args[0] for call in providers.call_args_list) == sorted(names)
     failed = read(session.path, {})
     assert failed['status'] == 'active' and failed['results'] == []
     assert failed['reviews'][names[0]]['status'] == 'completed'
@@ -215,7 +215,7 @@ def test_mandatory_write_failure_cannot_complete_or_cache_failed_reviewer(pinned
             patch.object(runner, 'run_skill_reviewer', return_value={'findings': []}) as providers:
         result = runner.review(context, names, '', decisions, '', prepared, session=resumed)
         item = resumed.finish(result)
-    assert [call.args[0] for call in providers.call_args_list] == names[1:]
+    assert sorted(call.args[0] for call in providers.call_args_list) == sorted(names[1:])
     assert result['complete'] and result['executed_reviewers'] == names[1:]
     assert result['reused_reviewers'] == names[:1]
     assert read(session.path, {})['reviews'][names[0]] == failed['reviews'][names[0]]

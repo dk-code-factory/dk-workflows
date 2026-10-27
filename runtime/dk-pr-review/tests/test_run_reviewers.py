@@ -54,7 +54,7 @@ class RunnerTests(unittest.TestCase):
         self.assertFalse(result['complete']);self.assertEqual(result['reason'],'no spec')
     def test_exhaustion_continues_but_all_exhausted_is_incomplete(self):
         exhausted={'status':'tokens_exhausted','findings':[],'message':'limit'}
-        with patch.object(mod,'run',side_effect=self.git),patch.object(mod,'run_skill_reviewer',side_effect=[exhausted,{'findings':[self.finding]}]):result=self.review()
+        with patch.object(mod,'run',side_effect=self.git),patch.object(mod,'run_skill_reviewer',side_effect=lambda provider,*a: exhausted if provider == self.providers[0] else {'findings':[self.finding]}):result=self.review()
         self.assertTrue(result['complete']);self.assertEqual(len(result['skipped_reviewers']),1)
         with patch.object(mod,'run',side_effect=self.git),patch.object(mod,'run_skill_reviewer',return_value=exhausted):result=self.review()
         self.assertFalse(result['complete']);self.assertEqual(len(result['skipped_reviewers']),2)
@@ -67,14 +67,14 @@ class RunnerTests(unittest.TestCase):
         values = [{'status':'incomplete','findings':[],'message':'API DNS failed'},
                   {'findings':[self.finding]}]
         with patch.object(mod,'run',side_effect=self.git), patch.object(
-                mod,'run_skill_reviewer',side_effect=values) as reviewer:
+                mod,'run_skill_reviewer',side_effect=lambda provider,*a: values[self.providers.index(provider)]) as reviewer:
             result = self.review()
         self.assertEqual(reviewer.call_count, 2)
         self.assertFalse(result['complete'])
         self.assertEqual(result['executed_reviewers'], [mod.bindings.key(self.providers[1])])
         self.assertEqual(result['findings'][0]['message'], self.finding['message'])
         self.assertEqual(result['failed_reviewers'][0]['reason'], 'API DNS failed')
-    def test_checkout_mutation_is_a_guard_failure_and_stops_later_reviewers(self):
+    def test_checkout_mutation_is_a_guard_failure_after_draining_reviewers(self):
         changed = False
         def git(argv, cwd=None):
             return '?? changed' if changed and argv[:3] == ['git','status','--porcelain=v1'] else self.git(argv,cwd)
@@ -85,7 +85,7 @@ class RunnerTests(unittest.TestCase):
         with patch.object(mod,'run',side_effect=git), patch.object(
                 mod,'run_skill_reviewer',side_effect=reviewer) as provider:
             result = self.review()
-        self.assertEqual(provider.call_count, 1)
+        self.assertEqual(provider.call_count, 2)
         self.assertTrue(result['guard_failure'])
         self.assertNotIn('failed_reviewers', result)
     def test_checkpoint_write_failure_is_a_guard_failure(self):
@@ -104,7 +104,7 @@ class RunnerTests(unittest.TestCase):
                         mod, 'run_skill_reviewer', return_value=response) as reviewer:
                     result = mod.review(self.context, self.providers, '', self.decisions,
                                         '', self.preparation, session=session)
-                self.assertEqual(reviewer.call_count, 1)
+                self.assertEqual(reviewer.call_count, 2)
                 self.assertFalse(result['complete'])
                 self.assertTrue(result['guard_failure'])
                 self.assertEqual(result['reason'], 'checkpoint write failed')
