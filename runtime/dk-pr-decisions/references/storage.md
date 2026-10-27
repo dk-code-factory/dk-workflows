@@ -3,7 +3,7 @@
 Set `DK_PR_DECISIONS_HOME` to an absolute private directory accessible to every
 run that should share agreements. This is the root of the complete Decisions
 cache, not its parent. Records use
-`<root>/<host>/<base-owner>/<base-repo>/pr-<number>.json`. The PR URL supplies the
+`<root>/v3/<host>/<base-owner>/<base-repo>/pr-<number>.json`. The PR URL supplies the
 base identity, including when the checkout and head belong to a fork. Hosts,
 repositories and PRs have independent records. The comments report, suggestion
 evidence and publication receipts use the same store.
@@ -16,9 +16,10 @@ silent fallback or merging with another store. Hosts must provide persistent
 storage, sandbox access and a filesystem supporting process locks, atomic rename
 and synchronization. No Code Factory configuration is changed by this plugin.
 
-Every modifying command holds a per-PR process lock from live snapshot refresh
-through analysis, local changes and publication bookkeeping. PRs can proceed
-independently. New directories are private (0700); records and locks use 0600.
+Every modifying command reads a monotonic revision before analysis and checks it
+under a per-PR process lock at commit. GitHub and model calls run outside the lock.
+Stale writers return `metadata_conflict` with their retained proposal and request;
+reconcile explicitly without automatic merging or retries. PRs proceed independently. New directories are private (0700); records and locks use 0600.
 Atomic replacement synchronizes the file and containing directory. Interruption
 leaves the previous complete record or its committed replacement. Temporary files
 from a killed process are not read as records. Do not delete lock files while
@@ -45,12 +46,14 @@ through `add` or `replace`.
 
 Saving and recovering cache records never mutates GitHub. Publication remains an
 explicit separate action (`publish` or `scan --publish`). A pending publication
-receipt survives interruption and refresh. Use `publish --reconcile` to observe
+receipt survives interruption and blocks competing refreshes and writers. Use `publish --reconcile` to observe
 live state before any retry; do not discard uncertain receipts or replay writes.
 
 ## Migration
 
-Existing Decisions JSON formats and API v2 records remain readable. With the
+Existing Decisions JSON formats and API v2 records remain readable. Fresh writes use
+the versioned `v3/` namespace. A validated snapshot from the same configured root
+may seed it without altering the legacy file. Pending publication remains blocking. With the
 default root, the former `dk-pr-read-comments` cache is still migrated on refresh.
 An explicit root never searches the default or former report store.
 

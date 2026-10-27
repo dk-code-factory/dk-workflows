@@ -99,7 +99,7 @@ class PreparedDeliveryTests(unittest.TestCase):
             self.assertEqual(review_coverage.verify(wire['review_artifact'],artifact),retained)
             received=json.loads(self.received.read_bytes().decode('utf-8'))
             self.assertEqual(os.fsencode(received['preparation']['analysis']['placement']['production']['locations'][0]),b'odd-\xff.py')
-            sidecar=json.loads((self.package.root/'review-stats.json').read_bytes().decode('utf-8'))
+            sidecar=json.loads((Path(runner.preparation_api.context_for(artifact)['patch']).parent/'review-stats.json').read_bytes().decode('utf-8'))
             self.assertEqual(sidecar['run']['reviews'][self.name]['status'],'completed')
             stats_results=[json.loads(Path(path).read_bytes().decode('utf-8'))
                            for path in sidecar['run']['reviews'][self.name]['artifacts'] if Path(path).suffix=='.json']

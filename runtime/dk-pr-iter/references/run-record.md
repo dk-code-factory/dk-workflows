@@ -79,7 +79,7 @@ reassessment. A parentless artifact cannot replace an existing binding; an expli
 idempotent only while that same artifact remains active. Registration remains one locked mutation
 and preserves the existing run and review budgets.
 `assessments` retains immutable scope dispositions keyed by feedback reference, code
-head and preparation ID, with sources and rationale. A later preparation can change
+head and engineering ID for fresh runs, with exact preparation provenance, sources and rationale. A later preparation can change
 scope at the same code head without erasing the previous assessment or classification.
 Validity remains in `threads`; an excluded valid defect never becomes `unsupported`.
 Only a `fix-plan` action of `fix` permits the fix handoff. It returns principal code/test
@@ -190,6 +190,8 @@ Report review readiness separately from cleanup and completion readiness.
 
 ## Recovery into the repaired runtime
 
+Legacy active runs without `contract_version: 2` must continue through their original retained runtime. This recovery procedure applies to compatible contract-v2 runs only.
+
 First verify that the old invocation and all its children have stopped. Inspect
 their retained lifecycle records with `update.py inspect --host HOST`, and
 explicitly complete each stopped child's token before its parent using the normal
@@ -197,7 +199,7 @@ explicitly complete each stopped child's token before its parent using the norma
 records; never delete them or infer liveness from age or a launcher PID alone.
 
 Enter the repaired installed package normally and use its returned retained
-`runtime_root`, `completion_script` and new lifecycle token. Resume the existing
+`runtime_root`, `completion_script` and new lifecycle token. For a run already marked `contract_version: 2`, resume the existing
 active iteration with `resume-run`; do not start a replacement run or reset the
 five-cycle budget. Validate the retained reviewer packages, original session and
 result, original preparation and evidence copies, current preparation, candidate,
@@ -213,3 +215,14 @@ provenance or disagreement remains a blocker. After verified publication, refres
 final-head preparation, reconcile against the original review with the published
 assessment, refresh engineering verification and exact-head CI, and run the
 complete gate. Retain the original artifacts and counters throughout recovery.
+
+
+New `iteration_run` records carry `contract_version: 2` and a private `workflow_dir`.
+Fresh runs require preparation v3. `resume-run`, work and preparation activation
+reject legacy active runs with an instruction to use their retained runtime; they
+never rewrite those records. After a terminal legacy run, normal `start-run` archives
+history and preserves cross-run publication, choice and rerun records as before.
+Before allocating a review cycle, validate retained reviewer bindings. A failed
+validation consumes no new cycle and never refunds previously consumed cycles.
+Operational preparation refresh preserves assessment/result/verification reuse by
+runtime-computed engineering ID while retaining original preparation references.

@@ -25,7 +25,7 @@ defines response fields, evidence normalization and stored artifacts.
    python3 dk-pr-decisions/scripts/decisions.py prepare --input-manifest MANIFEST.json --output-dir PRIVATE_DIR [--previous-preparation FILE] [--full-analysis]
    ```
 
-The API v2 envelope returns `data.artifact`, `preparation_id`, `readiness` and
+The API v2 envelope returns `data.artifact`, `preparation_id`, `engineering_id`, `readiness` and
 `refresh`. Consumers validate readiness and all current fingerprints, including
 choices, rules and reviewer sources. Never substitute local analysis to pass a gate.
 
@@ -65,7 +65,7 @@ or unverifiable selected parents block; old source paths use verified retained c
   Preserve retained values and stable IDs; the runtime assigns and retires IDs,
   rebuilds locations, adds mandatory dependencies and validates the merged graph.
 - `--full-analysis`, changed base/mode/policy or missing prior Git objects require
-  full reassessment. Version 1 migrates through fresh analysis into separate v2 storage.
+  full reassessment. Version 1 migrates through fresh analysis into separate v3 storage.
   Old-policy parents retain integrity/structural checks before current-policy analysis.
 - Unbounded impact may request one full fallback. Each model phase allows one
   correction; another invalid response blocks. No per-conclusion calls or scheduler.
@@ -143,3 +143,46 @@ cleanup. For version-2 review provenance, reconcile directly against the origina
 reviewed preparation using the published assessment; version-1 coverage keeps
 its exact-scope verification. Refresh engineering verification and require
 exact-head CI. Preserve the existing run, cycle count and five-cycle limit.
+
+
+## Fresh workflow storage and compatibility
+
+Preparation v3 writes new versions beneath a private workflow directory under
+`${XDG_STATE_HOME:-~/.local/state}/dk-code-factory/workflows/`. The context collector
+returns `workflow_dir` and a durable `context_file`. Use these paths for exports,
+manifests, scope/rule handoffs, validation reports and verification files. `prepare`
+retains the legacy `--output-dir` argument for caller compatibility and validates
+that it is outside the repository; the returned `artifact` path in workflow storage
+is authoritative. Existing artifacts and interrupted runtimes are never rewritten.
+
+Each source retains original path/hash plus a read-only `snapshot` and a `mode`:
+`capture` or `live`. Generated manifest/context/Decisions/metadata/patch, reviewer
+descriptors, prior preparation, complete bundled feedback, and pinned checkout
+production/test files are captures. Arbitrary external evidence defaults to live.
+Optional manifest `source_modes` maps exact indexed source keys (for example
+`run_history/0`) to `capture` or `live`. Mark generated exports as captures; preserve
+required external rules and instruction sources as live. Captures survive removal
+of their original export paths. Every live source must remain present and match.
+The workflow owns a separate clean pinned checkout. Gates read the captured context,
+metadata, Decisions and patch, and validate that checkout and all retained bindings.
+Current live PR head/body, configuration and mutable local choices still gate work.
+
+Retain both IDs. `preparation_id` covers all artifact fields. Runtime-computed
+`engineering_id` covers normalized governing inputs, tree/base, PR scope, Decisions,
+ordered reviewer descriptors, analysis, readiness and policy. Declared operational
+fields, storage paths, refresh reports and verified lineage bookkeeping are excluded;
+unknown fields govern. Counter-only refresh can preserve checkpoints, assessments,
+results and verification while retaining their original preparation IDs as provenance.
+Interrupted session resume additionally requires unchanged head. Governing changes
+invalidate reuse. Tree-equivalent series cleanup still requires its guarded path.
+Legacy active runs must use their retained runtime; starting a fresh request after a
+terminal run preserves history and counters under the existing start-run rules.
+
+
+Each new artifact also retains `recovery_manifest` and `recovery_context` path/hash
+references. After original exports disappear, use `recovery_manifest.path` with
+`prepare --previous-preparation ARTIFACT`. It references the owned context, checkout
+and captured evidence while retaining live source paths. Its `source_origins` map
+preserves captured source identities across relocation; this bookkeeping does not
+replace governing content fingerprints. Retain these files unchanged; construct a
+new manifest when current evidence changes. Required live inputs still block if lost.

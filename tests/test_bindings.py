@@ -289,3 +289,48 @@ def test_malformed_registry_response_not_cached(monkeypatch, invalid):
         with pytest.raises(ValueError, match='installed array'):
             b.codex_plugins()
         assert b.codex_plugins() == []
+
+
+@pytest.mark.parametrize('declared,registered,valid', [
+    (None, '1.2.3', True), ('1.2.3', None, True), (None, None, True),
+    ('1.2.3', '1.2.3', True), ('9.9.9', '1.2.3', False),
+])
+def test_discovery_and_retained_execution_share_version_contract(tmp_path, monkeypatch, declared, registered, valid):
+    from shared.runtime_bundles import retained_binding
+    root = plugin(tmp_path)
+    manifest = root / '.claude-plugin/plugin.json'
+    value = json.loads(manifest.read_text())
+    if declared is None:
+        value.pop('version')
+    else:
+        value['version'] = declared
+    manifest.write_text(json.dumps(value))
+    registry(tmp_path, root, monkeypatch, {'third-party@test': [
+        {'installPath': str(root), **({'version': registered} if registered else {})}]})
+    binding = {'skill': 'third-party:review', 'host': 'claude'}
+    if not valid:
+        with pytest.raises(ValueError, match='disagree'):
+            b.resolve(binding)
+        # Retained validation compares the same pair independently of discovery.
+        resolved = {'binding': binding, 'identity': b.key(binding), 'executor': 'claude',
+                    'root': str(root), 'procedure': str(root / 'native/skills/review/SKILL.md'),
+                    'version': registered}
+        retained = retained_binding(resolved)
+        with pytest.raises(ValueError, match='disagree'):
+            with b.pinned_bindings({b.key(binding): {'execution': retained}}):
+                pytest.fail('mismatched retained version accepted')
+        return
+    retained = retained_binding(b.resolve(binding))
+    descriptor = {b.key(binding): {'execution': retained}}
+    with b.pinned_bindings(descriptor):
+        assert b.resolve(binding) == retained
+        monkeypatch.setattr(e, 'execute_process', lambda *a, **kw: '{"findings":[]}')
+        handoff = tmp_path / 'handoff.json'
+        handoff.write_text('{}')
+        assert json.loads(e.invoke(binding, handoff, tmp_path, 'Review')) == {'findings': []}
+    source = Path(retained['procedure'])
+    source.chmod(0o600)
+    source.write_text('Tampered instructions')
+    with pytest.raises((ValueError, RuntimeError), match='changed'):
+        with b.pinned_bindings(descriptor):
+            pytest.fail('tampered retained package accepted')

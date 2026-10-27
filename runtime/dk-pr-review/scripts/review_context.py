@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from shared.github_reads import run as github_run
 from shared.pr_identity import resolve
+from shared.workflow_storage import allocate
 
 FIELDS = 'number,url,title,body,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,isCrossRepository,files'
 LARGE_DIFF_ERROR = re.compile(r'diff exceeded the maximum number of lines|20,?000\s+lines|PullRequest\.diff too_large', re.I)
@@ -156,7 +157,7 @@ def fetch(cwd, pr=None):
     local_head = local.stdout.strip() if local.returncode == 0 else None
     status = subprocess.run(['git', 'status', '--porcelain=v1'], cwd=cwd, text=True, capture_output=True)
     worktree_clean = status.returncode == 0 and not status.stdout.strip()
-    folder = Path(tempfile.mkdtemp(prefix='codex-pr-review-'))
+    folder = allocate(repository=root)
     checkout = folder/'checkout'
     command(['git', 'clone', '--quiet', '--no-hardlinks', '--no-checkout', str(root), str(checkout)], cwd)
     head = metadata['headRefOid']
@@ -188,11 +189,15 @@ def fetch(cwd, pr=None):
         raise RuntimeError('PR head or base changed during checkout; retry from a new snapshot')
     (folder/'metadata.json').write_text(json.dumps(metadata, indent=2, ensure_ascii=False)+'\n')
     (folder/'diff.patch').write_text(patch)
-    return {'url': metadata['url'], 'repository': str(root), 'base_sha': metadata['baseRefOid'], 'head_sha': head,
+    context = {'url': metadata['url'], 'repository': str(root), 'base_sha': metadata['baseRefOid'], 'head_sha': head,
             'local_head': local_head, 'worktree_clean': worktree_clean,
             'local_matches_pr': worktree_clean and local_head == metadata['headRefOid'],
             'metadata': str(folder/'metadata.json'), 'patch': str(folder/'diff.patch'),
-            'checkout': str(checkout)}
+            'checkout': str(checkout), 'workflow_dir': str(folder), 'context_file': str(folder / 'context.json')}
+    (folder / 'context.json').write_text(json.dumps(context, indent=2) + '\n')
+    for path in (folder / 'metadata.json', folder / 'diff.patch', folder / 'context.json'):
+        path.chmod(0o600)
+    return context
 
 
 def main():

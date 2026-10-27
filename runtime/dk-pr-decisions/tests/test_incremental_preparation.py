@@ -23,7 +23,7 @@ class IncrementalPreparationTests(unittest.TestCase):
         self.package = Package(self.temp.name)
 
     def refresh(self, parent, result=None, **kwargs):
-        return prep.prepare(self.package.manifest_path, self.package.root / 'versions',
+        return prep.prepare(self.package.manifest_path, self.package.versions,
                             previous_preparation=parent['artifact'],
                             analyzer=lambda *_: result, **kwargs)
 
@@ -54,7 +54,7 @@ class IncrementalPreparationTests(unittest.TestCase):
     def test_identical_inputs_reuse_artifact_without_model(self):
         first = self.package.prepare()
         with patch.object(prep, 'analyze') as model:
-            refreshed = prep.prepare(self.package.manifest_path, self.package.root / 'versions',
+            refreshed = prep.prepare(self.package.manifest_path, self.package.versions,
                                      previous_preparation=first['artifact'])
         model.assert_not_called()
         self.assertEqual(refreshed['artifact'], first['artifact'])
@@ -192,11 +192,11 @@ class IncrementalPreparationTests(unittest.TestCase):
         invalid = retain(parent)
         invalid['dispositions'].pop()
         with patch('shared.executors.execute', side_effect=[json.dumps(invalid), json.dumps(retain(parent))]) as model:
-            result = prep.prepare(self.package.manifest_path, self.package.root / 'versions', previous_preparation=first['artifact'])
+            result = prep.prepare(self.package.manifest_path, self.package.versions, previous_preparation=first['artifact'])
         self.assertEqual(model.call_count, 2)
         self.assertEqual(result['refresh']['model_call_count'], 2)
         with patch('shared.executors.execute', return_value=json.dumps(retain(parent))) as model:
-            result = prep.prepare(self.package.manifest_path, self.package.root / 'versions', previous_preparation=first['artifact'])
+            result = prep.prepare(self.package.manifest_path, self.package.versions, previous_preparation=first['artifact'])
         self.assertEqual(model.call_count, 1)
         self.assertEqual(result['refresh']['model_call_count'], 1)
         self.assertEqual(prep.read(result['artifact'])['analysis'], parent['analysis'])
@@ -214,7 +214,7 @@ class IncrementalPreparationTests(unittest.TestCase):
                 node['depends_on'] = [performance]
             elif node['location'] == performance:
                 node['depends_on'] = [correctness]
-        first = prep.prepare(self.package.manifest_path, self.package.root / 'versions', analyzer=lambda *_: value)
+        first = prep.prepare(self.package.manifest_path, self.package.versions, analyzer=lambda *_: value)
         parent = prep.read(first['artifact'])
         self.commit({'new/caller.py': 'from transform import transform\n'})
         # The prompt descriptor is unchanged: only the added file is substantive.
@@ -243,13 +243,13 @@ class IncrementalPreparationTests(unittest.TestCase):
         self.package.write('user.json', {'instruction': 'Cross-cutting change'})
         escalation = {'full_reassessment': True, 'reason': 'Cannot bound the scope of this interaction'}
         with patch('shared.executors.execute', side_effect=[json.dumps(escalation), json.dumps(retain(parent))]) as model:
-            result = prep.prepare(self.package.manifest_path, self.package.root / 'versions', previous_preparation=first['artifact'])
+            result = prep.prepare(self.package.manifest_path, self.package.versions, previous_preparation=first['artifact'])
         self.assertEqual(model.call_count, 2)
         self.assertEqual(result['refresh']['mode'], 'full_fallback')
         self.assertEqual(result['refresh']['model_call_count'], 2)
         with patch('shared.executors.execute', return_value=json.dumps(escalation)) as model:
             with self.assertRaisesRegex(ValueError, 'cannot escalate again'):
-                prep.prepare(self.package.manifest_path, self.package.root / 'versions', previous_preparation=first['artifact'])
+                prep.prepare(self.package.manifest_path, self.package.versions, previous_preparation=first['artifact'])
         self.assertEqual(model.call_count, 3)  # Initial escalation, full phase and its one correction.
 
     def test_new_conclusions_get_fresh_ids_deleted_ids_stay_retired(self):
@@ -451,7 +451,7 @@ class IncrementalPreparationTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, 'changed during analysis'):
                         package.prepare()
                 self.assertTrue(mutated)
-                self.assertEqual(list((package.root / 'versions').glob('*/preparation.json')), [])
+                self.assertEqual(list((package.versions).glob('*/preparation.json')), [])
 
     def test_reviewer_descriptor_change_between_parse_and_hash_cannot_publish(self):
         package = self.package
@@ -473,7 +473,7 @@ class IncrementalPreparationTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, 'changed during analysis'):
                         package.prepare()
                 self.assertTrue(mutated)
-                self.assertEqual(list((package.root / 'versions').glob('*/preparation.json')), [])
+                self.assertEqual(list((package.versions).glob('*/preparation.json')), [])
 
     def test_stale_inputs_interruptions_and_concurrent_activation(self):
         package = self.package
@@ -490,11 +490,11 @@ class IncrementalPreparationTests(unittest.TestCase):
             package.write('user.json', {'instruction': 'Changed during reassessment'})
             return retain(parent)
         with self.assertRaisesRegex(ValueError, 'source changed during analysis'):
-            prep.prepare(package.manifest_path, package.root / 'versions', previous_preparation=first['artifact'], analyzer=stale)
+            prep.prepare(package.manifest_path, package.versions, previous_preparation=first['artifact'], analyzer=stale)
         with self.assertRaises(KeyboardInterrupt):
-            prep.prepare(package.manifest_path, package.root / 'versions', previous_preparation=first['artifact'],
+            prep.prepare(package.manifest_path, package.versions, previous_preparation=first['artifact'],
                          analyzer=lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
-        self.assertEqual(list((package.root / 'versions').glob('*/preparation.json')), [Path(first['artifact'])])
+        self.assertEqual(list((package.versions).glob('*/preparation.json')), [Path(first['artifact'])])
         second = self.refresh(first, retain(parent))
         other = self.refresh(first, retain(parent))
         state.attach_preparation(record, second['artifact'], package.context['url'], package.head)
@@ -585,10 +585,10 @@ class IncrementalPreparationTests(unittest.TestCase):
                'identity': {'pr_url': context['url'], 'base_sha': context['base_sha'],
                             'head_sha': context['head_sha'], 'body_hash': decisions['body_hash'],
                             'decisions_hash': prep.digest(decisions)},
-               'sources': sources, 'reviewers': reviewers, 'analysis': analysis(), 'readiness': 'ready'}
+               'sources': {k: {f: v for f, v in s.items() if f not in {'mode', 'origin_identity'}} for k, s in sources.items()}, 'reviewers': reviewers, 'analysis': analysis(), 'readiness': 'ready'}
         old['preparation_id'] = prep.digest(old)
         legacy_dir = package.root / 'legacy-v1' / old['preparation_id'][:20]
-        for key, source in sources.items():
+        for key, source in old['sources'].items():
             self.assertEqual(set(source), {'path', 'sha256'})
             target = legacy_dir / 'evidence' / key
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -603,7 +603,7 @@ class IncrementalPreparationTests(unittest.TestCase):
         def model(prompt, checkout):
             prompts.append(prompt)
             return response(fresh_analysis)
-        result = prep.prepare(package.manifest_path, package.root / 'versions',
+        result = prep.prepare(package.manifest_path, package.versions,
                               previous_preparation=old_path, analyzer=model)
         migrated = prep.read(result['artifact'])
         self.assertEqual(len(prompts), 1)
@@ -611,12 +611,12 @@ class IncrementalPreparationTests(unittest.TestCase):
         self.assertIn('"preparation_version": 1', prompts[0])
         self.assertEqual(result['refresh']['mode'], 'migration')
         self.assertEqual(result['refresh']['model_call_count'], 1)
-        self.assertEqual(migrated['preparation_version'], 2)
+        self.assertEqual(migrated['preparation_version'], 3)
         self.assertEqual(migrated['analysis'], fresh_analysis)
         self.assertTrue(migrated['parent']['migration'])
         self.assertEqual(migrated['parent']['preparation_id'], old['preparation_id'])
         self.assertEqual(migrated['parent']['path'], str(old_path))
-        self.assertEqual(Path(result['artifact']).parent.parent, package.root / 'versions')
+        self.assertEqual(Path(result['artifact']).parent.parent, package.versions)
         self.assertEqual(prep.historical(old_path), old)
         self.assertEqual({path.relative_to(legacy_dir): path.read_bytes()
                           for path in legacy_dir.rglob('*') if path.is_file()}, before)
@@ -627,11 +627,11 @@ class IncrementalPreparationTests(unittest.TestCase):
             return response(fresh_analysis)
         try:
             with self.assertRaisesRegex(ValueError, 'invalid selected parent'):
-                prep.prepare(package.manifest_path, package.root / 'versions',
+                prep.prepare(package.manifest_path, package.versions,
                              previous_preparation=old_path, analyzer=stale_migration)
         finally:
             snapshot.write_bytes(original)
-        self.assertEqual(list((package.root / 'versions').glob('*/preparation.json')), [Path(result['artifact'])])
+        self.assertEqual(list((package.versions).glob('*/preparation.json')), [Path(result['artifact'])])
 
     def test_graph_rejects_invalid_watches_dangling_references_and_missing_coverage(self):
         for mutate in (lambda v: v['graph'].pop(),
@@ -646,7 +646,7 @@ class IncrementalPreparationTests(unittest.TestCase):
             value = response()
             mutate(value)
             with self.subTest(value=value), self.assertRaises(ValueError):
-                prep.prepare(self.package.manifest_path, self.package.root / 'versions', analyzer=lambda *_: value)
+                prep.prepare(self.package.manifest_path, self.package.versions, analyzer=lambda *_: value)
 
     def test_fifth_review_then_tree_equal_cleanup_completes_without_preparation_model(self):
         from shared import executors, review_sessions, review_coverage, review_reconciliation
@@ -679,7 +679,7 @@ class IncrementalPreparationTests(unittest.TestCase):
         self.assertNotEqual(package.head, reviewed_head)
         self.assertEqual(prep.git(package.repo, 'rev-parse', 'HEAD^{tree}'), reviewed_tree)
         with patch.object(prep, 'analyze') as model:
-            fresh = prep.prepare(package.manifest_path, package.root / 'versions', previous_preparation=first['artifact'])
+            fresh = prep.prepare(package.manifest_path, package.versions, previous_preparation=first['artifact'])
         model.assert_not_called()
         self.assertEqual(fresh['refresh']['model_call_count'], 0)
         state.attach_preparation(record, fresh['artifact'], package.context['url'], package.head,
@@ -694,7 +694,7 @@ class IncrementalPreparationTests(unittest.TestCase):
         source = package.repo / 'transform.py'
         check = {'satisfied': True, 'rationale': 'Inspected current transform and validation evidence',
                  'evidence': [{'path': str(source), 'sha256': prep.file_hash(source)}]}
-        verification = package.write('verification.json', {'verification_version': 1,
+        verification = package.write('verification.json', {'verification_version': 2, 'engineering_id': fresh['engineering_id'],
             'preparation_id': fresh['preparation_id'], 'pr_url': package.context['url'], 'head_sha': package.head,
             'checks': {name: check for name in ('behavior', 'placement', 'test_sufficiency', 'compatibility', 'complexity')}})
         tree = prep.git(package.repo, 'rev-parse', 'HEAD^{tree}')
@@ -753,8 +753,8 @@ class IncrementalPreparationTests(unittest.TestCase):
             else:
                 self.commit({'new.py': 'a = 1\n'})
                 invalid['identity']['head_sha'] = package.head
-            guard = ('preparation source identity is stale' if changed == 'tree' else
-                     'reconciliation does not cover this review and preparation')
+            guard = ('preparation PR or head mismatch' if changed == 'tree' else
+                     'preparation artifact identity mismatch')
             with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, guard):
                 state.verify_review(record_path, invalid)
 
@@ -968,7 +968,7 @@ class IncrementalPreparationTests(unittest.TestCase):
             package.write('conversation.json', conversation)
             with self.subTest(number=number), patch.object(prep, 'analyze') as model:
                 with self.assertRaisesRegex(ValueError, 'feedback|comment'):
-                    prep.prepare(package.manifest_path, package.root / 'versions')
+                    prep.prepare(package.manifest_path, package.versions)
                 model.assert_not_called()
         package.write('inline.json', self.inline_feedback())
         package.write('conversation.json', self.conversation_feedback())
@@ -1091,7 +1091,7 @@ class IncrementalPreparationTests(unittest.TestCase):
             package.write('feedback.json', {**self.inline_feedback(), 'schemaVersion': marker})
             with self.subTest(marker=marker), patch.object(prep, 'analyze') as model:
                 with self.assertRaisesRegex(ValueError, 'unsupported complete feedback schema'):
-                    prep.prepare(package.manifest_path, package.root / 'versions')
+                    prep.prepare(package.manifest_path, package.versions)
                 model.assert_not_called()
 
     def test_unknown_complete_claims_in_other_categories_keep_exact_bytes(self):
@@ -1177,10 +1177,10 @@ class IncrementalPreparationTests(unittest.TestCase):
                     with self.subTest(target=target, phase=phase, defect=defect), patch.object(Path, 'write_bytes', copying), \
                             patch.object(prep, 'policy', return_value=parent['inputs']['policy'] if phase == 'analyzer' else 'new-policy'):
                         with self.assertRaisesRegex(ValueError, 'invalid selected parent'):
-                            prep.prepare(package.manifest_path, package.root / 'versions',
+                            prep.prepare(package.manifest_path, package.versions,
                                          previous_preparation=second['artifact'], full_analysis=True, analyzer=analyzer)
                         self.assertEqual(len(damaged), 1)
-                        self.assertEqual(set((package.root / 'versions').glob('*/preparation.json')),
+                        self.assertEqual(set((package.versions).glob('*/preparation.json')),
                                          {Path(first['artifact']), Path(second['artifact'])} -
                                          ({snapshot} if defect == 'delete' else set()))
                 finally:
@@ -1207,7 +1207,7 @@ class IncrementalPreparationTests(unittest.TestCase):
             Path(first['artifact']).write_text('changed selected parent')
             return retain(parent)
         with self.assertRaisesRegex(ValueError, 'selected parent changed'):
-            prep.prepare(self.package.manifest_path, self.package.root / 'versions',
+            prep.prepare(self.package.manifest_path, self.package.versions,
                          previous_preparation=first['artifact'], analyzer=changed_parent)
 
     def test_review_session_resume_still_requires_exact_identity(self):
@@ -1352,9 +1352,9 @@ class IncrementalPreparationTests(unittest.TestCase):
         for invalid in ({'dispositions': []}, {'dispositions': [{'id': []}], 'additions': [], 'impacts': []}):
             with patch('shared.executors.execute', return_value=json.dumps(invalid)) as model:
                 with self.assertRaisesRegex(ValueError, 'invalid after one correction'):
-                    prep.prepare(self.package.manifest_path, self.package.root / 'versions', previous_preparation=first['artifact'])
+                    prep.prepare(self.package.manifest_path, self.package.versions, previous_preparation=first['artifact'])
             self.assertEqual(model.call_count, 2)
-        self.assertEqual(list((self.package.root / 'versions').glob('*/preparation.json')), [Path(first['artifact'])])
+        self.assertEqual(list((self.package.versions).glob('*/preparation.json')), [Path(first['artifact'])])
 
     def test_reviewer_instruction_changes_and_new_rules_invalidate_governing_conclusions(self):
         package = self.package

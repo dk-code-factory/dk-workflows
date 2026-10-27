@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.3.0.
+Independent MIT plugin for Claude Code and Codex. Version 1.4.0.
 
 ## Install
 
@@ -237,7 +237,7 @@ when the host removes the original installation during lookup. Entry failures
 without a usable runtime receipt stop work; offline release checks still return
 a retained runtime and token and remain nonblocking.
 
-Preparation v2 retains stable conclusion dependencies and immutable evidence snapshots.
+Preparation v3 retains stable conclusion dependencies and immutable evidence snapshots.
 `prepare --previous-preparation FILE` compares complete Git entries and governing
 sources, reuses proven unchanged conclusions, and batches affected conclusions into
 one reassessment. Identical and supported operational refreshes use zero model calls;
@@ -248,10 +248,41 @@ Decisions synchronization and iteration budgets retain their existing gates. See
 
 Decisions can persist across independent runs by setting `DK_PR_DECISIONS_HOME` to
 an absolute private directory shared by those runs. It is the complete cache root:
-`<root>/<host>/<base-owner>/<base-repo>/pr-<number>.json`, including fork PRs.
+`<root>/v3/<host>/<base-owner>/<base-repo>/pr-<number>.json`, including fork PRs.
 When unset, the default remains `${XDG_DATA_HOME:-~/.local/share}/dk-pr-decisions`.
 Explicit stores are exclusive; invalid or repository-local paths fail without
 fallback. Hosts provide persistent storage and access. See the
 [Decisions storage contract](runtime/dk-pr-decisions/references/storage.md) for
 seeding, migration, locking and interruption recovery. Recovered choices require
 live context refresh and engineering preparation before dependent work.
+
+
+Fresh workflows allocate durable private directories under
+`${XDG_STATE_HOME:-~/.local/state}/dk-code-factory/workflows/`. Generated contexts,
+isolated checkouts, manifests, evidence captures and conflict proposals belong there;
+use the returned paths in handoffs. No automatic deletion policy applies. Preparation
+gates read owned captures; arbitrary external evidence defaults to live checks, so
+missing required rules or instructions still block. Live head/body, configuration
+and local-choice checks remain mandatory.
+
+`preparation_id` fingerprints the entire immutable artifact. Runtime-computed
+`engineering_id` fingerprints its normalized governing evidence, tree/base, scope,
+Decisions, ordered reviewer descriptors, analysis, readiness and policy. Supported
+operational counters/status/receipts, storage paths, refresh reports and verified
+lineage do not invalidate engineering compatibility; unknown fields still govern.
+Session v2 checkpoints, review-result v3 coverage, scope assessments and completion
+verification v2 can survive an operational refresh with the same engineering ID.
+Interrupted resume also requires the same head. Tree-equivalent cleanup retains its
+separate guarded reconciliation path. Provenance keeps exact preparation references.
+
+New Decisions storage uses `dk-pr-decisions/v3/` under the private data home. Each
+write checks a monotonic revision under the private-state lock; network/model work
+runs outside it. A stale write returns API v2 `status: error` with
+`error.code: metadata_conflict`, a retained proposal path and an explicit recovery
+action. The stable CLI reports a workflow block. Publication intent is committed
+before GitHub mutation; pending intent blocks other writers until its owner finishes
+or `publish --reconcile` verifies the outcome without replaying the edit. A validated
+legacy snapshot can be imported without changing its original file, including any
+pending intent. Legacy active iteration runs require their retained runtime; a fresh
+request after a terminal legacy run preserves history under the existing start rules.
+There is no bulk migration of old runs, results or checkpoints.

@@ -54,6 +54,10 @@ def iteration_record(tmp_path, context, prepared, cycle=2):
     preparation_path = tmp_path / 'preparation.json'
     write(preparation_path, prepared)
     record = {}
+    from preparation_fixtures import promote
+    decisions = json.loads(Path(prepared["sources"]["decisions"]["path"]).read_text())
+    promote(prepared, context, decisions)
+    write(preparation_path, prepared)
     state.start_run(record)
     state.attach_preparation(record, preparation_path, context['url'], context['head_sha'])
     for _ in range(cycle):
@@ -147,7 +151,10 @@ def test_main_resumes_checkpoint_after_interrupt_before_aggregate_finish(
     artifact = result_artifact(session_path, result['review_artifact'])
     assert coverage.verify(result['review_artifact'], prepared) == artifact
     assert artifact['result'] == {key: value for key, value in result.items()
-                                  if key not in {'review_session', 'review_artifact'}}
+                                  if key not in {'review_session', 'review_artifact', 'preparation_id', 'engineering_id'}}
+    if artifact['version'] == 3:
+        assert result['preparation_id'] == artifact['preparation_id']
+        assert result['engineering_id'] == artifact['engineering_id']
     if route == 'legacy':
         record = read(run_path, {})
         assert record['iteration_run'] == original_record['iteration_run']

@@ -107,3 +107,23 @@ mapped, source-verified discussion restatements and operational changes with the
 same engineering meaning; all other protected inputs remain strict. Legacy
 version-1 attestations retain their original restrictions. Final-head refresh and
 reconciliation against the published assessment are still required.
+
+
+Fresh preparation v3 uses session v2 and review-result v3. The session compatibility
+identity contains the runtime-computed engineering ID, exact head, base/tree, scope,
+caller scope/rules text and ordered reviewers. Each result retains its exact
+preparation ID plus engineering ID; session provenance records each preparation
+used. An operational refresh with equal engineering identity can reuse completed
+checkpoints without modifying their bytes or earlier history. Validate current live
+evidence, immutable captures and retained provider bindings first. Changed governing
+sources, Decisions, code, instructions or reviewer order block reuse. A changed head
+blocks interruption resume even with an equal tree; use guarded cleanup reconciliation
+for completed coverage. Legacy sessions cannot resume through the new contract and
+must continue through their retained runtime. Fresh default sessions and their
+checkpoints/results live in the private workflow directory.
+
+Registry and retained execution use the same version validator: missing versions
+are accepted on either side; declared registry and manifest versions must match.
+Package hashes and exact procedure identity remain mandatory even without a version.
+Invalid retained bindings block cycle allocation before counters advance; consumed
+cycles are never refunded or reset.

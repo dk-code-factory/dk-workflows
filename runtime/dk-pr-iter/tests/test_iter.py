@@ -160,7 +160,7 @@ completion = module("completion")
 def prepared_boundaries(monkeypatch):
     # These existing tests isolate CI/series/counter policy. Preparation's real
     # gates and resume interactions are exercised in test_preparation.py.
-    monkeypatch.setattr(state, 'work_gate', lambda record, head: {'readiness': 'ready'})
+    monkeypatch.setattr(state, 'work_gate', lambda record, head: {'readiness': 'ready', 'reviewers': {}})
     monkeypatch.setattr(completion, 'current_preparation', lambda *a: {'mode': 'iteration'})
     monkeypatch.setattr(completion.run_state_api, 'verify_review', lambda *a, **kw: {})
     monkeypatch.setattr(completion, 'live_preparation_scope', lambda *a: {'body': '', 'headRefOid': SHA})

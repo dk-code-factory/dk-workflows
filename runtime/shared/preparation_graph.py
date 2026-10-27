@@ -48,8 +48,10 @@ def relative(path, checkout):
 
 
 def source_identity(key, source, checkout, content):
+    if source.get('mode') == 'capture' and source.get('origin_identity'):
+        return source['origin_identity']
     category = key.split('/')[0]
-    if '/' not in key or category == 'prior_preparation':
+    if '/' not in key or category in {'prior_preparation', 'reviewer-source'}:
         return key
     repo_path = relative(source['path'], checkout)
     if repo_path is not None:
@@ -98,11 +100,12 @@ def semantic(key, content):
     value = decode(content)
     if key == 'manifest':
         return {'mode': value['mode'], **{k: v for k, v in value.items()
-                                         if k not in {'mode', 'context', 'decisions', 'evidence'}}}
+                                         if k not in {'mode', 'context', 'decisions', 'evidence',
+                                                      'source_modes', 'source_origins'}}}
     if key == 'context':
         return {k: v for k, v in value.items()
                 if k not in {'head_sha', 'checkout', 'repository', 'patch', 'metadata',
-                             'local_head', 'worktree_clean', 'local_matches_pr'}}
+                             'local_head', 'worktree_clean', 'local_matches_pr', 'workflow_dir', 'context_file'}}
     if key == 'decisions':
         if 'data' in value:
             return {**value, 'data': {k: v for k, v in value['data'].items() if k != 'head_sha'}}
@@ -130,7 +133,8 @@ def semantic(key, content):
             return {'fields': {k: v for k, v in value.items() if k != 'operational'},
                     'operational_unknown': operational_unknown(value.get('operational', {}))}
         if category == 'reviewers':
-            return value
+            from shared.engineering_identity import descriptor
+            return descriptor(value)
     return {'opaque_sha256': hashlib.sha256(content).hexdigest()}
 
 

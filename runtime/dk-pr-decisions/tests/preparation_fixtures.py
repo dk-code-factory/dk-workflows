@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+from shared.workflow_storage import allocate
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -74,9 +75,33 @@ def artifact(context, decisions, sources, reviewers=('example',), result=None):
     return value
 
 
+def promote(value, context, decisions):
+    """Use the fresh contract in tests of the former run-record CLI adapter."""
+    if value['preparation_version'] >= 3:
+        return
+    directory = Path(context['patch']).parent / 'fresh-inputs'
+    directory.mkdir(exist_ok=True)
+    def put(name, content):
+        path = directory / name
+        path.write_text(json.dumps(content))
+        return str(path)
+    decisions.setdefault('decisions', [])
+    absence = put('absence.json', {'verified_absence': True, 'reason': 'No other fixture evidence'})
+    evidence = {name: [absence] for name in prep.EVIDENCE}
+    evidence['production'] = [str(Path(context['checkout']) / 'x.py')]
+    evidence['reviewers'] = [put('reviewer-' + str(i) + '.json', d) for i, d in enumerate(value['reviewers'].values())]
+    manifest = put('manifest.json', {'mode': value['mode'], 'context': put('context.json', context),
+                                    'decisions': put('decisions.json', decisions), 'evidence': evidence})
+    saved = prep.prepare(manifest, directory / 'output', analyzer=lambda *_: response(value['analysis']))
+    current = prep.read(saved['artifact'])
+    value.clear()
+    value.update(current)
+
+
 class Package:
     def __init__(self, root):
         self.root = Path(root)
+        self.versions = allocate()
         self.repo = self.root / 'checkout'
         self.repo.mkdir()
         def git(*args):
@@ -89,7 +114,7 @@ class Package:
         git('commit', '-qm', 'Transform fixture')
         self.head = git('rev-parse', 'HEAD')
         self.context = {'url': 'https://github.com/example/fixture/pull/1', 'base_sha': self.head,
-                        'head_sha': self.head, 'checkout': str(self.repo), 'repository': str(self.repo),
+                        'head_sha': self.head, 'checkout': str(self.repo), 'repository': str(self.repo), 'workflow_dir': str(self.versions),
                         'patch': str(self.root / 'diff.patch'), 'metadata': str(self.root / 'metadata.json')}
         (self.root / 'diff.patch').write_text('diff --git a/transform.py b/transform.py\n+++ b/transform.py\n@@ -1 +1 @@\n-old\n+new\n')
         (self.root / 'metadata.json').write_text(json.dumps({'body': '', 'title': 'Transform fix'}))
@@ -113,5 +138,5 @@ class Package:
         return path
 
     def prepare(self, result=None):
-        return prep.prepare(self.manifest_path, self.root / 'versions',
+        return prep.prepare(self.manifest_path, self.versions,
                             analyzer=lambda prompt, checkout: response(result or analysis()))

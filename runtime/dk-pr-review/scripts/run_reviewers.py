@@ -240,6 +240,15 @@ def describe_reviewer(name):
 
 
 def review(context, reviewers, scope, decisions, rules, preparation, stats=None, session=None):
+    if preparation.get('preparation_version', 1) >= 3:
+        if any(context[k] != preparation['identity'][field] for k, field in (
+                ('url', 'pr_url'), ('head_sha', 'head_sha'), ('base_sha', 'base_sha'))):
+            raise ValueError('supplied context has changed evidence; refresh preparation')
+        for field in ('patch', 'metadata'):
+            supplied = Path(context[field])
+            if supplied.exists() and preparation_api.file_hash(supplied) != preparation['sources'][field]['sha256']:
+                raise ValueError('preparation source identity mismatch: supplied ' + field + ' differs from prepared evidence')
+        context = preparation_api.context_for(preparation)
     decisions = validate_decisions(context, decisions)
     preparation = preparation_api.validate(preparation, context, decisions)
     with bindings.pinned_bindings(preparation['reviewers']):
@@ -251,6 +260,8 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
     reviewers = list(provider_map)
     if any(name not in preparation['reviewers'] for name in reviewers):
         raise ValueError('preparation omits a configured reviewer')
+    if preparation.get('preparation_version', 1) >= 3 and reviewers != preparation['reviewer_order']:
+        raise ValueError('configured reviewer order changed; refresh preparation')
     if not reviewers:
         raise ValueError('no PR review agent is configured; use dk-config reviewers set SKILL')
     patch = Path(context['patch']).read_text()
@@ -392,7 +403,17 @@ def main():
     parser.add_argument('--resume', action='store_true', help='Explicitly resume an interrupted session with identical evidence')
     parser.add_argument('--run-record', help='Compatibility adapter for earlier iteration callers')
     args = parser.parse_args()
-    context = json.loads(Path(args.context).read_text())
+    preparation = preparation_api.read(args.preparation_file) if args.preparation_file else None
+    fresh = preparation is not None and preparation.get('preparation_version', 1) >= 3
+    context = preparation_api.context_for(preparation) if fresh else json.loads(Path(args.context).read_text())
+    if fresh and Path(args.context).exists():
+        supplied = preparation_api.read(args.context)
+        if any(supplied[k] != context[k] for k in ('url', 'head_sha', 'base_sha')):
+            raise ValueError('supplied context has changed evidence; refresh preparation')
+        for field in ('metadata', 'patch'):
+            if (Path(supplied[field]).exists() and preparation_api.file_hash(supplied[field]) !=
+                    preparation['sources'][field]['sha256']):
+                raise ValueError('supplied ' + field + ' differs from prepared evidence')
     if not args.describe and (not args.decisions_file or not args.preparation_file):
         parser.error('--decisions-file and --preparation-file are required to launch reviewers')
     config = json.loads(run(['python3', str(ROOT/'dk-config/scripts/repo_rules.py'),
@@ -403,7 +424,11 @@ def main():
     if args.describe:
         print(json.dumps({'reviewers': [describe_reviewer(name) for name in config['reviewers']]}, ensure_ascii=True))
         return
-    decisions = validate_decisions(context, json.loads(Path(args.decisions_file).read_text()))
+    decisions = validate_decisions(context, preparation_api.read(preparation_api.source_path(preparation, 'decisions'))
+                                  if fresh else json.loads(Path(args.decisions_file).read_text()))
+    if fresh and Path(args.decisions_file).exists():
+        if validate_decisions(context, preparation_api.read(args.decisions_file)) != decisions:
+            raise ValueError('supplied Decisions changed; refresh preparation')
     preparation = preparation_api.load(args.preparation_file, context, decisions)
     def optional(path):
         return Path(path).read_text() if path else ''
@@ -440,6 +465,9 @@ def main():
         artifact = session.finish(result.copy())
     result['review_session'] = {'id': session.id, 'path': str(session.path)}
     result['review_artifact'] = artifact
+    if fresh:
+        result.update(preparation_id=preparation['preparation_id'],
+                      engineering_id=preparation_api.engineering_id(preparation))
     if legacy:
         legacy.legacy_register_review(args.run_record, result, context['head_sha'])
     print(json.dumps(result, ensure_ascii=True))
