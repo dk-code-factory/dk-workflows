@@ -83,7 +83,7 @@ def pinned_bindings(descriptors):
         procedure, manifest = manifest_skill(Path(value['root']), value['executor'],
                                              *value['binding']['skill'].split(':'))
         if (str(procedure) != value['procedure'] or (value.get('version') is not None
-                and manifest.get('version') != value['version'])):
+                and manifest.get('version', value['version']) != value['version'])):
             raise ValueError('retained reviewer procedure or version changed')
         pinned[name] = value
     token = _PINNED_BINDINGS.set(pinned)

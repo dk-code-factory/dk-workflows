@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 import pytest
@@ -16,6 +17,9 @@ from shared.private_state import read, write
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'dk-pr-decisions/tests'))
 from preparation_fixtures import Package, analysis, descriptor, prep, retain
+sys.path.insert(0, str(ROOT / 'dk-pr-address-reviews/scripts'))
+import fetch_pr_conversation as conversation_exporter
+import fetch_unresolved_review_threads as inline_exporter
 
 
 def module(name):
@@ -31,7 +35,7 @@ state, completion = module('run_state'), module('completion')
 
 class Scenario:
     def __init__(self, tmp_path, monkeypatch, reviewers=('example',), cycles=5, descriptor_links=False,
-                 extra_filename=None):
+                 extra_filename=None, decisions_choices=False):
         self.package = p = Package(tmp_path)
         self.reviewers = list(reviewers)
         if len(reviewers) > 1:
@@ -63,6 +67,9 @@ class Scenario:
         p.write('rules.json', {'rule': 'Preserve the supported transform'})
         p.manifest['evidence']['rules'] = ['rules.json']
         p.write('manifest.json', p.manifest)
+        if decisions_choices:
+            p.manifest['evidence']['choices'] = ['decisions.json']
+            p.write('manifest.json', p.manifest)
         self.path = tmp_path / 'run.json'
         self.original_path = p.prepare(analysis(reviewers))['artifact']
         self.original = prep.read(self.original_path)
@@ -79,6 +86,9 @@ class Scenario:
         state.register_review(record, {'review_artifact': self.reference}, self.reviewed_head)
         write(self.path, record)
         self.original_bytes = Path(self.reference['path']).read_bytes()
+        self.retained_bytes = {path: path.read_bytes() for path in
+            [Path(self.original_path), Path(binding['session_file']),
+             *[p for p in (Path(self.original_path).parent / 'evidence').rglob('*') if p.is_file()]]}
         self.calls = []
         self.different = None
         self.provider_hook = None
@@ -104,16 +114,24 @@ class Scenario:
         return {'equivalent': self.different is None,
                 'rationale': 'New review obligation' if self.different else 'Only synchronization wording changed',
                 'fields': {key: verdict('fields', key) for key in binding['fields']},
-                'sources': {key: verdict('sources', key) for key in binding['changed_sources']}}
+                'sources': {key: verdict('sources', key) for key in binding['changed_sources']},
+                **({'decisions': {key: {**verdict('decisions', key),
+                    'maps_to': binding['decision_targets'][0],
+                    'discussion_sources': list(item['discussion_sources']),
+                    'evidence': [binding['decision_targets'][0], 'current/decisions#' + key]
+                        + [refs[0] for refs in item['discussion_sources'].values()]}
+                    for key, item in binding['decision_additions'].items()}}
+                   if binding.get('comparison_version') == 2 else {})}
 
-    def feedback(self, status):
+    def feedback(self, status, items=()):
+        items = list(items)
         self.package.write('feedback.json', {
             'schemaVersion': 1, 'complete': True,
             'pullRequest': {'url': self.package.context['url'], 'headRefOid': self.package.context['head_sha']},
             'threads': [], 'threadCount': 0, 'threadsSha256': prep.digest([]),
-            'items': [], 'itemCount': 0, 'itemsSha256': prep.digest([]), 'status': status})
+            'items': items, 'itemCount': len(items), 'itemsSha256': prep.digest(items), 'status': status})
 
-    def refresh(self, *, published=True, change=None):
+    def refresh(self, *, published=True, change=None, feedback_items=()):
         p = self.package
         if published:
             self.git('commit', '--amend', '-qm', 'Clean series boundary')
@@ -121,35 +139,51 @@ class Scenario:
         p.context['head_sha'] = p.decisions['head_sha'] = self.head
         p.write('context.json', p.context)
         p.write('decisions.json', p.decisions)
-        self.feedback('Fresh feedback after cleanup')
-        p.manifest['evidence']['prior_preparation'] = [self.original_path]
-        p.write('manifest.json', p.manifest)
+        self.feedback('Fresh feedback after cleanup', feedback_items)
         result = analysis(self.reviewers)
         result['sync_reason'] = 'Published scope and Decisions are synchronized after cleanup.'
         if change:
             change(result)
+        self.prepare(result)
+        self.assess_series(published=published)
+
+    def prepare(self, result=None):
+        p = self.package
+        parent_path = read(self.path, {})['preparation']['path']
+        parent = prep.read(parent_path)
+        full = result is not None
+        result = result if full else parent['analysis']
+        p.manifest['evidence']['prior_preparation'] = [parent_path]
+        p.write('manifest.json', p.manifest)
         def reassess(prompt, checkout):
+            inputs = json.JSONDecoder().raw_decode(prompt.split('INPUT INDEX (read original paths):\n', 1)[1])[0]
             batch = json.JSONDecoder().raw_decode(prompt.split(
                 'REASSESSMENT (one batch, read original changed and governing sources):\n', 1)[1])[0]
-            value = retain(self.original, unmapped=batch['unmapped_changes'])
+            value = retain(parent, ids=batch['affected'], unmapped=batch['unmapped_changes'])
             conclusions = prep.graph_api.conclusions(result)
-            original_conclusions = prep.graph_api.conclusions(self.original['analysis'])
+            original_conclusions = prep.graph_api.conclusions(parent['analysis'])
             for item in value['dispositions']:
-                location = self.original['graph'][item['id']]['location']
+                node = parent['graph'][item['id']]
+                location = node['location']
+                if any(key not in inputs['sources'] for key in node['sources']):
+                    item['watches'] = {key: node[key] for key in ('depends_on', 'paths', 'sources', 'decisions')}
+                    item['watches']['sources'] = [key for key in node['sources'] if key in inputs['sources']]
                 if conclusions[location] != original_conclusions[location]:
                     item.update(action='replace', value=conclusions[location])
             return value
         refreshed = prep.prepare(p.manifest_path, p.root / 'versions',
-            previous_preparation=self.original_path, full_analysis=True, analyzer=reassess)
-        assert refreshed['refresh']['model_call_count'] == 1
+            previous_preparation=parent_path, full_analysis=full, analyzer=reassess)
+        if full:
+            assert refreshed['refresh']['model_call_count'] == 1
         self.current_path = refreshed['artifact']
         self.current = prep.read(self.current_path)
         assert self.current['analysis'] == result
-        assert self.current['parent']['preparation_id'] == self.original['preparation_id']
+        if self.current['preparation_id'] != parent['preparation_id']:
+            assert self.current['parent']['preparation_id'] == parent['preparation_id']
         state.mutate(self.path, {}, lambda record: state.attach_preparation(
             record, self.current_path, p.context['url'], self.head,
-            expected_parent=self.original['preparation_id']))
-        self.assess_series(published=published)
+            expected_parent=parent['preparation_id']))
+        return refreshed
 
     def assess_series(self, *, published):
         self.assessment = dict(schema_version=1, pr_url=self.package.context['url'], head_repo='example/fixture',
@@ -676,6 +710,25 @@ def test_successful_correction_uses_same_evidence_and_no_extra_cycle(scenario, m
     assert s.calls == [0, 1] and len(read(s.path, {})['cycles']) == 5
 
 
+@pytest.mark.parametrize('version,missing', [(1, 'sources'), (2, 'decisions')])
+def test_comparison_correction_names_all_required_categories(scenario, version, missing):
+    s = scenario
+    s.refresh()
+    binding, _, _, _ = reconcile.snapshot(read(s.path, {}), s.head, s.assessment_path,
+                                          state.reconciliation_api(), version=version)
+    complete = s.comparison(binding)
+    prompts = []
+    def provider(prompt, checkout, *, attempt=0):
+        prompts.append(prompt)
+        return json.dumps(complete if attempt else {key: value for key, value in complete.items() if key != missing})
+    result = executors.execute_json('Compare retained preparation evidence.', s.package.context['checkout'],
+        executor=provider, validate=lambda value: reconcile.validate_comparison(value, binding))
+    hint = prompts[1].split('Correction: ', 1)[1].split('\nReturn ', 1)[0]
+    assert all(key in hint for key in complete)
+    assert ('decisions' in hint) == (version == 2)
+    assert result == complete and len(prompts) == 2
+
+
 def replace_result(s, result):
     record = read(s.path, {})
     item = s.session.finish(result)
@@ -735,3 +788,614 @@ def test_native_reconciliation_command_exposes_blocked_contract(scenario, monkey
     receipt = json.loads(capsys.readouterr().out)
     assert receipt['differences'][0]['field'] == 'feedback/0'
     assert classification('run-state', 0, receipt)[:2] == ('blocked', 'review_reconciliation_blocked')
+
+
+def add_discussion(s):
+    p = s.package
+    url = p.context['url'] + '#discussion_r123'
+    p.decisions['discussion_decisions'] = [{'text': 'Keep the supported local transform', 'references': [url]}]
+    p.decisions['decisions'] = [{'id': hashlib.sha256(b'Keep the supported local transform').hexdigest()[:20], 'text': 'Keep the supported local transform',
+        'references': [url], 'source_type': 'discussion', 'status': 'active',
+        'publication_status': 'unpublished', 'superseded_by': None, 'source': None}]
+    body = 'Agreed: preserve the supported local transform.'
+    comment = {'reference': url, 'text': body, 'url': url}
+    return [{**comment, 'conversation': [comment]}]
+
+
+def restatement_refresh(s, *, published=True, missing_source=False):
+    # Retain the approved reply as source evidence, then discover its Decisions.
+    feedback = add_discussion(s)
+    s.refresh(published=published, feedback_items=[] if missing_source else feedback)
+
+
+def test_discussion_restatements_retain_fifth_cycle_coverage(scenario):
+    s = scenario
+    restatement_refresh(s)
+    receipt = s.run()
+    assert receipt['status'] == 'reconciled' and receipt['executed_reviewers'] == []
+    saved = read(Path(receipt['reconciliation']['path']), {})
+    assert saved['reconciliation_version'] == 2 and len(saved['comparison']['decisions']) == 1
+    assert state.verify_review(s.path, s.current)['head'] == s.reviewed_head
+    assert Path(s.reference['path']).read_bytes() == s.original_bytes
+    assert len(read(s.path, {})['cycles']) == 5
+
+
+@pytest.mark.parametrize('kind', ['inline', 'review', 'comment'])
+def test_official_exporters_supply_restatement_sources(scenario, monkeypatch, kind):
+    import copy
+    s = scenario
+    p = s.package
+    add_discussion(s)
+    url = p.context['url'] + {'inline': '#discussion_r123', 'review': '#pullrequestreview-123',
+                              'comment': '#issuecomment-123'}[kind]
+    p.decisions['discussion_decisions'][0]['references'] = [url]
+    p.decisions['decisions'][0]['references'] = [url]
+    body = 'Agreed: preserve the supported local transform.'
+    metadata = dict(number=1, url=p.context['url'], title='Transform', body='',
+                    headRefOid=s.reviewed_head)
+    if kind == 'inline':
+        raw = {'id': 'THREAD', 'isResolved': False, 'comments': {'nodes': [
+            {'id': 'COMMENT', 'body': body, 'url': url}],
+            'pageInfo': {'hasNextPage': False, 'endCursor': None}}}
+        def gh(arguments, cwd):
+            return copy.deepcopy(metadata if arguments[0] == 'pr' else {'data': {'repository': {
+                'pullRequest': {'reviewThreads': {'nodes': [raw],
+                'pageInfo': {'hasNextPage': False, 'endCursor': None}}}}}})
+        monkeypatch.setattr(inline_exporter, 'run_gh', gh)
+        exported = inline_exporter.fetch_stable_snapshot(p.context['url'], p.root)
+        assert exported['threads'][0]['comments'][0]['text'] == body
+        assert 'body' not in exported['threads'][0]['comments'][0]
+    else:
+        snapshot = inline_exporter.build_output(dict(metadata, owner='example', repo='fixture', description=''), [])
+        raw = {'id': 123, 'body': body, 'html_url': url}
+        responses = iter([[[raw]] if kind == 'review' else [[]],
+                          [[raw]] if kind == 'comment' else [[]],
+                          {'headRefOid': s.reviewed_head}] * 2)
+        monkeypatch.setattr(conversation_exporter, 'gh_json', lambda *a: next(responses))
+        exported = conversation_exporter.fetch(snapshot, p.root)
+        assert exported['items'][0]['text'] == body and 'body' not in exported['items'][0]
+    s.refresh(published=False)
+    p.write('official-feedback.json', exported)
+    p.manifest['evidence']['feedback'] = ['official-feedback.json']
+    s.prepare(analysis(s.reviewers))
+    assert s.run()['status'] == 'reconciled'
+    assert state.verify_review(s.path, s.current)['head'] == s.reviewed_head
+
+
+@pytest.mark.parametrize('record,expected', [
+    ({'url': 'https://example.test/source', 'body': 'Legacy retained body'}, True),
+    ({'url': 'https://example.test/source', 'text': 'Native retained text'}, True),
+    ({'url': 'https://example.test/other', 'text': 'Wrong source'}, False),
+    ({'text': 'No own URL'}, False),
+    ({'url': 'https://example.test/source', 'text': ' '}, False),
+])
+def test_discussion_source_requires_own_url_and_nonempty_content(record, expected):
+    from shared import decision_restatements
+    assert decision_restatements.discussion_sources(record, 'https://example.test/source') is expected
+
+
+def test_restatement_without_retained_discussion_body_is_blocked(scenario):
+    restatement_refresh(scenario, missing_source=True)
+    assert scenario.run()['status'] == 'blocked' and scenario.calls == []
+
+
+@pytest.mark.parametrize('kind', ['missing_mapping', 'unknown_mapping', 'missing_source', 'material'])
+def test_restatement_mapping_must_be_complete_and_equivalent(scenario, monkeypatch, kind):
+    s = scenario
+    restatement_refresh(s)
+    compare = s.comparison
+    def altered(binding):
+        value = compare(binding)
+        entry = next(iter(value['decisions'].values()))
+        if kind == 'missing_mapping': value['decisions'] = {}
+        if kind == 'unknown_mapping': entry['maps_to'] = 'original/analysis#/questions'
+        if kind == 'missing_source': entry['discussion_sources'] = []
+        if kind == 'material':
+            entry['verdict'] = 'different'
+            value['equivalent'] = False
+        return value
+    monkeypatch.setattr(s, 'comparison', altered)
+    if kind == 'material':
+        assert s.run()['status'] == 'blocked'
+    else:
+        with pytest.raises(ValueError, match='one correction'):
+            s.run()
+    assert not read(s.path, {}).get('review_reconciliations') or kind == 'material'
+
+
+@pytest.mark.parametrize('field', ['worker_instructions', 'completion_criteria'])
+def test_operational_prose_is_independently_assessed(scenario, field):
+    s = scenario
+    s.refresh(change=lambda value: value.update({field: value[field] + ' Refresh retained evidence after cleanup.'}))
+    assert s.run()['status'] == 'reconciled'
+    saved = read(Path(read(s.path, {})['review_reconciliations'][-1]['path']), {})
+    assert '/' + field in saved['comparison']['fields']
+
+
+@pytest.mark.parametrize('restatement', [False, True])
+def test_decisions_backed_choice_allows_only_validated_context(tmp_path, monkeypatch, restatement):
+    s = Scenario(tmp_path, monkeypatch, decisions_choices=True)
+    if restatement:
+        restatement_refresh(s)
+    else:
+        s.refresh()
+    assert s.run()['status'] == 'reconciled'
+    assert state.verify_review(s.path, s.current)['head'] == s.reviewed_head
+
+
+def setup_precheck(s, monkeypatch, *, no_op=False, discussion=False):
+    from shared import cleanup_precheck
+    p = s.package
+    if discussion:
+        restatement_refresh(s, published=False)
+    else:
+        s.refresh(published=False)
+    isolated = p.root / 'isolated'
+    s.git('clone', '-q', str(p.repo), str(isolated))
+    p.context['checkout'] = str(isolated)
+    p.manifest['evidence']['production'] = [str(isolated / 'transform.py')]
+    p.write('context.json', p.context)
+    s.prepare(analysis(s.reviewers))
+    remote = p.root / 'remote.git'
+    s.git('init', '--bare', '-q', str(remote))
+    s.git('remote', 'add', 'origin', str(remote))
+    branch = s.git('symbolic-ref', '--short', 'HEAD')
+    s.git('push', '-qu', 'origin', branch)
+    if not no_op:
+        s.git('commit', '--amend', '-qm', 'Coherent cleanup')
+    candidate = s.git('rev-parse', 'HEAD')
+    recovery = 'refs/pr-split-recovery/' + s.reviewed_head
+    s.git('update-ref', recovery, s.reviewed_head)
+    guard_path = p.repo / '.git/pr-split-state.json'
+    guard = {'branch': branch, 'remote': 'origin', 'remote_branch': branch,
+        'remote_sha': s.reviewed_head, 'original_head': s.reviewed_head,
+        'original_tree': s.git('rev-parse', 'HEAD^{tree}'), 'base': s.base,
+        'pr': 1, 'pr_url': p.context['url'], 'host': 'github.com',
+        'base_repo': 'example/fixture', 'head_repo': 'example/fixture',
+        'author': 'fixture@example.test', 'mode': 'regroup', 'target_tip': s.base,
+        'target_branch': 'main', 'recovery_ref': recovery}
+    write(guard_path, guard)
+    def live(*args):
+        published = s.git('ls-remote', '--heads', 'origin', branch).split()[0]
+        return dict(pr_url=p.context['url'], head_repo='example/fixture', final_head=published,
+                    final_tree=s.git('rev-parse', published + '^{tree}'), target_tip=s.base,
+                    target_branch='main', commit_count=1)
+    monkeypatch.setattr(reconcile.series, 'live_snapshot', live)
+    def run():
+        return cleanup_precheck.precheck(s.path, s.reviewed_head, candidate, guard_path, state.reconciliation_api())
+    return run, candidate, guard_path, guard
+
+
+@pytest.mark.parametrize('discussion', [False, True])
+def test_operational_preparation_refresh_preserves_cleanup_contract(scenario, monkeypatch, discussion):
+    s = scenario
+    run, _, _, _ = setup_precheck(s, monkeypatch, discussion=discussion)
+    parent = s.current
+    refreshed = s.prepare()
+    assert refreshed['refresh']['model_call_count'] == 0
+    assert s.current['analysis'] == parent['analysis']
+    assert s.current['graph'] == parent['graph']
+    assert s.current['parent']['preparation_id'] == parent['preparation_id']
+    assert run()['status'] == 'prechecked' and s.calls == [0]
+    assert len(read(s.path, {})['cycles']) == 5
+    assert Path(s.reference['path']).read_bytes() == s.original_bytes
+
+
+def retain_legacy_review(s, change=None):
+    record = read(s.path, {})
+    # The original runner registered only this reference and these v1 fields.
+    artifact = {key: value for key, value in coverage.load(s.reference).items()
+                if key not in {'session_id', 'session_identity'}}
+    artifact.update(version=1, iteration_run_id=record['iteration_run']['id'], cycle=5)
+    if change:
+        change(artifact)
+    path = s.package.write('legacy-review.json', artifact)
+    s.reference = {'path': str(path), 'sha256': coverage.digest(artifact)}
+    record['review_results'], record['review_sessions'] = [s.reference], []
+    write(s.path, record)
+    s.original_bytes = path.read_bytes()
+
+
+@pytest.mark.parametrize('kind', ['scope', 'discussion', 'tree', 'source', 'run', 'cycle',
+                                  'reviewer', 'finding', 'retained'])
+def test_legacy_precheck_keeps_original_guards(scenario, monkeypatch, kind):
+    s = scenario
+    retain_legacy_review(s)
+    run, _, _, _ = setup_precheck(s, monkeypatch, discussion=kind == 'discussion')
+    if kind == 'scope':
+        changed = analysis(s.reviewers)
+        changed['worker_instructions'] += ' Changed operational wording.'
+        s.prepare(changed)
+    elif kind == 'source':
+        s.package.write('user.json', {'instruction': 'Changed human choice'})
+    elif kind == 'retained':
+        snapshot = Path(s.original_path).parent / 'evidence/feedback/0'
+        snapshot.chmod(0o600)
+        snapshot.write_text('changed')
+    elif kind != 'discussion':
+        def change(artifact):
+            if kind == 'tree': artifact['tree'] = 'a' * 40
+            if kind == 'run': artifact['iteration_run_id'] = 'different-run'
+            if kind == 'cycle': artifact['cycle'] = 4
+            if kind == 'reviewer': artifact['result']['executed_reviewers'] = []
+            if kind == 'finding':
+                artifact['result']['findings'] = [{'path': 'transform.py', 'line': 1,
+                                                  'message': 'Unassessed defect', 'reviewers': s.reviewers}]
+        retain_legacy_review(s, change)
+    if kind in {'scope', 'discussion', 'tree'}:
+        result = run()
+        assert result['status'] == 'blocked'
+        assert ('unchanged review scope' if kind != 'tree' else 'original reviewed tree') in result['reason']
+    else:
+        reason = {'source': 'source changed', 'run': 'iteration run/cycle', 'cycle': 'iteration run/cycle',
+                  'reviewer': 'execution is incomplete', 'finding': 'lacks validity and scope assessment',
+                  'retained': 'retained preparation evidence changed'}[kind]
+        with pytest.raises(ValueError, match=reason):
+            run()
+    assert not read(s.path, {}).get('cleanup_prechecks') and s.calls == []
+    assert len(read(s.path, {})['cycles']) == 5
+
+
+@pytest.mark.parametrize('missing_object', [False, True])
+def test_precheck_uses_fresh_checkout_after_historical_checkout_removal(tmp_path, monkeypatch, missing_object):
+    original_prepare = Package.prepare
+    def prepare(package, *args, **kwargs):
+        if not hasattr(package, 'historical_checkout'):
+            package.historical_checkout = package.root / 'historical-review-checkout'
+            coverage.git(package.repo, 'clone', '-q', str(package.repo), str(package.historical_checkout))
+            package.context['checkout'] = str(package.historical_checkout)
+            package.manifest['evidence']['production'] = [str(package.historical_checkout / 'transform.py')]
+            package.write('manifest.json', package.manifest)
+            package.write('context.json', package.context)
+        return original_prepare(package, *args, **kwargs)
+    monkeypatch.setattr(Package, 'prepare', prepare)
+    s = Scenario(tmp_path, monkeypatch)
+    run, candidate, path, _ = setup_precheck(s, monkeypatch)
+    shutil.rmtree(s.package.historical_checkout)
+    if missing_object:
+        checkout = Path(s.package.context['checkout'])
+        (checkout / '.git/objects' / s.reviewed_head[:2] / s.reviewed_head[2:]).unlink()
+        with pytest.raises(subprocess.CalledProcessError):
+            run()
+        assert s.calls == []
+    else:
+        from shared import cleanup_precheck
+        receipt = run()['precheck']
+        assert cleanup_precheck.validate(receipt['path'], path, candidate,
+                                        state.reconciliation_api()) == receipt
+        assert run()['reused_precheck'] is True and s.calls == [0]
+    assert Path(s.reference['path']).read_bytes() == s.original_bytes
+    assert all(path.read_bytes() == before for path, before in s.retained_bytes.items())
+
+
+@pytest.mark.parametrize('no_op', [False, True])
+def test_precheck_retains_evidence_but_cannot_supply_completion(scenario, monkeypatch, no_op):
+    from shared import cleanup_precheck
+    s = scenario
+    run, candidate, path, guard = setup_precheck(s, monkeypatch, no_op=no_op, discussion=True)
+    receipt = run()
+    assert receipt['status'] == 'prechecked' and receipt['completion_ready'] is False
+    assert receipt['executed_reviewers'] == [] and s.calls == [0]
+    assert cleanup_precheck.validate(receipt['precheck']['path'], path, candidate,
+                                     state.reconciliation_api()) == receipt['precheck']
+    with pytest.raises(ValueError, match='scope lacks review coverage'):
+        state.verify_review(s.path, s.current)
+    assert not read(s.path, {}).get('review_reconciliations')
+    assert len(read(s.path, {})['cycles']) == 5
+    assert Path(s.reference['path']).read_bytes() == s.original_bytes
+    assert run()['status'] == 'prechecked' and s.calls == [0]
+
+
+@pytest.mark.parametrize('failure', ['candidate', 'recovery', 'identity', 'guard',
+    'remote', 'remote_branch', 'recovery_ref', 'remote_blank', 'missing_remote',
+    'missing_remote_branch', 'missing_target_branch', 'missing_head_repo'])
+def test_precheck_cli_reports_expected_errors_without_mutating_evidence(scenario, monkeypatch, capsys, failure):
+    s = scenario
+    _, candidate, guard_path, guard = setup_precheck(s, monkeypatch)
+    if failure == 'candidate':
+        candidate = 'f' * 40
+    elif failure == 'recovery':
+        s.git('update-ref', '-d', guard['recovery_ref'])
+    elif failure == 'guard':
+        guard_path.write_text('[]')
+    elif failure.startswith('missing_'):
+        guard.pop(failure.removeprefix('missing_'))
+        write(guard_path, guard)
+    elif failure in {'remote', 'remote_branch', 'recovery_ref', 'remote_blank'}:
+        field, value = {'remote': ('remote', []), 'remote_branch': ('remote_branch', None),
+                        'recovery_ref': ('recovery_ref', 42), 'remote_blank': ('remote', '')}[failure]
+        guard[field] = value
+        write(guard_path, guard)
+    else:
+        def unavailable(*args):
+            raise RuntimeError('Live repository identity unavailable')
+        monkeypatch.setattr(reconcile.series, 'live_snapshot', unavailable)
+    destination = s.path.with_name('pr-1.json')
+    destination.write_bytes(s.path.read_bytes())
+    original = destination.read_bytes()
+    guard_bytes = guard_path.read_bytes()
+    monkeypatch.setattr(state, 'root', lambda repo: destination.parent)
+    monkeypatch.setattr(sys, 'argv', ['run_state.py', '--repo', 'github.com/example/fixture', '--pr', '1',
+        'precheck-cleanup', '--head', s.reviewed_head, '--candidate-head', candidate,
+        '--split-state', str(guard_path)])
+    with pytest.raises(SystemExit) as stopped:
+        state.main()
+    assert stopped.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == '' and captured.err.startswith('run_state: ')
+    assert 'Traceback' not in captured.err
+    assert destination.read_bytes() == original and s.calls == []
+    assert guard_path.read_bytes() == guard_bytes
+    assert all(path.read_bytes() == before for path, before in s.retained_bytes.items())
+
+
+@pytest.mark.parametrize('malformed', [[], {'binding': []}, {'binding': {'assessment': []}}])
+def test_malformed_precheck_containers_fail_through_real_gate_and_cli(scenario, monkeypatch, capsys, malformed):
+    from shared import cleanup_precheck, ci_policy
+    s = scenario
+    run, candidate, guard_path, guard = setup_precheck(s, monkeypatch)
+    receipt = run()['precheck']
+    Path(receipt['path']).write_text(json.dumps(malformed))
+    record_bytes = s.path.read_bytes()
+    calls = list(s.calls)
+    verification = s.verification()
+    assert completion.completion_gate(s.reviewed_head, s.reviewed_head, s.reviewed_head, True, False, 'success',
+        stage='review', preparation=s.current_path, pr_url=s.package.context['url'], body='',
+        run_record=s.path, verification=verification, cleanup_precheck=receipt['path']) == 'review_coverage_invalid'
+    for check in (lambda: cleanup_precheck.validate(receipt['path'], guard_path, candidate, state.reconciliation_api()),
+                  lambda: cleanup_precheck.published_receipt({**guard, 'cleanup_precheck': receipt}, guard_path)):
+        with pytest.raises(ValueError):
+            check()
+    ci = module('ci_wait')
+    monkeypatch.setitem(sys.modules, 'ci_wait', ci)
+    monkeypatch.setattr(ci, 'observe', lambda *a: {'head': s.reviewed_head, 'result': 'success'})
+    monkeypatch.setattr(ci_policy, 'decide', lambda *a: {'head': s.reviewed_head, 'result': 'success'})
+    monkeypatch.setattr(completion, 'live_preparation_scope', lambda *a: {'body': '', 'headRefOid': s.reviewed_head})
+    monkeypatch.setattr(sys, 'argv', ['completion.py', '--cwd', str(s.package.repo), '--pr', s.package.context['url'],
+        'gate', '--stage', 'review', '--start-head', s.reviewed_head, '--final-head', s.reviewed_head,
+        '--review-complete', '--preparation-file', str(s.current_path), '--verification-file', str(verification),
+        '--run-record', str(s.path), '--cleanup-precheck', receipt['path']])
+    with pytest.raises(SystemExit) as stopped:
+        completion.main()
+    assert stopped.value.code == 1
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    assert output['gate'] == 'review_coverage_invalid'
+    assert not any(output[key] for key in ('review_ready', 'cleanup_ready', 'completion_ready'))
+    assert captured.err == '' and s.calls == calls and s.path.read_bytes() == record_bytes
+    assert all(path.read_bytes() == before for path, before in s.retained_bytes.items())
+
+
+def test_nonobject_retained_comparison_has_normal_invalid_evidence_error(tmp_path):
+    path = tmp_path / 'comparison.json'
+    path.write_text('[]')
+    item = {'path': str(path), 'sha256': coverage.digest([]), 'current_preparation_id': 'current'}
+    with pytest.raises(ValueError):
+        reconcile.load(item, {})
+    with pytest.raises(ValueError):
+        reconcile.retained_comparison({'cleanup_prechecks': [item]}, {'current_preparation_id': 'current'},
+                                      collection='cleanup_prechecks')
+
+
+@pytest.mark.parametrize('kind', ['guard', 'candidate', 'source', 'run', 'attempt', 'receipt', 'lease'])
+def test_stale_precheck_never_authorizes_publication(scenario, monkeypatch, kind):
+    from shared import cleanup_precheck
+    s = scenario
+    run, candidate, path, guard = setup_precheck(s, monkeypatch)
+    receipt = run()['precheck']
+    if kind == 'guard':
+        guard['remote_branch'] = 'other'
+        write(path, guard)
+    if kind == 'candidate':
+        s.git('commit', '--allow-empty', '-qm', 'Concurrent change')
+    if kind == 'source': s.package.write('feedback.json', {'changed': True})
+    if kind == 'run': state.mutate(s.path, {}, lambda r: r['iteration_run'].update(id='other'))
+    if kind == 'attempt': state.mutate(s.path, {}, lambda r: r['cycle_retries'].append({'number': 5}))
+    if kind == 'receipt': Path(receipt['path']).write_text('{}')
+    if kind == 'lease': s.git('push', '-q', '--force', 'origin', 'HEAD:' + guard['remote_branch'])
+    with pytest.raises((ValueError, KeyError)):
+        cleanup_precheck.validate(receipt['path'], path, candidate, state.reconciliation_api())
+    assert Path(s.reference['path']).read_bytes() == s.original_bytes
+
+
+def test_precheck_disagreement_and_interruption_preserve_budget(scenario, monkeypatch):
+    s = scenario
+    run, _, _, _ = setup_precheck(s, monkeypatch)
+    provider = executors.execute
+    monkeypatch.setattr(executors, 'execute', lambda *a, **kw: (_ for _ in ()).throw(KeyboardInterrupt()))
+    with pytest.raises(KeyboardInterrupt): run()
+    assert not read(s.path, {}).get('cleanup_prechecks')
+    monkeypatch.setattr(executors, 'execute', provider)
+    s.different = ('sources', 'feedback/0')
+    assert run()['status'] == 'blocked'
+    s.different = None
+    assert run()['status'] == 'blocked' and s.calls == [0]
+    assert len(read(s.path, {})['cycles']) == 5
+
+
+@pytest.mark.parametrize('verdict', ['different', 'ambiguous', 'equivalent'])
+def test_precheck_same_tree_candidate_preserves_disagreement_and_exact_approval(scenario, monkeypatch, verdict):
+    from shared import cleanup_precheck
+    s = scenario
+    run, candidate, path, _ = setup_precheck(s, monkeypatch)
+    original_comparison = s.comparison
+    answer = [verdict]
+    def comparison(binding):
+        result = original_comparison(binding)
+        if answer[0] != 'equivalent':
+            result.update(equivalent=False, rationale='Retained engineering judgment: ' + answer[0])
+            result['sources']['feedback/0']['verdict'] = answer[0]
+        return result
+    s.comparison = comparison
+    expected = 'prechecked' if verdict == 'equivalent' else 'blocked'
+    assert run()['status'] == expected
+    original_receipt = read(s.path, {})['cleanup_prechecks'][-1]
+    original_receipt_bytes = Path(original_receipt['path']).read_bytes()
+    assert run()['status'] == expected and s.calls == [0]
+    s.git('commit', '--amend', '-qm', 'Another same-tree cleanup candidate')
+    changed = s.git('rev-parse', 'HEAD')
+    assert changed != candidate
+    assert s.git('rev-parse', changed + '^{tree}') == s.git('rev-parse', candidate + '^{tree}')
+    answer[0] = 'equivalent'
+    result = cleanup_precheck.precheck(s.path, s.reviewed_head, changed, path, state.reconciliation_api())
+    if verdict == 'equivalent':
+        assert result['status'] == 'prechecked' and result['reused_precheck'] is False
+        assert s.calls == [0, 0]
+        with pytest.raises(ValueError, match='does not cover this guard and candidate'):
+            cleanup_precheck.validate(original_receipt['path'], path, changed, state.reconciliation_api())
+        assert cleanup_precheck.validate(result['precheck']['path'], path, changed,
+                                        state.reconciliation_api()) == result['precheck']
+    else:
+        assert result['status'] == 'blocked' and s.calls == [0]
+        assert result['comparison'] == original_receipt
+        assert read(s.path, {})['cleanup_prechecks'] == [original_receipt]
+    assert Path(original_receipt['path']).read_bytes() == original_receipt_bytes
+    assert Path(s.reference['path']).read_bytes() == s.original_bytes
+    assert all(path.read_bytes() == before for path, before in s.retained_bytes.items())
+    assert len(read(s.path, {})['cycles']) == 5
+
+
+@pytest.mark.parametrize('verdict', ['different', 'ambiguous'])
+def test_version_one_disagreement_survives_attestation_upgrade(scenario, verdict):
+    s = scenario
+    s.refresh()
+    binding, _, _, _ = reconcile.snapshot(read(s.path, {}), s.head, s.assessment_path,
+                                         state.reconciliation_api(), version=1)
+    comparison = s.comparison(binding)
+    comparison['equivalent'] = False
+    comparison['rationale'] = 'Retained legacy disagreement'
+    comparison['sources']['feedback/0']['verdict'] = verdict
+    value = {'reconciliation_version': 1, 'binding': binding, 'comparison': comparison}
+    path = s.package.write('legacy-disagreement.json', value)
+    item = {'path': str(path), 'sha256': coverage.digest(value), 'binding_hash': coverage.digest(binding),
+            'current_preparation_id': s.current['preparation_id']}
+    reconcile.load(item, binding, require_equivalent=False)
+    state.mutate(s.path, {}, lambda r: r.setdefault('review_reconciliations', []).append(item))
+    assert s.run()['status'] == 'blocked' and s.calls == []
+
+    # A later valid v2 approval for the same evidence cannot supply coverage.
+    upgraded, _, _, _ = reconcile.snapshot(read(s.path, {}), s.head, s.assessment_path,
+                                          state.reconciliation_api())
+    approval = {'reconciliation_version': 2, 'binding': upgraded, 'comparison': s.comparison(upgraded)}
+    path = s.package.write('later-approval.json', approval)
+    later = {'path': str(path), 'sha256': coverage.digest(approval), 'binding_hash': coverage.digest(upgraded),
+             'current_preparation_id': s.current['preparation_id']}
+    reconcile.load(later, upgraded)
+    state.mutate(s.path, {}, lambda r: r['review_reconciliations'].append(later))
+    assert s.run()['status'] == 'blocked' and s.calls == []
+    with pytest.raises(ValueError, match='not semantically equivalent'):
+        state.verify_review(s.path, s.current)
+    assert len(read(s.path, {})['cycles']) == 5
+    assert Path(s.reference['path']).read_bytes() == s.original_bytes
+
+
+def test_version_one_attestations_keep_original_restrictions(scenario):
+    s = scenario
+    s.refresh()
+    binding, _, _, _ = reconcile.snapshot(read(s.path, {}), s.head, s.assessment_path,
+                                         state.reconciliation_api(), version=1)
+    value = {'reconciliation_version': 1, 'binding': binding, 'comparison': s.comparison(binding)}
+    path = s.package.write('legacy-reconciliation.json', value)
+    item = {'path': str(path), 'sha256': coverage.digest(value), 'binding_hash': coverage.digest(binding),
+            'current_preparation_id': s.current['preparation_id']}
+    state.mutate(s.path, {}, lambda r: r.setdefault('review_reconciliations', []).append(item))
+    assert state.verify_review(s.path, s.current)['head'] == s.reviewed_head
+    receipt = s.run()
+    assert receipt['status'] == 'reconciled' and not receipt['reused_reconciliation']
+    assert s.calls == [0]
+    assert read(Path(receipt['reconciliation']['path']), {})['reconciliation_version'] == 2
+    restatement_refresh(s, published=False)
+    with pytest.raises(reconcile.NotEquivalent, match='Decisions'):
+        reconcile.snapshot(read(s.path, {}), s.head, s.assessment_path, state.reconciliation_api(), version=1)
+
+
+@pytest.mark.parametrize('no_op', [False, True])
+@pytest.mark.parametrize('legacy', [False, True])
+def test_reply_precheck_guarded_cleanup_and_final_completion(scenario, monkeypatch, no_op, legacy):
+    from shared.review_loop import encode
+    s = scenario
+    if legacy:
+        retain_legacy_review(s)
+    run, candidate, path, data = setup_precheck(s, monkeypatch, no_op=no_op, discussion=not legacy)
+    receipt = run()['precheck']
+    if legacy:
+        assert state.verify_review(s.path, s.current)['version'] == 1
+        saved = read(Path(receipt['path']), {})
+        assert saved['reconciliation_version'] == 1
+        assert not {'session_file', 'attempt'} & saved['binding'].keys()
+        with pytest.raises(ValueError, match='cannot supply final review coverage'):
+            coverage.verify(s.reference, s.current, reconciliation={
+                'artifact': receipt, 'binding': saved['binding']})
+    assert completion.completion_gate(s.reviewed_head, s.reviewed_head, s.reviewed_head, True, False, 'success',
+        stage='review', preparation=s.current_path, pr_url=s.package.context['url'], body='', run_record=s.path,
+        verification=s.verification(), cleanup_precheck=receipt['path']) == 'clean'
+    with pytest.raises(ValueError, match='cannot authorize completion'):
+        completion.completion_gate(s.reviewed_head, candidate, candidate, True, False, 'success',
+                                   cleanup_precheck=receipt['path'])
+    spec = importlib.util.spec_from_file_location('end_to_end_guard', ROOT / 'dk-pr-split-commits/scripts/split_guard.py')
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    monkeypatch.chdir(s.package.repo)
+    real_run = guard.run
+    def command(*args, **kwargs):
+        if args[0] == 'gh':
+            return json.dumps(dict(number=1, url=s.package.context['url'], headRefName=data['remote_branch'],
+                headRefOid=s.git('ls-remote', '--heads', 'origin', data['remote_branch']).split()[0],
+                isCrossRepository=False, headRepository={'nameWithOwner': data['head_repo']}))
+        return real_run(*args, **kwargs)
+    monkeypatch.setattr(guard, 'run', command)
+    token = encode('split', 1, True)
+    def invoke(*args):
+        monkeypatch.setattr(sys, 'argv', ['split_guard.py', *args])
+        guard.main()
+    reasons = s.package.write('reasons.json', ['One coherent reviewed change'])
+    final_assessment = s.package.root / 'published-assessment.json'
+    if not no_op:
+        with pytest.raises(ValueError, match='cleanup-precheck'):
+            invoke('push', '--allow-force-push', '--review-state', token)
+        assert s.git('ls-remote', '--heads', 'origin', data['remote_branch']).split()[0] == s.reviewed_head
+        invoke('push', '--allow-force-push', '--review-state', token, '--cleanup-precheck', receipt['path'])
+    if no_op:
+        with pytest.raises(ValueError, match='cleanup-precheck'):
+            invoke('assess', '--review-state', token, '--reasons-file', str(reasons),
+                   '--output', str(final_assessment))
+        assert not final_assessment.exists()
+    invoke('assess', '--review-state', token, '--cleanup-precheck', receipt['path'],
+           '--reasons-file', str(reasons), '--output', str(final_assessment))
+    isolated = s.package.context['checkout']
+    coverage.git(isolated, 'fetch', '-q', str(s.package.repo), candidate)
+    coverage.git(isolated, 'checkout', '-q', '--detach', candidate)
+    # Final preparation must consume the same verified discussion, now at the
+    # published candidate head. It receives a new comparison and verification.
+    if legacy:
+        s.refresh(published=False, change=lambda result: result.update(sync_reason=''))
+    else:
+        restatement_refresh(s, published=False)
+    s.assessment_path = final_assessment
+    s.assessment = reconcile.series.load(final_assessment, s.package.repo)
+    if legacy:
+        with pytest.raises(ValueError, match='requires version-2'):
+            s.run()
+    else:
+        assert s.run()['status'] == 'reconciled'
+    assert completion.completion_gate(s.reviewed_head, candidate, candidate, True, False,
+        {'head': candidate, 'result': 'success'}, preparation=s.current_path, pr_url=s.package.context['url'], body='', run_record=s.path,
+        verification=s.verification(), assessment=s.assessment,
+        series_snapshot=reconcile.series.live_snapshot(s.package.context['url'], isolated)) == 'clean'
+    assert s.calls == ([0] if legacy else [0, 0]) and len(read(s.path, {})['cycles']) == 5
+    if legacy:
+        assert read(s.path, {})['review_sessions'] == []
+    assert Path(s.reference['path']).read_bytes() == s.original_bytes
+    assert not path.exists() and s.git('rev-parse', data['recovery_ref']) == s.reviewed_head
+    assert all(path.read_bytes() == before for path, before in s.retained_bytes.items())
+
+
+def test_choice_envelope_is_not_an_exact_decisions_copy(tmp_path, monkeypatch):
+    s = Scenario(tmp_path, monkeypatch, decisions_choices=True)
+    p = s.package
+    s.refresh()
+    p.write('choice-envelope.json', {'data': p.decisions, 'unverified_extension': 'New obligation'})
+    p.manifest['evidence']['choices'] = ['choice-envelope.json']
+    p.write('manifest.json', p.manifest)
+    s.prepare(analysis())
+    assert s.run()['status'] == 'blocked' and s.calls == []

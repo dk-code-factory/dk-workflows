@@ -166,3 +166,50 @@ explicit session/result contract.
 `accept-review-failures --head SHA --reviewer NAME [--reviewer NAME ...] --source EXACT_HUMAN_INSTRUCTION_OR_SOURCE --reason TEXT` appends `accepted_review_failures`. Each entry retains the active iteration ID, immutable review-artifact reference, reviewed head/tree/scope, exact reviewer names, human source and rationale. Apply prior applicable human acceptance without asking again. Only recorded provider failures/exhaustion can be accepted, after all configured reviewers were accounted for. Evidence/checkout/instruction guards and unrun reviewers cannot be accepted. History survives restart, but a different active run/result/tree/scope does not inherit permission. Gates preserve `complete: false` and return accepted failure names plus their source records; report these separately from successful/reused reviews. Findings, CI, preparation and series cleanup remain mandatory.
 
 Incremental preparation children carry an expected parent ID. Registration compares it with the active preparation under the run-record lock; reconcile concurrent siblings instead of overwriting the newer active artifact. Typed operational snapshots and zero-call refresh behavior follow the preparation contract.
+
+## Prepublication cleanup coverage
+
+`precheck-cleanup --head REVIEWED_SHA --candidate-head CANDIDATE_SHA --split-state FILE`
+requires a fresh ready preparation and complete feedback/Decisions pinned to the
+still-published reviewed head in an isolated checkout. Keep the candidate in the
+owned repository checkout. `cleanup_prechecks` retains immutable comparisons
+separately from `review_reconciliations`. Version-1 review results require their
+exact reviewed scope and a strict version-1 comparison, using existing run/cycle
+provenance without inventing a session or attempt. The receipt binds the active
+run, available cycle/attempt and session provenance, original review result,
+original and current preparations/scopes, candidate head/tree/base, remote lease
+and stable guard identity. Pass its artifact path to the review-stage gate and
+the regroup push/no-op assessment. Persisted disagreement remains blocking; interrupted
+comparisons grant no coverage. No cycle or reviewer execution is added.
+
+After cleanup, refresh final-head evidence. Version-2 review provenance uses
+`reconcile-review --head FINAL_SHA --series-assessment FILE`; version-1 coverage
+keeps its exact-scope verification. Completion requires applicable final coverage
+and current verification/CI. A precheck cannot replace them.
+Report review readiness separately from cleanup and completion readiness.
+
+## Recovery into the repaired runtime
+
+First verify that the old invocation and all its children have stopped. Inspect
+their retained lifecycle records with `update.py inspect --host HOST`, and
+explicitly complete each stopped child's token before its parent using the normal
+`complete --host HOST --token TOKEN --reason TEXT` command. Preserve lifecycle
+records; never delete them or infer liveness from age or a launcher PID alone.
+
+Enter the repaired installed package normally and use its returned retained
+`runtime_root`, `completion_script` and new lifecycle token. Resume the existing
+active iteration with `resume-run`; do not start a replacement run or reset the
+five-cycle budget. Validate the retained reviewer packages, original session and
+result, original preparation and evidence copies, current preparation, candidate,
+guard state/remote lease, recovery ref and base before continuing. The repaired
+runtime orchestrates recovery while original reviewer packages remain pinned.
+
+For an unpublished candidate, refresh reviewed-head evidence in an isolated
+checkout, obtain the prepublication receipt and rerun the review-stage gate before
+the guarded push or no-op assessment. For a pending push with its receipt, use
+`split_guard.py reconcile` to check the same candidate against the remote; never
+retry an uncertain push or refresh its lease automatically. Missing/corrupt
+provenance or disagreement remains a blocker. After verified publication, refresh
+final-head preparation, reconcile against the original review with the published
+assessment, refresh engineering verification and exact-head CI, and run the
+complete gate. Retain the original artifacts and counters throughout recovery.

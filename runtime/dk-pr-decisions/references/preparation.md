@@ -116,3 +116,30 @@ clean reviews cannot replace these assessments. Both stages receive
 `--preparation-file`, `--verification-file` and `--run-record`; the current mutable
 record must match active preparation and choices. Refresh verification after relevant
 changes, preserving earlier versions. Custom completion prompts cannot bypass gates.
+
+### Coverage across discussion restatements and cleanup
+
+Before cleanup publication, refresh complete feedback, verified Decisions and
+preparation on an isolated checkout of the still-published reviewed head. Run
+`run-state precheck-cleanup --head REVIEWED_SHA --candidate-head CANDIDATE_SHA
+--split-state FILE` and retain its immutable receipt. Added discussion Decisions
+can preserve coverage only when every addition maps independently to an original
+decision or prepared boundary and cites both retained original evidence and the
+verified discussion bodies. Changed human choices, removals, supersessions, new
+obligations and ambiguity block coverage. Assess every analysis field and changed
+source, including worker instructions and completion criteria. A choice source
+may use these rules and change its head only if it exactly copies that
+preparation's validated Decisions context. Other choice, issue, instruction,
+rule and reviewer inputs remain strict; raw hashes and original artifacts remain
+unchanged. Version-1 attestations retain their original restrictions.
+
+Valid version-1 review results may authorize a precheck only at their exact
+reviewed scope, using their original run/cycle provenance and strict version-1
+comparison. Do not invent a session or attempt. This does not relax final
+coverage or permit version-2 reconciliation of a version-1 review result.
+
+The precheck cannot authorize completion. Refresh final-head evidence after
+cleanup. For version-2 review provenance, reconcile directly against the original
+reviewed preparation using the published assessment; version-1 coverage keeps
+its exact-scope verification. Refresh engineering verification and require
+exact-head CI. Preserve the existing run, cycle count and five-cycle limit.

@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts' / 'decisions.py'
 spec = importlib.util.spec_from_file_location('decisions', SCRIPT)
@@ -77,7 +78,7 @@ class DecisionTests(unittest.TestCase):
         self.assertNotIn('PATCH', str(gh.call_args))
 
     def test_context_rejects_changed_live_pr(self):
-        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'number': 2,
+        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'number': 2,
                         'headRefOid': 'a'*40, 'body': ''}, 'decisions': [], 'manual_decisions': []}
         with patch.object(mod, 'gh_json', return_value={'url': state['pr']['url'], 'body': 'changed', 'headRefOid': 'a'*40}):
             with self.assertRaisesRegex(RuntimeError, 'changed'):
@@ -94,7 +95,7 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(result['local_decisions'], [{'text': 'Keep schema stable', 'source': 'user chose stable schema'}])
 
     def test_normal_diff_preserves_patch_when_pinned_refs_are_unchanged(self):
-        pr = {'url': 'https://github.com/o/r/pull/2', 'baseRefOid': 'a'*40,
+        pr = {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'baseRefOid': 'a'*40,
               'baseRefName': 'main', 'headRefOid': 'b'*40}
         live = {key: pr[key] for key in ('baseRefOid', 'baseRefName', 'headRefOid')}
         diff = 'diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -0,0 +1 @@\n+x\n'
@@ -106,7 +107,7 @@ class DecisionTests(unittest.TestCase):
                                     '--json', mod.DIFF_SNAPSHOT_FIELDS])
 
     def test_normal_diff_ref_changes_stop_discovery_before_retention_or_provider_start(self):
-        pr = {'url': 'https://github.com/o/r/pull/2', 'baseRefOid': 'a'*40,
+        pr = {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'baseRefOid': 'a'*40,
               'baseRefName': 'main', 'headRefOid': 'b'*40}
         for key, changed in (('baseRefOid', 'c'*40), ('baseRefName', 'release'),
                              ('headRefOid', 'd'*40)):
@@ -129,7 +130,7 @@ class DecisionTests(unittest.TestCase):
 
     def test_large_diff_uses_pinned_local_three_dot_diff(self):
         base, head = 'a'*40, 'b'*40
-        pr = {'url': 'https://github.com/o/r/pull/2', 'baseRefOid': base,
+        pr = {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'baseRefOid': base,
               'baseRefName': 'main', 'headRefOid': head, 'changedFiles': 1}
         live = {'baseRefOid': base, 'baseRefName': 'main', 'headRefOid': head,
                 'changedFiles': 1}
@@ -163,7 +164,7 @@ class DecisionTests(unittest.TestCase):
                             and head in cmd for cmd in commands))
 
     def test_local_diff_ref_mismatch_fails_closed(self):
-        pr = {'url': 'https://github.com/o/r/pull/2', 'baseRefOid': 'a'*40,
+        pr = {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'baseRefOid': 'a'*40,
               'baseRefName': 'main', 'headRefOid': 'b'*40}
         live = {k: pr[k] for k in ('baseRefOid', 'baseRefName', 'headRefOid')}
         def fake_run(args, **kwargs):
@@ -178,7 +179,7 @@ class DecisionTests(unittest.TestCase):
                 mod.pr_diff(pr)
 
     def test_local_diff_live_head_change_fails_before_fetch(self):
-        pr = {'url': 'https://github.com/o/r/pull/2', 'baseRefOid': 'a'*40,
+        pr = {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'baseRefOid': 'a'*40,
               'baseRefName': 'main', 'headRefOid': 'b'*40}
         live = {k: pr[k] for k in ('baseRefOid', 'baseRefName', 'headRefOid')}
         live['headRefOid'] = 'c'*40
@@ -189,7 +190,7 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(run.call_count, 1)
 
     def test_local_diff_incomplete_file_coverage_fails_closed(self):
-        pr = {'url': 'https://github.com/o/r/pull/2', 'baseRefOid': 'a'*40,
+        pr = {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'baseRefOid': 'a'*40,
               'baseRefName': 'main', 'headRefOid': 'b'*40, 'changedFiles': 2}
         live = {k: pr[k] for k in ('baseRefOid', 'baseRefName', 'headRefOid', 'changedFiles')}
         def fake_run(args, **kwargs):
@@ -211,7 +212,7 @@ class DecisionTests(unittest.TestCase):
                 mod.pr_diff(pr)
 
     def test_unrelated_gh_diff_failure_does_not_use_local_fallback(self):
-        pr = {'url': 'https://github.com/o/r/pull/2', 'baseRefOid': 'a'*40,
+        pr = {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'baseRefOid': 'a'*40,
               'baseRefName': 'main', 'headRefOid': 'b'*40}
         with patch.object(mod, 'run', side_effect=RuntimeError('HTTP 401: authentication required')) as run, \
              patch.object(mod, 'gh_json') as gh:
@@ -258,7 +259,7 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(mod.merge_body(updated, [item]), updated)
 
     def test_publish_conflict_keeps_decision_pending(self):
-        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'number': 2,
+        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'number': 2,
                         'headRefOid': 'a'*40, 'body': 'original'}}
         item = {'text': 'Use a cache', 'references': []}
         with patch.object(mod, 'gh_json', return_value={'body': 'changed', 'headRefOid': 'a'*40}) as gh:
@@ -267,7 +268,7 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(gh.call_count, 1)
 
     def test_publish_edits_only_body_once(self):
-        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'number': 2,
+        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'number': 2,
                         'headRefOid': 'a'*40, 'body': 'Intro\n'}}
         item = {'text': 'Use a cache', 'references': ['https://github.com/o/r/pull/2#issuecomment-1']}
         live = {'body': 'Intro\n', 'headRefOid': 'a'*40}
@@ -284,7 +285,7 @@ class DecisionTests(unittest.TestCase):
 
     def test_code_suggestions_are_cached_and_never_publish(self):
         link = 'https://github.com/o/r/blob/' + 'a'*40 + '/x.py#L4'
-        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'number': 2,
+        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'number': 2,
                         'headRefOid': 'a'*40, 'baseRefOid': 'b'*40, 'baseRefName': 'main'}, 'decisions': []}
         live = {key: state['pr'][key] for key in ('baseRefOid', 'baseRefName', 'headRefOid')}
         diff = 'diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -0,0 +4,1 @@\n+cache = {}\n'
@@ -301,7 +302,7 @@ class DecisionTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text())['code_suggestions']['head'], 'a'*40)
 
     def test_large_code_discovery_uses_retained_complete_evidence(self):
-        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40},
+        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'headRefOid': 'a'*40},
                  'decisions': [{'text': 'Preserve API', 'references': ['user choice']}]}
         diff = ('diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -0,0 +1,1 @@\n+'
                 + 'large patch \" \u2603 ' * 100000 + '\n')
@@ -326,7 +327,7 @@ class DecisionTests(unittest.TestCase):
             self.assertEqual((retained / 'diff.patch').read_text(), diff)
 
     def test_failed_discovery_retains_evidence_and_existing_choices(self):
-        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40},
+        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'headRefOid': 'a'*40},
                  'decisions': [{'text': 'Keep API', 'references': ['user']}],
                  'code_suggestions': {'head': 'b'*40, 'items': []}}
         with tempfile.TemporaryDirectory() as td:
@@ -373,7 +374,7 @@ class DecisionTests(unittest.TestCase):
         diff = 'diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -0,0 +1 @@\n+keep_api()\n'
         for name, response, explanation in cases:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as td:
-                state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40},
+                state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'headRefOid': 'a'*40},
                          'decisions': [{'text': 'Preserve choice', 'references': ['user']}],
                          'code_suggestions': {'head': 'b'*40, 'items': [valid]}}
                 original = json.dumps(state)
@@ -398,7 +399,7 @@ class DecisionTests(unittest.TestCase):
     def test_invalid_code_response_excerpt_is_bounded_redacted_and_not_exhaustion(self):
         for mode in ('raw', 'unicode-json', 'ascii-json'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as td:
-                state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40}, 'decisions': []}
+                state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'headRefOid': 'a'*40}, 'decisions': []}
                 path = Path(td) / 'state.json'
                 original = json.dumps(state)
                 path.write_text(original)
@@ -435,7 +436,7 @@ class DecisionTests(unittest.TestCase):
         reason = 'Inspection unavailable: authentication failed for evidence access'
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / 'state.json'
-            state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40}, 'decisions': []}
+            state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'headRefOid': 'a'*40}, 'decisions': []}
             original = json.dumps(state)
             path.write_text(original)
             write_text = Path.write_text
@@ -461,7 +462,7 @@ class DecisionTests(unittest.TestCase):
         for exception in (RuntimeError('transport failed'), ValueError('invalid provider setup'),
                           executors.ProviderExhausted('usage limit reached')):
             with self.subTest(kind=type(exception).__name__), tempfile.TemporaryDirectory() as td:
-                state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40}, 'decisions': []}
+                state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'headRefOid': 'a'*40}, 'decisions': []}
                 path = Path(td) / 'state.json'
                 original = json.dumps(state)
                 path.write_text(original)
@@ -480,7 +481,7 @@ class DecisionTests(unittest.TestCase):
                 self.assertEqual(json.dumps(state), original)
 
     def test_code_discovery_rejects_oversized_serialized_request_before_provider_start(self):
-        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40},
+        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'headRefOid': 'a'*40},
                  'decisions': [{'text': 'Keep API', 'references': ['user']}]}
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / 'state.json'
@@ -539,7 +540,7 @@ Path(sys.argv[sys.argv.index('-o') + 1]).write_text(json.dumps(result))
                 return run_local([sys.executable, str(provider), *argv[1:]], **kwargs)
             for access in ('available', 'unavailable', 'plain-response', 'error-response'):
                 with self.subTest(access=access):
-                    state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40},
+                    state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'headRefOid': 'a'*40},
                              'decisions': [{'text': 'Keep API', 'references': ['user']}]}
                     path = root / (access + '.json')
                     original = json.dumps(state)
@@ -564,7 +565,7 @@ Path(sys.argv[sys.argv.index('-o') + 1]).write_text(json.dumps(result))
                 self.assertEqual((retained / 'diff.patch').read_text(), diff)
 
     def test_suggest_preserves_default_code_and_explicit_source_dispatch(self):
-        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a'*40}}
+        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'headRefOid': 'a'*40}}
         for selection, expected in (([], ['code']), (['--source', 'code'], ['code']),
                                     (['--source', 'description'], ['description']),
                                     (['--source', 'all'], ['code', 'description'])):
@@ -617,7 +618,7 @@ Path(sys.argv[sys.argv.index('-o') + 1]).write_text(json.dumps(result))
 class ApiTests(unittest.TestCase):
     def setUp(self):
         self.url = 'https://github.com/o/r/pull/2'
-        self.state = {'pr': {'url': self.url, 'number': 2, 'headRefOid': 'a'*40,
+        self.state = {'pr': {'url': self.url, 'headRepository': {'nameWithOwner': 'o/r'}, 'number': 2, 'headRefOid': 'a'*40,
                              'body': 'Intro\n\n## Decisions\n\n- Keep old behavior\n\n## Testing\nDone\n'},
                       'decisions': [], 'manual_decisions': [], 'comments': {}, 'threads': {}, 'summaries': {}}
         self.item = {'text': 'Use new behavior', 'references': []}
@@ -860,3 +861,73 @@ class ApiTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+@pytest.mark.parametrize('deleted', [False, True])
+def test_code_links_preserve_verified_fork_and_deleted_head_base_fallback(tmp_path, deleted):
+    state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'number': 2,
+             'headRefOid': 'a' * 40, 'headRefName': 'topic',
+             'baseRefOid': 'b' * 40, 'baseRefName': 'main', 'isCrossRepository': True,
+             'headRepository': {'name': 'repo', 'id': 'R_head', 'nameWithOwner': ''}}, 'decisions': []}
+    rest = {'html_url': state['pr']['url'], 'number': 2,
+            'head': {'sha': 'a' * 40, 'ref': 'topic',
+                     'repo': {'full_name': 'contributor/repo', 'name': 'repo', 'node_id': 'R_head'}},
+            'base': {'sha': 'b' * 40, 'ref': 'main', 'repo': {'full_name': 'o/r', 'name': 'r'}}}
+    if deleted:
+        state['pr']['headRepository'] = None
+        rest['head']['repo'] = None
+    diff = 'diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -0,0 +1,1 @@\n+cache = {}\n'
+    repository = 'o/r' if deleted else 'contributor/repo'
+    prefix = 'https://github.com/' + repository + '/blob/' + 'a' * 40 + '/'
+    candidate = {'text': 'Use cache', 'references': [prefix + 'x.py#L1']}
+    def model(prompt, checkout):
+        links = json.loads((checkout / 'code-permalinks.json').read_text())
+        assert links['prefix'] == prefix
+        return json.dumps({'decisions': [candidate]})
+    with patch.object(mod, 'pr_diff', return_value=diff), patch.object(mod, 'gh_json', return_value=rest), \
+         patch.object(mod, 'execute', side_effect=model):
+        assert mod.suggest_from_code(state, tmp_path / 'state.json') == [candidate]
+    def gh(args):
+        return state['pr'] if args[:2] == ['pr', 'view'] else rest
+    def analyze(*args, **kwargs):
+        assert args[7] == {prefix + 'x.py#L1'}
+        return [], {}
+    with patch.dict(os.environ, {'XDG_DATA_HOME': str(tmp_path)}), \
+         patch.object(mod, 'gh_json', side_effect=gh), patch.object(mod, 'run', return_value='viewer'), \
+         patch.object(mod, 'pr_diff', return_value=diff), \
+         patch.object(mod, 'collect_metadata', return_value=({}, {})), \
+         patch.object(mod, 'fetch_bodies', return_value={}), patch.object(mod, 'linked_issues', return_value=[]), \
+         patch.object(mod, 'analyze', side_effect=analyze):
+        scanned, path = mod.scan(state['pr']['url'])
+        assert path.is_file()
+        assert scanned['pr']['headRepository'] == state['pr']['headRepository']
+
+
+@pytest.mark.parametrize('representation', ['unified', 'empty', 'legacy'])
+def test_restatement_targets_follow_authoritative_context_records(representation):
+    from shared import decision_restatements
+    url = 'https://github.com/example/fixture/pull/1'
+    local = [{'text': 'Retired transform choice', 'source': 'Original human choice'},
+             {'text': 'Current transform choice', 'source': 'Explicit replacement answer'}]
+    old = mod.record(local[0]['text'], 'local', [], source=local[0]['source'])
+    state = {'pr': {'url': url, 'number': 1, 'headRefOid': 'a' * 40, 'body': ''},
+             'decisions': [], 'manual_decisions': [],
+             'replacements': [{'old': old, 'new_id': mod.decision_id(local[1]['text']), 'raw': None}]}
+    with patch.object(mod, 'gh_json', return_value={'url': url, 'body': '', 'headRefOid': 'a' * 40}):
+        context = mod.decision_context(state, local)
+    context['decisions'] = mod.decision_records(state, context['local_decisions'])
+    assert context['decisions'][0]['status'] == 'superseded'
+    context['live_decisions'] = 'Legacy scope wording'
+    if representation == 'empty':
+        context['decisions'] = []
+    elif representation == 'legacy':
+        context.pop('decisions')
+    analysis = {'boundaries': {'correctness': [{'text': 'Preserve the supported transform'}]}}
+    _, targets = decision_restatements.index(context, context, {}, analysis)
+    expected = ['original/analysis#/boundaries/correctness/0']
+    if representation == 'unified':
+        expected.insert(0, 'original/decisions#/decisions/1')
+    elif representation == 'legacy':
+        expected = ['original/decisions#/local_decisions/0', 'original/decisions#/local_decisions/1',
+                    'original/decisions#/live_decisions', *expected]
+    assert targets == expected

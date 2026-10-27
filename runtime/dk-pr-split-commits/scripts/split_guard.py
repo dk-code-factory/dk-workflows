@@ -7,7 +7,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 from urllib.parse import urlparse
@@ -15,12 +14,14 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 from shared.review_loop import require_complete
 from shared.commit_message_lines import validate_commits
-from shared import series_assessment
+from shared import series_assessment, cleanup_precheck
+from shared.pr_identity import resolve
+from shared.github_reads import run as github_run
 
 STATE = '.git/pr-split-state.json'
 
 def run(*args, check=True):
-    p = subprocess.run(args, text=True, capture_output=True)
+    p = github_run(args, text=True, capture_output=True)
     if check and p.returncode: raise RuntimeError(p.stderr.strip() or p.stdout.strip())
     return p.stdout.strip()
 
@@ -56,18 +57,7 @@ def remote_identity(url):
     return host.lower(), '/'.join(parts).lower()
 
 def pr_identity(pr):
-    parsed = urlparse(pr.get('url') or '')
-    parts = parsed.path.strip('/').split('/')
-    head_repo = (pr.get('headRepository') or {}).get('nameWithOwner')
-    if (not parsed.hostname or len(parts) != 4 or parts[2] != 'pull'
-            or parts[3] != str(pr.get('number')) or not head_repo
-            or len(head_repo.split('/')) != 2):
-        raise RuntimeError('PR repository identity is incomplete')
-    base_repo = '/'.join(parts[:2]).lower()
-    head_repo = head_repo.lower()
-    if pr.get('isCrossRepository') is not (head_repo != base_repo):
-        raise RuntimeError('PR repository identity is inconsistent')
-    return parsed.hostname.lower(), base_repo, head_repo
+    return resolve(pr, Path.cwd(), api=lambda *args: json.loads(run('gh', *args)))
 
 def check_remote(remote, host, head_repo, cross_repo):
     push_urls=git('remote','get-url','--push','--all',remote).splitlines()
@@ -180,10 +170,12 @@ def assess(data, output, reasons_file):
     else:
         if data.get('publication') != 'published' or data.get('final_head') != final:
             raise RuntimeError('guarded publication is unconfirmed; reconcile recovery state')
+        cleanup_precheck.published_receipt(data, state_path())
         outcome = 'published'
     artifact = dict(schema_version=1, pr_url=data['pr_url'], head_repo=data['head_repo'],
                     reviewed_head=data['original_head'], reviewed_tree=data['original_tree'],
                     target_tip=data['target_tip'], target_branch=data['target_branch'],
+                    cleanup_precheck=data.get('cleanup_precheck'),
                     final_head=final, outcome=outcome, commit_count=live['commit_count'],
                     reasons=json.loads(Path(reasons_file).read_text(encoding='utf-8')))
     series_assessment.validate(artifact)
@@ -205,6 +197,7 @@ def reconcile(data):
         raise RuntimeError('no cleanup publication to reconcile')
     if git('status','--porcelain=v1') or git('symbolic-ref','--short','HEAD') != data['branch']:
         raise RuntimeError('reconciliation requires the clean prepared branch')
+    cleanup_precheck.published_receipt(data, state_path())
     check_remote(data['remote'],data['host'],data['head_repo'],data['head_repo'] != data['base_repo'])
     remote_sha=run('git','ls-remote','--heads',git('remote','get-url','--push',data['remote']),
                    data['remote_branch']).split('\t')[0]
@@ -219,6 +212,19 @@ def reconcile(data):
     write_state(data)
     print('verified published cleanup; recovery state retained')
 
+def require_precheck(data, path):
+    if data.get('mode') != 'regroup':
+        return
+    if not path:
+        raise ValueError('regroup publication requires --cleanup-precheck from run-state precheck-cleanup')
+    import importlib.util
+    script = next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir()) / 'dk-pr-iter/scripts/run_state.py'
+    spec = importlib.util.spec_from_file_location('cleanup_run_state', script)
+    api = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(api)
+    return cleanup_precheck.validate(path, state_path(), git('rev-parse', 'HEAD'), api.reconciliation_api())
+
+
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument('command',choices=['prepare','verify','push','assess','reconcile'])
@@ -229,6 +235,7 @@ def main():
     ap.add_argument('--reasons-file', help='JSON list explaining the final commit boundaries')
     ap.add_argument('--allow-force-push', action='store_true',
                     help='Required when the user requests publishing rewritten commits')
+    ap.add_argument('--cleanup-precheck', help='Immutable run-state precheck-cleanup receipt for regroup publication')
     ap.add_argument('--review-state', help='Completed split review loop token required for push')
     args=ap.parse_args()
     if args.command=='prepare':
@@ -247,6 +254,9 @@ def main():
     if args.command=='assess':
         if not args.output or not args.reasons_file:
             raise ValueError('assess requires --output and --reasons-file')
+        if git('rev-parse','HEAD') == data['original_head']:
+            verify(data)
+            data['cleanup_precheck'] = require_precheck(data, args.cleanup_precheck)
         assess(data,args.output,args.reasons_file); return
     verify(data)
     if args.command=='push':
@@ -255,6 +265,7 @@ def main():
                 raise RuntimeError('cleanup push already attempted; reconcile before any retry')
             if git('rev-parse','HEAD') == data['original_head']:
                 raise RuntimeError('unchanged cleanup series requires a no-op assessment, not a push')
+            data['cleanup_precheck'] = require_precheck(data, args.cleanup_precheck)
             data.update(publication='pending',final_head=git('rev-parse','HEAD'))
             write_state(data)
         run('git','push',f"--force-with-lease={data['remote_branch']}:{data['remote_sha']}",

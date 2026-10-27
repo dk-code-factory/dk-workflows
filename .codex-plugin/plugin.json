@@ -1,6 +1,6 @@
 {
   "name": "dk-workflows",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Portable repository workflows, configurable reviewers, and guarded drafting.",
   "author": {
     "name": "Dmitry Kropachev"

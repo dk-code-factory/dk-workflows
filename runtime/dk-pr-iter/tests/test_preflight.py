@@ -113,3 +113,44 @@ class PreflightTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_preflight_resolves_modern_cli_repository_identity(tmp_path, monkeypatch):
+    """Exercise configuration, diagnostics and completion with actual helpers."""
+    repo = tmp_path / 'repo'
+    subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    gh = bin_dir / 'gh'
+    gh.write_text('#!' + sys.executable + '''
+import json, os, sys
+fork = os.environ.get('FIXTURE_FORK') == 'yes'
+head = 'fork/repo' if fork else 'base/repo'
+meta = {'url': 'https://github.com/base/repo/pull/1', 'number': 1,
+        'headRefOid': 'a' * 40, 'headRefName': 'topic', 'isCrossRepository': fork,
+        'headRepository': {'id': 'R_head', 'name': 'repo', 'nameWithOwner': ''}}
+if sys.argv[1] == 'api':
+    result = {'html_url': meta['url'], 'number': 1,
+        'head': {'sha': 'a' * 40, 'ref': 'topic', 'repo':
+            {'full_name': head, 'name': 'repo', 'node_id': 'R_other' if os.environ.get('FIXTURE_CONFLICT') else 'R_head'}},
+        'base': {'sha': 'b' * 40, 'ref': 'main', 'repo': {'full_name': 'base/repo', 'name': 'repo'}}}
+else:
+    result = meta
+print(json.dumps(result))
+''')
+    gh.chmod(0o755)
+    monkeypatch.setenv('PATH', str(bin_dir) + os.pathsep + os.environ['PATH'])
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
+    bindings = tmp_path / 'bindings.json'
+    bindings.write_text(json.dumps([{'command': [sys.executable, '{handoff}']}]))
+    for fork in ('no', 'yes'):
+        monkeypatch.setenv('FIXTURE_FORK', fork)
+        configured = subprocess.run([sys.executable, str(mod.ROOT / 'dk-config/scripts/repo_rules.py'),
+            '--cwd', str(repo), '--pr', PR, 'reviewers', 'set', '--bindings-file', str(bindings)],
+            text=True, capture_output=True)
+        assert configured.returncode == 0, configured.stderr
+        assert mod.configuration(repo, PR)['ready']
+    monkeypatch.setenv('FIXTURE_CONFLICT', 'yes')
+    result = mod.configuration(repo, PR)
+    assert not result['ready'] and len(result['blockers']) == 3
+    assert all('inconsistent' in entry['message'] for entry in result['blockers'])

@@ -3,15 +3,17 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
 import tempfile
 from urllib.parse import quote, urlparse
+
+from shared.github_reads import run as github_run
+from shared.pr_identity import resolve
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
 def command(cwd, *args):
-    result = subprocess.run(args, cwd=cwd, text=True, capture_output=True)
+    result = github_run(args, cwd=cwd, text=True, capture_output=True)
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "command failed")
     return result.stdout.strip()
@@ -90,14 +92,9 @@ def live_snapshot(pr, cwd):
     def gh(*args):
         return json.loads(command(cwd, 'gh', *args))
 
-    fields = 'url,number,headRefOid,headRepository,baseRefName'
+    fields = 'url,number,headRefOid,headRefName,headRepository,isCrossRepository,baseRefName'
     meta = gh('pr', 'view', pr, '--json', fields)
-    host, base_repo, number = pr_key(meta['url'])
-    if meta['number'] != number:
-        raise ValueError("live PR identity is inconsistent")
-    head_repo = (meta.get('headRepository') or {}).get('nameWithOwner')
-    if not head_repo:
-        raise ValueError("live PR head repository is missing")
+    host, base_repo, head_repo = resolve(meta, cwd, api=gh)
     ref = f"repos/{base_repo}/git/ref/heads/{quote(meta['baseRefName'], safe='')}"
     tip = gh('api', '--hostname', host, ref)['object']['sha']
     head = meta['headRefOid']
@@ -105,6 +102,7 @@ def live_snapshot(pr, cwd):
         raise ValueError('live PR head or target tip is malformed')
     tree = gh('api', '--hostname', host, f'repos/{head_repo}/git/commits/{head}')['tree']['sha']
     latest = gh('pr', 'view', pr, '--json', fields)
+    resolve(latest, cwd, api=gh)
     if latest != meta or gh('api', '--hostname', host, ref)['object']['sha'] != tip:
         raise RuntimeError("PR head or target tip changed during assessment")
     # Local objects must match remote evidence; never fetch or mutate in the gate.

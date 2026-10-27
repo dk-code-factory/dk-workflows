@@ -31,7 +31,13 @@ class ReviewContextTest(unittest.TestCase):
 import json,os,sys
 mode=os.environ.get('GH_FIXTURE_MODE','ok')
 if mode=='fail': print('missing PR',file=sys.stderr); sys.exit(1)
-if sys.argv[1]=='api':
+if sys.argv[1]=='api' and '/pulls/7' == sys.argv[-1][-8:]:
+ sha=os.environ.get('GH_FIXTURE_SHA','a'*40)
+ base=os.environ.get('GH_FIXTURE_BASE_SHA',sha)
+ repo={'full_name':'o/r','name':'r','node_id':'R_fixture'}
+ print(json.dumps({'number':7,'html_url':'https://github.com/o/r/pull/7',
+       'head':{'sha':sha,'ref':'topic','repo':None if mode=='deleted' else repo},'base':{'sha':base,'ref':'main','repo':repo}}))
+elif sys.argv[1]=='api':
  files=[{'filename':'a.py','additions':1,'deletions':1,'status':'modified'},
         {'filename':'b.py','additions':1,'deletions':0,'status':'added'}]
  if mode=='spaces': files=[{'filename':'a b.py','status':'added'}]
@@ -45,7 +51,9 @@ elif sys.argv[1:3]==['pr','view']:
  files=[{'path':'a b.py'}] if mode=='spaces' else [{'path':'a.py'},{'path':'b.py'}]
  if mode=='unusual': files=[{'path':os.environ['GH_FIXTURE_FILENAME']}]
  if mode in ('large_missing','large_truncated'): files=[{'path':'a.py'}]
- print(json.dumps({'number':7,'url':'https://github.com/o/r/pull/7','title':'fixture','body':'test','baseRefName':'main','baseRefOid':base,'headRefName':'topic','headRefOid':sha,'files':files}))
+ result={'number':7,'url':'https://github.com/o/r/pull/7','title':'fixture','body':'test','baseRefName':'main','baseRefOid':base,'headRefName':'topic','headRefOid':sha,'headRepository':(None if mode=='deleted' else {'name':'r','id':'R_fixture','nameWithOwner':''} if mode=='modern' else {'nameWithOwner':'o/r'}),'files':files}
+ if mode=='deleted' and os.environ.get('GH_FIXTURE_FORK')!='missing': result['isCrossRepository']=os.environ.get('GH_FIXTURE_FORK')!='false'
+ print(json.dumps(result))
 elif sys.argv[1:3]==['pr','diff']:
  if mode in ('large','large_missing','large_truncated') or os.environ.get('GH_FIXTURE_PATCH_KIND')=='large':
   print('HTTP 406: Sorry, the diff exceeded the maximum number of lines (20000)',file=sys.stderr); sys.exit(1)
@@ -65,6 +73,13 @@ else: sys.exit(2)
     def call(self, mode):
         return subprocess.run([sys.executable,str(SCRIPT),'--cwd',str(self.root),'--pr','7'],
                               env=dict(self.env,GH_FIXTURE_MODE=mode), text=True,capture_output=True)
+    def test_modern_cli_identity_is_retained_for_review_context(self):
+        result = self.call('modern')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        context = json.loads(result.stdout)
+        metadata = json.loads(Path(context['metadata']).read_text())
+        self.assertEqual(metadata['headRepository']['nameWithOwner'], 'o/r')
+
     def test_fetch_and_coverage(self):
         p=self.call('ok')
         self.assertEqual(p.returncode,0,p.stderr)
@@ -72,6 +87,46 @@ else: sys.exit(2)
         self.assertFalse(result['local_matches_pr'])
         self.assertEqual(json.loads(Path(result['metadata']).read_text())['number'],7)
         self.assertIn('diff --git a/b.py',Path(result['patch']).read_text())
+
+    def test_deleted_fork_with_reachable_commit_can_be_reviewed(self):
+        result = self.call('deleted')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        context = json.loads(result.stdout)
+        self.assertEqual(context['head_sha'], self.sha)
+        self.assertIsNone(json.loads(Path(context['metadata']).read_text())['headRepository'])
+
+    def test_deleted_head_without_fork_evidence_fails_in_actual_read_only_caller(self):
+        for flag in ('false', 'missing'):
+            with self.subTest(flag=flag):
+                self.env['GH_FIXTURE_FORK'] = flag
+                result = self.call('deleted')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('inconsistent', result.stderr)
+                self.assertEqual(result.stdout, '')
+
+    def test_head_identity_is_required_only_for_fork_fetch_fallback(self):
+        metadata = {'url': 'https://github.com/o/r/pull/7', 'number': 7,
+                    'headRefOid': 'a' * 40, 'headRefName': 'topic',
+                    'baseRefOid': self.sha, 'baseRefName': 'main', 'headRepository': None,
+                    'isCrossRepository': True}
+        rest = {'number': 7, 'html_url': metadata['url'],
+                'head': {'sha': metadata['headRefOid'], 'ref': 'topic', 'repo': None},
+                'base': {'sha': self.sha, 'ref': 'main', 'repo': {'full_name': 'o/r'}}}
+        missing = subprocess.CompletedProcess([], 1, '', '')
+        fetched = subprocess.CompletedProcess([], 0, '', '')
+        with patch.object(review_context, 'repository_remote', return_value='known-base'), \
+             patch.object(review_context, 'command', return_value=json.dumps(rest)) as command, \
+             patch.object(review_context.subprocess, 'run', side_effect=[missing, fetched]):
+            review_context.ensure_commit(self.root, metadata['headRefOid'], self.root, metadata)
+            command.assert_not_called()
+        with patch.object(review_context, 'repository_remote', return_value='known-base'), \
+             patch.object(review_context, 'command', return_value=json.dumps(rest)) as command, \
+             patch.object(review_context.subprocess, 'run', return_value=missing) as run:
+            with self.assertRaisesRegex(RuntimeError, 'unavailable'):
+                review_context.ensure_commit(self.root, metadata['headRefOid'], self.root, metadata)
+            self.assertEqual([call.args[0] for call in run.call_args_list if call.args[0][1] == 'fetch'],
+                             [['git', 'fetch', '--quiet', 'known-base', metadata['headRefOid']]])
+            self.assertEqual(command.call_args.args[0][:2], ['gh', 'api'])
     def test_fails_closed(self):
         for mode,message in [('fail','missing PR'),('empty','empty or incomplete'),('partial','every changed file'),('moving','head or base changed')]:
             with self.subTest(mode=mode):
