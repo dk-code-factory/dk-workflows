@@ -300,6 +300,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
     # A bad later checkpoint must never permit an earlier missing provider to run.
     jobs, results = {}, {}
     for name in reviewers:
+        cached = None
         try:
             preparation_api.validate(preparation, context, decisions)
             if describe_reviewer(provider_map[name]) != preparation['reviewers'][name]:
@@ -314,7 +315,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                     'reviewer_addendum': preparation['analysis']['reviewer_addenda'][name]}}
             unchanged()
         except Exception as exc:
-            if stats:
+            if stats and cached is None:
                 stats.safe(stats.failure, name, str(exc))
             return outcome({'complete': False, 'failed_reviewer': name, 'reason': str(exc),
                             'guard_failure': True, 'findings': [], 'skipped_reviewers': []})

@@ -127,6 +127,7 @@ def test_every_reusable_checkpoint_and_descriptor_is_checked_before_launch(pinne
     context, decisions, prep, names, git = pinned
     session = Session(context, prep, names)
     session.record(names[1], 'completed', {'findings': [] if invalid != 'findings' else [{**finding(), 'line': 99}]})
+    stats = for_iteration(context, prep, names, cycle=1, attempt='guard')
     if invalid == 'checkpoint':
         data = json.loads(session.path.read_text())
         Path(data['reviews'][names[1]]['checkpoint']['path']).write_text('{}')
@@ -135,9 +136,12 @@ def test_every_reusable_checkpoint_and_descriptor_is_checked_before_launch(pinne
         return {} if invalid == 'descriptor' and name == names[1] else describe(name)
     with session.execution(), patch.object(runner, 'describe_reviewer', side_effect=descriptor), \
             patch.object(runner, 'run_skill_reviewer') as provider:
-        result = runner.review(context, names, '', decisions, '', prep, session=session)
+        result = runner.review(context, names, '', decisions, '', prep, stats=stats, session=session)
     provider.assert_not_called()
     assert result['outcome'] == 'guard_failed'
+    if invalid == 'findings':
+        reviews = api.ledger(stats.repo)['runs'][stats.run_id]['reviews']
+        assert all(review['status'] == 'not_run' for review in reviews.values())
 
 
 @pytest.mark.parametrize('failure', ['interrupt', 'storage', 'provider'])
