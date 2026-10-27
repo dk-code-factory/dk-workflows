@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.3.0",
+      "description": "Persistent Decisions storage, per-PR transactions, retained agreement evidence and independent-run recovery regressions."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.2.0",
       "description": "Incremental preparation, conclusion graph, immutable evidence lineage, refresh validation and regression coverage."
     }

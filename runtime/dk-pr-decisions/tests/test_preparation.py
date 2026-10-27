@@ -315,6 +315,45 @@ class PreparationTests(unittest.TestCase):
                 prep.load(saved['artifact'], self.package.context, self.package.decisions)
             (self.package.root / name).write_text(original)
 
+    def test_retained_source_changes_require_fresh_preparation_and_conflicts_block_work(self):
+        package = self.package
+        api = module('retained_preparation_decisions', 'dk-pr-decisions/scripts/decisions.py')
+        pr = {'url': package.context['url'], 'number': 1, 'body': '', 'headRefOid': package.head}
+        ref = pr['url'] + '#issuecomment-1'
+        original = {'url': ref, 'body': 'Agreed: preserve the parser.', 'updatedAt': 'first'}
+        choice = {'text': 'Preserve the parser', 'references': [ref]}
+        state = {'pr': pr, 'comments': {'c': original}, 'decisions': [choice]}
+        api.retain_agreements(state)
+
+        def context():
+            with patch.object(api, 'gh_json', return_value=pr):
+                data = api.decision_context(state)
+            data['decisions'] = api.decision_records(state)
+            return data
+
+        package.decisions = context()
+        package.write('decisions.json', package.decisions)
+        prepared = package.prepare()
+        artifact = prep.load(prepared['artifact'], package.context, package.decisions)
+        for comments in ({'c': {**original, 'body': 'Change the parser.', 'updatedAt': 'second'}}, {}):
+            state['comments'] = comments
+            package.decisions = context()
+            self.assertEqual(package.decisions['head_sha'], package.head)
+            self.assertEqual(package.decisions['decisions'][0]['id'], api.decision_id(choice['text']))
+            self.assertIn(original['body'], package.decisions['decisions'][0]['source'])
+            with self.assertRaisesRegex(ValueError, 'identity is stale'):
+                prep.validate(artifact, package.context, package.decisions)
+            package.write('decisions.json', package.decisions)
+            blocked = analysis()
+            question = self.question()
+            question.update(statements='Retained parser agreement conflicts with changed source evidence',
+                            evidence=['decisions#decisions'])
+            blocked['questions'] = [question]
+            pending = package.prepare(blocked)
+            self.assertEqual(pending['readiness'], 'needs_decision')
+            with self.assertRaisesRegex(ValueError, 'needs_decision'):
+                prep.load(pending['artifact'], package.context, package.decisions)
+
     def test_rejects_tampered_readiness_and_invalid_placement_or_strategy(self):
         saved = self.package.prepare()
         artifact = prep.read(saved['artifact'])

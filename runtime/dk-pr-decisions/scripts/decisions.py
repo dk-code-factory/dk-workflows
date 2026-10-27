@@ -8,7 +8,9 @@ import argparse
 import base64
 from shared.pr_identity import resolve as resolve_pr_identity
 from shared.executors import check_prompt_size, execute, execute_json, provider_failure
-from shared.repository_scope import inside_checkout
+from contextlib import contextmanager
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import decision_storage as storage
 import hashlib
 import json
 import os
@@ -512,22 +514,29 @@ def render(pr, viewer, state):
     return "\n".join(lines).rstrip() + "\n"
 
 
-def atomic_write(path, content):
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd, temp_name = tempfile.mkstemp(prefix=".pr-read-comments-", dir=path.parent)
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temp_name, path)
-    finally:
-        if os.path.exists(temp_name):
-            os.unlink(temp_name)
+# Compatibility exports for report consumers and existing callers.
+atomic_write = storage.atomic_write
+cache_path = storage.cache_path
+
+
+@contextmanager
+def transaction(pr_target=None):
+    # Discovery only locates the lock. Fetch the working snapshot under the lock.
+    storage.root()
+    pr_url = pr_target
+    if not isinstance(pr_url, str) or not pr_url.startswith('https://'):
+        pr_url = gh_json(['pr', 'view', *([str(pr_target)] if pr_target else []),
+                          '--json', 'url'])['url']
+    with storage.lock(pr_url):
+        yield pr_url
 
 
 def scan(pr_target=None):
+    with transaction(pr_target) as pr_url:
+        return _scan(pr_url)
+
+
+def _scan(pr_target):
     global GH_HOST
     repo_dir = Path.cwd()
     try:
@@ -538,6 +547,8 @@ def scan(pr_target=None):
             raise RuntimeError("No pull request found for the current branch") from exc
         raise RuntimeError(f"Could not discover the current branch's pull request: {exc}") from exc
     url = urlparse(pr["url"])
+    if pr['url'].rstrip('/') != pr_target.rstrip('/'):
+        raise ValueError('Discovered PR differs from the locked PR URL; retry with a full --pr URL')
     host = url.hostname
     parts = url.path.strip("/").split("/")
     if len(parts) != 4 or parts[2] != "pull" or str(pr["number"]) != parts[3]:
@@ -549,21 +560,22 @@ def scan(pr_target=None):
     viewer = run(["gh", "api", "user", "--hostname", host, "--jq", ".login"]).strip()
     if not viewer:
         raise RuntimeError("Could not identify the authenticated GitHub user")
-    base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
-    if not base.is_absolute():
-        raise RuntimeError("XDG_DATA_HOME must be an absolute path")
-    private = base / "dk-pr-decisions" / host / owner / name
-    if inside_checkout(private, repo_dir):
-        raise RuntimeError("Private data directory must be outside the code repository")
-    state_path = private / f"pr-{pr['number']}.json"
-    legacy_path = base / "dk-pr-read-comments" / host / owner / name / f"pr-{pr['number']}.json"
-    source_path = state_path if state_path.exists() else legacy_path
-    prior = json.loads(source_path.read_text(encoding="utf-8")) if source_path.exists() else {}
-    migrating = source_path == legacy_path and source_path.exists()
+    state_path = cache_path(pr['url'])
+    # Legacy report migration is default-store only. An explicit root is exclusive.
+    legacy_path = None
+    if 'DK_PR_DECISIONS_HOME' not in os.environ:
+        legacy_path = storage.root().parent / 'dk-pr-read-comments' / storage.identity(pr['url'])
+        legacy_path = storage.validate_location(legacy_path)
+    source_path = state_path
+    if not state_path.exists() and legacy_path is not None and legacy_path.exists():
+        source_path = legacy_path
+    prior = storage.read(source_path, pr['url'], missing=True)
+    migrating = source_path == legacy_path
     if migrating:
         discussion_urls = {comment.get('url') for comment in prior.get('comments', {}).values()}
         prior['decisions'] = [item for item in prior.get('decisions', [])
                               if item.get('references') and all(ref in discussion_urls for ref in item['references'])]
+    retain_agreements(prior)
     metadata, threads = collect_metadata(owner, name, pr["number"])
     old_comments = prior.get("comments", {})
     changed = {cid for cid, meta in metadata.items()
@@ -616,6 +628,7 @@ def scan(pr_target=None):
              "comments": comments, "threads": threads, "decisions": decisions,
              "summaries": {k: v for k, v in summaries.items() if k in threads},
              "manual_decisions": manual,
+             "saved_decisions": prior.get("saved_decisions", {}),
              "replacements": prior.get("replacements", []),
              "decision_sources": prior.get("decision_sources", {}),
              "description_suggestions": prior.get("description_suggestions", {}),
@@ -624,6 +637,7 @@ def scan(pr_target=None):
              "publication_intent": prior.get("publication_intent"),
              "publication_history": prior.get("publication_history", []),
              "code_suggestions": prior.get('code_suggestions', {}) if prior.get('pr', {}).get('headRefOid') == pr['headRefOid'] else {}}
+    retain_agreements(state)
     # Commit only after every API page, body, and analysis has succeeded.
     atomic_write(state_path, json.dumps(state, ensure_ascii=False, indent=2) + "\n")
     return state, state_path
@@ -987,6 +1001,19 @@ def decision_records(state, local=None):
         identity = decision_id(item['text'])
         if identity not in records:
             records[identity] = record(item['text'], 'local', [], source=item['source'])
+    # Saved agreements outlive mutable discussions and description edits. Keep
+    # their original evidence even if analysis later returns the same text.
+    for identity, saved in state.get('saved_decisions', {}).items():
+        records[identity] = {**saved, 'publication_status':
+                             'published' if identity in published_ids else 'unpublished'}
+        if saved['source_type'] == 'discussion' and saved.get('source'):
+            evidence = json.loads(saved['source'])
+            current = {c['url']: c for c in state.get('comments', {}).values()}
+            observed = [current.get(c['url']) for c in evidence['comments']]
+            if observed != evidence['comments']:
+                records[identity]['source'] = json.dumps(
+                    {'agreement_evidence': evidence, 'current_comments': observed},
+                    ensure_ascii=False, sort_keys=True)
     for old in history_records(state['pr'].get('body') or ''):
         records[old['id']] = old
     for replacement in state.get('replacements', []):
@@ -994,6 +1021,26 @@ def decision_records(state, local=None):
         old.update(status='superseded', superseded_by=replacement['new_id'])
         records[old['id']] = old
     return list(records.values())
+
+
+def retain_agreements(state):
+    if not state:
+        return
+    saved = state.setdefault('saved_decisions', {})
+    for entry in decision_records(state):
+        if entry['id'] in saved:
+            continue
+        entry = dict(entry)
+        if entry['source_type'] == 'discussion':
+            evidence = [dict(c) for c in state.get('comments', {}).values()
+                        if c.get('url') in entry['references']]
+            entry['source'] = json.dumps({'comments': evidence, 'instruction': entry['source']},
+                                         ensure_ascii=False, sort_keys=True)
+        elif entry['source_type'] == 'description':
+            body = state['pr'].get('body') or ''
+            entry['source'] = json.dumps({'body': body, 'sha256': hashlib.sha256(body.encode()).hexdigest()},
+                                         ensure_ascii=False, sort_keys=True)
+        saved[entry['id']] = entry
 
 
 def apply_replacements(body, replacements):
@@ -1026,30 +1073,18 @@ def apply_replacements(body, replacements):
     return body
 
 
-def cache_path(pr_url):
-    url = urlparse(pr_url or '')
-    match = re.fullmatch(r'/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([1-9][0-9]*)/?', url.path)
-    if (url.scheme != 'https' or not url.hostname or not match or url.query or url.fragment
-            or url.netloc != url.hostname or any(part in ('.', '..') for part in match.groups()[:2])):
-        raise ValueError('A full HTTPS --pr URL is required for cached commands')
-    base = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local' / 'share')
-    if not base.is_absolute():
-        raise ValueError('XDG_DATA_HOME must be an absolute path')
-    return base / 'dk-pr-decisions' / url.hostname / match[1] / match[2] / ('pr-' + match[3] + '.json')
-
-
 def load_cache(pr_url):
     path = cache_path(pr_url)
-    if not path.exists():
-        raise ValueError('No cached decisions; run scan first')
-    state = json.loads(path.read_text(encoding='utf-8'))
-    if state['pr']['url'].rstrip('/') != pr_url.rstrip('/'):
-        raise ValueError('Cached PR URL mismatch')
-    return state, path
+    return storage.read(path, pr_url), path
 
 
 def save_state(state, path):
     atomic_write(path, json.dumps(state, ensure_ascii=False, indent=2) + '\n')
+
+
+def active_choices(state):
+    return [{'text': item['text'], 'references': item['references']}
+            for item in decision_records(state) if item['status'] == 'active']
 
 
 def suggest_from_description(state, path):
@@ -1136,15 +1171,16 @@ def add_decision(state, item, instruction=None, replaces=None):
                                                     'raw': entries[0]['raw'] if entries else None})
         for field in ('decisions', 'manual_decisions'):
             state[field] = [d for d in state.get(field, []) if decision_id(d['text']) != replaces]
-    if item not in state['decisions']:
+    if not any(decision_id(d['text']) == identity for d in state['decisions']):
         state['decisions'].append(item)
         state.setdefault('manual_decisions', []).append(item)
     source = ('PR body SHA-256: ' + hashlib.sha256((state['pr'].get('body') or '').encode()).hexdigest()
               if source_type == 'description' else instruction)
-    state.setdefault('decision_sources', {})[identity] = {'source_type': source_type, 'source': source}
+    state.setdefault('decision_sources', {}).setdefault(identity, {'source_type': source_type, 'source': source})
     if item in state.get('manual_decisions', []):
-        state.setdefault('manual_decision_sources', {})[json.dumps(item, sort_keys=True)] = (
+        state.setdefault('manual_decision_sources', {}).setdefault(json.dumps(item, sort_keys=True),
             ', '.join(item['references']) if item['references'] else instruction)
+    retain_agreements(state)
     return next(r for r in decision_records(state) if r['id'] == identity)
 
 
@@ -1201,6 +1237,15 @@ def cli():
                 raise ValueError('preparation manifest PR differs from --pr')
         print(json.dumps(envelope(args.command, data), ensure_ascii=True))
         return
+    if args.command == 'list':
+        execute_command(args)
+    else:
+        with transaction(args.pr) as pr_url:
+            args.pr = pr_url
+            execute_command(args)
+
+
+def execute_command(args):
     state, path = load_cache(args.pr) if args.command in ('list', 'publish') else scan(args.pr)
     publication = None
     if args.command == 'context':
@@ -1231,10 +1276,10 @@ def cli():
         if args.command == 'publish' or (args.command == 'scan' and args.publish):
             if args.command == 'publish':
                 description = Path(args.description_file).read_text() if args.description_file else None
-                publication = publish(state, state['decisions'], description, args.description_review_state,
+                publication = publish(state, active_choices(state), description, args.description_review_state,
                                       persist=lambda: save_state(state, path), reconcile=args.reconcile)
             else:
-                publication = publish(state, state['decisions'], persist=lambda: save_state(state, path))
+                publication = publish(state, active_choices(state), persist=lambda: save_state(state, path))
             if not publication['pending'] and not publication.get('reason'):
                 save_state(state, path)
         data = compact(state)

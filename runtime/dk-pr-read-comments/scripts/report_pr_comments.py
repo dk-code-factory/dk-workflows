@@ -16,10 +16,11 @@ spec.loader.exec_module(core)
 
 
 def main(context_json=False, pr=None):
-    state, path = core.scan(pr)
-    report = core.render(state['pr'], state['viewer'], state)
-    report_path = path.with_suffix('.md')
-    core.atomic_write(report_path, report)
+    with core.transaction(pr) as pr_url:
+        state, path = core.scan(pr_url)
+        report = core.render(state['pr'], state['viewer'], state)
+        report_path = path.with_suffix('.md')
+        core.atomic_write(report_path, report)
     if context_json:
         print(json.dumps(core.compact(state), ensure_ascii=False, sort_keys=True))
     else:
@@ -33,6 +34,6 @@ if __name__ == '__main__':
         parser.add_argument('--pr', help='PR URL, including fork-based PRs')
         args = parser.parse_args()
         main(context_json=args.context_json, pr=args.pr)
-    except (RuntimeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+    except (RuntimeError, ValueError, KeyError, OSError) as exc:
         print(f'dk-pr-read-comments: {exc}', file=sys.stderr)
         sys.exit(1)
