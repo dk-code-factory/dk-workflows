@@ -99,10 +99,8 @@ def read(path):
 
 
 def write(path, value):
-    path = Path(path)
-    temporary = path.with_suffix(path.suffix + '.tmp')
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
-    temporary.replace(path)
+    from shared.private_state import write as atomic_write
+    atomic_write(Path(path), value)
 
 
 def context(snapshot, conversation):

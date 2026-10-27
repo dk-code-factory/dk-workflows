@@ -351,7 +351,9 @@ class DecisionTests(unittest.TestCase):
         cases = [('plain failure', reason, reason), ('malformed JSON', '{"error": ' + reason, reason),
                  ('empty reply', '', 'Analysis returned no diagnostic text'),
                  ('whitespace reply', ' \n\t', 'Analysis returned no diagnostic text'),
-                 ('nested JSON recursion', '[' * 10000 + '0' + ']' * 10000, 'recursion')]
+                 ('deep JSON', '[' * 10000 + '0' + ']' * 10000,
+                  ('recursion', 'Invalid code suggestion result')),
+                 ('forced decoder recursion', 'force-decoder-recursion', 'recursion')]
         for name, value in [('error object', {'error': reason}), ('string', reason), ('null', None),
                             ('list', []), ('integer', 7), ('boolean', True), ('missing decisions', {}),
                             ('extra key', {'decisions': [], 'error': reason}),
@@ -373,6 +375,11 @@ class DecisionTests(unittest.TestCase):
         cases.append(('quota text in invalid decision', json.dumps({'decisions': [
             {'text': 'usage limit reached', 'references': [[]]}]}), 'Code suggestion lacks exact evidence'))
         diff = 'diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -0,0 +1 @@\n+keep_api()\n'
+        original_loads = json.loads
+        def decode(value, *args, **kwargs):
+            if value == 'force-decoder-recursion':
+                raise RecursionError('forced recursion failure')
+            return original_loads(value, *args, **kwargs)
         for name, response, explanation in cases:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as td:
                 state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'headRefOid': 'a'*40},
@@ -382,7 +389,8 @@ class DecisionTests(unittest.TestCase):
                 path = Path(td) / 'state.json'
                 path.write_text(original)
                 with patch.object(mod, 'pr_diff', return_value=diff), \
-                     patch.object(mod, 'execute', return_value=response):
+                     patch.object(mod, 'execute', return_value=response), \
+                     patch.object(mod.json, 'loads', side_effect=decode):
                     with self.assertRaises(RuntimeError) as failure:
                         mod.suggest_from_code(state, path)
                 self.assertIs(type(failure.exception), RuntimeError)
@@ -390,7 +398,10 @@ class DecisionTests(unittest.TestCase):
                 retained, = Path(td).glob('code-evidence-*')
                 self.assertIn(str(retained / 'manifest.json'), message)
                 self.assertIn(str(retained / 'failed-response.txt'), message)
-                self.assertIn(explanation, message)
+                if isinstance(explanation, tuple):
+                    self.assertTrue(any(text in message for text in explanation), message)
+                else:
+                    self.assertIn(explanation, message)
                 self.assertLess(len(message), executors.MAX_PROVIDER_ERROR_CHARS + 1000)
                 self.assertEqual((retained / 'failed-response.txt').read_text(), response)
                 self.assertEqual((retained / 'diff.patch').read_text(), diff)

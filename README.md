@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.4.0.
+Independent MIT plugin for Claude Code and Codex. Version 1.5.0.
 
 ## Install
 
@@ -286,3 +286,27 @@ legacy snapshot can be imported without changing its original file, including an
 pending intent. Legacy active iteration runs require their retained runtime; a fresh
 request after a terminal legacy run preserves history under the existing start rules.
 There is no bulk migration of old runs, results or checkpoints.
+
+Lifecycle entry is now one command:
+`dk.py --host HOST --cwd REPO begin --skill SKILL_NAME`. Retain its `invocation`
+path and use `dk.py --invocation FILE --cwd REPO HELPER ...`; finish with
+`dk.py --invocation FILE end`. The receipt supplies a retained runtime, host,
+token and CLI reference and grants no publication authority. Managed executors
+create this receipt before entering the read-only provider and own completion.
+Direct helpers and the earlier explicit lifecycle interface remain supported.
+
+Publication helpers retain approved input hashes, target snapshots, intent and
+verified receipts in private workflow storage. `edit-pr --prepare`,
+`post-review prepare`, `publication-actions ci-rerun prepare`,
+`publication-actions request-review prepare` and `branch-publish prepare`
+cover the remaining mutations. Their publish/reconcile help describes the native
+arguments. These publication routes also return artifact receipts by default;
+use `--full` for native output. A pending operation permits read-only reconciliation, never an automatic
+second mutation. Split and regroup pushes retain their distinct gates and recovery
+state, including standalone split receipts.
+
+Terminal receipts add bounded `message` and structured `action` fields
+(command argv, an engineering task, or a human question). Complete diagnostics
+remain in artifacts. `run-state next --head SHA` describes the current gate and
+required artifacts without consuming review budgets. Load
+[recovery details](common/recovery.md) only when a diagnostic requires them.

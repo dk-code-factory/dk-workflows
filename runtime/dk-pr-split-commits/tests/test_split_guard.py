@@ -71,7 +71,9 @@ class SplitTest(unittest.TestCase):
             self.assertEqual(p.returncode,0,p.stderr)
             self.assertEqual(run('git','ls-remote','--heads','origin','topic',cwd=repo).stdout.split()[0],
                              run('git','rev-parse','HEAD',cwd=repo).stdout.strip())
-            self.assertFalse((repo/'.git/pr-split-state.json').exists())
+            retained = json.loads((repo/'.git/pr-split-state.json').read_text())
+            self.assertEqual(retained['publication'], 'published')
+            self.assertEqual(guard('push','--allow-force-push','--review-state',state).returncode, 0)
 
     def test_rewritten_tree_and_stale_lease(self):
         with tempfile.TemporaryDirectory() as tmp:

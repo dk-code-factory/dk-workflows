@@ -21,27 +21,8 @@ Never refer to commits belonging to the same PR, including commit links, SHAs, o
 
 ## Publish
 
-- Submit all inline findings together with [GitHub's `addPullRequestReview` mutation](https://docs.github.com/en/graphql/reference/pulls#addpullrequestreviewinput). Its review `body` is optional; each inline thread still requires its own `body`. Use the user's requested action (`COMMENT`, `APPROVE`, or `REQUEST_CHANGES`); default to `COMMENT`. Always set `event` so the review is submitted instead of left pending. Never change the requested action to work around an API rejection.
-- Resolve the PR's node ID and remote head with `gh pr view PR_URL --json id,headRefOid`. Require the reviewed head to match immediately before publication. Save the exact JSON payload and a snapshot of existing reviews (including the authenticated user's pending reviews) outside the repository before the request. On resume, retain these artifacts and reconcile any earlier attempt first. Do not submit, delete, or modify an unrelated pending review.
-- Use `pullRequestId` for the verified PR node, `commitOID` for the reviewed head, and `threads` for the findings. Each thread supplies `path`, `line`, `side`, and `body`; multi-line comments also supply `startLine` and `startSide`. Use these GraphQL field names, not REST's `commit_id`, `comments`, or `start_line`. Omit the review-level `body` unless the user explicitly requests a summary, in which case supply the reviewed summary text there.
+Save the reviewed GraphQL payload described in [the payload reference](references/payload.md). Use the requested event, defaulting to COMMENT. Keep the review body empty unless a summary was explicitly requested. With no findings, skip a default COMMENT review; an explicitly requested approval may have empty threads. Do not fabricate a rationale for REQUEST_CHANGES.
 
-For example, save this request shape as `PAYLOAD_FILE`, replacing the example values with verified evidence and the complete findings:
+Run `dk.py --invocation INVOCATION_FILE --pr PR_URL post-review prepare --head REVIEWED_HEAD --payload PAYLOAD_FILE`. Add `--allow-summary` only for an explicitly requested summary. The helper validates the diff locations and pinned head and retains the complete existing-review snapshot and approved payload. Read the prepared operation before submission.
 
-```json
-{
-  "query": "mutation($input:AddPullRequestReviewInput!){addPullRequestReview(input:$input){pullRequestReview{id fullDatabaseId url state body commit{oid}}}}",
-  "variables": {
-    "input": {
-      "pullRequestId": "PR_NODE_ID",
-      "commitOID": "REVIEWED_HEAD_SHA",
-      "event": "COMMENT",
-      "threads": [{"path": "src/example.py", "line": 42, "side": "RIGHT", "body": "Finding and consequence."}]
-    }
-  }
-}
-```
-
-- Publish with `gh api --hostname HOST graphql --input PAYLOAD_FILE`, using the PR URL's hostname. Retain the complete response and returned review IDs. Treat a GraphQL `errors` array, a missing review, or an unexpected state as failure or uncertainty even if the HTTP request succeeded. Do not use `gh pr review --body-file` for inline findings: it supplies a review-level body. Do not substitute separate comment submissions or a top-level PR comment. If GitHub rejects an empty review body, report that restriction; do not add filler text or a summary without an explicit request.
-- With no findings, report that locally and skip a default `COMMENT` review. An explicitly requested approval may be submitted with no review body and an empty `threads` array; an explicitly requested summary may be submitted in the review body. Do not fabricate findings or a rationale to satisfy `REQUEST_CHANGES` when the completed review has none; report the mismatch locally.
-- Re-fetch the submitted review by its ID and paginate **all** its comments. Verify the reviewed head, exact review body (empty unless requested), and every expected inline body and location, with no missing or extra comments. Expected submitted states are `COMMENTED`, `APPROVED`, and `CHANGES_REQUESTED` for the three actions above; `PENDING` is not successful submission. Report the review URL, inline comment count, and any findings omitted because they could not be anchored.
-- On a failed or uncertain response, reconcile live reviews and comments before retrying. Use the saved review ID when available; otherwise compare with the pre-request snapshot and match the authenticated author, reviewed head, action, review body, and complete inline content/locations. If one exact submitted match exists, verify and reuse its receipt. A partial, pending, mismatched, or ambiguous candidate stops publication for inspection. Retry only after confirming the earlier attempt created no review or comments and rechecking the head. Never create a duplicate review or silently complete an unrelated draft.
+Submit with `dk.py --invocation INVOCATION_FILE post-review publish --operation OPERATION_FILE`. The helper owns submission and verification of every comment. Follow its typed diagnostic action if blocked; report only the verified review URL, inline count and omitted findings. Never substitute direct mutations for the helper.

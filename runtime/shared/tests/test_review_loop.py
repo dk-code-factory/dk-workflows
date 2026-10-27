@@ -73,11 +73,21 @@ class ReviewLoopTest(unittest.TestCase):
             title = root / 'title'; title.write_text('Reviewed title\n')
             body = root / 'body'; body.write_text('Reviewed body\n')
             log = root / 'gh-log'
+            metadata = root / 'metadata.json'
+            metadata.write_text(json.dumps({'url': 'https://github.com/upstream/repo/pull/42',
+                'headRefOid': 'a' * 40, 'title': 'Old title', 'body': 'Old body'}))
             fake = root / 'gh'
-            fake.write_text('#!/usr/bin/env python3\nimport os,sys\n'
-                            'open(os.environ["GH_LOG"],"w").write(" ".join(sys.argv[1:]))\n')
+            fake.write_text('#!/usr/bin/env python3\nimport json,os,sys\nfrom pathlib import Path\n'
+                            'path=Path(os.environ["GH_METADATA"])\nvalue=json.loads(path.read_text())\n'
+                            'if sys.argv[1:3]==["pr","view"]:\n print(json.dumps(value))\n'
+                            'else:\n'
+                            ' value["title"]=sys.argv[sys.argv.index("--title")+1]\n'
+                            ' value["body"]=Path(sys.argv[sys.argv.index("--body-file")+1]).read_text()\n'
+                            ' path.write_text(json.dumps(value))\n'
+                            ' Path(os.environ["GH_LOG"]).write_text(" ".join(sys.argv[1:]))\n')
             fake.chmod(0o755)
-            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'], GH_LOG=str(log))
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'], GH_LOG=str(log),
+                       GH_METADATA=str(metadata), XDG_STATE_HOME=str(root / 'state'))
             started = json.loads(call('start', '--kind', 'dk-pr-description').stdout)
 
             def edit(token):

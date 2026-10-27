@@ -287,7 +287,9 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
     executed = []
     reused = []
     def outcome(value):
-        return {**value, **({'failed_reviewers': failed_reviewers} if failed_reviewers else {}),
+        typed = ('completed' if value.get('complete') else 'guard_failed' if value.get('guard_failure')
+                 else 'provider_failed' if failed_reviewers else 'usage_exhausted')
+        return {**value, 'outcome': typed, **({'failed_reviewers': failed_reviewers} if failed_reviewers else {}),
                 'executed_reviewers': executed, 'reused_reviewers': reused}
     def unchanged():
         preparation_api.validate(preparation, context, decisions)

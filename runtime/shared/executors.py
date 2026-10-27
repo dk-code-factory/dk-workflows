@@ -146,7 +146,9 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None):
         stack.append(identity)
         env['DK_BINDING_STACK'] = json.dumps(stack)
         prompt = (f'Apply the installed procedure at {resolved["procedure"]}. '
-                  f'Its plugin root is {resolved["root"]}. Read linked resources.\n\n' + prompt)
+                  f'Its plugin root is {resolved["root"]}. Read linked resources required by your '
+                  'assigned task or current stage. Load recovery and exceptional-state procedures '
+                  'only when the procedure or a reported diagnostic requires them.\n\n' + prompt)
     receipt = managed_update(resolved, env, 'entry')
     if receipt and receipt.get('action') == 'stop':
         raise RuntimeError(receipt.get('message') or 'Required plugin runtime unavailable')
@@ -154,10 +156,32 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None):
     if token:
         env['DK_UPDATE_PARENT'] = token
         env['DK_UPDATE_MANAGED_RECEIPT'] = json.dumps(receipt)
-        prompt = ('The host executor has called this plugin\'s lifecycle entry and will call completion '
-                  'after your final response. Use DK_UPDATE_MANAGED_RECEIPT; do not duplicate those calls.\n' + prompt)
+    managed_context = ''
+    if token:
+        managed_context = ('The host executor has called this plugin\'s lifecycle entry and will call completion '
+                           'after your final response. Use DK_UPDATE_MANAGED_RECEIPT; do not duplicate those calls.\n')
     try:
-        return execute_process(prompt, checkout, host, env, resolved, attempt, timeout)
+        if token and resolved and receipt.get('identity', {}).get('name') == 'dk-workflows':
+            # The read-only provider can reuse this complete begin receipt without
+            # attempting lifecycle/storage writes from its sandbox.
+            import importlib.util
+            from shared.invocations import begin
+            root = Path(receipt['runtime_root'])
+            spec = importlib.util.spec_from_file_location('managed_dk_cli', root / 'scripts/dk.py')
+            cli = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(cli)
+            entry = begin(root, cli.ROUTES, host, resolved['binding']['skill'].split(':')[-1],
+                          checkout, managed_receipt=receipt)
+            env['DK_MANAGED_INVOCATION'] = entry['invocation']
+            managed_context = (
+                'The host executor owns lifecycle entry and completion for this DK workflow. '
+                f'DK_MANAGED_INVOCATION is {entry["invocation"]}; use that path as INVOCATION_FILE '
+                f'and {entry["runtime_root"]} as PLUGIN_ROOT. The skill\'s begin/end commands reuse '
+                'this executor-managed invocation; do not duplicate lifecycle calls with update.py '
+                'entry or complete. Pass --invocation INVOCATION_FILE before routed helpers. '
+                'A nested native skill uses this invocation\'s token as its parent and retains its '
+                'own returned or executor-managed invocation.\n')
+        return execute_process(managed_context + prompt, checkout, host, env, resolved, attempt, timeout)
     finally:
         if token:
             managed_update(resolved, env, 'complete', token)

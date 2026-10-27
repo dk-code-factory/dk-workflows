@@ -26,6 +26,7 @@ from shared import review_coverage, review_sessions, review_reconciliation
 from shared.engineering_identity import engineering_id, compatible_reference
 from shared import bindings
 from shared.workflow_storage import allocate
+from shared.diagnostics import Diagnostic, emit, command as recovery_command, task, human
 
 _spec = importlib.util.spec_from_file_location('iteration_preparation',
     next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir()) / 'dk-pr-decisions/scripts/preparation.py')
@@ -426,15 +427,31 @@ def retry_exhausted_cycle(record, head):
         raise ValueError("no review cycle to retry")
     last = cycles[-1]
     number = last["number"]
-    prefix = f"review-cycle-{number}:"
-    events = [event for event in record.get("events", [])
-              if event.get("kind") == "review" and event.get("key", "").startswith(prefix)
-              and event.get('iteration_run_id') == record.get('iteration_run', {}).get('id')]
-    exhausted = any(event.get("key", "").endswith(":incomplete")
-                    and any(term in event.get("detail", "").lower()
-                            for term in ("session limit", "usage limit", "tokens_exhausted"))
-                    for event in events)
-    if not exhausted or any(not event.get("key", "").endswith(":incomplete") for event in events):
+    # Current runs use the registered immutable result, never event prose.
+    results = [r for r in record.get('review_results', []) if r.get('cycle') == number
+               and r.get('iteration_run_id') == record.get('iteration_run', {}).get('id')]
+    exhausted = False
+    if results:
+        reference = {k: results[-1][k] for k in ('path', 'sha256')}
+        artifact = review_coverage.load(reference)
+        result = artifact['result']
+        usage_exhausted = result.get('outcome') == 'usage_exhausted'
+        if 'outcome' not in result:
+            # Existing v3 results already have typed per-reviewer session states.
+            # Read those through the original session; never rewrite the result.
+            review_sessions.result_artifact(results[-1]['session_file'], reference)
+            session = read(Path(results[-1]['session_file']), {})
+            names = artifact.get('session_identity', {}).get('reviewers', [])
+            usage_exhausted = bool(names) and all(
+                session.get('reviews', {}).get(name, {}).get('status') == 'exhausted' for name in names)
+        exhausted = (result.get('complete') is False and usage_exhausted
+                     and not result.get('guard_failure') and not result.get('failed_reviewers'))
+    elif not record.get('iteration_run'):
+        # Unit-level/direct legacy records may carry explicit typed outcomes.
+        events = [e for e in record.get('events', []) if e.get('kind') == 'review'
+                  and e.get('key', '').startswith(f'review-cycle-{number}:')]
+        exhausted = bool(events) and all(e.get('outcome') == 'usage_exhausted' for e in events)
+    if not exhausted:
         raise ValueError("last cycle is not an incomplete usage-limited review")
     retries = record.setdefault("cycle_retries", [])
     if any(item["number"] == number for item in retries):
@@ -442,6 +459,109 @@ def retry_exhausted_cycle(record, head):
     item = {"number": number, "prior_head": last["head"], "head": head}
     retries.append(item)
     return item
+
+
+def next_stage(record, head, record_path, *, verification=None, assessment=None):
+    """Describe the existing gates without allocating a cycle or invoking a reviewer."""
+    require_head(head)
+    record_path = Path(record_path).resolve()
+    base = [sys.executable, str(Path(__file__).resolve()), '--repo', record.get('_repo', ''),
+            '--pr', str(record.get('pr', ''))]
+    def stage(name, artifacts, action, message):
+        return {'stage': name, 'head': head, 'required_artifacts': [str(p) for p in artifacts],
+                'message': message, 'action': action}
+    active = record.get('iteration_run')
+    if not active:
+        return stage('entry', [record_path], recovery_command([*base, 'start-run'], record_path),
+                     'Start a distinct iteration run.')
+    if active.get('contract_version') != 2:
+        return stage('legacy_runtime', [record_path], task('Resume through the legacy run’s retained runtime.', record_path),
+                     'This runtime cannot adopt a legacy active run.')
+    if active.get('status') != 'active':
+        return stage('terminal', [record_path], None, 'The recorded iteration run is terminal.')
+    replies = record.get('reply_workflow', {})
+    reply_active = next((entry for index, entry in enumerate(replies.get('history', []))
+                         if index == replies.get('active')), {})
+    if (replies.get('blocked') or reply_active.get('status') == 'in_flight'
+            or any(r.get('status') == 'in_flight' for r in replies.get('resolutions', []))):
+        if (replies.get('blocked') or {}).get('kind') == 'rejected':
+            return stage('reply_rejected', [record_path], human(
+                'The independent validator rejected further reply publication; report the retained verdict.', record_path),
+                'Reply rejection limits remain in force.')
+        pr = replies['pr'] + ('#' + replies['selection'] if replies.get('selection') else '')
+        return stage('reply_reconciliation', [record_path], recovery_command([
+            sys.executable, str(Path(__file__).parents[2] / 'dk-pr-reply-review/scripts/reply_passes.py'),
+            '--record', str(record_path), '--pr', pr, '--cwd', str(Path.cwd()),
+            '--agent', replies['agent'], 'reconcile'], record_path), 'Reconcile the existing reply controller.')
+    split_path = subprocess.run(['git', 'rev-parse', '--git-path', 'pr-split-state.json'],
+                                text=True, capture_output=True)
+    if not split_path.returncode:
+        path = Path(split_path.stdout.strip()).resolve()
+        split = read(path, {})
+        if (split.get('publication') == 'pending' and split.get('pr') == record.get('pr')
+                and record.get('_repo') == split.get('host', '') + '/' + split.get('base_repo', '')):
+            return stage('split_reconciliation', [path], recovery_command([
+                sys.executable, str(Path(__file__).parents[2] / 'dk-pr-split-commits/scripts/split_guard.py'),
+                '--cwd', str(Path.cwd()), 'reconcile'], path), 'Reconcile the retained split/regroup publication.')
+    from shared.publication import load as publication_load
+    for path in record.get('publication_attempts', {}).values():
+        try:
+            operation = publication_load(path)
+        except (OSError, ValueError) as exc:
+            return stage('publication_recovery', [path],
+                task('Restore the retained operation and account for its publication before continuing.', path), str(exc))
+        if operation['status'] == 'pending':
+            return stage('publication_reconciliation', [path],
+                         recovery_command(operation['reconcile_argv'], path), 'Reconcile publication before continuing.')
+        if operation['status'] == 'prepared':
+            argv = list(operation['reconcile_argv'])
+            if argv[-3] == 'reconcile':
+                argv[-3] = 'publish'
+            elif argv[-3] == '--reconcile':
+                del argv[-3]
+            else:
+                return stage('publication_prepared', [path], task('Inspect the retained operation and use its publisher.', path),
+                             'A prepared publication has not been submitted.')
+            return stage('publication_prepared', [path], recovery_command(argv, path),
+                         'Inspect the prepared publication and use its existing guards.')
+    try:
+        prepared = work_gate(record, head)
+    except (ValueError, OSError, RuntimeError) as exc:
+        return stage('preparation', [record_path], task('Refresh Decisions and engineering preparation, then register it.', record_path), str(exc))
+    try:
+        _, reviewed = current_review(record, prepared)
+    except (ValueError, OSError, KeyError) as exc:
+        action = (human('The five-cycle budget is exhausted; report coverage and required human decisions.', record_path)
+                  if len(record.get('cycles', [])) >= 5 else
+                  recovery_command([*base, 'review-session', '--head', head], record_path))
+        return stage('review', [record_path, record['preparation']['path']], action, str(exc))
+    try:
+        verify_review(record_path, prepared)
+    except (ValueError, OSError, RuntimeError, KeyError) as exc:
+        return stage('review_assessment', [record_path],
+                     task('Assess registered findings or record applicable explicit human acceptance of provider failures.', record_path), str(exc))
+    if not verification:
+        return stage('engineering_verification', [record['preparation']['path']],
+                     task('Verify engineering criteria through the existing preparation verification helper.', record['preparation']['path']),
+                     'Engineering verification is required independently of review.')
+    try:
+        preparation_api.verify_completion(verification, prepared)
+    except (OSError, ValueError, RuntimeError, KeyError) as exc:
+        return stage('engineering_verification', [record['preparation']['path'], verification],
+                     task('Refresh engineering verification against the current preparation.', verification), str(exc))
+    if not assessment:
+        return stage('cleanup', [record_path, verification],
+                     task('Complete guarded series cleanup and retain its verified assessment.', record_path),
+                     'Series cleanup has a separate publication gate.')
+    argv = [sys.executable, str(Path(__file__).with_name('completion.py')), '--cwd', str(Path.cwd()),
+            '--pr', prepared['identity']['pr_url'], 'gate', '--start-head', head, '--final-head', head,
+            '--preparation-file', record['preparation']['path'], '--verification-file', str(verification),
+            '--run-record', str(record_path), '--series-assessment', str(assessment)]
+    if reviewed['result']['complete']:
+        argv.append('--review-complete')
+    return stage('completion_check', [record_path, verification, assessment],
+                 recovery_command(argv, record_path, verification, assessment),
+                 'Run fresh exact-head completion checks before any completion action.')
 
 
 def decision_route(options, independently_checked, settled_option=None):
@@ -539,6 +659,10 @@ def main():
     p.add_argument("--pr", type=int)
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("show")
+    nxt = sub.add_parser('next', help='Describe the current stage and recovery action without consuming budgets')
+    nxt.add_argument('--head', required=True)
+    nxt.add_argument('--verification-file')
+    nxt.add_argument('--series-assessment')
     sub.add_parser('start-run')
     sub.add_parser('resume-run')
     sub.add_parser('adopt-run')
@@ -605,6 +729,9 @@ def main():
             path = base / f"pr-{a.pr}.json"
             default = {"pr": a.pr, "threads": {}, "events": [], "cycles": [], "cycle_retries": [], "repairs": [], "reruns": [], "local_decisions": []}
             if a.command == "show": result = read(path, default)
+            elif a.command == 'next':
+                result = next_stage({**read(path, default), '_repo': a.repo}, a.head, path,
+                                    verification=a.verification_file, assessment=a.series_assessment)
             elif a.command in {'start-run', 'resume-run'}:
                 result = mutate(path, default, lambda d: start_run(d, resume=a.command == 'resume-run'))
             elif a.command == 'adopt-run': result = mutate(path, default, adopt_run)
@@ -643,6 +770,8 @@ def main():
             elif a.command == "decision": result = mutate(path, default, lambda d: record_local_decision(d, a.text, a.source))
             else: result = mutate(path, default, lambda d: attempt(d, a.command, a.cycle, a.head, getattr(a, "run_id", None)))
         print(json.dumps(result, sort_keys=True))
+    except Diagnostic as exc:
+        emit(exc); raise SystemExit(2)
     except (ValueError, OSError, RuntimeError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
         p.exit(2, f"run_state: {exc}\n")
 

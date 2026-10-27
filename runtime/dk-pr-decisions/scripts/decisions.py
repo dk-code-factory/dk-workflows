@@ -26,6 +26,7 @@ from urllib.parse import quote, urlparse
 from shared.github_reads import run as github_run
 from shared.private_state import mutate, write
 from shared.workflow_storage import allocate
+from shared.diagnostics import command as recovery_command, task as recovery_task
 
 _OPERATION = ContextVar('decisions_operation', default=None)
 _REQUEST = ContextVar('decisions_request', default=None)
@@ -40,6 +41,10 @@ class MetadataConflict(ValueError):
         self.next_action = ('Read the retained proposal and current Decisions record; reconcile pending '
                             'publication with publish --reconcile, then explicitly reapply the intended update '
                             'against the current revision. Do not replay publication.')
+        self.action = recovery_task(self.next_action, self.proposal_path, path)
+        if (current.get('publication_intent') or {}).get('status') == 'pending':
+            self.action = recovery_command([sys.executable, str(Path(__file__).resolve()),
+                '--pr', current['pr']['url'], 'publish', '--reconcile'], self.proposal_path, path)
         write(Path(self.proposal_path), {'proposal': state, 'current_revision': current.get('revision', 0),
               'expected_revision': state.get('revision', 0), 'record': str(path),
               'request': _REQUEST.get(), 'reason': reason, 'next_action': self.next_action})
@@ -1360,7 +1365,12 @@ def execute_command(args):
                 save_state(state, path)
         data = compact(state)
         data['cached'] = args.command == 'list'
-    print(json.dumps(envelope(args.command, data, publication), ensure_ascii=False))
+    result = envelope(args.command, data, publication)
+    if publication and (publication.get('pending') or publication.get('reason')):
+        result['diagnostic'] = {'code': 'publication_pending', 'message': publication.get('reason') or 'Decisions remain pending.',
+            'action': recovery_command([sys.executable, str(Path(__file__).resolve()), '--pr', args.pr,
+                'publish', '--reconcile'], path)}
+    print(json.dumps(result, ensure_ascii=False))
 
 
 def cli():
@@ -1377,7 +1387,7 @@ def main():
     except (RuntimeError, ValueError, KeyError, TypeError, OSError) as exc:
         error = {'code': getattr(exc, 'code', type(exc).__name__), 'message': str(exc)}
         if isinstance(exc, MetadataConflict):
-            error.update(proposal_path=exc.proposal_path, next_action=exc.next_action)
+            error.update(proposal_path=exc.proposal_path, next_action=exc.next_action, action=exc.action)
         print(json.dumps(envelope(None, error=error), ensure_ascii=True))
         return 1
     return 0

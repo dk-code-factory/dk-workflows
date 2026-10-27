@@ -4,6 +4,7 @@ import json
 import os
 import re
 import tempfile
+import sys
 from pathlib import Path
 
 def root(repo):
@@ -21,18 +22,47 @@ def read(path, default):
 
 
 def write(path, value):
-    fd, name = tempfile.mkstemp(dir=path.parent, prefix=".state-")
+    atomic_text(path, json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + '\n')
+
+
+def sync_directory(path):
+    directory = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:
-        with os.fdopen(fd, "w") as stream:
-            json.dump(value, stream, indent=2, sort_keys=True)
-            stream.write("\n")
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def atomic_text(path, content, *, prefix='.state-', sync=None):
+    path = Path(path)
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=prefix)
+    stream = None
+    try:
+        stream = os.fdopen(fd, "w", encoding='utf-8', errors='backslashreplace')
+        try:
+            stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
+        except BaseException:
+            try:
+                stream.close()
+            except OSError:
+                pass
+            raise
+        stream.close()
         os.chmod(name, 0o600)
         os.replace(name, path)
+        (sync or sync_directory)(path.parent)
     finally:
-        if os.path.exists(name):
-            os.unlink(name)
+        original = sys.exception()
+        try:
+            if stream is None:
+                os.close(fd)
+            if os.path.exists(name):
+                os.unlink(name)
+        except OSError:
+            if original is None:
+                raise
 
 
 def mutate(path, default, operation):

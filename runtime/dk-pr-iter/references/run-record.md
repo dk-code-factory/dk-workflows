@@ -18,7 +18,8 @@ run_state.py --repo HOST/OWNER/REPO --pr NUMBER review-session --head SHA
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER review-result --head SHA --file RESULT.json
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER decision --text TEXT --source SOURCE
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER repair --cycle N --head SHA
-run_state.py --repo HOST/OWNER/REPO --pr NUMBER rerun --cycle N --head SHA --run-id ID
+dk.py --invocation INVOCATION_FILE --pr PR_URL publication-actions ci-rerun prepare --cycle N --head SHA --run-id ID --attempt ATTEMPT --run-record RUN_RECORD
+dk.py --invocation INVOCATION_FILE publication-actions ci-rerun publish --operation OPERATION_FILE
 run_state.py --repo HOST/OWNER/REPO flaky --test NAME --signature TEXT --head SHA --outcome fail|pass --attempt ID --url URL
 run_state.py --repo HOST/OWNER/REPO flaky-show
 ```
@@ -27,9 +28,9 @@ Feedback classifications use the existing `thread` command and `threads` storage
 
 `local_decisions` retains settled choices and their sources across interrupted runs. Pass the run record path to `dk-pr-decisions context --local-decisions-file` after each decision, body edit, or head change. Give the resulting verified snapshot to every dependent agent; a stale snapshot cannot be reused.
 
-For completion, record the handoff with the starting, reviewed, and final heads, reviewed tree, target tip, cleanup assessment path, cycle and final-head CI results, and prompt source. Record the title/body check or edit, each inline reply and resolution, each source-linked top-level reply, and each reviewer request as separate events. Record squash-only requests as ignored editorial feedback with their source references. Include the final head in reviewer-request keys, for example `review-request:login:<head>`; check both the record and GitHub's pending requests before sending. Preserve rejected and uncertain requests with their API responses as evidence. Pass the run record path to the completion agent; it must read the full record there.
+For completion, record the handoff with the retained runtime, host, parent invocation path/token and CLI reference; preparation artifact path and both `preparation_id` and `engineering_id`; starting, reviewed, and final heads, reviewed tree, target tip, cleanup assessment path, cycle and final-head CI results, and prompt source. Record title/body checks, replies, resolutions and editorial exclusions with their source references. The reviewer-request helper owns eligibility, final-head/reviewer attempt retention and verified receipts; preserve its returned operation and receipt paths, including rejected or uncertain attempts. Optional events reference those artifacts and cannot authorize another notification. Pass the run record path to the completion agent; it must read the full record there.
 
-Review cycle numbers are one through five; use cycle zero for CI after initial thread fixes. A single `cycle-retry` may reuse the last cycle only after an incomplete usage-limited review; its prior attempt remains in the record. `repair` allows five attempts per cycle. `rerun` allows three attempts total per unchanged head, across cycles and Actions run IDs. A rerun does not change the head. The flaky tracker requires a test name, signature, exact head, attempt ID, and link; only a fail followed by pass on the same head qualifies.
+Review cycle numbers are one through five; use cycle zero for CI after initial thread fixes. A single `cycle-retry` may reuse the last cycle only after an incomplete usage-limited review; its prior attempt remains in the record. `repair` allows five attempts per cycle. The CI rerun helper reserves the three-attempt budget per unchanged head across cycles and Actions run IDs, persists intent, submits failed jobs and requires observation of the new attempt. Do not also call the compatibility `run-state rerun` counter command: that would consume another reservation for the same action. Retain the operation and follow its reconciliation diagnostic on uncertainty. A rerun does not change the head. The flaky tracker requires a test name, signature, exact head, attempt ID, and link; only a fail followed by pass on the same head qualifies.
 
 For top-level replies, record the source reference, exact source text/update time, reply URL, and verified head in the event detail. A changed source at the same head requires reassessment; preserve the original classification and record the reassessment as a new event with the changed source fingerprint rather than overwriting earlier evidence. Reconcile later comments before retrying an uncertain post. Top-level comments have no resolved flag, so a missing inline thread does not close their work.
 
@@ -139,8 +140,12 @@ it to `review-result`. This registers the already completed evidence without
 another provider execution or cycle. Preserve the session and immutable artifact.
 Classify and assess findings using `review-finding:` plus
 `shared.review_coverage.digest(finding)` as their references.
-For review events, include the iteration run ID in the unique key; events retain
-`iteration_run_id`, so an older run cannot authorize a usage-limited retry.
+For review events, include the iteration run ID in the unique key to preserve
+history. `cycle-retry` validates the latest registered immutable result for the
+active run/cycle and its typed `usage_exhausted` outcome. Existing results without
+that additive outcome use typed reviewer states through their original validated
+session. Event prose and earlier-run events cannot authorize a retry; do not
+rewrite immutable results or reset counters to supply retry evidence.
 
 Both completion stages validate the latest registered result against the active
 run and current tree, base, scope/Decisions and reviewer instructions, and require
@@ -182,10 +187,15 @@ and stable guard identity. Pass its artifact path to the review-stage gate and
 the regroup push/no-op assessment. Persisted disagreement remains blocking; interrupted
 comparisons grant no coverage. No cycle or reviewer execution is added.
 
-After cleanup, refresh final-head evidence. Version-2 review provenance uses
-`reconcile-review --head FINAL_SHA --series-assessment FILE`; version-1 coverage
-keeps its exact-scope verification. Completion requires applicable final coverage
-and current verification/CI. A precheck cannot replace them.
+After cleanup, refresh final-head evidence. Preparation v3 and review-result v3
+can retain coverage across an operational refresh at the same head when the
+runtime-computed engineering ID is unchanged and current coverage gates pass.
+A different provenance ID alone does not require reconciliation. A changed head
+or a gate requiring equivalence uses `reconcile-review --head FINAL_SHA
+--series-assessment FILE`. Legacy v2 and v1 coverage retain their stricter checks
+through their retained runtime; do not adopt a legacy active run. Completion
+requires applicable final coverage and current verification/CI. A precheck cannot
+replace them.
 Report review readiness separately from cleanup and completion readiness.
 
 ## Recovery into the repaired runtime

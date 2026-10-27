@@ -1,4 +1,5 @@
 import json
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -78,6 +79,67 @@ def prepare(repo, mode='regroup'):
     result = guard('prepare', '--base', base, '--pr', PR, '--mode', mode)
     assert result.returncode == 0, result.stderr
     return json.loads((work / '.git/pr-split-state.json').read_text())
+
+
+@pytest.mark.parametrize('mode', ['split', 'regroup'])
+@pytest.mark.parametrize('fault', ['before_submission', 'after_application', 'receipt_persistence', 'verification'])
+def test_durable_push_boundaries_never_repeat_a_mutation(repo, tmp_path, monkeypatch, mode, fault):
+    work, _, base, git, _ = repo
+    prepare(repo, mode)
+    git('reset', '--mixed', base)
+    if mode == 'split':
+        git('add', 'a'); git('commit', '-qm', 'first logical change')
+        git('add', 'b'); git('commit', '-qm', 'second logical change')
+    else:
+        git('add', '.'); git('commit', '-qm', 'coherent logical change')
+    flags = []
+    if mode == 'regroup':
+        flags = ['--cleanup-precheck', cleanup_receipt(repo, tmp_path)['path']]
+    spec = importlib.util.spec_from_file_location('injected_split_guard', GUARD)
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    real_run, real_write, real_reconcile = mod.run, mod.write_state, mod.reconcile
+    sends = []
+    def run(*args, **kwargs):
+        result = real_run(*args, **kwargs)
+        if args[:2] == ('git', 'push'):
+            sends.append(args)
+            if fault == 'after_application':
+                raise RuntimeError('response lost after push')
+        return result
+    def write(value):
+        if (fault == 'before_submission' and value.get('publication') == 'pending'
+                or fault == 'receipt_persistence' and value.get('publication') == 'published'):
+            raise OSError('storage exhausted')
+        real_write(value)
+    monkeypatch.setattr(mod, 'run', run)
+    monkeypatch.setattr(mod, 'write_state', write)
+    if fault == 'verification':
+        monkeypatch.setattr(mod, 'reconcile', lambda value: (_ for _ in ()).throw(ValueError('verification unavailable')))
+    args = ['split_guard.py', 'push', '--allow-force-push', '--review-state', TOKEN, *flags]
+    monkeypatch.setattr(sys, 'argv', args)
+    from shared.diagnostics import Diagnostic
+    with pytest.raises(OSError if fault == 'before_submission' else Diagnostic):
+        mod.main()
+    if fault == 'before_submission':
+        assert not sends
+        assert 'publication' not in json.loads((work / '.git/pr-split-state.json').read_text())
+    else:
+        saved = json.loads((work / '.git/pr-split-state.json').read_text())
+        assert saved['publication'] == 'pending' and saved['publication_id']
+    monkeypatch.setattr(mod, 'write_state', real_write)
+    monkeypatch.setattr(mod, 'reconcile', real_reconcile)
+    if fault != 'before_submission':
+        monkeypatch.setattr(sys, 'argv', ['split_guard.py', 'reconcile'])
+        mod.main()
+    else:
+        mod.main()
+    # A second submission only verifies the existing receipt.
+    monkeypatch.setattr(sys, 'argv', args)
+    mod.main()
+    assert len(sends) == 1
+    saved = json.loads((work / '.git/pr-split-state.json').read_text())
+    assert saved['publication'] == 'published'
+    assert saved['publication_receipt']['head'] == git('rev-parse', 'HEAD')
 
 
 def assessment(repo, tmp_path):

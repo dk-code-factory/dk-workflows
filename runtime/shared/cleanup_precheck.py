@@ -21,7 +21,8 @@ def stable_guard(data):
     # Publication bookkeeping changes after the check. All ownership, lease,
     # target and recovery fields remain part of the stable guard identity.
     return {key: value for key, value in _object(data, 'guard').items()
-            if key not in {'publication', 'final_head', 'assessment', 'cleanup_precheck'}}
+            if key not in {'publication', 'final_head', 'assessment', 'cleanup_precheck',
+                           'publication_id', 'publication_receipt', 'approved_review_state'}}
 
 
 def identity(request, context, result, prepared, *, live=False):

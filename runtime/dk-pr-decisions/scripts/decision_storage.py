@@ -221,18 +221,8 @@ def atomic_write(path, content):
     path = validate_location(Path(path))
     check_access(path)
     private_directory(path.parent)
-    fd, name = tempfile.mkstemp(prefix='.decisions-', dir=path.parent)
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(name, path)
-        sync_directory(path.parent)
-    finally:
-        if os.path.exists(name):
-            os.unlink(name)
+    from shared.private_state import atomic_text
+    atomic_text(path, content, prefix='.decisions-', sync=sync_directory)
 
 
 _locks = {}

@@ -17,6 +17,8 @@ from shared.commit_message_lines import validate_commits
 from shared import series_assessment, cleanup_precheck
 from shared.pr_identity import resolve
 from shared.github_reads import run as github_run
+from shared import publication
+from shared.diagnostics import Diagnostic, emit, command
 
 STATE = '.git/pr-split-state.json'
 
@@ -31,18 +33,8 @@ def state_path():
     return Path(git('rev-parse','--git-path','pr-split-state.json')).resolve()
 
 def write_state(data):
-    path = state_path()
-    fd, name = tempfile.mkstemp(dir=path.parent, prefix='.pr-split-')
-    try:
-        with os.fdopen(fd, 'w') as stream:
-            json.dump(data, stream, indent=2)
-            stream.write('\n')
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(name, path)
-    finally:
-        if os.path.exists(name):
-            os.unlink(name)
+    from shared.private_state import write
+    write(state_path(), data)
 
 def remote_identity(url):
     if '://' not in url and ':' in url and not url.startswith('/'):
@@ -85,7 +77,15 @@ def current():
 
 def prepare(base, pr_arg=None, mode='split'):
     if state_path().exists():
-        raise RuntimeError('existing split state requires recovery; refusing to overwrite')
+        previous = json.loads(state_path().read_text())
+        if previous.get('mode', 'split') != 'split' or previous.get('publication') != 'published':
+            raise RuntimeError('existing split state requires recovery; refusing to overwrite')
+        reconcile(previous)
+        history = state_path().parent / 'pr-split-history'
+        history.mkdir(exist_ok=True)
+        fd, archive = tempfile.mkstemp(dir=history, prefix=previous['original_head'] + '-', suffix='.json')
+        os.close(fd)
+        os.replace(state_path(), archive)
     branch,remote,remote_branch,sha=current()
     target=[pr_arg] if pr_arg else []
     pr=json.loads(run('gh','pr','view',*target,'--json','number,url,headRefName,headRefOid,isCrossRepository,headRepository'))
@@ -108,6 +108,8 @@ def prepare(base, pr_arg=None, mode='split'):
           'original_head':sha,'original_tree':git('rev-parse','HEAD^{tree}'),
           'base':base_sha,'pr':pr['number'],'pr_url':pr['url'],'host':host,
           'base_repo':base_repo,'head_repo':head_repo,'author':author,'mode':mode}
+    data['recovery_ref'] = f'refs/pr-split-recovery/{sha}'
+    git('update-ref',data['recovery_ref'],sha)
     if mode == 'regroup':
         live = series_assessment.live_snapshot(pr['url'], Path.cwd())
         if (live['final_head'] != sha or live['target_tip'] != git('rev-parse',base)
@@ -153,7 +155,7 @@ def verify(data):
         if (live['final_head'] != data['remote_sha'] or live['target_tip'] != data['target_tip']
                 or live['target_branch'] != data['target_branch']):
             raise RuntimeError('PR head or target tip changed; cleanup incomplete')
-    print(f"verified {len(commits)} commits; original tree preserved; remote SHA {remote_sha}")
+    print(f"verified {len(commits)} commits; original tree preserved; remote SHA {remote_sha}", file=sys.stderr)
 
 def assess(data, output, reasons_file):
     if data.get('mode') != 'regroup':
@@ -193,24 +195,43 @@ def assess(data, output, reasons_file):
     print(json.dumps({'assessment':str(path), 'recovery_state':name, **artifact}, sort_keys=True))
 
 def reconcile(data):
-    if data.get('mode') != 'regroup' or data.get('publication') not in {'pending','published'}:
+    if data.get('publication') not in {'pending','published'}:
         raise RuntimeError('no cleanup publication to reconcile')
+    if data.get('publication_id') and data['publication_id'] != publication.digest({
+            'guard': cleanup_precheck.stable_guard(data), 'candidate': data['final_head'],
+            'review_state': data.get('approved_review_state'), 'precheck': data.get('cleanup_precheck')}):
+        raise RuntimeError('prepared split publication inputs changed')
     if git('status','--porcelain=v1') or git('symbolic-ref','--short','HEAD') != data['branch']:
         raise RuntimeError('reconciliation requires the clean prepared branch')
-    cleanup_precheck.published_receipt(data, state_path())
+    if data.get('mode') == 'regroup':
+        cleanup_precheck.published_receipt(data, state_path())
     check_remote(data['remote'],data['host'],data['head_repo'],data['head_repo'] != data['base_repo'])
     remote_sha=run('git','ls-remote','--heads',git('remote','get-url','--push',data['remote']),
                    data['remote_branch']).split('\t')[0]
-    live = series_assessment.live_snapshot(data['pr_url'], Path.cwd())
+    if data.get('mode') == 'regroup':
+        live = series_assessment.live_snapshot(data['pr_url'], Path.cwd())
+    else:
+        live = json.loads(run('gh','pr','view',data['pr_url'], '--json',
+            'number,url,headRefName,headRefOid,isCrossRepository,headRepository'))
+        host, base_repo, head_repo = pr_identity(live)
+        if (host, base_repo, head_repo, live['headRefName']) != (
+                data['host'], data['base_repo'], data['head_repo'], data['remote_branch']):
+            raise RuntimeError('PR identity changed during publication')
+        live = {'final_head': live['headRefOid'], 'head_repo': head_repo,
+                'final_tree': git('rev-parse',data['final_head']+'^{tree}')}
     if (remote_sha != data['final_head'] or live['final_head'] != data['final_head']
             or git('rev-parse','HEAD') != data['final_head']
             or live['head_repo'] != data['head_repo']
             or live['final_tree'] != data['original_tree']
-            or live['target_tip'] != data['target_tip'] or live['target_branch'] != data['target_branch']):
+            or data.get('mode') == 'regroup' and (
+                live['target_tip'] != data['target_tip'] or live['target_branch'] != data['target_branch'])):
         raise RuntimeError('publication is uncertain; retain recovery state; cleanup incomplete')
     data['publication'] = 'published'
+    data['publication_receipt'] = {'head': data['final_head'], 'tree': data['original_tree'],
+                                   'remote': data['remote'], 'branch': data['remote_branch']}
     write_state(data)
-    print('verified published cleanup; recovery state retained')
+    print('verified publication; recovery state retained', file=sys.stderr)
+    return {'status': 'verified', 'state': str(state_path()), 'receipt': data['publication_receipt']}
 
 def require_precheck(data, path):
     if data.get('mode') != 'regroup':
@@ -227,6 +248,7 @@ def require_precheck(data, path):
 
 def main():
     ap=argparse.ArgumentParser()
+    ap.add_argument('--cwd', default='.', help='Prepared repository directory')
     ap.add_argument('command',choices=['prepare','verify','push','assess','reconcile'])
     ap.add_argument('--base')
     ap.add_argument('--pr', help='PR URL; required for a fork PR')
@@ -238,6 +260,7 @@ def main():
     ap.add_argument('--cleanup-precheck', help='Immutable run-state precheck-cleanup receipt for regroup publication')
     ap.add_argument('--review-state', help='Completed split review loop token required for push')
     args=ap.parse_args()
+    os.chdir(args.cwd)
     if args.command=='prepare':
         if not args.base: raise ValueError('--base is required')
         prepare(args.base,args.pr,args.mode); return
@@ -249,8 +272,23 @@ def main():
         require_complete(args.review_state, 'split')
     path=state_path()
     data=json.loads(path.read_text())
+    if args.pr and args.pr.lower() != data['pr_url'].lower():
+        raise ValueError('common PR context conflicts with the retained split target')
     if args.command=='reconcile':
-        reconcile(data); return
+        try:
+            print(json.dumps(reconcile(data), sort_keys=True))
+        except Exception as exc:
+            raise Diagnostic('publication_uncertain', str(exc), command([
+                sys.executable, Path(__file__).resolve(), '--cwd', str(Path.cwd()), 'reconcile'], path),
+                dispatched=True) from exc
+        return
+    if args.command == 'push' and data.get('publication'):
+        if data.get('approved_review_state') and data['approved_review_state'] != args.review_state:
+            raise ValueError('reviewed inputs changed; fresh split preparation required')
+        if data['publication'] == 'published':
+            print(json.dumps({**reconcile(data), 'reused': True}, sort_keys=True)); return
+        raise Diagnostic('publication_uncertain', 'Push already attempted; reconcile before any retry.',
+            command([sys.executable, Path(__file__).resolve(), '--cwd', str(Path.cwd()), 'reconcile'], path), dispatched=True)
     if args.command=='assess':
         if not args.output or not args.reasons_file:
             raise ValueError('assess requires --output and --reasons-file')
@@ -266,17 +304,23 @@ def main():
             if git('rev-parse','HEAD') == data['original_head']:
                 raise RuntimeError('unchanged cleanup series requires a no-op assessment, not a push')
             data['cleanup_precheck'] = require_precheck(data, args.cleanup_precheck)
-            data.update(publication='pending',final_head=git('rev-parse','HEAD'))
-            write_state(data)
-        run('git','push',f"--force-with-lease={data['remote_branch']}:{data['remote_sha']}",
-            data['remote'],f"HEAD:refs/heads/{data['remote_branch']}")
-        if data.get('mode') == 'regroup':
-            reconcile(data)
-        else:
-            path.unlink()
-        print('pushed rewritten PR series')
+        data.update(publication='pending',final_head=git('rev-parse','HEAD'),
+                    approved_review_state=args.review_state)
+        data['publication_id'] = publication.digest({'guard': cleanup_precheck.stable_guard(data),
+            'candidate': data['final_head'], 'review_state': args.review_state, 'precheck': data.get('cleanup_precheck')})
+        write_state(data)
+        try:
+            run('git','push',f"--force-with-lease={data['remote_branch']}:{data['remote_sha']}",
+                data['remote'],f"{data['final_head']}:refs/heads/{data['remote_branch']}")
+            result = reconcile(data)
+        except Exception as exc:
+            raise Diagnostic('publication_uncertain', str(exc),
+                command([sys.executable, Path(__file__).resolve(), '--cwd', str(Path.cwd()), 'reconcile'], path), dispatched=True) from exc
+        print(json.dumps({**result, 'reused': False, 'message': 'pushed rewritten PR series'}, sort_keys=True))
 
 if __name__=='__main__':
     try: main()
+    except Diagnostic as exc:
+        emit(exc); print(str(exc), file=sys.stderr); sys.exit(1)
     except Exception as exc:
         print(f'pr split: {exc}',file=sys.stderr); sys.exit(1)

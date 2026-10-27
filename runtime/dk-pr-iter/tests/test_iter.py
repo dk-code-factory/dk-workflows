@@ -56,7 +56,7 @@ def test_usage_limited_last_cycle_can_be_retried_once(tmp_path):
     for _ in range(5):
         state.next_cycle(record, SHA)
     record["events"].append({"kind": "review", "key": "review-cycle-5:old:incomplete",
-                             "detail": "Claude Correctness run hit session limit"})
+                             "detail": "Claude Correctness run hit session limit", 'outcome': 'usage_exhausted'})
     path = tmp_path / "run.json"
     state.write(path, record)
     retry = state.mutate(path, {}, lambda data: state.retry_exhausted_cycle(data, OTHER))
@@ -76,10 +76,33 @@ def test_cycle_retry_rejects_other_incomplete_or_completed_reviews():
     with pytest.raises(ValueError, match="not an incomplete"):
         state.retry_exhausted_cycle(record, SHA)
     record["events"][0]["detail"] = "usage limit reached"
+    with pytest.raises(ValueError, match="not an incomplete"):
+        state.retry_exhausted_cycle(record, SHA)
+    record['events'][0]['outcome'] = 'usage_exhausted'
     record["events"].append({"kind": "review", "key": "review-cycle-1:head:clean",
                              "detail": "complete"})
     with pytest.raises(ValueError, match="not an incomplete"):
         state.retry_exhausted_cycle(record, SHA)
+
+
+@pytest.mark.parametrize('status,allowed', [('exhausted', True), ('failed', False), ('running', False)])
+def test_existing_result_uses_typed_session_outcomes_without_migration(tmp_path, monkeypatch, status, allowed):
+    monkeypatch.setattr(state, 'work_gate', lambda *args: {})
+    artifact = {'result': {'complete': False}, 'session_identity': {'reviewers': ['reviewer']}}
+    monkeypatch.setattr(state.review_coverage, 'load', lambda ref: artifact)
+    monkeypatch.setattr(state.review_sessions, 'result_artifact', lambda *args: artifact)
+    path = tmp_path / 'session.json'
+    state.write(path, {'reviews': {'reviewer': {'status': status, 'reason': 'usage limit prose is irrelevant'}}})
+    original = path.read_bytes()
+    record = {'iteration_run': {'id': 'run'}, 'cycles': [{'number': 1, 'head': SHA}],
+        'review_results': [{'cycle': 1, 'iteration_run_id': 'run', 'path': 'result.json',
+                            'sha256': 'hash', 'session_file': str(path)}]}
+    if allowed:
+        assert state.retry_exhausted_cycle(record, SHA)['number'] == 1
+    else:
+        with pytest.raises(ValueError, match='not an incomplete'):
+            state.retry_exhausted_cycle(record, SHA)
+    assert path.read_bytes() == original and 'outcome' not in artifact['result']
 
 
 def test_material_decision_gate():

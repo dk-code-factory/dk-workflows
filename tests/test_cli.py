@@ -108,7 +108,7 @@ def test_artifact_helpers_do_not_silently_ignore_conflicting_context(tmp_path):
 
 
 def test_routed_publication_still_requires_completed_review_state(tmp_path):
-    result = subprocess.run([sys.executable, str(SCRIPT), '--host', 'codex', '--cwd', str(tmp_path),
+    result = subprocess.run([sys.executable, str(SCRIPT), '--full', '--host', 'codex', '--cwd', str(tmp_path),
         '--pr', 'https://github.com/o/r/pull/42', 'edit-pr', '--review-state', 'invalid',
         '--title-file', 'title.txt', '--body-file', 'body.txt'], text=True, capture_output=True)
     assert result.returncode == 1
