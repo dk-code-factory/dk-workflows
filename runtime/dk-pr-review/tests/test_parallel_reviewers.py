@@ -339,3 +339,35 @@ time.sleep(60)
     traces = [json.loads(path.read_text()) for path in stats.directory.glob('*-execution.json')]
     assert len(traces) == 2
     assert all(trace['attempts'][0]['returncode'] == -signal.SIGINT for trace in traces)
+
+
+def test_failure_observed_before_a_later_interruption_remains_a_failure(pinned):
+    context, decisions, prep, names, git = pinned
+    session = Session(context, prep, names)
+    stats = for_iteration(context, prep, names, cycle=1, attempt='earlier-failure')
+    pending, release = threading.Event(), threading.Event()
+    completed = runner.as_completed
+    class Pool(runner.ThreadPoolExecutor):
+        def shutdown(self, wait=True, **kwargs):
+            release.set()
+            return super().shutdown(wait=wait, **kwargs)
+    def provider(name, *args):
+        if name == names[0]:
+            assert pending.wait(timeout=5)
+            raise RuntimeError('authentication failed')
+        pending.set()
+        assert release.wait(timeout=5)
+        return {'findings': [finding()]}
+    def interrupted(futures):
+        yield next(completed(futures))
+        assert json.loads(session.path.read_text())['reviews'][names[0]]['status'] == 'failed'
+        raise KeyboardInterrupt()
+    with session.execution(), patch.object(runner, 'ThreadPoolExecutor', Pool), \
+            patch.object(runner, 'as_completed', side_effect=interrupted), \
+            patch.object(runner, 'run_skill_reviewer', side_effect=provider):
+        with pytest.raises(KeyboardInterrupt):
+            runner.review(context, names, '', decisions, '', prep, stats=stats, session=session)
+    reviews = api.ledger(stats.repo)['runs'][stats.run_id]['reviews']
+    assert reviews[names[0]]['status'] == 'failed'
+    assert reviews[names[1]]['status'] == 'completed'
+    assert session.cached(names[1]) == {'findings': [finding()]}

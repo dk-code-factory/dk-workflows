@@ -380,25 +380,26 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
             futures = {pool.submit(copy_context().run, execute, name): name for name in jobs}
             for future in as_completed(futures):
-                results[futures[future]] = future.result()
+                name = futures[future]
+                results[name] = future.result()
+                failure = results[name][1]
+                if failure and not failure['shared_guard']:
+                    # Only the coordinator finalizes failures it observes. Workers
+                    # draining after interruption retain unknown attempts and traces.
+                    if session:
+                        session.record(name, 'failed', reason=failure['reason'])
+                    worker_stats = jobs[name]['stats']
+                    if worker_stats and not failure['guard_failure']:
+                        worker_stats.safe(worker_stats.finish, 'failed', reason=failure['reason'],
+                                          duration_seconds=jobs[name]['duration_seconds'])
 
     guard_failures = []
     for name in reviewers:
         result, failure = results[name]
         if failure:
             if failure['guard_failure']:
-                if session and not failure['shared_guard']:
-                    session.record(name, 'failed', reason=failure['reason'])
                 guard_failures.append(failure)
             else:
-                # Finalize provider failures only after normal coordinator drain.
-                # An interrupted run retains unknown attempts and raw traces.
-                if session:
-                    session.record(name, 'failed', reason=failure['reason'])
-                worker_stats = jobs[name]['stats']
-                if worker_stats:
-                    worker_stats.safe(worker_stats.finish, 'failed', reason=failure['reason'],
-                                      duration_seconds=jobs[name]['duration_seconds'])
                 failed_reviewers.append({k: v for k, v in failure.items()
                                          if k not in ('guard_failure', 'shared_guard')})
             continue
