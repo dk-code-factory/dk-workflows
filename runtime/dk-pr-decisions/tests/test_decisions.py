@@ -95,16 +95,17 @@ class DecisionTests(unittest.TestCase):
             result = mod.decision_context(state)
         self.assertEqual(result['local_decisions'], [{'text': 'Keep schema stable', 'source': 'user chose stable schema'}])
 
-    def test_normal_diff_preserves_patch_when_pinned_refs_are_unchanged(self):
-        pr = {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'baseRefOid': 'a'*40,
+    def test_enterprise_diff_preserves_patch_with_conflicting_default_host(self):
+        pr = {'url': 'https://github.example/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'baseRefOid': 'a'*40,
               'baseRefName': 'main', 'headRefOid': 'b'*40}
         live = {key: pr[key] for key in ('baseRefOid', 'baseRefName', 'headRefOid')}
         diff = 'diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -0,0 +1 @@\n+x\n'
-        with patch.object(mod, 'run', return_value=diff) as run, \
+        with patch.dict(os.environ, {'GH_HOST': 'github.com'}), \
+             patch.object(mod, 'run', return_value=diff) as run, \
              patch.object(mod, 'gh_json', return_value=live) as gh:
             self.assertEqual(mod.pr_diff(pr), diff)
-        run.assert_called_once_with(['gh', 'pr', 'diff', '2', '--repo', 'o/r'])
-        gh.assert_called_once_with(['pr', 'view', '2', '--repo', 'o/r',
+        run.assert_called_once_with(['gh', 'pr', 'diff', pr['url']])
+        gh.assert_called_once_with(['pr', 'view', pr['url'],
                                     '--json', mod.DIFF_SNAPSHOT_FIELDS])
 
     def test_normal_diff_ref_changes_stop_discovery_before_retention_or_provider_start(self):
@@ -129,9 +130,9 @@ class DecisionTests(unittest.TestCase):
                 self.assertEqual(json.dumps(state), original)
                 self.assertEqual(list(Path(td).iterdir()), [path])
 
-    def test_large_diff_uses_pinned_local_three_dot_diff(self):
+    def test_large_enterprise_diff_uses_pinned_local_three_dot_diff(self):
         base, head = 'a'*40, 'b'*40
-        pr = {'url': 'https://github.com/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'baseRefOid': base,
+        pr = {'url': 'https://github.example/o/r/pull/2', 'headRepository': {'nameWithOwner': 'o/r'}, 'baseRefOid': base,
               'baseRefName': 'main', 'headRefOid': head, 'changedFiles': 1}
         live = {'baseRefOid': base, 'baseRefName': 'main', 'headRefOid': head,
                 'changedFiles': 1}
@@ -154,13 +155,17 @@ class DecisionTests(unittest.TestCase):
                 return 'diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -0,0 +1 @@\n+x\n'
             self.fail(f'unexpected command {args}')
 
-        with patch.object(mod, 'run', side_effect=fake_run), \
+        with patch.dict(os.environ, {'GH_HOST': 'github.com'}), \
+             patch.object(mod, 'run', side_effect=fake_run), \
              patch.object(mod, 'gh_json', return_value=live) as gh:
             diff = mod.pr_diff(pr)
         self.assertIn('+x', diff)
         self.assertEqual(gh.call_count, 2)
+        self.assertIn(['gh', 'pr', 'diff', pr['url']], commands)
+        self.assertTrue(all(call.args[0] == ['pr', 'view', pr['url'], '--json', mod.DIFF_SNAPSHOT_FIELDS]
+                            for call in gh.call_args_list))
         self.assertIn(['git', 'fetch', '--quiet', '--no-tags',
-                       'https://github.com/o/r.git', 'refs/pull/2/head'], commands)
+                       'https://github.example/o/r.git', 'refs/pull/2/head'], commands)
         self.assertTrue(any(cmd[:2] == ['git', 'diff'] and 'c'*40 in cmd
                             and head in cmd for cmd in commands))
 

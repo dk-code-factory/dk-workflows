@@ -36,7 +36,9 @@ Existing Decisions entries are read as Markdown blocks, including multiline bull
 
 ## Refresh and publication
 
-`scan`, `context`, `suggest`, `add`, and `replace` refresh the PR and discussions and may run model analysis. They may write the private cache but do not edit GitHub. `list` is entirely offline. `publish` loads the cache and checks live GitHub state without rerunning analysis. `scan --publish` combines refresh and publication when both are requested.
+`scan`, `context`, `suggest`, `add`, and `replace` refresh the PR and discussions and may run model analysis. They may write the private cache but do not edit GitHub. `list` is entirely offline: it reads a validated legacy snapshot directly when no v3 record exists, without creating directories, locks, records or migration receipts. A v3 record takes precedence; corruption blocks the read without fallback. `publish` loads the cache and checks live GitHub state without rerunning analysis. `scan --publish` combines refresh and publication when both are requested.
+
+PR view and diff reads use the full PR URL, including verification and diff fallback checks, so the requested GitHub host governs routing even when the default `GH_HOST` differs. REST writes remain explicitly host-qualified.
 
 Code suggestions are bound to the head SHA. Description suggestions are bound to the complete PR body hash. Selecting either requires the exact cached `{text, references}` object and a matching current snapshot. Discussion choices require exact current comment or review URLs. A PR URL alone is accepted only for an exact current description suggestion.
 
@@ -74,6 +76,21 @@ results retain `status: pending` with `publication.reason`, even if the pending 
 array is empty. Dependent iteration stays `sync_pending` until live publication,
 context and preparation agree. Existing scan/list/context/add/replace/suggest
 commands and unified decision records retain their contracts.
+
+If the head or title changed after an interrupted write, ordinary `publish` leaves
+the intent pending and requires explicit `publish --reconcile`. Reconciliation
+compares the live body exactly with the saved attempted body and original body.
+An attempted-body match marks the intent and matching history entry `verified`;
+an original-body match marks both `not_applied`. These commits retain the existing
+revision checks. An unmatched body leaves the intent pending. Reconciliation never
+sends a GitHub mutation or replays the attempted write.
+
+The original receipt snapshot and cached head/title remain unchanged. Applied
+recovery updates only the cached body. After head/title changes the result stays
+`status: pending` with instructions in `publication.reason` to refresh live context
+and engineering preparation, including when `publication.reconciled` is `published`.
+The recovered receipt establishes publication outcome only; ordinary publication
+continues to require a fresh matching snapshot.
 
 
 ## Revision conflicts and pending publication

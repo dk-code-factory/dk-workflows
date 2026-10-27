@@ -169,7 +169,7 @@ class IntegrationTests(unittest.TestCase):
         if args[:3] == ["gh", "api", "user"]:
             return self.viewer + "\n"
         if args[:3] == ["gh", "pr", "diff"]:
-            self.assertEqual(args[4:], ["--repo", "acme/project"])
+            self.assertEqual(args, ["gh", "pr", "diff", self.pr["url"]])
             return "diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -0,0 +4,1 @@\n+cache = {}\n"
         if args[:2] == ["codex", "exec"]:
             self.analysis_count += 1

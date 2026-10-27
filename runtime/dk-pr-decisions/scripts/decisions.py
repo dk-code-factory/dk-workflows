@@ -271,8 +271,8 @@ def pr_diff(pr):
     owner, repo, _, number = parts
     target = f"{owner}/{repo}"
     try:
-        diff = run(["gh", "pr", "diff", number, "--repo", target])
-        live = gh_json(["pr", "view", number, "--repo", target, "--json", DIFF_SNAPSHOT_FIELDS])
+        diff = run(["gh", "pr", "diff", pr["url"]])
+        live = gh_json(["pr", "view", pr["url"], "--json", DIFF_SNAPSHOT_FIELDS])
         if any(live.get(key) != pr.get(key) for key in (
                 "baseRefOid", "baseRefName", "headRefOid")):
             raise RuntimeError("PR base or head changed while fetching the pinned diff")
@@ -292,7 +292,7 @@ def pr_diff(pr):
             raise RuntimeError(f"GitHub diff failed and pinned PR refs are incomplete: {original_error}") from original_error
 
         def check_live():
-            live = gh_json(["pr", "view", number, "--repo", target, "--json", DIFF_SNAPSHOT_FIELDS])
+            live = gh_json(["pr", "view", pr["url"], "--json", DIFF_SNAPSHOT_FIELDS])
             if any(live.get(key) != value for key, value in expected.items()):
                 raise RuntimeError("PR base or head changed while fetching the pinned diff")
             return live
@@ -773,8 +773,7 @@ def _publish(state, decisions, description=None, description_review_state=None, 
     pr = state['pr']
     parts = urlparse(pr['url']).path.strip('/').split('/')
     host = urlparse(pr['url']).hostname
-    live = gh_json(['pr', 'view', str(pr['number']), '--repo', '/'.join(parts[:2]),
-                    '--json', 'body,title,headRefOid'])
+    live = gh_json(['pr', 'view', pr['url'], '--json', 'body,title,headRefOid'])
     def save():
         current = state.get('publication_intent')
         if current:
@@ -783,21 +782,32 @@ def _publish(state, decisions, description=None, description_review_state=None, 
                     entry.update(current)
         if persist:
             persist()
-    def same(snapshot, body):
-        return (live.get('body') == body and live.get('headRefOid') == snapshot.get('headRefOid')
+    def same_metadata(snapshot):
+        return (live.get('headRefOid') == snapshot.get('headRefOid')
                 and ('title' not in snapshot or live.get('title') == snapshot['title']))
+    def same(snapshot, body):
+        return live.get('body') == body and same_metadata(snapshot)
     reconciled = False
     if pending_intent and pending_intent['status'] == 'pending':
-        if same(pending_intent['snapshot'], pending_intent['body']):
+        metadata_changed = not same_metadata(pending_intent['snapshot'])
+        if metadata_changed and not reconcile:
+            return {'updated': False, 'pending': decisions,
+                    'reason': 'Publication uncertain after PR head or title changed; run publish --reconcile'}
+        if live.get('body') == pending_intent['body']:
             pending_intent['status'] = 'verified'
             state['pr']['body'] = live['body']
             save()
             reconciled = True
-        elif reconcile and same(pending_intent['snapshot'], pending_intent['snapshot']['body']):
+            if metadata_changed:
+                return {'updated': False, 'pending': decisions, 'reconciled': 'published',
+                        'reason': 'Verified publication outcome; refresh live context and engineering preparation '
+                                  'after PR head or title changed'}
+        elif reconcile and live.get('body') == pending_intent['snapshot']['body']:
             pending_intent['status'] = 'not_applied'
             save()
             return {'updated': False, 'pending': decisions,
-                    'reason': 'Verified unapplied publication; refresh scope and retry explicitly'}
+                    'reason': 'Verified unapplied publication; refresh live context and engineering preparation '
+                              'before retrying explicitly'}
         else:
             return {'updated': False, 'pending': decisions,
                     'reason': 'Publication uncertain; reconcile live head, title and body before retrying'}
@@ -831,8 +841,7 @@ def _publish(state, decisions, description=None, description_review_state=None, 
                           '-f', 'body=' + updated])
         if result.get('body') != updated:
             raise RuntimeError('GitHub returned a different PR body')
-        live = gh_json(['pr', 'view', str(pr['number']), '--repo', '/'.join(parts[:2]),
-                        '--json', 'body,title,headRefOid'])
+        live = gh_json(['pr', 'view', pr['url'], '--json', 'body,title,headRefOid'])
         if not same(intent['snapshot'], updated):
             raise RuntimeError('Publication could not be verified against live head, title and body')
     except MetadataConflict:
@@ -858,9 +867,7 @@ def compact(state):
 def decision_context(state, local_decisions=None):
     """Export settled constraints without publishing the PR body."""
     pr = state['pr']
-    parts = urlparse(pr['url']).path.strip('/').split('/')
-    live = gh_json(['pr', 'view', str(pr['number']), '--repo', '/'.join(parts[:2]),
-                    '--json', 'url,body,headRefOid'])
+    live = gh_json(['pr', 'view', pr['url'], '--json', 'url,body,headRefOid'])
     if (live.get('url') != pr['url'] or live.get('body') != pr.get('body')
             or live.get('headRefOid') != pr['headRefOid']):
         raise RuntimeError('PR body or head changed during decision context fetch; retry')
@@ -1125,13 +1132,15 @@ def validated_cache(path, pr_url):
     return state
 
 
-def load_cache(pr_url):
+def load_cache(pr_url, *, migrate=True):
     path = cache_path(pr_url)
     if not path.exists():
         legacy = storage.cache_path(pr_url, versioned=False)
         if not legacy.exists():
             raise ValueError('No cached decisions; run scan first')
         state = validated_cache(legacy, pr_url)
+        if not migrate:
+            return state, legacy
         state['revision'] = 0
         save_state(state, path)
     return validated_cache(path, pr_url), path
@@ -1327,7 +1336,8 @@ def _cli():
 
 
 def execute_command(args):
-    state, path = load_cache(args.pr) if args.command in ('list', 'publish') else scan(args.pr)
+    state, path = (load_cache(args.pr, migrate=args.command != 'list')
+                   if args.command in ('list', 'publish') else scan(args.pr))
     publication = None
     if args.command == 'context':
         local = []
@@ -1367,9 +1377,12 @@ def execute_command(args):
         data['cached'] = args.command == 'list'
     result = envelope(args.command, data, publication)
     if publication and (publication.get('pending') or publication.get('reason')):
+        intent = state.get('publication_intent') or {}
+        next_command = (['context'] if intent.get('status') in ('verified', 'not_applied')
+                        else ['publish', '--reconcile'])
         result['diagnostic'] = {'code': 'publication_pending', 'message': publication.get('reason') or 'Decisions remain pending.',
             'action': recovery_command([sys.executable, str(Path(__file__).resolve()), '--pr', args.pr,
-                'publish', '--reconcile'], path)}
+                *next_command], path)}
     print(json.dumps(result, ensure_ascii=False))
 
 

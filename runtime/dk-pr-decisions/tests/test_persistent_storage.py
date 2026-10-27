@@ -37,11 +37,13 @@ def gh(args):
     data = live()
     if args[0] == 'api':
         assert '-X' in args and args[args.index('-X') + 1] == 'PATCH'
+        assert args[args.index('--hostname') + 1] == data['pr']['url'].split('/')[2], args
         data['pr']['body'] = args[-1].removeprefix('body=')
         live_path.write_text(json.dumps(data))
         pause('publication')
         return data['pr']
     assert args[:2] == ['pr', 'view'], args
+    assert args[2] == data['pr']['url'] and '--repo' not in args, args
     pause('snapshot')
     time.sleep(float(os.environ.get('TEST_SCAN_DELAY', '0')))
     return data['pr']
@@ -153,6 +155,20 @@ def test_isolation_and_exclusive_root(harness):
     assert harness.path() == harness.root / 'persistent/v3/github.com/base/project/pr-34.json'
 
 
+def test_enterprise_publication_and_context_ignore_conflicting_default_host(harness):
+    live = json.loads(harness.live.read_text())
+    url = URL.replace('github.com', 'github.example')
+    live['pr']['url'] = url
+    harness.update(**live)
+    overrides = {'url': url, 'GH_HOST': 'github.com'}
+    harness.add('Enterprise choice', **overrides)
+    result = harness.invoke('publish', **overrides)
+    assert result['status'] == 'ok' and result['publication']['updated'] is True
+    context = harness.invoke('context', **overrides)['data']
+    assert context['pr_url'] == url and context['verified'] is True
+    assert [r['text'] for r in context['decisions']] == ['Enterprise choice']
+
+
 def test_competing_adds_and_refreshes_do_not_lose_changes(harness):
     processes = []
     for i in range(8):
@@ -252,12 +268,29 @@ def test_uncertain_publication_receipt_survives_kill_and_refresh(harness):
     intent = state['publication_intent']
     assert intent['status'] == 'pending'
     assert state['publication_history'][-1] == intent
+    live = json.loads(harness.live.read_text())
+    live['pr']['headRefOid'] = 'b' * 40
+    harness.update(**live)
     blocked = harness.invoke('scan', code=1)
     assert blocked['error']['code'] == 'metadata_conflict'
     assert json.loads(harness.path().read_text())['publication_intent'] == intent
+    assert harness.invoke('publish')['status'] == 'pending'
     result = harness.invoke('publish', '--reconcile')
+    assert result['status'] == 'pending'
+    assert result['diagnostic']['action']['argv'][-1] == 'context'
     assert result['publication']['reconciled'] == 'published'
-    assert json.loads(harness.path().read_text())['publication_intent']['status'] == 'verified'
+    recovered = json.loads(harness.path().read_text())
+    assert recovered['publication_intent']['status'] == 'verified'
+    assert recovered['publication_intent']['snapshot'] == intent['snapshot']
+    assert recovered['pr']['headRefOid'] == state['pr']['headRefOid']
+    assert harness.invoke('publish')['status'] == 'pending'
+    context = harness.invoke(result['diagnostic']['action']['argv'][-1])
+    assert context['status'] == 'ok'
+    assert context['data']['verified'] is True
+    assert context['data']['head_sha'] == live['pr']['headRefOid']
+    refreshed = json.loads(harness.path().read_text())
+    assert refreshed['publication_history'][-1] == recovered['publication_intent']
+    assert json.loads(harness.live.read_text()) == live
 
 
 def test_source_edits_and_deletion_retain_agreement_and_original_text(harness):
@@ -305,21 +338,59 @@ def test_temporary_imports_and_report_share_storage_without_publication(harness)
     assert json.loads(harness.live.read_text())['pr']['body'] == ''
 
 
-def test_offline_list_has_no_writes_or_lock_creation(harness):
+@pytest.mark.parametrize('legacy', [False, True])
+@pytest.mark.parametrize('receipt', ['absent', 'pending', 'corrupt'])
+def test_offline_list_has_no_writes_or_lock_creation(harness, legacy, receipt):
     harness.add('Saved')
-    harness.path().with_name(harness.path().name + '.lock').unlink()
     root = harness.root / 'persistent'
-    before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in root.rglob('*') if p.is_file()}
+    path = harness.path()
+    if receipt != 'absent':
+        state = json.loads(path.read_text())
+        state['publication_intent'] = {'id': 'uncertain', 'status': 'pending',
+                                      'snapshot': dict(state['pr']), 'body': 'Attempted body'}
+        state['publication_history'] = [state['publication_intent']]
+        if receipt == 'corrupt':
+            state['publication_intent'] = 'corrupt receipt'
+        path.write_text(json.dumps(state))
+    if legacy:
+        old = root / core.storage.identity(URL)
+        old.parent.mkdir(parents=True)
+        shutil.copy2(path, old)
+        shutil.rmtree(root / 'v3')
+    else:
+        path.with_name(path.name + '.lock').unlink()
+    def snapshot():
+        return {p: (p.read_bytes() if p.is_file() else None, p.stat().st_mtime_ns)
+                for p in [root, *root.rglob('*')]}
+    before = snapshot()
     bin_dir = harness.root / 'bin'
     bin_dir.mkdir()
     (bin_dir / 'git').symlink_to(shutil.which('git'))
     result = subprocess.run([sys.executable, str(SCRIPT), '--pr', URL, 'list'],
                             env=dict(harness.env, PATH=str(bin_dir)), cwd=harness.root,
                             text=True, capture_output=True)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == (1 if receipt == 'corrupt' else 0), result.stderr
     result = json.loads(result.stdout)
-    assert result['data']['cached'] is True
-    assert before == {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in root.rglob('*') if p.is_file()}
+    if receipt == 'corrupt':
+        assert 'restore a valid backup' in result['error']['message']
+    else:
+        assert result['data']['cached'] is True
+        assert [r['text'] for r in result['data']['decisions']] == ['Saved']
+    assert snapshot() == before
+
+
+def test_offline_list_prefers_v3_and_never_falls_back_from_corruption(harness):
+    harness.add('Current choice')
+    legacy = harness.root / 'persistent' / core.storage.identity(URL)
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text('{corrupt legacy record')
+    assert harness.invoke('list')['data']['decisions'][0]['text'] == 'Current choice'
+    shutil.copy2(harness.path(), legacy)
+    harness.path().write_text('{corrupt v3 record')
+    before = harness.path().read_bytes()
+    result = harness.invoke('list', code=1)
+    assert 'restore a valid backup' in result['error']['message']
+    assert harness.path().read_bytes() == before
 
 
 @pytest.mark.parametrize('value', ['', 'relative', 'file', 'blocked', 'repository', 'symlink'])
