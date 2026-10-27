@@ -6,6 +6,7 @@ import multiprocessing
 from pathlib import Path
 import shutil
 import sys
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -82,7 +83,8 @@ def test_stale_process_preserves_choices_intents_and_history(tmp_path):
 
 
 @pytest.mark.parametrize('applied', [False, True])
-def test_publication_interruption_requires_explicit_reconciliation_without_replay(tmp_path, applied):
+@pytest.mark.parametrize('changes', [(), ('headRefOid',), ('title',), ('headRefOid', 'title')])
+def test_publication_interruption_requires_explicit_reconciliation_without_replay(tmp_path, capsys, applied, changes):
     path = tmp_path / 'state.json'
     current = state()
     current['decisions'] = [{'text': 'Preserve API', 'references': []}]
@@ -102,17 +104,80 @@ def test_publication_interruption_requires_explicit_reconciliation_without_repla
         pending = read(path, {})
         assert pending['publication_intent']['status'] == 'pending'
         assert pending['publication_history'][0]['status'] == 'pending'
+        original_pr = copy.deepcopy(pending['pr'])
+        original_snapshot = copy.deepcopy(pending['publication_intent']['snapshot'])
+        for key in changes:
+            live[key] = 'b' * 40 if key == 'headRefOid' else 'Changed title'
+        if changes:
+            before = path.read_bytes()
+            ordinary = api.publish(read(path, {}), current['decisions'],
+                                   persist=lambda: pytest.fail('ordinary publication must stay blocked'))
+            assert 'publish --reconcile' in ordinary['reason']
+            assert path.read_bytes() == before
         with pytest.raises(api.MetadataConflict):
             api.save_state(pending, path)
         recovered = read(path, {})
-        result = api.publish(recovered, recovered['decisions'], reconcile=True,
-                             persist=lambda: api.save_state(recovered, path))
+        args = SimpleNamespace(command='publish', pr=current['pr']['url'], reconcile=True,
+                               description_file=None, description_review_state=None)
+        with patch.object(api, 'load_cache', return_value=(recovered, path)):
+            api.execute_command(args)
+        output = json.loads(capsys.readouterr().out)
+        result = output['publication']
     assert len(mutations) == 1
     assert not result['updated']
     saved = read(path, {})
     assert saved['publication_intent']['status'] == ('verified' if applied else 'not_applied')
     assert saved['publication_history'][0] == saved['publication_intent']
     assert saved['revision'] > pending['revision']
+    assert saved['publication_intent']['snapshot'] == original_snapshot
+    assert saved['pr'] == {**original_pr, 'body': live['body'] if applied else original_pr['body']}
+    if changes:
+        assert output['diagnostic']['action']['argv'][-1] == 'context'
+        assert api.envelope('publish', publication=result)['status'] == 'pending'
+        assert 'context and engineering preparation' in result['reason']
+        with patch.object(api, 'gh_json', side_effect=github):
+            ordinary = api.publish(saved, saved['decisions'], persist=lambda: api.save_state(saved, path))
+        assert 'changed' in ordinary['reason']
+        assert len(mutations) == 1
+
+
+@pytest.mark.parametrize('body', ['Scope\n', 'Scope with unrelated edits'])
+def test_reconciliation_rejects_body_without_exact_receipt_match(tmp_path, body):
+    path = tmp_path / 'state.json'
+    current = state()
+    current['publication_intent'] = {'id': 'uncertain', 'status': 'pending',
+            'snapshot': dict(current['pr']), 'body': 'Scope with attempted choices'}
+    current['publication_history'] = [copy.deepcopy(current['publication_intent'])]
+    api.save_state(current, path)
+    before = path.read_bytes()
+    live = {**current['pr'], 'body': body, 'headRefOid': 'b' * 40, 'title': 'Changed title'}
+    with patch.object(api, 'gh_json', return_value=live) as github:
+        result = api.publish(current, [], reconcile=True,
+                             persist=lambda: pytest.fail('unmatched receipt must stay pending'))
+    assert api.envelope('publish', publication=result)['status'] == 'pending'
+    assert path.read_bytes() == before
+    assert api.validated_cache(path, current['pr']['url'])['publication_intent']['status'] == 'pending'
+    assert all(call.args[0][:2] == ['pr', 'view'] for call in github.call_args_list)
+
+
+@pytest.mark.parametrize('applied', [False, True])
+def test_reconciliation_checks_loaded_revision_before_committing_outcome(tmp_path, applied):
+    path = tmp_path / 'state.json'
+    current = state()
+    current['publication_intent'] = {'id': 'uncertain', 'status': 'pending',
+            'snapshot': dict(current['pr']), 'body': 'Scope with attempted choices'}
+    current['publication_history'] = [copy.deepcopy(current['publication_intent'])]
+    api.save_state(current, path)
+    newer = copy.deepcopy(current)
+    newer['revision'] += 1
+    write(path, newer)
+    before = path.read_bytes()
+    live = {**current['pr'], 'headRefOid': 'b' * 40,
+            'body': current['publication_intent']['body'] if applied else current['pr']['body']}
+    with patch.object(api, 'gh_json', return_value=live) as github, pytest.raises(api.MetadataConflict):
+        api.publish(current, [], reconcile=True, persist=lambda: api.save_state(current, path))
+    assert path.read_bytes() == before
+    assert all(call.args[0][:2] == ['pr', 'view'] for call in github.call_args_list)
 
 
 def test_legacy_decisions_import_leaves_pending_original_untouched(tmp_path, monkeypatch):

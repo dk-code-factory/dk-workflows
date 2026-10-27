@@ -252,12 +252,29 @@ def test_uncertain_publication_receipt_survives_kill_and_refresh(harness):
     intent = state['publication_intent']
     assert intent['status'] == 'pending'
     assert state['publication_history'][-1] == intent
+    live = json.loads(harness.live.read_text())
+    live['pr']['headRefOid'] = 'b' * 40
+    harness.update(**live)
     blocked = harness.invoke('scan', code=1)
     assert blocked['error']['code'] == 'metadata_conflict'
     assert json.loads(harness.path().read_text())['publication_intent'] == intent
+    assert harness.invoke('publish')['status'] == 'pending'
     result = harness.invoke('publish', '--reconcile')
+    assert result['status'] == 'pending'
+    assert result['diagnostic']['action']['argv'][-1] == 'context'
     assert result['publication']['reconciled'] == 'published'
-    assert json.loads(harness.path().read_text())['publication_intent']['status'] == 'verified'
+    recovered = json.loads(harness.path().read_text())
+    assert recovered['publication_intent']['status'] == 'verified'
+    assert recovered['publication_intent']['snapshot'] == intent['snapshot']
+    assert recovered['pr']['headRefOid'] == state['pr']['headRefOid']
+    assert harness.invoke('publish')['status'] == 'pending'
+    context = harness.invoke(result['diagnostic']['action']['argv'][-1])
+    assert context['status'] == 'ok'
+    assert context['data']['verified'] is True
+    assert context['data']['head_sha'] == live['pr']['headRefOid']
+    refreshed = json.loads(harness.path().read_text())
+    assert refreshed['publication_history'][-1] == recovered['publication_intent']
+    assert json.loads(harness.live.read_text()) == live
 
 
 def test_source_edits_and_deletion_retain_agreement_and_original_text(harness):

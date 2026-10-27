@@ -75,6 +75,21 @@ array is empty. Dependent iteration stays `sync_pending` until live publication,
 context and preparation agree. Existing scan/list/context/add/replace/suggest
 commands and unified decision records retain their contracts.
 
+If the head or title changed after an interrupted write, ordinary `publish` leaves
+the intent pending and requires explicit `publish --reconcile`. Reconciliation
+compares the live body exactly with the saved attempted body and original body.
+An attempted-body match marks the intent and matching history entry `verified`;
+an original-body match marks both `not_applied`. These commits retain the existing
+revision checks. An unmatched body leaves the intent pending. Reconciliation never
+sends a GitHub mutation or replays the attempted write.
+
+The original receipt snapshot and cached head/title remain unchanged. Applied
+recovery updates only the cached body. After head/title changes the result stays
+`status: pending` with instructions in `publication.reason` to refresh live context
+and engineering preparation, including when `publication.reconciled` is `published`.
+The recovered receipt establishes publication outcome only; ordinary publication
+continues to require a fresh matching snapshot.
+
 
 ## Revision conflicts and pending publication
 

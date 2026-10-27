@@ -48,6 +48,14 @@ Saving and recovering cache records never mutates GitHub. Publication remains an
 explicit separate action (`publish` or `scan --publish`). A pending publication
 receipt survives interruption and blocks competing refreshes and writers. Use `publish --reconcile` to observe
 live state before any retry; do not discard uncertain receipts or replay writes.
+If the live head or title changed, reconciliation must be explicit. It compares
+the live body exactly against the saved attempted and original bodies, recording
+`verified` or `not_applied` in the intent and matching history entry under the
+existing revision check. An unmatched body remains pending. The receipt's original
+snapshot and cached head/title are preserved; applied recovery updates the cached
+body only. The command still returns `status: pending` after head/title changes:
+refresh live context and engineering preparation before dependent work or another
+publication. Reconciliation makes no GitHub mutation.
 
 ## Migration
 

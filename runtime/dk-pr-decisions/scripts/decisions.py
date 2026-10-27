@@ -783,21 +783,32 @@ def _publish(state, decisions, description=None, description_review_state=None, 
                     entry.update(current)
         if persist:
             persist()
-    def same(snapshot, body):
-        return (live.get('body') == body and live.get('headRefOid') == snapshot.get('headRefOid')
+    def same_metadata(snapshot):
+        return (live.get('headRefOid') == snapshot.get('headRefOid')
                 and ('title' not in snapshot or live.get('title') == snapshot['title']))
+    def same(snapshot, body):
+        return live.get('body') == body and same_metadata(snapshot)
     reconciled = False
     if pending_intent and pending_intent['status'] == 'pending':
-        if same(pending_intent['snapshot'], pending_intent['body']):
+        metadata_changed = not same_metadata(pending_intent['snapshot'])
+        if metadata_changed and not reconcile:
+            return {'updated': False, 'pending': decisions,
+                    'reason': 'Publication uncertain after PR head or title changed; run publish --reconcile'}
+        if live.get('body') == pending_intent['body']:
             pending_intent['status'] = 'verified'
             state['pr']['body'] = live['body']
             save()
             reconciled = True
-        elif reconcile and same(pending_intent['snapshot'], pending_intent['snapshot']['body']):
+            if metadata_changed:
+                return {'updated': False, 'pending': decisions, 'reconciled': 'published',
+                        'reason': 'Verified publication outcome; refresh live context and engineering preparation '
+                                  'after PR head or title changed'}
+        elif reconcile and live.get('body') == pending_intent['snapshot']['body']:
             pending_intent['status'] = 'not_applied'
             save()
             return {'updated': False, 'pending': decisions,
-                    'reason': 'Verified unapplied publication; refresh scope and retry explicitly'}
+                    'reason': 'Verified unapplied publication; refresh live context and engineering preparation '
+                              'before retrying explicitly'}
         else:
             return {'updated': False, 'pending': decisions,
                     'reason': 'Publication uncertain; reconcile live head, title and body before retrying'}
@@ -1367,9 +1378,12 @@ def execute_command(args):
         data['cached'] = args.command == 'list'
     result = envelope(args.command, data, publication)
     if publication and (publication.get('pending') or publication.get('reason')):
+        intent = state.get('publication_intent') or {}
+        next_command = (['context'] if intent.get('status') in ('verified', 'not_applied')
+                        else ['publish', '--reconcile'])
         result['diagnostic'] = {'code': 'publication_pending', 'message': publication.get('reason') or 'Decisions remain pending.',
             'action': recovery_command([sys.executable, str(Path(__file__).resolve()), '--pr', args.pr,
-                'publish', '--reconcile'], path)}
+                *next_command], path)}
     print(json.dumps(result, ensure_ascii=False))
 
 
