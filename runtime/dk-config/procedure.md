@@ -1,5 +1,8 @@
 # Repository rule configuration
 
+Read [instruction sources](../../common/instruction-sources.md) before interpreting
+repository guidance or generated rule summaries.
+
 ## Architecture rules
 
 Use `dk-config architecture inspect|init|refresh|edit|delete|packet|export|request|enforce`

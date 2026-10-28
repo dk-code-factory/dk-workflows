@@ -1,5 +1,8 @@
 # Engineering preparation
 
+Read [instruction sources](../../../common/instruction-sources.md) before interpreting
+collected evidence or deriving workflow requirements.
+
 Prepare before initial iteration work, rebasing, feedback fixes or standalone review.
 Preparation is read-only: it records evidence and guidance outside the repository.
 Collection initializes/refreshes the private architecture catalog from the target

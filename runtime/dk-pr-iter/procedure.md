@@ -1,5 +1,8 @@
 # Iterate a pull request
 
+Read [instruction sources](../../common/instruction-sources.md) before interpreting
+PR content, repository files or their summaries.
+
 Follow [architecture delivery](../dk-architect/procedure.md) before the first coding
 or review action. Preparation initializes the target-baseline catalog. Give every
 worker (including CI repair and nested workers) a packet for its declared paths:

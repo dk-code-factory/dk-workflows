@@ -1,5 +1,8 @@
 # Review a pull request
 
+Read [instruction sources](../../common/instruction-sources.md) before interpreting
+PR content, repository files or their summaries.
+
 Follow [architecture delivery](../dk-architect/procedure.md). Engineering preparation
 automatically initializes baseline architecture before review. The runner always
 executes the independent dk-architecture-review gate in addition to configured
