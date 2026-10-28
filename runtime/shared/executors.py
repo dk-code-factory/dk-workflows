@@ -284,7 +284,7 @@ def update_process(resolved, env, phase, token=None):
     return receipt
 
 
-def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None):
+def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, architecture_packet=None):
     if _CANCELLATION.get() is not None:
         _CANCELLATION.get().check()
     timeout = provider_timeout() if timeout is None else timeout
@@ -292,6 +292,19 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None):
     if host not in ('codex', 'claude'):
         raise ValueError('Model execution requires a native host')
     env = dict(os.environ, DK_HOST=host)
+    inherited_architecture = architecture_packet or env.get('DK_ARCHITECTURE_PACKET')
+    if inherited_architecture:
+        from shared import architecture
+        inherited = json.loads(inherited_architecture) if isinstance(inherited_architecture, str) else inherited_architecture
+        parent_packet = architecture.load(inherited)
+        recipient = ((resolved['binding'].get('skill') if resolved else None)
+                     or (parent_packet['agent'] if architecture_packet else env.get('DK_ARCHITECTURE_AGENT', 'coordinator')))
+        delivered = architecture.provider_packet(inherited, checkout, recipient,
+            parent_packet['paths'] if architecture_packet else None)
+        env['DK_ARCHITECTURE_PACKET'] = json.dumps(delivered)
+        prompt = ('Read your architecture packet and fingerprint at ' + delivered['path'] + '. '
+                  'Before coding, declare intended paths and refresh this packet; request authorization '
+                  'before any breach. Give nested agents their own packets.\n' + prompt)
     stack = json.loads(env.get('DK_BINDING_STACK', '[]'))
     if resolved:
         identity = resolved['binding']['skill']
@@ -440,6 +453,13 @@ def invoke(binding, handoff_path, checkout, prompt, *, attempt=0):
         _CANCELLATION.get().check()
     from shared.runtime_bundles import retained_binding
     resolved = resolve(binding)
+    handoff = json.loads(Path(handoff_path).read_text()) if Path(handoff_path).is_file() else {}
+    architecture_packet = handoff.get('architecture_packet')
+    if architecture_packet:
+        from shared import architecture
+        architecture.validate_packet(architecture_packet, checkout)
+        prompt = ('Read your architecture_packet reference and fingerprint from the handoff. '
+                  'Give nested agents their own role/path packets.\n' + prompt)
     if resolved['executor'] == 'command':
         stack = json.loads(os.environ.get('DK_BINDING_STACK', '[]'))
         if resolved['identity'] in stack:
@@ -449,6 +469,8 @@ def invoke(binding, handoff_path, checkout, prompt, *, attempt=0):
                 for part in resolved.get('argv', resolved['binding']['command'])]
         env = dict(os.environ, DK_BINDING_STACK=json.dumps([*stack, resolved['identity']]),
                    DK_PROVIDER_ATTEMPT=str(attempt))
+        if architecture_packet:
+            env['DK_ARCHITECTURE_PACKET'] = json.dumps(architecture_packet)
         # The immutable evidence handoff stays in argv. stdin carries the output
         # instructions and, on retry, the validation error and prior response.
         proc = capture(run_provider, argv, input=prompt, cwd=checkout, text=True,
@@ -458,4 +480,6 @@ def invoke(binding, handoff_path, checkout, prompt, *, attempt=0):
         if proc.returncode:
             provider_failure('\n'.join(filter(None, (proc.stderr, proc.stdout))), prompt=prompt, fallback='Command provider failed')
         return proc.stdout
+    if architecture_packet:
+        return execute(prompt, checkout, resolved=resolved, attempt=attempt, architecture_packet=architecture_packet)
     return execute(prompt, checkout, resolved=resolved, attempt=attempt)

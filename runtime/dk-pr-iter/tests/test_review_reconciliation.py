@@ -16,7 +16,7 @@ from shared.private_state import read, write
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'dk-pr-decisions/tests'))
-from preparation_fixtures import Package, analysis, descriptor, prep, retain
+from preparation_fixtures import Package, analysis, descriptor, prep, retain, architecture_review
 sys.path.insert(0, str(ROOT / 'dk-pr-address-reviews/scripts'))
 import fetch_pr_conversation as conversation_exporter
 import fetch_unresolved_review_threads as inline_exporter
@@ -81,6 +81,7 @@ class Scenario:
         binding = state.review_session(record, self.reviewed_head, self.path)
         self.session = review_sessions.Session(p.context, self.original, self.reviewers, path=binding['session_file'])
         self.result = {'complete': True, 'executed_reviewers': self.reviewers, 'reused_reviewers': [],
+                       'architecture_review': architecture_review(self.original, p.context, p.decisions),
                        'skipped_reviewers': [], 'findings': []}
         self.reference = self.session.finish(self.result)
         state.register_review(record, {'review_artifact': self.reference}, self.reviewed_head)
@@ -707,7 +708,8 @@ def test_fresh_review_supersedes_only_old_result_comparisons(tmp_path, monkeypat
     state.next_cycle(record, s.head)
     binding = state.review_session(record, s.head, s.path)
     session = review_sessions.Session(s.package.context, s.current, s.reviewers, path=binding['session_file'])
-    reference = session.finish(s.result)
+    reference = session.finish({**s.result, 'architecture_review': architecture_review(
+        s.current, s.package.context, s.package.decisions)})
     state.register_review(record, {'review_artifact': reference}, s.head)
     write(s.path, record)
     assert state.verify_review(s.path, s.current)['preparation_id'] == s.current['preparation_id']
@@ -1310,7 +1312,9 @@ def test_version_one_attestations_keep_original_restrictions(scenario):
     s.refresh()
     binding, _, _, _ = reconcile.snapshot(read(s.path, {}), s.head, s.assessment_path,
                                          state.reconciliation_api(), version=1)
-    value = {'reconciliation_version': 1, 'binding': binding, 'comparison': s.comparison(binding)}
+    # A legacy comparison format does not waive fresh architecture coverage.
+    value = {'reconciliation_version': 1, 'binding': binding, 'comparison': s.comparison(binding),
+             'architecture_review': architecture_review(s.current, s.package.context, s.package.decisions)}
     path = s.package.write('legacy-reconciliation.json', value)
     item = {'path': str(path), 'sha256': coverage.digest(value), 'binding_hash': coverage.digest(binding),
             'current_preparation_id': s.current['preparation_id']}

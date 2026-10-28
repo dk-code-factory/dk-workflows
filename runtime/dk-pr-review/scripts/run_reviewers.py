@@ -25,7 +25,7 @@ from validate_result import added_lines, validate as validate_findings, validate
 from reviewer_prompts import preparation_instructions, source_files
 from stats_capture import for_iteration
 from shared.reviewer_telemetry import capture, transport
-from shared import bindings
+from shared import bindings, architecture
 from shared.runtime_bundles import retained_binding, retain
 from shared.review_sessions import Session
 from shared.executors import invoke, ProviderExhausted, provider_cancellation
@@ -48,7 +48,9 @@ def build_skill_prompt(skill, handoff_path):
     procedure = skill if skill.suffix == '.md' else skill/'SKILL.md'
     prompt = (f'Apply the installed skill at {procedure} to the pinned PR diff. '
               f'Read the git-diff-v1 handoff at {handoff_path}, including its patch, scope, '
-              'decisions, and rules. Follow decision_instructions: use active entries in the '
+              'decisions, rules, and architecture_packet reference/fingerprint when supplied. '
+              'Pass architecture delivery requirements to any nested agents. '
+              'Follow decision_instructions: use active entries in the '
               'unified decisions array; superseded entries are history, not current constraints. '
               'For a legacy record without that array, use its live, discussion, and local choices. '
               'The fixed point is base_sha; the final tree is head_sha. '
@@ -305,10 +307,14 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                'rules': rules, 'pr_url': context['url'], 'preparation': preparation}
     findings, skipped_reviewers, failed_reviewers = [], [], []
     executed, reused = [], []
+    architecture_result = None
+    architecture_findings = []
     def outcome(value):
         typed = ('completed' if value.get('complete') else 'guard_failed' if value.get('guard_failure')
                  else 'provider_failed' if failed_reviewers else 'usage_exhausted')
         return {**value, 'outcome': typed, **({'failed_reviewers': failed_reviewers} if failed_reviewers else {}),
+                **({'architecture_review': architecture_result} if architecture_result else {}),
+                **({'architecture_findings': architecture_findings} if architecture_findings else {}),
                 'executed_reviewers': executed, 'reused_reviewers': reused}
 
     def unchanged():
@@ -334,6 +340,10 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             else:
                 jobs[name] = {'skill': skill, 'handoff': {**handoff,
                     'reviewer_addendum': preparation['analysis']['reviewer_addenda'][name]}}
+                if preparation.get('architecture'):
+                    jobs[name]['handoff']['architecture_packet'] = architecture.handoff(
+                        preparation['architecture'], context, name,
+                        architecture.load(preparation['architecture']['packet'])['paths'])
             unchanged()
         except Exception as exc:
             if stats and cached is None:
@@ -509,6 +519,19 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
         (executed if name in jobs else reused).append(name)
 
     preparation_api.validate(preparation, context, decisions)
+    if preparation.get('preparation_version', 1) >= 3 and not guard_failures:
+        try:
+            architecture_result = architecture.review(preparation['architecture'], context, decisions)
+            architecture_data = architecture.load(architecture_result)['result']
+            if not architecture_data['complete']:
+                return outcome({'complete': False, 'guard_failure': True,
+                    'reason': 'Architecture review incomplete: ' + architecture_data['reason'],
+                    'findings': findings, 'skipped_reviewers': skipped_reviewers})
+            architecture_findings = [r for r in architecture_data['coverage'] if r['status'] == 'violation']
+        except Exception as exc:
+            return outcome({'complete': False, 'guard_failure': True,
+                'reason': 'Architecture gate failed: ' + str(exc),
+                'findings': findings, 'skipped_reviewers': skipped_reviewers})
     findings.sort(key=lambda x: (('Major', 'Minor', 'Nit').index(x['severity']), x['path'], x['line']))
     if guard_failures or failed_reviewers:
         first = (guard_failures or failed_reviewers)[0]

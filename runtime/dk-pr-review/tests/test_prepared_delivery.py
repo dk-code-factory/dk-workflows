@@ -13,7 +13,8 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'dk-pr-decisions/tests'))
 from preparation_fixtures import Package,analysis,prep
 from shared import review_coverage
-from shared.review_sessions import result_artifact
+from shared import architecture
+from shared.review_sessions import result_artifact, Session
 spec=importlib.util.spec_from_file_location('prepared_runner',ROOT/'dk-pr-review/scripts/run_reviewers.py')
 runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
 from stats_capture import api as stats_api
@@ -149,3 +150,57 @@ class PreparedDeliveryTests(unittest.TestCase):
         result=runner.review(self.package.context,[self.provider],'',self.package.decisions,'',artifact)
         self.assertTrue(result['complete'],result)
         self.assertTrue(self.received.is_file())
+
+    def test_worker_exception_architecture_gate_and_completion_coverage(self):
+        p=self.package
+        user={'actor':'user','instruction':'Allow an independent enforcer to approve this local adapter.',
+              'source':'fixture user request'}
+        rule={'id':'arch-local','revision':1,'text':'Keep the transform local.', 'origin':'user-created',
+              'sources':[], 'agents':['worker'], 'patterns':['transform.py'],
+              'auto_approve':True, 'approval_when':'The supported transform still returns its input.'}
+        architecture.edit(p.repo,rule,user=user,expected=architecture.current(p.repo)['fingerprint'])
+        prepared=self.prepare()
+        worker=architecture.handoff(prepared['architecture'],p.context,'worker',['transform.py'])
+        request=architecture.exception_request(worker,p.repo,'arch-local','One local adapter.', ['transform.py'],
+            [{'path':'transform.py','start':1,'end':2}],'The adapter preserves the transform.')
+        approved=architecture.enforce(request,p.repo,evaluator=lambda *_:{'established':True,
+            'rationale':'Inspected supported behavior.', 'evidence':[{'path':'transform.py','start':1,'end':2}]})
+        enforcer=architecture.load(architecture.load(approved)['enforcer_packet'])
+        self.assertIn('user_instructions/0',enforcer['governing_sources'])
+        self.assertIn('decisions',enforcer['scope_contents'])
+        p.manifest['architecture_exceptions']=[approved];p.write('manifest.json',p.manifest)
+        prepared=self.prepare()
+        verdict={'complete':True,'reason':'','coverage':[{'rule_id':'arch-local','revision':1,
+            'status':'approved_exception','exception':approved['fingerprint'],'paths':['transform.py'],
+            'rationale':'The approved adapter stays within scope.',
+            'evidence':[{'path':'transform.py','start':1,'end':2}]}]}
+        with patch.object(architecture,'analyze',return_value=verdict):
+            result=runner.review(p.context,[self.provider],'',p.decisions,'',prepared)
+        self.assertTrue(result['complete'],result)
+        self.assertEqual(result['executed_reviewers'],[self.name])
+        received=json.loads(self.received.read_text())
+        self.assertIn('architecture_packet',received)
+        self.assertEqual(architecture.load(received['architecture_packet'])['agent'],self.name)
+        session=Session(p.context,prepared,[self.name])
+        item=session.finish(result)
+        review_coverage.verify(item,prepared)
+        # Configured reviewer success cannot waive a missing architecture gate.
+        session=Session(p.context,prepared,[self.name])
+        without={k:v for k,v in result.items() if k!='architecture_review'}
+        item=session.finish(without)
+        with self.assertRaisesRegex(ValueError,'architecture evidence'):
+            review_coverage.verify(item,prepared,accepted_failures=[self.name])
+        # An unchanged PR/head cannot retain an exception after a user changes
+        # the governing task requirement outside the PR description/Decisions.
+        p.write('user.json',{'instruction':'The adapter must now preserve an additional public guarantee.'})
+        with self.assertRaisesRegex(ValueError,'does not cover'):
+            self.prepare()
+
+    def test_architecture_provider_failure_keeps_configured_success_incomplete(self):
+        prepared=self.prepare()
+        with patch.object(architecture,'analyze',side_effect=RuntimeError('Architecture provider unavailable')):
+            result=runner.review(self.package.context,[self.provider],'',self.package.decisions,'',prepared)
+        self.assertFalse(result['complete'])
+        self.assertTrue(result['guard_failure'])
+        self.assertEqual(result['executed_reviewers'],[self.name])
+        self.assertIn('Architecture provider unavailable',result['reason'])

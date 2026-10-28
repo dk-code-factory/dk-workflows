@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.5.5.
+Independent MIT plugin for Claude Code and Codex. Version 1.6.0.
 
 ## Install
 
@@ -22,6 +22,9 @@ Each repository catalogs only its own plugin. Installing this plugin does not in
 
 ## Skills
 
+- `dk-architect`
+- `dk-architecture-review`
+- `dk-architecture-enforcer`
 - `dk-commit-message`
 - `dk-config`
 - `dk-flaky-tests`
@@ -67,6 +70,32 @@ Run `python3 scripts/check.py` and `python3 scripts/test.py` (development depend
 Owned source provenance is recorded in `PROVENANCE.json`. No installed system skills, external plugins, credentials, private rules/state, caches, or benchmark results are distributed.
 
 ## Configuration and guards
+
+Architecture knowledge is maintained privately by three bundled roles on both
+hosts: `dk-architect`, `dk-architecture-review` and `dk-architecture-enforcer`.
+The shared `architecture` CLI route (also `dk-config architecture`) inspects,
+initializes and refreshes versioned catalogs, edits scoped rules, exports agent
+packets and evaluates exception requests. Local initialization uses clean pre-edit
+HEAD; PR preparation automatically uses the pinned target baseline. Evidence-backed
+rules may be adopted automatically; uncertain conventions remain proposals.
+Conflicts and changes to existing obligations require explicit user resolution.
+
+Rules carry IDs/revisions, origin, source locations/fingerprints, POSIX file globs,
+recipient IDs and user-owned autoapproval policy. Empty recipients target the
+coordinator and architecture reviewer; `all` targets everyone. Empty patterns
+remove file filtering; ** spans directories. Mandatory recipients always see the
+full catalog. Workers declare paths before editing and receive a refreshed packet
+when scope expands, including rename/deletion paths and nested handoffs. Export
+packets explicitly for agents outside DK execution. Exceptions cover one task/PR,
+revision, deviation, paths, code evidence and scope/Decisions; only the user can
+enable automatic approval or broaden its conditions. An independent enforcer
+retains approvals/rejections; reviewers cannot grant exceptions.
+
+Architecture review is mandatory alongside configured reviewers, whose settings
+and completion requirements are unchanged. Preparation and immutable review
+results pin catalogs, packets and approvals. Completion rejects missing coverage,
+violations and stale rule/code/scope evidence. See the
+[architecture contract](runtime/dk-architect/procedure.md) for commands and delivery.
 
 Use `dk-config` in plain English to inspect or change settings. There is no default reviewer. Commit messages, PR descriptions, and issue descriptions use bundled DK drafting by default. Unrelated DK workflows work without configured reviewers.
 

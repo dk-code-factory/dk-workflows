@@ -341,6 +341,13 @@ def reconcile(record_path, head, assessment_path, api, *, precheck=None):
                    'Raw fingerprints remain provenance and must not be rewritten.')
     comparison = execute_json(prompt, context['checkout'],
                               validate=lambda value: validate_comparison(value, binding))
+    architecture_review = None
+    if comparison['equivalent'] and current.get('preparation_version', 1) >= 3:
+        from shared import architecture
+        raw = api.preparation_api.read(api.preparation_api.source_path(current, 'decisions'))
+        decisions = raw.get('data', raw)
+        architecture_review = architecture.review(current['architecture'], context, decisions)
+        architecture.verify_review(architecture_review, current['architecture'], context, decisions)
     # No state lock is held during the model call. Recheck live and retained
     # evidence, then recheck again under the state lock before registration.
     after, _, _, _ = capture(read(record_path, {}), live=True)
@@ -348,6 +355,8 @@ def reconcile(record_path, head, assessment_path, api, *, precheck=None):
         raise ValueError('reconciliation evidence moved during comparison')
     value = {'reconciliation_version': binding.get('comparison_version', 1),
              'binding': binding, 'comparison': comparison}
+    if architecture_review:
+        value['architecture_review'] = architecture_review
     fingerprint = coverage.digest(value)
     directory = 'cleanup-prechecks' if precheck else 'review-reconciliations'
     path = coverage.storage_path(record_path.parent / directory / (fingerprint + '.json'), context)

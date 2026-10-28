@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from preparation_fixtures import Package, ROOT, analysis, prep, response, retain
+from preparation_fixtures import Package, ROOT, analysis, prep, response, retain, architecture_review
 
 
 def module(name, relative):
@@ -26,6 +26,22 @@ class PreparationTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.package = Package(self.temp.name)
+
+    def test_pre_architecture_history_remains_readable_but_cannot_authorize_work(self):
+        saved = self.package.prepare()
+        old = prep.read(saved['artifact'])
+        old.pop('architecture')
+        old['sources'].pop('architecture/0')
+        old['inputs']['sources'].pop('architecture/0')
+        old['inputs']['policy'] = 'previous-policy'
+        for node in old['graph'].values():
+            node['sources'] = [source for source in node['sources'] if source != 'architecture/0']
+        old['engineering_id'] = prep.engineering_id(old)
+        old['preparation_id'] = prep.digest({key: value for key, value in old.items() if key != 'preparation_id'})
+        path = self.package.write('past-preparation.json', old)
+        self.assertEqual(prep.historical(path), old)
+        with self.assertRaisesRegex(ValueError, 'policy changed|Architecture preparation missing'):
+            prep.gate(path, pr_url=self.package.context['url'], head_sha=self.package.head)
 
     def test_codex_output_failure_blocks_preparation_without_changing_iteration_history(self):
         package = self.package
@@ -548,6 +564,7 @@ class PreparationTests(unittest.TestCase):
         package.write('run-record.json', record)
         session = Session(package.context, prep.read(saved['artifact']), ['example'], path=binding['session_file'])
         item = session.finish({'complete': True, 'findings': [], 'executed_reviewers': ['example'],
+                               'architecture_review': architecture_review(prep.read(saved['artifact']), package.context, package.decisions),
                                'reused_reviewers': [], 'skipped_reviewers': []})
         record = state.read(Path(record_path), {})
         state.register_review(record, {'review_artifact': item}, package.head)
@@ -590,6 +607,7 @@ class PreparationTests(unittest.TestCase):
         package.write('run-record.json', record)
         session = Session(package.context, prep.read(saved['artifact']), ['example'], path=binding['session_file'])
         item = session.finish({'complete': True, 'findings': [], 'executed_reviewers': ['example'],
+                               'architecture_review': architecture_review(prep.read(saved['artifact']), package.context, package.decisions),
                                'reused_reviewers': [], 'skipped_reviewers': []})
         record = state.read(Path(record_path), {})
         state.register_review(record, {'review_artifact': item}, package.head)
@@ -626,6 +644,7 @@ class PreparationTests(unittest.TestCase):
         package.write('run-record.json', record)
         session = Session(package.context, prep.read(restored['artifact']), ['example'], path=binding['session_file'])
         item = session.finish({'complete': True, 'findings': [], 'executed_reviewers': ['example'],
+                               'architecture_review': architecture_review(prep.read(restored['artifact']), package.context, package.decisions),
                                'reused_reviewers': [], 'skipped_reviewers': []})
         state.register_review(record, {'review_artifact': item}, package.head)
         package.write('run-record.json', record)

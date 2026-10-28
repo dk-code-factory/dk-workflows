@@ -2,6 +2,11 @@
 
 Prepare before initial iteration work, rebasing, feedback fixes or standalone review.
 Preparation is read-only: it records evidence and guidance outside the repository.
+Collection initializes/refreshes the private architecture catalog from the target
+baseline and pins the complete coordinator packet as architecture/0. Optional
+architecture_exceptions in the manifest is an array of immutable approval
+references. Collection and work gates revalidate their rule revisions, paths,
+code and scope/Decisions. Read [architecture delivery](../../dk-architect/procedure.md).
 It never edits code, Git refs or GitHub. The [data contract](preparation-contract.md)
 defines response fields, evidence normalization and stored artifacts.
 

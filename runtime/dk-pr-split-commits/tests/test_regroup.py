@@ -266,7 +266,7 @@ def cleanup_receipt(repo, tmp_path):
     from shared.private_state import write
     from unittest.mock import patch
     sys.path.insert(0, str(ROOT / 'dk-pr-decisions/tests'))
-    from preparation_fixtures import Package, analysis, descriptor, prep, retain
+    from preparation_fixtures import Package, analysis, descriptor, prep, retain, architecture_review
     spec = importlib.util.spec_from_file_location('regroup_run_state', ROOT / 'dk-pr-iter/scripts/run_state.py')
     state = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(state)
@@ -297,6 +297,7 @@ def cleanup_receipt(repo, tmp_path):
     binding = state.review_session(record, data['original_head'], record_path)
     session = review_sessions.Session(p.context, original, ['example'], path=binding['session_file'])
     result = {'complete': True, 'executed_reviewers': ['example'], 'reused_reviewers': [],
+              'architecture_review': architecture_review(original, p.context, p.decisions),
               'skipped_reviewers': [], 'findings': []}
     reference = session.finish(result)
     state.register_review(record, {'review_artifact': reference}, data['original_head'])

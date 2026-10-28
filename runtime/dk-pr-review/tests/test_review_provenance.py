@@ -153,7 +153,7 @@ def test_legacy_main_validates_effective_selection_before_completed_reuse(
     preparation_path = root / 'preparation.json'
     write(preparation_path, prepared)
     record = {}
-    from preparation_fixtures import promote
+    from preparation_fixtures import promote, architecture_review
     promote(prepared, context, decisions)
     write(preparation_path, prepared)
     state.start_run(record)
@@ -164,6 +164,7 @@ def test_legacy_main_validates_effective_selection_before_completed_reuse(
     write(record_path, record)
     session = Session(context, prepared, names, path=binding['session_file'])
     result = {'complete': True, 'findings': [], 'executed_reviewers': names,
+              'architecture_review': architecture_review(prepared, context, decisions),
               'reused_reviewers': [], 'skipped_reviewers': []}
     session.finish(result)
     # Old descriptor files remain valid even after the effective registry/PATH

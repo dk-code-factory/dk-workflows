@@ -1,5 +1,18 @@
 # Iterate a pull request
 
+Follow [architecture delivery](../dk-architect/procedure.md) before the first coding
+or review action. Preparation initializes the target-baseline catalog. Give every
+worker (including CI repair and nested workers) a packet for its declared paths:
+`run-state work-gate --head SHA --agent STABLE_ID --paths-file PATHS.json` returns
+architecture_packet with its reference and fingerprint. Unknown paths receive
+all audience-matching rules; refresh when paths expand. Include rename old/new
+paths and deletions. Stop for authorization before violating a delivered rule.
+Use the independent architecture enforcer for requests; the architecture reviewer
+cannot grant exceptions. Preserve catalogs, packets, approvals and architecture
+review results in preparation, review and completion evidence. Scope/Decisions
+changes require reconsideration even on an unchanged head. Architecture is a
+mandatory additional gate and never replaces configured reviewers.
+
 Pass the root workflow's `DK_CLI_REFERENCE` path to each child agent and helper.
 Use its command map and previously read help sections before new discovery calls;
 query missing help through the stable CLI with that reference.

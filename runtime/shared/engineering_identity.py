@@ -38,7 +38,7 @@ def engineering_id(prepared):
     # Only these declared fields are operational, derived, or verified lineage.
     excluded = {'preparation_id', 'engineering_id', 'sources', 'reviewer_paths',
                 'parent', 'refresh', 'retired_ids', 'workflow_dir', 'workspace',
-                'identity', 'inputs', 'reviewers', 'recovery_manifest', 'recovery_context'}
+                'identity', 'inputs', 'reviewers', 'recovery_manifest', 'recovery_context', 'architecture'}
     content = {k: v for k, v in prepared.items() if k not in excluded}
     graph = prepared.get('graph', {})
     content['graph'] = {node['location']: {**node,

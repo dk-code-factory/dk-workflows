@@ -12,7 +12,7 @@ import uuid
 
 POLICY = 2
 GOVERNING = {'issues', 'choices', 'user_instructions', 'rules', 'questions', 'decisions',
-             'reviewers', 'reviewer-source'}
+             'reviewers', 'reviewer-source', 'architecture', 'architecture-exceptions'}
 GUIDANCE = {'reviewer_addenda', 'worker_instructions', 'completion_criteria'}
 
 
@@ -98,6 +98,12 @@ def semantic(key, content):
     """Normalize only declared schemas/fields; unknown fields remain governing."""
     category = key.split('/')[0]
     value = decode(content)
+    if category == 'architecture' and isinstance(value, dict) and value.get('kind') == 'architecture-packet':
+        # Code entries, path watches, metadata and Decisions already govern via
+        # their original sources. Keep the packet's raw provenance pinned, but
+        # do not make every code edit invalidate every engineering conclusion.
+        return {k: v for k, v in value.items() if k not in {
+            'head', 'fingerprint', 'tree', 'paths', 'scope', 'scope_contents', 'governing_sources'}}
     if key == 'manifest':
         return {'mode': value['mode'], **{k: v for k, v in value.items()
                                          if k not in {'mode', 'context', 'decisions', 'evidence',

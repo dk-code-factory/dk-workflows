@@ -667,7 +667,9 @@ class IncrementalPreparationTests(unittest.TestCase):
             binding = state.review_session(record, package.head, record_path)
             write(record_path, record)
             session = review_sessions.Session(package.context, prepared, ['example'], path=binding['session_file'])
+            from preparation_fixtures import architecture_review
             item = session.finish({'complete': True, 'findings': [], 'executed_reviewers': ['example'],
+                                   'architecture_review': architecture_review(prepared, package.context, package.decisions),
                                    'reused_reviewers': [], 'skipped_reviewers': []})
             state.register_review(record, {'review_artifact': item}, package.head)
         write(record_path, record)
@@ -808,7 +810,7 @@ class IncrementalPreparationTests(unittest.TestCase):
         self.assertEqual(fresh['identity']['head_sha'], parent['identity']['head_sha'])
         self.assertEqual(fresh['inputs']['tree'], parent['inputs']['tree'])
         self.assertEqual(result['refresh']['changed_paths'], [])
-        self.assertEqual(result['refresh']['changed_sources'], ['context'])
+        self.assertEqual(result['refresh']['changed_sources'], ['architecture/0', 'context'])
         self.assertEqual(result['refresh']['mode'], 'full')
         self.assertEqual(result['refresh']['model_call_count'], 1)
         self.assertEqual(set(result['refresh']['affected_conclusions']), set(parent['graph']))

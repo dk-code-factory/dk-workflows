@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 from shared.workflow_storage import allocate
+from shared import architecture
 import subprocess
 import time
 
@@ -11,6 +12,21 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('fixture_preparation', ROOT / 'dk-pr-decisions/scripts/preparation.py')
 prep = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prep)
+
+
+def seed_architecture(root):
+    """Retain an inspected baseline so subprocess fixtures need no extra model."""
+    path = architecture.git(root, 'ls-files').splitlines()[0]
+    item = {'text': 'No extra architecture policy in this fixture.', 'origin': 'inferred',
+            'rationale': 'Inspected fixture source.', 'sources': [{'path': path, 'start': 1, 'end': 1}]}
+    architecture.ensure(root, architecture.git(root, 'rev-parse', 'HEAD').strip(),
+        analyzer=lambda *_: {'knowledge': {key: [item] for key in architecture.KNOWLEDGE},
+                             'rules': [], 'proposals': [], 'conflicts': []})
+
+
+def architecture_review(prepared, context, decisions):
+    return architecture.review(prepared['architecture'], context, decisions,
+        reviewer=lambda *_: {'complete': True, 'reason': '', 'coverage': []})
 
 
 def interrupt_after_checkpoint(completed_reviewer, result, ready):
@@ -95,6 +111,11 @@ def promote(value, context, decisions):
     """Use the fresh contract in tests of the former run-record CLI adapter."""
     if value['preparation_version'] >= 3:
         return
+    # Legacy unit fixtures use a synthetic base OID. Fresh architecture needs a
+    # readable target baseline; their single real commit is the fixture baseline.
+    context['base_sha'] = context['head_sha']
+    context['repository_identity'] = 'path:' + str(Path(context['repository']).resolve())
+    seed_architecture(context['checkout'])
     directory = Path(context['patch']).parent / 'fresh-inputs'
     directory.mkdir(exist_ok=True)
     def put(name, content):
@@ -129,7 +150,9 @@ class Package:
         git('add', '.')
         git('commit', '-qm', 'Transform fixture')
         self.head = git('rev-parse', 'HEAD')
+        seed_architecture(self.repo)
         self.context = {'url': 'https://github.com/example/fixture/pull/1', 'base_sha': self.head,
+                        'repository_identity': 'path:' + str(self.repo.resolve()),
                         'head_sha': self.head, 'checkout': str(self.repo), 'repository': str(self.repo), 'workflow_dir': str(self.versions),
                         'patch': str(self.root / 'diff.patch'), 'metadata': str(self.root / 'metadata.json')}
         (self.root / 'diff.patch').write_text('diff --git a/transform.py b/transform.py\n+++ b/transform.py\n@@ -1 +1 @@\n-old\n+new\n')
