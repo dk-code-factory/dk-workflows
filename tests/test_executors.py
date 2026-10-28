@@ -1,5 +1,11 @@
 import base64
+import hashlib
 import json
+import os
+import threading
+import time
+from contextlib import nullcontext
+from contextvars import copy_context
 from pathlib import Path
 import subprocess
 import sys
@@ -334,7 +340,8 @@ def test_explicit_native_timeout_takes_precedence(tmp_path, monkeypatch):
     assert process.call_args.args[-1] == 30
 
 
-def test_command_timeout_is_enforced_by_real_subprocess(tmp_path, monkeypatch):
+@pytest.mark.parametrize('scoped', [False, True])
+def test_command_timeout_is_enforced_by_real_subprocess(tmp_path, monkeypatch, scoped):
     monkeypatch.setenv('DK_HOST', 'codex')
     monkeypatch.setenv('DK_PROVIDER_TIMEOUT_SECONDS', '1')
     provider = tmp_path / 'slow_provider.py'
@@ -342,7 +349,8 @@ def test_command_timeout_is_enforced_by_real_subprocess(tmp_path, monkeypatch):
                         'print("provider waiting", file=sys.stderr, flush=True)\ntime.sleep(30)\n')
     trace = tmp_path / 'command-trace.json'
     monkeypatch.setenv('DK_REVIEW_STATS_TRACE', str(trace))
-    with pytest.raises(subprocess.TimeoutExpired) as failure:
+    with executors.provider_cancellation() if scoped else nullcontext(), \
+            pytest.raises(subprocess.TimeoutExpired) as failure:
         executors.invoke({'command': [sys.executable, str(provider), '{handoff}']},
                          tmp_path / 'handoff.json', tmp_path, 'Review evidence')
     assert failure.value.timeout == 1
@@ -351,6 +359,189 @@ def test_command_timeout_is_enforced_by_real_subprocess(tmp_path, monkeypatch):
     assert attempt['stdout'] == 'partial command review\n'
     assert attempt['stderr'] == 'provider waiting\n'
     assert attempt['error_type'] == 'TimeoutExpired'
+
+
+def test_cancelled_scope_prevents_another_provider_or_correction_start(tmp_path, monkeypatch):
+    process = Mock(side_effect=AssertionError('provider must not start'))
+    monkeypatch.setattr(executors.subprocess, 'Popen', process)
+    with executors.provider_cancellation() as scope:
+        scope.cancel()
+        with pytest.raises(executors.ProviderCancelled):
+            executors.run_provider(['provider'], text=True, capture_output=True)
+        with pytest.raises(executors.ProviderCancelled):
+            executors.invoke({'command': ['provider']}, tmp_path / 'handoff', tmp_path, 'correction', attempt=1)
+    process.assert_not_called()
+    executors.managed_update.assert_not_called()
+
+
+@pytest.mark.parametrize('prompt', ['', 'large UTF-8 prompt: \u2603\r\n' * 20000], ids=['empty', 'large-utf8'])
+def test_cancellable_transport_delivers_input_with_output_backpressure(tmp_path, prompt):
+    provider = tmp_path / 'slow_reader.py'
+    provider.write_text('import hashlib,json,sys,time\ntime.sleep(.3)\n'
+                        'sys.stderr.write("startup" * 50000)\nsys.stderr.flush()\n'
+                        'data=sys.stdin.buffer.read()\n'
+                        'print(json.dumps({"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()}))\n')
+    with executors.provider_cancellation():
+        result = executors.run_provider([sys.executable, str(provider)], input=prompt,
+                                        text=True, capture_output=True, timeout=5)
+    assert result.returncode == 0
+    assert json.loads(result.stdout) == {'bytes': len(prompt.encode()),
+                                        'sha256': hashlib.sha256(prompt.encode()).hexdigest()}
+    assert result.stderr == 'startup' * 50000
+
+
+def test_cancellable_transport_preserves_streamed_output_while_provider_keeps_working(tmp_path):
+    provider = tmp_path / 'output.py'
+    provider.write_text('import sys,time\nsys.stdout.buffer.write(b"x" * (4 * 1024 * 1024))\n'
+                        'sys.stdout.flush()\ntime.sleep(.35)\n'
+                        'sys.stdout.buffer.write(b"\\r\\nfinished\\r")\n'
+                        'sys.stderr.buffer.write("diagnostic: \\u2603\\r\\n".encode())\n')
+    with executors.provider_cancellation():
+        result = executors.run_provider([sys.executable, str(provider)], input='prompt',
+                                        text=True, capture_output=True, timeout=5)
+    assert result.returncode == 0
+    assert result.stdout == 'x' * (4 * 1024 * 1024) + '\nfinished\n'
+    assert result.stderr == 'diagnostic: \u2603\n'
+
+
+def test_cancellation_closes_owned_pipes_without_waiting_for_an_inherited_writer(tmp_path):
+    provider = tmp_path / 'provider.py'
+    ready, release, finished = [tmp_path / name for name in ('ready', 'release', 'finished')]
+    descendant = ('import sys,time\nfrom pathlib import Path\n'
+                  'release,finished=map(Path,sys.argv[1:])\n'
+                  'deadline=time.monotonic()+10\n'
+                  'while not release.exists() and time.monotonic()<deadline: time.sleep(.01)\n'
+                  'finished.write_text("finished")\n')
+    provider.write_text('import subprocess,sys,time\nfrom pathlib import Path\n'
+                        f'subprocess.Popen([sys.executable,"-c",{descendant!r},{str(release)!r},{str(finished)!r}])\n'
+                        f'Path({str(ready)!r}).write_text("ready")\ntime.sleep(30)\n')
+    outcome = []
+    def execute():
+        try:
+            executors.run_provider([sys.executable, str(provider)], input='prompt',
+                                   text=True, capture_output=True, timeout=30)
+        except executors.ProviderCancelled as exc:
+            outcome.append(exc)
+    with executors.provider_cancellation() as scope:
+        context = copy_context()
+        thread = threading.Thread(target=context.run, args=(execute,))
+        thread.start()
+        try:
+            deadline = time.monotonic() + 5
+            while not ready.exists():
+                assert time.monotonic() < deadline
+                time.sleep(.01)
+            scope.cancel()
+            thread.join(timeout=5)
+            assert not thread.is_alive() and len(outcome) == 1
+            assert not finished.exists()
+        finally:
+            release.write_text('release')
+            scope.cancel()
+            thread.join(timeout=5)
+            deadline = time.monotonic() + 5
+            while not finished.exists():
+                assert time.monotonic() < deadline
+                time.sleep(.01)
+
+
+def test_cancellation_is_local_to_the_owned_transport_scope(tmp_path):
+    provider = tmp_path / 'provider.py'
+    provider.write_text('''import sys, time
+from pathlib import Path
+root, name = Path(sys.argv[1]), sys.argv[2]
+(root / (name + '-ready')).write_text('ready')
+while not (root / (name + '-release')).exists():
+    time.sleep(.01)
+print(name)
+''')
+    scopes, outcomes = {}, {}
+    def execute(name):
+        with executors.provider_cancellation() as scope:
+            scopes[name] = scope
+            try:
+                outcomes[name] = executors.run_provider(
+                    [sys.executable, str(provider), str(tmp_path), name],
+                    text=True, capture_output=True, timeout=30)
+            except executors.ProviderCancelled as exc:
+                outcomes[name] = exc
+    threads = [threading.Thread(target=execute, args=(name,)) for name in ('first', 'second')]
+    for thread in threads:
+        thread.start()
+    try:
+        deadline = time.monotonic() + 5
+        while len(list(tmp_path.glob('*-ready'))) != 2:
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+        scopes['first'].cancel()
+        threads[0].join(timeout=5)
+        assert not threads[0].is_alive()
+        assert isinstance(outcomes['first'], executors.ProviderCancelled)
+        assert not scopes['second'].cancelled.is_set()
+        assert 'second' not in outcomes
+        (tmp_path / 'second-release').write_text('release')
+        threads[1].join(timeout=5)
+        assert outcomes['second'].returncode == 0 and outcomes['second'].stdout == 'second\n'
+    finally:
+        for scope in scopes.values():
+            scope.cancel()
+        for thread in threads:
+            thread.join(timeout=5)
+
+
+def test_native_cancellation_finishes_managed_lifecycle_before_worker_returns(tmp_path, monkeypatch):
+    provider = tmp_path / 'codex'
+    ready = tmp_path / 'ready'
+    provider.write_text(f'#!{sys.executable}\nfrom pathlib import Path\nimport time\n'
+                        f'Path({str(ready)!r}).write_text("ready")\ntime.sleep(30)\n')
+    provider.chmod(0o755)
+    monkeypatch.setenv('PATH', str(tmp_path) + os.pathsep + os.environ['PATH'])
+    monkeypatch.setenv('DK_HOST', 'codex')
+    lifecycle = Mock(return_value={'token': 'owned-invocation'})
+    monkeypatch.setattr(executors, 'managed_update', lifecycle)
+    transport = executors.run_provider
+    def controlled_transport(argv, **kwargs):
+        assert argv[:2] == ['codex', 'exec']
+        return transport([sys.executable, str(provider)], **kwargs)
+    monkeypatch.setattr(executors, 'run_provider', controlled_transport)
+    outcome = []
+    def execute():
+        try:
+            executors.execute('Controlled offline native transport', tmp_path)
+        except executors.ProviderCancelled as exc:
+            outcome.append((exc, [call.args[2] for call in lifecycle.call_args_list]))
+    with executors.provider_cancellation() as scope:
+        context = copy_context()
+        thread = threading.Thread(target=context.run, args=(execute,))
+        thread.start()
+        try:
+            deadline = time.monotonic() + 5
+            while not ready.exists():
+                assert time.monotonic() < deadline
+                time.sleep(.01)
+            scope.cancel()
+            thread.join(timeout=5)
+            assert not thread.is_alive() and len(outcome) == 1
+            assert outcome[0][1] == ['entry', 'complete']
+        finally:
+            scope.cancel()
+            thread.join(timeout=5)
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+def test_model_guard_blocks_unmocked_native_launch_in_cancellation_scope(tmp_path, monkeypatch, host):
+    marker = tmp_path / 'launched'
+    executable = tmp_path / host
+    executable.write_text(f'#!{sys.executable}\nfrom pathlib import Path\nimport sys,json\n'
+                          f'Path({str(marker)!r}).write_text("launched")\n'
+                          'if "-o" in sys.argv: Path(sys.argv[sys.argv.index("-o")+1]).write_text("fixture")\n'
+                          'print(json.dumps({"subtype":"success","result":"fixture"}))\n')
+    executable.chmod(0o755)
+    monkeypatch.setenv('PATH', str(tmp_path) + os.pathsep + os.environ['PATH'])
+    monkeypatch.setenv('DK_HOST', host)
+    with executors.provider_cancellation(), pytest.raises(AssertionError, match='unmocked model execution'):
+        executors.execute('Controlled guard regression', tmp_path)
+    assert not marker.exists()
 
 
 

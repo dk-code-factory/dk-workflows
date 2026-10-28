@@ -4,10 +4,15 @@ import json
 import os
 from pathlib import Path
 import re
+import selectors
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from contextlib import contextmanager
+from contextvars import ContextVar
+from threading import Event, RLock
 from shared.bindings import current_host, resolve
 from shared.diagnostics import Diagnostic, task
 from shared.private_state import write
@@ -17,6 +22,139 @@ from shared.workflow_storage import allocate
 
 class ProviderExhausted(RuntimeError):
     """Explicit provider usage exhaustion; authentication failures remain blocking."""
+
+
+_CANCELLATION = ContextVar('provider_cancellation', default=None)
+
+
+class ProviderCancelled(RuntimeError):
+    """The owning review was interrupted before transport completed."""
+
+
+class ProviderCancellation:
+    def __init__(self):
+        self.lock = RLock()
+        self.cancelled = Event()
+
+    def cancel(self):
+        with self.lock:
+            self.cancelled.set()
+
+    def check(self):
+        if self.cancelled.is_set():
+            raise ProviderCancelled('Review provider execution interrupted')
+
+
+@contextmanager
+def provider_cancellation():
+    scope = ProviderCancellation()
+    token = _CANCELLATION.set(scope)
+    try:
+        yield scope
+    finally:
+        _CANCELLATION.reset(token)
+
+
+def run_provider(argv, **kwargs):
+    """Abort only this invocation's owned transport, leaving lifecycle helpers alone."""
+    scope = _CANCELLATION.get()
+    if scope is None:
+        return subprocess.run(argv, **kwargs)
+    request = kwargs.pop('input', None)
+    timeout = kwargs.pop('timeout', None)
+    if kwargs.pop('capture_output', False):
+        kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if request is not None:
+        kwargs['stdin'] = subprocess.PIPE
+    # Cancellation and spawn have one ordering; a late correction cannot escape.
+    with scope.lock:
+        scope.check()
+        process = subprocess.Popen(argv, **kwargs)
+    buffers = {}
+    error = None
+    def partial(stream):
+        data = buffers.get(stream)
+        return bytes(data) if data else None
+    def output(stream):
+        if stream is None:
+            return None
+        data = bytes(buffers[stream])
+        if getattr(stream, 'encoding', None):
+            return data.decode(stream.encoding, stream.errors).replace('\r\n', '\n').replace('\r', '\n')
+        return data
+    try:
+        deadline = time.monotonic() + timeout if timeout is not None else None
+        payload = request if request is not None else b''
+        if request is not None and getattr(process.stdin, 'encoding', None):
+            payload = request.encode(process.stdin.encoding, process.stdin.errors)
+        payload, offset = memoryview(payload), 0
+        with selectors.DefaultSelector() as selector:
+            def close(stream):
+                selector.unregister(stream)
+                try:
+                    stream.close()
+                except BrokenPipeError:
+                    pass
+            for stream in (process.stdout, process.stderr):
+                if stream:
+                    buffers[stream] = bytearray()
+                    os.set_blocking(stream.fileno(), False)
+                    selector.register(stream, selectors.EVENT_READ)
+            if process.stdin:
+                if payload:
+                    os.set_blocking(process.stdin.fileno(), False)
+                    selector.register(process.stdin, selectors.EVENT_WRITE)
+                else:
+                    process.stdin.close()
+            while selector.get_map() or process.poll() is None:
+                scope.check()
+                remaining = deadline - time.monotonic() if deadline is not None else .1
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(argv, timeout, output=partial(process.stdout),
+                                                    stderr=partial(process.stderr))
+                interval = min(.1, remaining)
+                if not selector.get_map():
+                    try:
+                        process.wait(timeout=interval)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    continue
+                for key, mask in selector.select(interval):
+                    stream = key.fileobj
+                    try:
+                        if mask & selectors.EVENT_WRITE:
+                            try:
+                                offset += os.write(stream.fileno(), payload[offset:offset + 32768])
+                            except BrokenPipeError:
+                                close(stream)
+                            else:
+                                if offset == len(payload):
+                                    close(stream)
+                        else:
+                            data = os.read(stream.fileno(), 32768)
+                            if data:
+                                buffers[stream].extend(data)
+                            else:
+                                close(stream)
+                    except BlockingIOError:
+                        pass
+        return subprocess.CompletedProcess(argv, process.returncode,
+                                           output(process.stdout), output(process.stderr))
+    except BaseException as exc:
+        error = exc
+        if isinstance(exc, ProviderCancelled):
+            exc.stdout = partial(process.stdout)
+            exc.stderr = partial(process.stderr)
+        raise
+    finally:
+        if process.poll() is None:
+            process.kill()
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream:
+                stream.close()
+        process.wait()
+        if isinstance(error, ProviderCancelled):
+            error.returncode = process.returncode
 
 
 def provider_timeout():
@@ -147,6 +285,8 @@ def update_process(resolved, env, phase, token=None):
 
 
 def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None):
+    if _CANCELLATION.get() is not None:
+        _CANCELLATION.get().check()
     timeout = provider_timeout() if timeout is None else timeout
     host = resolved['executor'] if resolved else current_host()
     if host not in ('codex', 'claude'):
@@ -252,7 +392,7 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
                     '--output-format', 'json', '--disallowedTools', 'Edit,Write,NotebookEdit', '-p']
             if resolved:
                 argv += ['--plugin-dir', resolved['root']]
-        proc = capture(subprocess.run, argv, input=prompt, text=True, capture_output=True,
+        proc = capture(run_provider, argv, input=prompt, text=True, capture_output=True,
                        cwd=checkout, env=env, timeout=timeout, telemetry_prompt=prompt,
                        telemetry_attempt=attempt, telemetry_provider=host, telemetry_output=output)
         if proc.returncode:
@@ -296,6 +436,8 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
 
 
 def invoke(binding, handoff_path, checkout, prompt, *, attempt=0):
+    if _CANCELLATION.get() is not None:
+        _CANCELLATION.get().check()
     from shared.runtime_bundles import retained_binding
     resolved = resolve(binding)
     if resolved['executor'] == 'command':
@@ -309,7 +451,7 @@ def invoke(binding, handoff_path, checkout, prompt, *, attempt=0):
                    DK_PROVIDER_ATTEMPT=str(attempt))
         # The immutable evidence handoff stays in argv. stdin carries the output
         # instructions and, on retry, the validation error and prior response.
-        proc = capture(subprocess.run, argv, input=prompt, cwd=checkout, text=True,
+        proc = capture(run_provider, argv, input=prompt, cwd=checkout, text=True,
                        capture_output=True, env=env, timeout=provider_timeout(),
                        telemetry_prompt=prompt, telemetry_attempt=attempt,
                        telemetry_provider='command')

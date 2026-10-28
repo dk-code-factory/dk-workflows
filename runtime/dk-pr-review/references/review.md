@@ -19,10 +19,28 @@ one descriptor per reviewer without invoking a model. Skill descriptors resolve 
 
 The launch operation requires `--decisions-file` and `--preparation-file`. Validate
 ready preparation and source identity before models launch, including hashes of the actual supplied patch and metadata (relocated identical files are allowed); rediscover each effective
-descriptor before its reviewer to detect changed plugin selection/aspects as well as
+descriptor and validate every reusable checkpoint, including cached findings, before
+launching any missing reviewer to detect changed plugin selection/aspects as well as
 changed files. Every `git-diff-v1` handoff adds identical `preparation` and the selected
 `reviewer_addendum`. Preserve both through nested agents and correction retries.
 Tailoring applies boundaries to assigned axes while preserving native roles, finding
 thresholds, read-only restrictions and output contract. A fix direction names the
 required outcome without authorizing more architecture or stronger guarantees.
 Direct standalone reviewer skills remain outside this required preparation runner.
+
+Configured reviewers execute concurrently, one worker per missing reviewer. Each
+worker inherits the pinned binding and registry context and receives a separate
+immutable handoff, reused through its bounded correction attempt. Its normal or
+fallback capture and execution trace belong to that worker; optional statistics
+updates are serialized and never replace mandatory session checkpoints. Validated
+checkpoints are persisted as workers finish. Aggregate findings, duplicate-finding
+attribution, failures and skips in configured order, independent of completion
+order. On interruption, abort this invocation's in-flight provider transport and
+prevent later provider or correction launches. Wait for actual reviewer cleanup
+and checkpoint work before propagating interruption or finishing the session and
+lifecycle. Keep completed checkpoints; unfinished reviewers remain unknown and
+are rerun by an exact-evidence resume, without recording provider failures.
+Genuine failures observed before interruption retain their classification.
+A guard or mandatory storage failure blocks
+completion; it cannot discard another reviewer's retained evidence. Preserve each
+selected skill's internal procedure and execution requirements.

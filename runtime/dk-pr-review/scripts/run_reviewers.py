@@ -8,11 +8,17 @@ import hashlib
 import importlib.util
 import json
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
 import tempfile
-from contextlib import nullcontext
+import time
+from contextlib import contextmanager, nullcontext
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutureWaitTimeout
+from contextvars import copy_context
+from threading import Event, RLock, current_thread, main_thread
+from shared.private_state import write
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from validate_result import added_lines, validate as validate_findings, validate_response
@@ -22,7 +28,7 @@ from shared.reviewer_telemetry import capture, transport
 from shared import bindings
 from shared.runtime_bundles import retained_binding, retain
 from shared.review_sessions import Session
-from shared.executors import invoke, ProviderExhausted
+from shared.executors import invoke, ProviderExhausted, provider_cancellation
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())
 _spec = importlib.util.spec_from_file_location('decision_api', ROOT/'dk-pr-decisions/scripts/decisions.py')
@@ -94,6 +100,25 @@ def run(args, cwd=None):
     if proc.returncode:
         raise RuntimeError((proc.stderr or proc.stdout).strip() or f'{args[0]} failed')
     return proc.stdout
+
+
+@contextmanager
+def _defer_review_sigint():
+    """Keep default CLI interruption from escaping task-ownership cleanup."""
+    received = [False]
+    armed = (current_thread() is main_thread()
+             and signal.getsignal(signal.SIGINT) is signal.default_int_handler)
+    def observed(signum, frame):
+        received[0] = True
+    if armed:
+        previous = signal.signal(signal.SIGINT, observed)
+    try:
+        yield received
+    finally:
+        if armed:
+            signal.signal(signal.SIGINT, previous)
+            if received[0] and not isinstance(sys.exception(), KeyboardInterrupt):
+                raise KeyboardInterrupt()
 
 
 def validate_decisions(context, decisions):
@@ -251,11 +276,11 @@ def review(context, reviewers, scope, decisions, rules, preparation, stats=None,
         context = preparation_api.context_for(preparation)
     decisions = validate_decisions(context, decisions)
     preparation = preparation_api.validate(preparation, context, decisions)
-    with bindings.pinned_bindings(preparation['reviewers']):
-        return _review(context, reviewers, scope, decisions, rules, preparation, stats, session)
+    with bindings.pinned_bindings(preparation['reviewers']), provider_cancellation() as cancellation:
+        return _review(context, reviewers, scope, decisions, rules, preparation, stats, session, cancellation)
 
 
-def _review(context, reviewers, scope, decisions, rules, preparation, stats=None, session=None):
+def _review(context, reviewers, scope, decisions, rules, preparation, stats=None, session=None, cancellation=None):
     provider_map = {bindings.key(value): value for value in reviewers}
     reviewers = list(provider_map)
     if any(name not in preparation['reviewers'] for name in reviewers):
@@ -278,115 +303,223 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                                          'Superseded entries are history, not current constraints. '
                                          'For legacy contexts check all live, discussion, and local decisions.'),
                'rules': rules, 'pr_url': context['url'], 'preparation': preparation}
-    handoff_path = Path(context['patch']).with_name('handoff.json')
-    handoff_path.write_text(json.dumps(handoff, ensure_ascii=True, indent=2) + '\n', encoding='utf-8')
-    findings = []
-    skipped_reviewers = []
-    failed_reviewers = []
-    completed_reviewers = 0
-    executed = []
-    reused = []
+    findings, skipped_reviewers, failed_reviewers = [], [], []
+    executed, reused = [], []
     def outcome(value):
         typed = ('completed' if value.get('complete') else 'guard_failed' if value.get('guard_failure')
                  else 'provider_failed' if failed_reviewers else 'usage_exhausted')
         return {**value, 'outcome': typed, **({'failed_reviewers': failed_reviewers} if failed_reviewers else {}),
                 'executed_reviewers': executed, 'reused_reviewers': reused}
+
     def unchanged():
         preparation_api.validate(preparation, context, decisions)
         if (run(['git', 'rev-parse', 'HEAD'], checkout).strip() != context['head_sha']
                 or run(['git', 'status', '--porcelain=v1'], checkout).strip()):
             raise RuntimeError('reviewer changed isolated checkout')
+
+    # Validate the entire cohort before any launch, including cached findings.
+    # A bad later checkpoint must never permit an earlier missing provider to run.
+    jobs, results = {}, {}
     for name in reviewers:
         cached = None
-        capturing = False
-        attempted = False
-        checking = False
         try:
             preparation_api.validate(preparation, context, decisions)
             if describe_reviewer(provider_map[name]) != preparation['reviewers'][name]:
                 raise ValueError('effective reviewer instructions changed; refresh preparation')
-            handoff['reviewer_addendum'] = preparation['analysis']['reviewer_addenda'][name]
-            handoff_path.write_text(json.dumps(handoff, ensure_ascii=True, indent=2) + '\n', encoding='utf-8')
-            provider = provider_map[name]
-            skill = skill_path(provider)
+            skill = skill_path(provider_map[name]) or Path('command')
             cached = session.cached(name) if session else None
-            if session and cached is None:
-                session.record(name, 'running')
-            capturing = bool(stats and cached is None)
-            attempted = True
-            with stats.invocation(name, handoff, preparation['reviewers'][name]) if capturing else nullcontext():
-                if cached is not None:
-                    result = cached
-                else:
-                    result = run_skill_reviewer(provider, skill or Path('command'), handoff_path, checkout)
-            checking = True
+            if cached is not None:
+                validate_findings(cached, lines)
+                results[name] = (cached, None)
+            else:
+                jobs[name] = {'skill': skill, 'handoff': {**handoff,
+                    'reviewer_addendum': preparation['analysis']['reviewer_addenda'][name]}}
             unchanged()
-            checking = False
-            if (isinstance(result, dict) and result.get('status') == 'tokens_exhausted'
-                    and result.get('findings') == [] and isinstance(result.get('message'), str)
-                    and result['message'].strip()):
-                skipped_reviewers.append({'reviewer': name, 'reason': result['message']})
-                if capturing:
-                    stats.safe(stats.finish, 'exhausted', result, result['message'])
-                if session:
-                    checking = True
-                    session.record(name, 'exhausted', reason=result['message'])
-                continue
-            if (isinstance(result, dict) and result.get('status') == 'incomplete'
-                    and result.get('findings') == [] and isinstance(result.get('message'), str)
-                    and result['message'].strip()):
-                if capturing:
-                    stats.safe(stats.finish, 'incomplete', result, result['message'])
-                if session:
-                    checking = True
-                    session.record(name, 'incomplete', reason=result['message'])
-                failed_reviewers.append({'reviewer': name, 'status': 'incomplete',
-                                         'reason': result['message']})
-                continue
-            validate_findings(result, lines)
-            for item in result['findings']:
-                existing = next((entry for entry in findings
-                                 if all(entry[key] == value for key, value in item.items())), None)
-                if existing:
-                    existing['reviewers'].append(name)
-                else:
-                    findings.append({**item, 'reviewers': [name]})
-            if capturing:
-                stats.safe(stats.finish, 'completed', result)
-            if session and cached is None:
-                checking = True
-                session.record(name, 'completed', result=result)
-            completed_reviewers += 1
-            (reused if cached is not None else executed).append(name)
         except Exception as exc:
-            guard_failure = not attempted or checking or cached is not None
-            if not guard_failure:
+            if stats and cached is None:
+                stats.safe(stats.failure, name, str(exc))
+            return outcome({'complete': False, 'failed_reviewer': name, 'reason': str(exc),
+                            'guard_failure': True, 'findings': [], 'skipped_reviewers': []})
+
+    # Keep these immutable files with the private evidence, including on interruption.
+    if jobs:
+        directory = Path(tempfile.mkdtemp(prefix='review-handoffs-', dir=Path(context['patch']).parent))
+        for index, (name, job) in enumerate(jobs.items()):
+            job['path'] = directory / f'{index}.json'
+            write(job['path'], job['handoff'])
+            job['stats'] = stats.fork() if stats else None
+            job['finished'] = Event()
+            if session:
+                session.record(name, 'running')
+
+    checkpoint_lock = RLock()
+    launch_lock = RLock()
+    launches_closed = False
+
+    def run_reviewer(name):
+        job = jobs[name]
+        worker_stats = job['stats']
+        checking = False
+        shared_guard = False
+        try:
+            with worker_stats.invocation(name, job['handoff'], preparation['reviewers'][name]) if worker_stats else nullcontext():
+                try:
+                    result = run_skill_reviewer(provider_map[name], job['skill'], job['path'], checkout)
+                finally:
+                    if worker_stats:
+                        job['duration_seconds'] = time.monotonic() - worker_stats.start
+            # Serialize guard checks and mandatory checkpoint writes. Each worker
+            # persists its evidence before its future completes, even if another
+            # worker or the coordinator has been interrupted.
+            with checkpoint_lock:
+                checking = True
+                shared_guard = True
+                unchanged()
+                checking = False
+                shared_guard = False
+                validate_response(result, lines)
+                status = {'tokens_exhausted': 'exhausted', 'incomplete': 'incomplete'}.get(
+                    result.get('status'), 'completed')
+                if session:
+                    checking = True
+                    session.record(name, status, result=result if status == 'completed' else None,
+                                   reason=result.get('message'))
+                if worker_stats:
+                    worker_stats.safe(worker_stats.finish, status, result, result.get('message'),
+                                      duration_seconds=job['duration_seconds'])
+            return result, None
+        except Exception as exc:
+            with checkpoint_lock:
+                guard_failure = checking
                 try:
                     unchanged()
                 except Exception as guard_error:
-                    exc, guard_failure = guard_error, True
-            if session:
-                session.record(name, 'failed', reason=str(exc))
-            if stats and not cached:
-                if not capturing:
-                    # Descriptor/skill failures happened before model launch.
-                    stats.safe(stats.failure, name, str(exc))
-                else:
-                    stats.safe(stats.finish, 'failed', reason=str(exc))
-            if guard_failure:
-                return outcome({'complete': False, 'failed_reviewer': name, 'reason': str(exc),
-                        'guard_failure': True, 'findings': findings,
-                        'skipped_reviewers': skipped_reviewers})
-            failed_reviewers.append({'reviewer': name, 'status': 'failed', 'reason': str(exc)})
+                    if not shared_guard:
+                        original = f'{type(exc).__name__}: {exc}'
+                        print(f'Reviewer {name}: {original}; shared guard: {guard_error}', file=sys.stderr)
+                        exc = RuntimeError(f'{guard_error}; original reviewer error: {original}')
+                    else:
+                        exc = guard_error
+                    guard_failure = True
+                    shared_guard = True
+                if worker_stats and guard_failure and not shared_guard:
+                    worker_stats.safe(worker_stats.finish, 'failed', reason=str(exc),
+                                      duration_seconds=job['duration_seconds'])
+            return None, {'reviewer': name, 'status': 'failed', 'reason': str(exc),
+                          'guard_failure': guard_failure, 'shared_guard': shared_guard}
+
+    def execute(name):
+        job = jobs[name]
+        with launch_lock:
+            if launches_closed:
+                return None, None
+            job['started'] = True
+        try:
+            return run_reviewer(name)
+        finally:
+            job['finished'].set()
+
+    if jobs:
+        # Every worker needs its own Context, carrying retained bindings and the
+        # invocation's registry snapshot. Actual task acknowledgements protect
+        # ownership even when SIGINT interrupts Python's thread-join bookkeeping.
+        with _defer_review_sigint() as interrupted:
+            pool = ThreadPoolExecutor(max_workers=len(jobs))
+            interruption = None
+            try:
+                futures = {}
+                for name in jobs:
+                    if interrupted[0]:
+                        raise KeyboardInterrupt()
+                    futures[pool.submit(copy_context().run, execute, name)] = name
+                pending = dict(futures)
+                while pending:
+                    if interrupted[0]:
+                        raise KeyboardInterrupt()
+                    ready = iter(as_completed(pending, timeout=.1))
+                    while pending:
+                        try:
+                            future = next(ready)
+                        except (StopIteration, FutureWaitTimeout):
+                            break
+                        name = pending.pop(future)
+                        results[name] = future.result()
+                        if interrupted[0]:
+                            raise KeyboardInterrupt()
+                        failure = results[name][1]
+                        if failure and not failure['shared_guard']:
+                            # The coordinator records observed session/provider failures.
+                            # Workers finalize known reviewer-specific storage statistics;
+                            # interrupted unfinished provider attempts remain unknown.
+                            if session:
+                                session.record(name, 'failed', reason=failure['reason'])
+                            worker_stats = jobs[name]['stats']
+                            if worker_stats and not failure['guard_failure']:
+                                worker_stats.safe(worker_stats.finish, 'failed', reason=failure['reason'],
+                                                  duration_seconds=jobs[name]['duration_seconds'])
+            finally:
+                cancel = interrupted[0] or isinstance(sys.exception(), KeyboardInterrupt)
+                cancel_sent = False
+                def request_cancel():
+                    nonlocal cancel_sent
+                    if cancellation and (cancel or interrupted[0]) and not cancel_sent:
+                        cancellation.cancel()
+                        cancel_sent = True
+                while True:
+                    try:
+                        with launch_lock:
+                            launches_closed = True
+                        request_cancel()
+                        pool.shutdown(wait=False, cancel_futures=True)
+                        for job in jobs.values():
+                            if job.get('started'):
+                                while not job['finished'].wait(.1):
+                                    request_cancel()
+                        break
+                    except KeyboardInterrupt as exc:
+                        interruption, cancel = exc, True
+                if interruption:
+                    raise interruption
+                if interrupted[0] and not isinstance(sys.exception(), KeyboardInterrupt):
+                    raise KeyboardInterrupt()
+
+    guard_failures = []
+    for name in reviewers:
+        result, failure = results[name]
+        if failure:
+            if failure['guard_failure']:
+                guard_failures.append(failure)
+            else:
+                failed_reviewers.append({k: v for k, v in failure.items()
+                                         if k not in ('guard_failure', 'shared_guard')})
+            continue
+        if result.get('status') == 'tokens_exhausted':
+            skipped_reviewers.append({'reviewer': name, 'reason': result['message']})
+            continue
+        if result.get('status') == 'incomplete':
+            failed_reviewers.append({'reviewer': name, 'status': 'incomplete', 'reason': result['message']})
+            continue
+        for item in result['findings']:
+            existing = next((entry for entry in findings
+                             if all(entry[key] == value for key, value in item.items())), None)
+            if existing:
+                existing['reviewers'].append(name)
+            else:
+                findings.append({**item, 'reviewers': [name]})
+        (executed if name in jobs else reused).append(name)
+
     preparation_api.validate(preparation, context, decisions)
     findings.sort(key=lambda x: (('Major', 'Minor', 'Nit').index(x['severity']), x['path'], x['line']))
-    if failed_reviewers:
-        return outcome({'complete': False, 'failed_reviewer': failed_reviewers[0]['reviewer'],
-                'reason': failed_reviewers[0]['reason'], 'findings': findings,
-                'skipped_reviewers': skipped_reviewers})
-    if not completed_reviewers:
+    if guard_failures or failed_reviewers:
+        first = (guard_failures or failed_reviewers)[0]
+        return outcome({'complete': False,
+                        **({} if first.get('shared_guard') else {'failed_reviewer': first['reviewer']}),
+                        'reason': first['reason'], 'findings': findings,
+                        **({'guard_failure': True} if guard_failures else {}),
+                        'skipped_reviewers': skipped_reviewers})
+    if not executed and not reused:
         return outcome({'complete': False, 'reason': 'all configured reviewers exhausted their usage limits',
-                'findings': findings, 'skipped_reviewers': skipped_reviewers})
+                        'findings': findings, 'skipped_reviewers': skipped_reviewers})
     return outcome({'complete': True, 'findings': findings, 'skipped_reviewers': skipped_reviewers})
 
 

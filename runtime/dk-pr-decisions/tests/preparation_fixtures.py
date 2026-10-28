@@ -5,11 +5,27 @@ import json
 from pathlib import Path
 from shared.workflow_storage import allocate
 import subprocess
+import time
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('fixture_preparation', ROOT / 'dk-pr-decisions/scripts/preparation.py')
 prep = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prep)
+
+
+def interrupt_after_checkpoint(completed_reviewer, result, ready):
+    """Establish durable success before an interruption fixture closes launches."""
+    from shared.bindings import key
+    def review(reviewer, *args):
+        if key(reviewer) == completed_reviewer:
+            return result
+        deadline = time.monotonic() + 5
+        while not ready():
+            if time.monotonic() >= deadline:
+                raise AssertionError('successful reviewer checkpoint was not established')
+            time.sleep(.005)
+        raise KeyboardInterrupt()
+    return review
 
 
 def analysis(reviewers=('example',)):

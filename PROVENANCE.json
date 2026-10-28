@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.5.3",
+      "description": "Concurrent configured PR reviewers with immutable per-reviewer handoffs, isolated telemetry, deterministic aggregation and interruption-safe mandatory checkpoints, with offline command-provider regression coverage."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.5.2",
       "description": "Recover interrupted Decisions publication outcomes after head/title changes, route PR reads by full host URL, and keep offline legacy reads free of migration writes, with recovery, host-routing and persistence regression coverage."
     },
