@@ -13,6 +13,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from preparation_fixtures import Package, ROOT, analysis, prep, response, retain, architecture_review
 
+NATIVE_ARCHITECTURE_ANALYZE = prep.architecture.analyze
+
 
 def module(name, relative):
     spec = importlib.util.spec_from_file_location(name, ROOT / relative)
@@ -303,6 +305,55 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(artifact['analysis'], analysis())
         self.assertEqual(model.call_count, 2)
         self.assertIn('worker instructions and completion criteria required', model.call_args_list[1].args[0])
+
+    def test_call_count_includes_architecture_and_preparation_corrections(self):
+        architecture = prep.architecture
+        package = self.package
+        identity = architecture.context_identity(package.context)
+        catalog = architecture.current(package.repo, identity)
+        architecture_response = {key: catalog[key] for key in ('knowledge', 'rules', 'proposals', 'conflicts')}
+        directory, _ = architecture.folder(package.repo, identity)
+        (directory / 'current.json').unlink()
+        invalid = response()
+        invalid['analysis']['worker_instructions'] = []
+        with patch.object(architecture, 'analyze', NATIVE_ARCHITECTURE_ANALYZE), \
+                patch('shared.executors.execute', side_effect=[
+                    'invalid JSON', json.dumps(architecture_response), json.dumps(invalid), json.dumps(response())]) as model:
+            result = prep.prepare(package.manifest_path, package.versions)
+        self.assertEqual(model.call_count, 4)
+        self.assertEqual(result['refresh']['model_call_count'], 4)
+        self.assertEqual(prep.read(result['artifact'])['refresh']['model_call_count'], 4)
+        with patch('shared.executors.execute') as model:
+            reused = prep.prepare(package.manifest_path, package.versions, previous_preparation=result['artifact'])
+        model.assert_not_called()
+        self.assertEqual(reused['refresh']['model_call_count'], 0)
+
+    def test_call_count_includes_architecture_reinitialization_during_source_recheck(self):
+        architecture = prep.architecture
+        package = self.package
+        identity = architecture.context_identity(package.context)
+        catalog = architecture.current(package.repo, identity)
+        architecture_response = {key: catalog[key] for key in ('knowledge', 'rules', 'proposals', 'conflicts')}
+        directory, _ = architecture.folder(package.repo, identity)
+        collect = prep.collect
+        for recheck in (2, 3):
+            collections = 0
+            def recollect(*args, **kwargs):
+                nonlocal collections
+                collections += 1
+                if collections == recheck:
+                    # A catalog may disappear before either source freshness recheck.
+                    (directory / 'current.json').unlink()
+                return collect(*args, **kwargs)
+            with self.subTest(recheck=recheck), \
+                    patch.object(architecture, 'analyze', NATIVE_ARCHITECTURE_ANALYZE), \
+                    patch.object(prep, 'collect', side_effect=recollect), \
+                    patch('shared.executors.execute', side_effect=[
+                        json.dumps(response()), json.dumps(architecture_response)]) as model:
+                result = prep.prepare(package.manifest_path, package.versions)
+                self.assertEqual(model.call_count, 2)
+                self.assertEqual(result['refresh']['model_call_count'], 2)
+                self.assertEqual(prep.read(result['artifact'])['refresh']['model_call_count'], 2)
 
     def test_invalid_analysis_exhausts_correction_without_preparing(self):
         for raw in ('not JSON', json.dumps({'boundaries': {}}), '[]'):

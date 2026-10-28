@@ -389,3 +389,35 @@ def test_unknown_scope_requires_declared_paths_before_coding(repo):
         a.validate_packet(unknown, repo, paths=['src/core.py'])
     declared = deliver(repo, paths=['src/core.py'])
     a.validate_packet(declared, repo, paths=['src/core.py'])
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+def test_resolved_native_invoke_delivers_binding_recipient_scope(repo, monkeypatch, host):
+    from shared import executors, runtime_bundles
+    recipient = 'fixture:review'
+    initialize(repo, [obligation(), obligation('review', agents=[recipient])])
+    parent = deliver(repo, paths=['src/core.py'])
+    original = a.load(parent)
+    handoff = repo.parent / 'handoff.json'
+    handoff.write_text(json.dumps({'architecture_packet': parent}))
+    binding = {'skill': recipient, 'host': host}
+    resolved = {'binding': binding, 'executor': host, 'identity': recipient,
+                'root': str(repo), 'procedure': str(repo / 'procedure.md')}
+    monkeypatch.setattr(executors, 'resolve', lambda _: resolved)
+    monkeypatch.setattr(runtime_bundles, 'retained_binding', lambda value: value)
+    monkeypatch.setattr(executors, 'managed_update', lambda *_: None)
+    monkeypatch.setenv('DK_BINDING_STACK', '[]')
+    captured = []
+    def process(prompt, checkout, selected_host, environment, *args):
+        captured.append((selected_host, json.loads(environment['DK_ARCHITECTURE_PACKET'])))
+        return '{}'
+    monkeypatch.setattr(executors, 'execute_process', process)
+    executors.invoke(binding, handoff, repo, 'Inspect the handoff.')
+    selected_host, reference = captured.pop()
+    delivered = a.load(reference)
+    assert selected_host == host
+    assert delivered['agent'] == recipient
+    assert [rule['id'] for rule in delivered['rules']] == ['arch-review']
+    for key in ('paths', 'scope', 'task', 'head', 'baseline', 'catalog'):
+        assert delivered[key] == original[key]
+    a.validate_packet(reference, repo, paths=['src/core.py'])

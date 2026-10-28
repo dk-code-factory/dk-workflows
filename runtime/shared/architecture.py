@@ -161,13 +161,16 @@ def rule(value):
     return result
 
 
-def analyze(prompt, checkout, validate):
+def analyze(prompt, checkout, validate, *, on_call=None):
     from shared.executors import execute_json, execute
     packet = _PACKET.get()
-    if packet is None:
-        return execute_json(prompt, checkout, validate=validate)
-    return execute_json(prompt, checkout, validate=validate,
-        executor=lambda prompt, checkout, **kwargs: execute(prompt, checkout, architecture_packet=packet, **kwargs))
+    def counted(prompt, checkout, **kwargs):
+        if on_call:
+            on_call()
+        if packet is not None:
+            kwargs['architecture_packet'] = packet
+        return execute(prompt, checkout, **kwargs)
+    return execute_json(prompt, checkout, validate=validate, executor=counted)
 
 
 def role_analysis(analyzer, prompt, checkout, validate, packet):

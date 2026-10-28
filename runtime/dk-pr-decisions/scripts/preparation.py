@@ -51,7 +51,7 @@ def git(checkout, *args):
         raise ValueError('cannot verify prepared checkout: ' + exc.stderr.strip()) from exc
 
 
-def collect(manifest_path):
+def collect(manifest_path, *, on_call=None):
     """Require an explicit complete package; empty categories need a source explaining why."""
     manifest_path = Path(manifest_path).resolve()
     manifest = read(manifest_path)
@@ -109,7 +109,9 @@ def collect(manifest_path):
         raise ValueError('preparation checkout moved from pinned head')
     if git(context['checkout'], 'status', '--porcelain=v1'):
         raise ValueError('preparation requires a clean isolated checkout')
-    architecture_value = architecture.prepare(context, decisions,
+    architecture_analyzer = (lambda prompt, checkout, validate: architecture.analyze(
+        prompt, checkout, validate, on_call=on_call)) if on_call else None
+    architecture_value = architecture.prepare(context, decisions, analyzer=architecture_analyzer,
         exceptions=manifest.get('architecture_exceptions', []), governing=architecture.governing_sources(paths))
     paths['architecture/0'] = architecture_value['packet']['path']
     for index, reference in enumerate(architecture_value['exceptions']):
@@ -275,7 +277,8 @@ def readiness(analysis):
 
 def policy():
     import shared.engineering_identity as engineering
-    return digest({str(p.name): file_hash(p) for p in (
+    runtime = Path(__file__).resolve().parents[2]
+    return digest({p.resolve().relative_to(runtime).as_posix(): file_hash(p) for p in (
         Path(__file__), Path(graph_api.__file__), Path(engineering.__file__),
         Path(architecture.__file__), architecture.PROCEDURE,
         architecture.PROCEDURE.parent.parent / 'dk-architecture-review/procedure.md',
@@ -327,7 +330,11 @@ def reassessment_prompt(prompt, parent_path, parent, paths, changed_sources, sel
 
 
 def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=None, full_analysis=False):
-    manifest, context, decisions, sources, descriptors, prior = collect(manifest_path)
+    calls = 0
+    def count():
+        nonlocal calls
+        calls += 1
+    manifest, context, decisions, sources, descriptors, prior = collect(manifest_path, on_call=count)
     collection_sources = dict(sources)
     # Capture collection order before rebinding citation slots. Manifest aliases
     # can disappear after publication; retained paths must not resolve them again.
@@ -413,10 +420,6 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
                 'head_sha': context['head_sha'], 'body_hash': decisions['body_hash'],
                 'decisions_hash': digest(decisions)}
     phases = []
-    calls = 0
-    def count():
-        nonlocal calls
-        calls += 1
     def invoke(prompt, validator):
         def checked(value):
             try:
@@ -472,7 +475,7 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
     # Recollect the entire package: additions, removals and input movement cannot
     # hide behind the initial index. Check again immediately before publication.
     def unchanged():
-        again = collect(manifest_path)
+        again = collect(manifest_path, on_call=count)
         live = graph_api.inputs(again[1], again[3])
         live['policy'] = policy()
         live_sources = again[3]
@@ -570,6 +573,8 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
         captured_paths = {(source['path'], source['sha256']): source['snapshot'] for source in sources.values()}
         architecture_scope = architecture.governing_sources({key: captured_paths[source['path'], source['sha256']]
             for key, source in collection_sources.items() if key.split('/')[0] in architecture.SCOPE_SOURCES})
+        unchanged()
+        report['model_call_count'] = calls
         artifact = {'preparation_version': VERSION, 'mode': manifest['mode'], 'identity': identity,
                     'architecture': {'packet': {'path': sources['architecture/0']['snapshot'],
                         'fingerprint': read(sources['architecture/0']['snapshot'])['fingerprint']},
@@ -589,7 +594,6 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
         artifact['engineering_id'] = engineering_id(artifact)
         artifact['preparation_id'] = digest(artifact)
         validate(artifact, context, decisions, require_ready=False)
-        unchanged()
         target = version_dir / 'preparation.json'
         write(target, artifact)
         os.chmod(target, 0o400)

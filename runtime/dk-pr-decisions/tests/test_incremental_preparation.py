@@ -839,6 +839,20 @@ class IncrementalPreparationTests(unittest.TestCase):
         result = self.refresh(first, retain(parent), full_analysis=True)
         self.assertEqual(result['refresh']['mode'], 'full')
 
+    def test_each_architecture_procedure_change_requires_full_reassessment(self):
+        first = self.package.prepare()
+        parent = prep.read(first['artifact'])
+        runtime = Path(prep.__file__).resolve().parents[2]
+        file_hash = prep.file_hash
+        for name in ('dk-architect', 'dk-architecture-review', 'dk-architecture-enforcer'):
+            procedure = runtime / name / 'procedure.md'
+            with self.subTest(procedure=name), patch.object(prep, 'file_hash', side_effect=
+                    lambda path: '0' * 64 if Path(path) == procedure else file_hash(path)):
+                self.assertNotEqual(prep.policy(), parent['inputs']['policy'])
+                result = self.refresh(first, retain(parent))
+                self.assertEqual(result['refresh']['mode'], 'full')
+                self.assertEqual(set(result['refresh']['affected_conclusions']), set(parent['graph']))
+
     def test_old_policy_parent_reaches_full_reassessment_without_current_normalization(self):
         semantic, identity = graph.semantic, graph.source_identity
         def old_semantic(key, content):

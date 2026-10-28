@@ -36,7 +36,7 @@ def offline_architecture_dependency(request, monkeypatch):
             'dk-pr-decisions', 'dk-pr-review', 'dk-pr-iter', 'dk-pr-split-commits')):
         return
     from shared import architecture
-    def analyze(prompt, checkout, validate):
+    def analyze(prompt, checkout, validate, *, on_call=None):
         if 'Act as dk-architecture-review' in prompt:
             result = {'complete': True, 'reason': '', 'coverage': []}
         else:
