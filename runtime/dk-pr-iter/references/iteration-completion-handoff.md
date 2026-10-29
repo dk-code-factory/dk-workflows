@@ -1,5 +1,9 @@
 ## Completion handoff
 
+Follow [waiting and communication](waiting-communication.md) during this stage.
+Include its retained runtime path in every handoff; recipients read it and pass
+it to their nested workers.
+
 Include architecture catalog fingerprint, packet references, approved exceptions
 and independent architecture review in the completion handoff. The coverage gate
 requires complete rule coverage with current rule/code/scope evidence. Scope or

@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.6.3",
+      "description": "Shared PR iteration waiting and communication policy, nested handoff delivery and behavioral long-wait acceptance examples; brief host-required pending updates remain independent of evidence collection, provider calls and CI observation."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.6.2",
       "description": "Recognize Codex usage-limit diagnostics as provider exhaustion while preserving authentication precedence and bounded redacted diagnostics, with classifier, Codex transport and reviewer-status regression coverage."
     },
