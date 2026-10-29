@@ -7,6 +7,11 @@ repository guidance or generated rule summaries.
 
 Use `dk-config architecture inspect|init|refresh|edit|delete|packet|export|request|enforce`
 for private scoped architecture knowledge, or the shared `architecture` route.
+Both routes use independent baseline catalogs: inspect/export require `--baseline SHA`
+or a current `--catalog HASH`; edit/delete require the inspected `--expected HASH`,
+which also selects its baseline. User rules and exception settings apply only to
+that baseline. Reinitialize formerly shared live catalogs; retained files remain
+readable as history.
 Read [architecture delivery and policy](../dk-architect/procedure.md) before use.
 This catalog is separate from the existing plain-English rule store and does not
 change its lookup or reviewer settings. Accept plain-English requests and derive

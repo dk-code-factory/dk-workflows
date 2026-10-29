@@ -297,8 +297,15 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, archite
         from shared import architecture
         inherited = json.loads(inherited_architecture) if isinstance(inherited_architecture, str) else inherited_architecture
         parent_packet = architecture.load(inherited)
-        recipient = ((resolved['binding'].get('skill') if resolved else None)
-                     or (parent_packet['agent'] if architecture_packet else env.get('DK_ARCHITECTURE_AGENT', 'coordinator')))
+        if resolved:
+            skill = resolved['binding']['skill']
+            recipient = resolved['identity']
+            if architecture_packet and parent_packet['agent'] in (skill, recipient, skill + '@' + host):
+                recipient = parent_packet['agent']
+        else:
+            recipient = parent_packet['agent'] if architecture_packet else env.get('DK_ARCHITECTURE_AGENT')
+        if not recipient:
+            raise ValueError('Inherited architecture packet requires an explicit recipient identity')
         delivered = architecture.provider_packet(inherited, checkout, recipient,
             parent_packet['paths'] if architecture_packet else None)
         env['DK_ARCHITECTURE_PACKET'] = json.dumps(delivered)

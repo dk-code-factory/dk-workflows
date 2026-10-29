@@ -120,7 +120,9 @@ def load(reference):
 
 def source(root, revision, value):
     """Fingerprint the cited lines, allowing unrelated edits outside a decision."""
-    path = relative(value['path'])
+    if not isinstance(value, dict):
+        raise ValueError('Architecture source must be an object with a path')
+    path = relative(value.get('path'))
     content = git(root, 'show', f'{revision}:{path}', binary=True)
     start, end = value.get('start', 1), value.get('end', len(content.splitlines()) or 1)
     if type(start) is not int or type(end) is not int or start < 1 or end < start or end > max(1, len(content.splitlines())):
@@ -134,14 +136,16 @@ def source(root, revision, value):
 
 
 def rule(value):
+    if not isinstance(value, dict):
+        raise ValueError('Architecture rule must be an object')
     result = deepcopy(value)
-    if not re.fullmatch(r'arch-[A-Za-z0-9_.-]+', result.get('id', '')):
+    if not isinstance(result.get('id'), str) or not re.fullmatch(r'arch-[A-Za-z0-9_.-]+', result['id']):
         raise ValueError('Architecture rules require a stable arch- ID')
     if type(result.get('revision')) is not int or result['revision'] < 1:
         raise ValueError('Architecture rule revision must be positive')
     if not isinstance(result.get('text'), str) or not result['text'].strip():
         raise ValueError('Architecture rule text required')
-    if result.get('origin') not in {'documented', 'inferred', 'user-created'}:
+    if result.get('origin') not in ('documented', 'inferred', 'user-created'):
         raise ValueError('Invalid architecture rule origin')
     for field in ('sources', 'patterns', 'agents'):
         result.setdefault(field, [])
@@ -190,8 +194,10 @@ def validate_analysis(value, root, baseline):
         if not isinstance(value['knowledge'][category], list) or not value['knowledge'][category]:
             raise ValueError('Each knowledge category requires evidence or an evidenced absence')
         for item in value['knowledge'][category]:
-            if (not isinstance(item, dict) or not item.get('text') or not item.get('rationale')
-                    or item.get('origin') not in {'documented', 'inferred'} or not item.get('sources')):
+            if (not isinstance(item, dict) or not isinstance(item.get('text'), str) or not item['text'].strip()
+                    or not isinstance(item.get('rationale'), str) or not item['rationale'].strip()
+                    or item.get('origin') not in ('documented', 'inferred')
+                    or not isinstance(item.get('sources'), list) or not item['sources']):
                 raise ValueError('Knowledge requires text, rationale, origin and sources')
             for ref in item['sources']:
                 source(root, baseline, ref)
@@ -208,19 +214,57 @@ def validate_analysis(value, root, baseline):
     return value
 
 
-def current(root, identity=None):
-    directory, _ = folder(root, identity)
-    pointer = read(directory / 'current.json', None)
+def baseline_pointer(directory, baseline):
+    if not isinstance(baseline, str) or not re.fullmatch(r'[0-9a-f]{40,64}', baseline):
+        raise ValueError('A pinned architecture baseline is required')
+    return directory / 'baselines' / baseline / 'current.json'
+
+
+def current(root, identity=None, *, baseline=None, catalog=None):
+    """Select one baseline's live catalog; legacy repository pointers are history."""
+    directory, key = folder(root, identity)
+    selected = None
+    if catalog is not None:
+        if not isinstance(catalog, str) or not re.fullmatch(r'[0-9a-f]{64}', catalog):
+            raise ValueError('Invalid architecture catalog selector')
+        path = directory / 'catalogs' / (catalog + '.json')
+        if not path.is_file():
+            raise ValueError('Unknown architecture catalog selector; inspect selected baseline')
+        selected = load({'path': str(path), 'fingerprint': catalog})
+        if selected['repository'] != key:
+            raise ValueError('Architecture catalog belongs to a different repository')
+    if baseline is not None:
+        try:
+            baseline = git(root, 'rev-parse', '--verify', baseline + '^{commit}').strip()
+        except (TypeError, ValueError) as exc:
+            raise ValueError('Invalid architecture baseline selector') from exc
+        if selected is not None and selected['baseline'] != baseline:
+            raise ValueError('Architecture catalog has a different baseline')
+    elif selected is not None:
+        baseline = selected['baseline']
+    else:
+        raise ValueError('Explicit architecture baseline or catalog selection required')
+    pointer = read(baseline_pointer(directory, baseline), None)
     if pointer is None:
-        raise ValueError('Architecture initialization required before work')
-    return load(pointer)
+        raise ValueError('Architecture initialization required for selected baseline before work')
+    result = load(pointer)
+    if result['repository'] != key or result['baseline'] != baseline:
+        raise ValueError('Architecture live catalog differs from selected baseline/repository')
+    if selected is not None and result['fingerprint'] != catalog:
+        raise ValueError('Architecture catalog changed; refresh rule packet or inspect current catalog before editing')
+    return result
 
 
 def publish(directory, catalog):
     saved = seal({k: v for k, v in catalog.items() if k != 'fingerprint'})
     path = directory / 'catalogs' / (saved['fingerprint'] + '.json')
     reference = retain(path, saved)
-    write(directory / 'current.json', reference)
+    pointer = baseline_pointer(directory, saved['baseline'])
+    pointer.parent.parent.mkdir(exist_ok=True, mode=0o700)
+    pointer.parent.parent.chmod(0o700)
+    pointer.parent.mkdir(exist_ok=True, mode=0o700)
+    pointer.parent.chmod(0o700)
+    write(pointer, reference)
     return saved
 
 
@@ -234,9 +278,9 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
     tree = git(root, 'rev-parse', baseline + '^{tree}').strip()
     directory, key = folder(root, identity)
     with locked(directory):
-        pointer = read(directory / 'current.json', None)
-        old = load(pointer) if pointer else None
-        if old and old['baseline'] == baseline and not force:
+        pointer = read(baseline_pointer(directory, baseline), None)
+        old = current(root, identity, baseline=baseline) if pointer else None
+        if old and not force:
             return old
         expected = old['fingerprint'] if old else None
     # Analyze an isolated baseline, never PR-derived head guidance or local edits.
@@ -279,6 +323,8 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
             continue
         if not value['conflicts']:
             rules.append(item)
+        else:
+            proposals.append({'rule': item, 'reason': 'Conflicting obligations require user resolution'})
     stale = []
     for item in rules:
         for ref in item['sources']:
@@ -296,7 +342,7 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
                'knowledge': knowledge, 'rules': rules, 'proposals': proposals,
                'conflicts': value['conflicts'], 'stale_rules': sorted(set(stale))}
     with locked(directory):
-        pointer = read(directory / 'current.json', None)
+        pointer = read(baseline_pointer(directory, baseline), None)
         if (pointer['fingerprint'] if pointer else None) != expected:
             raise ValueError('Architecture catalog changed concurrently; refresh before retrying')
         return publish(directory, catalog)
@@ -310,12 +356,12 @@ def user_evidence(value):
     return deepcopy(value)
 
 
-def edit(root, value=None, *, delete=None, user=None, expected=None, identity=None, resolve_conflicts=False):
+def edit(root, value=None, *, delete=None, user=None, expected=None, identity=None, baseline=None, resolve_conflicts=False):
     """Only explicit user configuration can change existing obligations or policy."""
     evidence = user_evidence(user)
     directory, _ = folder(root, identity)
     with locked(directory):
-        old = current(root, identity)
+        old = current(root, identity, baseline=baseline, catalog=expected)
         if expected != old['fingerprint']:
             raise ValueError('Architecture catalog changed; inspect current catalog before editing')
         catalog = deepcopy(old)
@@ -372,11 +418,14 @@ def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, id
         if not isinstance(paths, (list, tuple)):
             raise ValueError('Worker paths must be an explicit list')
         paths = sorted(set(relative(p) for p in paths))
-    catalog = unseal(catalog) if catalog else current(root, identity)
+    if catalog is not None:
+        supplied = unseal(catalog)
+        catalog = current(root, identity or supplied['repository'], baseline=baseline,
+                          catalog=supplied['fingerprint'])
+    else:
+        catalog = current(root, identity, baseline=baseline)
     if catalog['conflicts'] or catalog['stale_rules']:
         raise ValueError('Architecture obligations require explicit user resolution')
-    if baseline and git(root, 'rev-parse', baseline).strip() != catalog['baseline']:
-        raise ValueError('Architecture catalog has a different baseline')
     head = git(root, 'rev-parse', '--verify', (head or 'HEAD') + '^{commit}').strip()
     value = seal({'schema_version': 1, 'kind': 'architecture-packet', 'repository': catalog['repository'],
                   'catalog': catalog['fingerprint'], 'baseline': catalog['baseline'],
@@ -392,7 +441,9 @@ def validate_packet(reference, root, *, agent=None, paths=None, current_catalog=
     value = load(reference)
     catalog = load({'path': str(folder(root, value['repository'])[0] / 'catalogs' / (value['catalog'] + '.json')),
                     'fingerprint': value['catalog']})
-    if current_catalog and current(root, value['repository'])['fingerprint'] != catalog['fingerprint']:
+    if catalog['repository'] != value['repository'] or catalog['baseline'] != value['baseline']:
+        raise ValueError('Architecture packet catalog identity differs')
+    if current_catalog and current(root, value['repository'], baseline=value['baseline'])['fingerprint'] != catalog['fingerprint']:
         raise ValueError('Architecture catalog changed; refresh rule packet')
     if value['rules'] != selected(catalog, value['agent'], value['paths']):
         raise ValueError('Architecture packet rule coverage differs')
@@ -476,7 +527,7 @@ def validate_preparation(value, context, decisions, *, live=True):
 
 def handoff(value, context, agent, paths=None):
     coordinator = validate_packet(value['packet'], context['checkout'])
-    catalog = current(context['checkout'], coordinator['repository'])
+    catalog = current(context['checkout'], coordinator['repository'], baseline=coordinator['baseline'])
     reference = packet(context['checkout'], agent, paths, task=coordinator['task'],
                        head=coordinator['head'], identity=coordinator['repository'], catalog=catalog,
                        scope=None)
@@ -520,7 +571,9 @@ def enforce(reference, root, *, evaluator=None, user=None):
     enforcer_packet = provider_packet(request['packet'], root, 'dk-architecture-enforcer', request['paths'])
     def validate(value):
         if (not isinstance(value, dict) or set(value) != {'established', 'rationale', 'evidence'}
-                or type(value['established']) is not bool or not value['rationale'] or not value['evidence']):
+                or type(value['established']) is not bool
+                or not isinstance(value['rationale'], str) or not value['rationale'].strip()
+                or not isinstance(value['evidence'], list) or not value['evidence']):
             raise ValueError('Enforcer requires established bool, rationale and code evidence')
         for ref in value['evidence']:
             source(root, delivered['head'], ref)
@@ -587,18 +640,24 @@ def validate_review_result(result, delivered, root, approvals):
     expected = {(r['id'], r['revision']) for r in delivered['rules']}
     covered = []
     for item in result['coverage']:
-        if (not isinstance(item, dict) or item.get('status') not in {
-                'compliant', 'not_applicable', 'approved_exception', 'violation'}
-                or not item.get('rationale') or not isinstance(item.get('evidence'), list)):
+        if (not isinstance(item, dict) or item.get('status') not in (
+                'compliant', 'not_applicable', 'approved_exception', 'violation')
+                or not isinstance(item.get('rule_id'), str) or type(item.get('revision')) is not int
+                or not isinstance(item.get('rationale'), str) or not item['rationale'].strip()
+                or not isinstance(item.get('evidence'), list)):
             raise ValueError('Invalid architecture rule coverage')
         covered.append((item.get('rule_id'), item.get('revision')))
-        if item.get('evidence_revision', delivered['head']) not in {delivered['baseline'], delivered['head']}:
+        if item.get('evidence_revision', delivered['head']) not in (delivered['baseline'], delivered['head']):
             raise ValueError('Architecture review cites evidence outside the pinned baseline/head')
         for ref in item['evidence']:
             source(root, item.get('evidence_revision', delivered['head']), ref)
         if not item['evidence'] and item['status'] != 'not_applicable':
             raise ValueError('Architecture judgment requires code evidence')
         if item['status'] == 'approved_exception':
+            if not isinstance(item.get('paths'), list):
+                raise ValueError('Architecture exception requires a path list')
+            for path in item['paths']:
+                relative(path)
             approval = next((a for a in approvals if a['rule_id'] == item['rule_id']
                              and a['fingerprint'] == item.get('exception')), None)
             if (approval is None or not set(item.get('paths', [])).issubset(approval['paths'])

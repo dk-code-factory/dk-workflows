@@ -310,10 +310,10 @@ class PreparationTests(unittest.TestCase):
         architecture = prep.architecture
         package = self.package
         identity = architecture.context_identity(package.context)
-        catalog = architecture.current(package.repo, identity)
+        catalog = architecture.current(package.repo, identity, baseline=package.context['base_sha'])
         architecture_response = {key: catalog[key] for key in ('knowledge', 'rules', 'proposals', 'conflicts')}
         directory, _ = architecture.folder(package.repo, identity)
-        (directory / 'current.json').unlink()
+        architecture.baseline_pointer(directory, package.context['base_sha']).unlink()
         invalid = response()
         invalid['analysis']['worker_instructions'] = []
         with patch.object(architecture, 'analyze', NATIVE_ARCHITECTURE_ANALYZE), \
@@ -332,7 +332,7 @@ class PreparationTests(unittest.TestCase):
         architecture = prep.architecture
         package = self.package
         identity = architecture.context_identity(package.context)
-        catalog = architecture.current(package.repo, identity)
+        catalog = architecture.current(package.repo, identity, baseline=package.context['base_sha'])
         architecture_response = {key: catalog[key] for key in ('knowledge', 'rules', 'proposals', 'conflicts')}
         directory, _ = architecture.folder(package.repo, identity)
         collect = prep.collect
@@ -343,7 +343,7 @@ class PreparationTests(unittest.TestCase):
                 collections += 1
                 if collections == recheck:
                     # A catalog may disappear before either source freshness recheck.
-                    (directory / 'current.json').unlink()
+                    architecture.baseline_pointer(directory, package.context['base_sha']).unlink()
                 return collect(*args, **kwargs)
             with self.subTest(recheck=recheck), \
                     patch.object(architecture, 'analyze', NATIVE_ARCHITECTURE_ANALYZE), \

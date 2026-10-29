@@ -158,7 +158,7 @@ class PreparedDeliveryTests(unittest.TestCase):
         rule={'id':'arch-local','revision':1,'text':'Keep the transform local.', 'origin':'user-created',
               'sources':[], 'agents':['worker'], 'patterns':['transform.py'],
               'auto_approve':True, 'approval_when':'The supported transform still returns its input.'}
-        architecture.edit(p.repo,rule,user=user,expected=architecture.current(p.repo)['fingerprint'])
+        architecture.edit(p.repo,rule,user=user,expected=architecture.current(p.repo,baseline=p.context['base_sha'])['fingerprint'])
         prepared=self.prepare()
         worker=architecture.handoff(prepared['architecture'],p.context,'worker',['transform.py'])
         request=architecture.exception_request(worker,p.repo,'arch-local','One local adapter.', ['transform.py'],

@@ -30,19 +30,25 @@ def dispatch(arguments=None, *, cwd='.', pr=None):
         command = sub.add_parser(name)
         command.add_argument('--baseline', help='Pinned target SHA; local default requires clean HEAD')
     for name in ('inspect', 'list'):
-        sub.add_parser(name)
+        command = sub.add_parser(name)
+        command.add_argument('--baseline')
+        command.add_argument('--catalog', help='Selected live catalog fingerprint')
     command = sub.add_parser('edit')
     command.add_argument('--file', required=True, help='JSON rule record')
     command.add_argument('--user-file', required=True, help='Exact user instruction and source')
-    command.add_argument('--expected', required=True, help='Inspected catalog fingerprint')
+    command.add_argument('--expected', required=True, help='Inspected catalog fingerprint, also selects its baseline')
+    command.add_argument('--baseline')
     command.add_argument('--resolve-conflicts', action='store_true', help='Apply the explicit user resolution to outstanding conflicts')
     command = sub.add_parser('delete')
     command.add_argument('id')
     command.add_argument('--user-file', required=True)
     command.add_argument('--expected', required=True)
+    command.add_argument('--baseline')
     command.add_argument('--resolve-conflicts', action='store_true')
     command = sub.add_parser('packet', aliases=['export'])
     command.add_argument('--agent', required=True)
+    command.add_argument('--baseline')
+    command.add_argument('--catalog', help='Selected live catalog fingerprint')
     command.add_argument('--paths-file', help='JSON array of intended paths; omission means unknown scope')
     command.add_argument('--task', required=True)
     command.add_argument('--head')
@@ -81,15 +87,16 @@ def dispatch(arguments=None, *, cwd='.', pr=None):
             parser.error('PR architecture initialization requires the pinned target --baseline')
         result = api.ensure(root, args.baseline, identity=identity, force=args.command == 'refresh')
     elif args.command in ('inspect', 'list'):
-        result = api.current(root, identity)
+        result = api.current(root, identity, baseline=args.baseline, catalog=args.catalog)
     elif args.command in ('edit', 'delete'):
         result = api.edit(root, json_file(args.file) if args.command == 'edit' else None,
                           delete=args.id if args.command == 'delete' else None,
                           user=json_file(args.user_file), expected=args.expected, identity=identity,
-                          resolve_conflicts=args.resolve_conflicts)
+                          resolve_conflicts=args.resolve_conflicts, baseline=args.baseline)
     elif args.command in ('packet', 'export'):
         result = api.packet(root, args.agent, json_file(args.paths_file) if args.paths_file else None,
                             task=args.task, head=args.head, identity=identity,
+                            catalog=api.current(root, identity, baseline=args.baseline, catalog=args.catalog),
                             scope=json_file(args.scope_file) if args.scope_file else None)
     elif args.command == 'validate-packet':
         result = api.validate_packet(reference(args.packet), root, agent=args.agent,
@@ -111,7 +118,7 @@ def dispatch(arguments=None, *, cwd='.', pr=None):
         prepared, decisions = json_file(args.preparation), json_file(args.decisions)
         result = api.review(prepared.get('architecture', prepared), json_file(args.context),
                             decisions.get('data', decisions),
-                            exceptions=json_file(args.exceptions_file) if args.exceptions_file else ())
+                            exceptions=json_file(args.exceptions_file) if args.exceptions_file else None)
     print(json.dumps(result, sort_keys=True))
     return 0
 

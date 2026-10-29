@@ -277,14 +277,15 @@ def readiness(analysis):
 
 def policy():
     import shared.engineering_identity as engineering
-    runtime = Path(__file__).resolve().parents[2]
-    return digest({p.resolve().relative_to(runtime).as_posix(): file_hash(p) for p in (
+    plugin = Path(__file__).resolve().parents[3]
+    return digest({p.resolve().relative_to(plugin).as_posix(): file_hash(p) for p in (
         Path(__file__), Path(graph_api.__file__), Path(engineering.__file__),
         Path(architecture.__file__), architecture.PROCEDURE,
         architecture.PROCEDURE.parent.parent / 'dk-architecture-review/procedure.md',
         architecture.PROCEDURE.parent.parent / 'dk-architecture-enforcer/procedure.md',
         Path(__file__).resolve().parents[1] / 'references/preparation.md',
-        Path(__file__).resolve().parents[1] / 'references/preparation-contract.md')})
+        Path(__file__).resolve().parents[1] / 'references/preparation-contract.md',
+        plugin / 'common/instruction-sources.md')})
 
 
 def retained_source(artifact_path, artifact, key):

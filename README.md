@@ -76,7 +76,13 @@ hosts: `dk-architect`, `dk-architecture-review` and `dk-architecture-enforcer`.
 The shared `architecture` CLI route (also `dk-config architecture`) inspects,
 initializes and refreshes versioned catalogs, edits scoped rules, exports agent
 packets and evaluates exception requests. Local initialization uses clean pre-edit
-HEAD; PR preparation automatically uses the pinned target baseline. Evidence-backed
+HEAD; PR preparation automatically uses the pinned target baseline. Each baseline
+owns its catalog, user-created rules and exception settings independently.
+Inspection and export require `--baseline SHA` or a current `--catalog HASH`; edit
+and delete select their baseline with the required `--expected HASH`. Configure
+user rules/settings separately for each baseline. Initializing or editing one
+baseline preserves other baselines' evidence. Former shared live catalogs require
+fresh initialization; fingerprinted historical files remain readable. Evidence-backed
 rules may be adopted automatically; uncertain conventions remain proposals.
 Conflicts and changes to existing obligations require explicit user resolution.
 
