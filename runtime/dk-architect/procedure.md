@@ -35,9 +35,11 @@ origin, sources, patterns, agents, auto_approve (false by default) and approval_
 Sources cite repository-relative paths and inclusive start/end lines; the helper
 computes SHA-256 fingerprints. User-created rules may omit sources. Patterns are
 case-sensitive repository-relative POSIX globs; ** spans directories. Multiple
-patterns match any; an empty array removes file filtering. Empty agents means
-coordinator and architecture reviewer only; `all` reaches every agent. These two
-mandatory recipients always receive the full catalog regardless of filters.
+patterns match any; an empty array removes file filtering. An empty agents list
+reaches only mandatory recipients; `all` reaches every agent. The coordinator,
+`dk-architecture-review`, `dk-pr-iter`, `dk-pr-review`, `dk-pr-address-reviews`
+and `dk-pr-split-commits` always receive the full catalog regardless of filters.
+These skill identities also accept the `dk-workflows:` prefix and host suffixes.
 
 Use `architecture edit --file RULE.json --user-file USER.json --expected HASH`
 or `delete ID` for explicit user configuration; USER.json contains

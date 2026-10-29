@@ -28,7 +28,7 @@ from shared.reviewer_telemetry import capture, transport
 from shared import bindings, architecture
 from shared.runtime_bundles import retained_binding, retain
 from shared.review_sessions import Session
-from shared.executors import invoke, ProviderExhausted, provider_cancellation
+from shared.executors import invoke, ProviderExhausted, ProviderCancelled, provider_cancellation
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())
 _spec = importlib.util.spec_from_file_location('decision_api', ROOT/'dk-pr-decisions/scripts/decisions.py')
@@ -528,6 +528,11 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                     'reason': 'Architecture review incomplete: ' + architecture_data['reason'],
                     'findings': findings, 'skipped_reviewers': skipped_reviewers})
             architecture_findings = [r for r in architecture_data['coverage'] if r['status'] == 'violation']
+        except ProviderExhausted as exc:
+            return outcome({'complete': False, 'reason': 'Architecture review usage exhausted: ' + str(exc),
+                'findings': findings, 'skipped_reviewers': skipped_reviewers})
+        except ProviderCancelled as exc:
+            raise KeyboardInterrupt() from exc
         except Exception as exc:
             return outcome({'complete': False, 'guard_failure': True,
                 'reason': 'Architecture gate failed: ' + str(exc),
