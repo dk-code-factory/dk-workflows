@@ -1400,8 +1400,10 @@ def cli():
 def main():
     try:
         cli()
-    except (RuntimeError, ValueError, KeyError, TypeError, OSError) as exc:
+    except (RuntimeError, ValueError, KeyError, TypeError, OSError, subprocess.TimeoutExpired) as exc:
         error = {'code': getattr(exc, 'code', type(exc).__name__), 'message': str(exc)}
+        if hasattr(exc, 'action'):
+            error['action'] = exc.action
         if isinstance(exc, MetadataConflict):
             error.update(proposal_path=exc.proposal_path, next_action=exc.next_action, action=exc.action)
         print(json.dumps(envelope(None, error=error), ensure_ascii=True))

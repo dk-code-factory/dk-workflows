@@ -195,3 +195,56 @@ and captured evidence while retaining live source paths. Its `source_origins` ma
 preserves captured source identities across relocation; this bookkeeping does not
 replace governing content fingerprints. Retain these files unchanged; construct a
 new manifest when current evidence changes. Required live inputs still block if lost.
+
+## Rejected model output and recovery
+
+`model_validation_failed` leaves preparation blocked. The error receipt identifies
+the exact invalid placement field, such as `placement.dependencies.locations`, and
+its `action.artifacts` points to a private exchange JSON file. Read that file to
+inspect each original response, validation detail, correction prompt, and provider
+stdout/stderr. These files are retained independently of review telemetry, with
+private directory/file permissions. Do not copy raw diagnostics into GitHub or
+public errors; they may contain sensitive source or provider data.
+
+Each exchange permits an initial response and one correction. The private index
+preserves exhausted or interrupted exchanges across process restarts; repeating
+the same normalized governing evidence, PR/base/tree, parent engineering identity,
+runtime and assessment phase returns the retained diagnostic without calling the
+provider again. Recapturing evidence or relocating the checkout does not replenish
+the budget; normalization follows the existing captured/live evidence contracts.
+Each initial, migration, incremental or full assessment phase has its own budget.
+Keep the index, per-exchange lock and evidence intact. A failed
+exchange is never a preparation artifact and cannot authorize work or publication.
+An explicit provider transport failure keeps its original error classification.
+After repairing that failure, a manual retry resumes the same response/correction
+slot and prompt; it does not replenish a consumed schema correction. If equivalent
+evidence now produces a different prompt or checkout path, recovery blocks before
+calling the provider so the retained prompt cannot read stale source paths.
+
+Received responses remain consumed when local cleanup or diagnostic storage fails.
+Journal acceptance must finish durably before the index can permit another exchange;
+an error after replacing the journal still blocks an unchanged retry. If only the
+optional index update fails, the validated result remains successful, but a later
+unchanged request may report `model_diagnostics_invalid` and require inspection.
+That diagnostic also identifies missing referenced evidence, malformed retained
+state, or a missing index when its reservation lock survives. The lock records a
+prior reservation, even when interruption occurred before an index or response was
+written. Such a retry blocks before calling the provider and reports the index and
+lock paths. Preserve all evidence and restore the original private state where
+available; if setup never wrote an index, report the unresolved storage or setup
+failure. Do not reconstruct or reset the budget automatically. Deleting both the
+index and reservation lock is unsupported state loss and cannot be distinguished
+from a first invocation.
+
+Inspect the reported field and the indexed original sources. Correct a genuine
+missing or contradictory governing input, document that correction in the existing
+run, and assemble a new manifest with refreshed current-head/base evidence. Run
+`prepare --input-manifest FILE --previous-preparation LAST_VALID_ARTIFACT` in the
+same PR run, preserving review counters and the old rejected exchange. The new
+evidence receives its own bounded assessment; a prior artifact at a different base
+remains history and cannot authorize publication. Do not change irrelevant wording
+or paths, reset the run, delete diagnostics, fabricate analysis, or repeatedly retry
+unchanged inputs to obtain additional corrections. If no concrete input defect can
+be corrected, report the blocker with its private evidence path and repair the
+provider contract before attempting dependent work. Follow retained-runtime rules
+for an active invocation; switching runtime is not a recovery shortcut.

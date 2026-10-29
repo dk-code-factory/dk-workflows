@@ -78,6 +78,7 @@ active invocation back to the mutable installed cache or a newly installed versi
 | local_changes / rebase_conflicts | Perform the returned engineering assessment or conflict resolution against scope and Decisions. Preserve original, target and candidate recovery refs. |
 | reply_stop | Preserve the independent validator's final rejection and report it. Do not reset rejection budgets. |
 | reply_reconcile | Use the existing controller's exact reconciliation command, including its original PR selection, record and agent ID. |
+| model_validation_failed | Inspect the private exchange in `action.artifacts`, including both rejected responses and exact validation fields. Correct governing evidence before preparing again in the existing run; unchanged or interrupted exchanges cannot reset the correction budget. See [preparation recovery](../runtime/dk-pr-decisions/references/preparation.md#rejected-model-output-and-recovery). |
 
 PR edits retain their original head/title/body and reviewed field hashes. Review
 posting retains the authenticated author, pinned head, complete pre-submit reviews
