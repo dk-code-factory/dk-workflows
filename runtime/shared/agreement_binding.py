@@ -29,7 +29,7 @@ def check(context):
         root = api.storage.root()
         if exported.get('store_root') != str(root):
             raise ValueError('selected Decisions store changed')
-        state = api.storage.read(api.storage.cache_path(context['pr_url']), context['pr_url'])
+        state = api.validated_cache(api.storage.cache_path(context['pr_url']), context['pr_url'])
         if (state.get('publication_intent') or {}).get('status') == 'pending':
             raise ValueError('Decisions publication is pending; use publish --reconcile')
         if exported != binding(api.decision_records(state), root):
