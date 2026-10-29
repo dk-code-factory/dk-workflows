@@ -314,7 +314,8 @@ def cleanup_receipt(repo, tmp_path):
     state.attach_preparation(record, current, PR, data['original_head'],
                              expected_parent=original['preparation_id'])
     write(record_path, record)
-    def compare(prompt, checkout, *, attempt=0):
+    def compare(prompt, checkout, *, attempt=0, inherit_architecture=True):
+        assert inherit_architecture is False
         binding = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]['binding']
         def verdict(category, key):
             evidence = ['original/analysis', 'current/analysis']
