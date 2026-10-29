@@ -484,20 +484,20 @@ def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, go
     return retain(directory / 'packets' / (value['fingerprint'] + '.json'), value)
 
 
-def validate_packet(reference, root, *, agent=None, paths=None, current_catalog=True):
+def validate_packet(reference, root, *, agent=None, paths=None, current_catalog=True, live=True):
     value = load(reference)
     catalog = load({'path': str(folder(root, value['repository'])[0] / 'catalogs' / (value['catalog'] + '.json')),
                     'fingerprint': value['catalog']})
     if catalog['repository'] != value['repository'] or catalog['baseline'] != value['baseline']:
         raise ValueError('Architecture packet catalog identity differs')
-    if current_catalog and current(root, value['repository'], baseline=value['baseline'])['fingerprint'] != catalog['fingerprint']:
+    if live and current_catalog and current(root, value['repository'], baseline=value['baseline'])['fingerprint'] != catalog['fingerprint']:
         raise ValueError('Architecture catalog changed; refresh rule packet')
     if value['rules'] != selected(catalog, value['agent'], value['paths']):
         raise ValueError('Architecture packet rule coverage differs')
     if digest(value.get('scope_contents')) != value['scope']:
         raise ValueError('Architecture packet scope evidence differs')
     governing = value.get('governing_sources', {})
-    if governing_sources({key: ref['path'] for key, ref in governing.items()}) != governing:
+    if live and governing_sources({key: ref['path'] for key, ref in governing.items()}) != governing:
         raise ValueError('Architecture governing scope evidence changed; refresh rule packet')
     if agent is not None and value['agent'] != agent:
         raise ValueError('Architecture recipient identity changed')
@@ -744,16 +744,25 @@ def review(value, context, decisions, *, exceptions=None, reviewer=None):
     return retain(directory / 'reviews' / (saved['fingerprint'] + '.json'), saved)
 
 
-def verify_review(reference, prepared, context, decisions):
+def verify_review(reference, prepared, context, decisions, *, live=True):
     value = load(reference)
-    delivered = validate_preparation(prepared, context, decisions)
-    reviewed = validate_packet(value['packet'], context['checkout'], agent='dk-architecture-review')
+    delivered = validate_preparation(prepared, context, decisions, live=live)
+    if not live:
+        validate_packet(prepared['packet'], context['checkout'], agent='coordinator', live=False)
+    reviewed = validate_packet(value['packet'], context['checkout'], agent='dk-architecture-review', live=live)
     if (reviewed['catalog'] != delivered['catalog']
             or any(reviewed[k] != delivered[k] for k in ('baseline', 'tree', 'scope', 'task'))
             or value['exceptions'] != prepared.get('exceptions', [])):
         raise ValueError('Architecture review does not cover current preparation')
     result = value['result']
-    approvals = [validate_exception(ref, delivered, context['checkout']) for ref in value['exceptions']]
+    approvals = [validate_exception(ref, delivered, context['checkout'], live=live) for ref in value['exceptions']]
+    if not live:
+        # Historical coverage uses the caller's available checkout for immutable
+        # Git citations, never the original mutable governing paths.
+        for approval in approvals:
+            validate_packet(approval['packet'], context['checkout'], live=False)
+            for ref in approval['evidence']:
+                source(context['checkout'], delivered['head'], ref)
     validate_review_result(result, reviewed, context['checkout'], approvals)
     expected = {(r['id'], r['revision']) for r in delivered['rules']}
     covered = [(r.get('rule_id'), r.get('revision')) for r in result['coverage']]

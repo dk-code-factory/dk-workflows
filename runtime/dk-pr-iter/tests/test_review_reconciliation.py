@@ -10,7 +10,7 @@ import sys
 
 import pytest
 
-from shared import executors, review_coverage as coverage, review_reconciliation as reconcile, review_sessions
+from shared import architecture, executors, review_coverage as coverage, review_reconciliation as reconcile, review_sessions
 from shared.command_results import classification
 from shared.private_state import read, write
 
@@ -35,8 +35,12 @@ state, completion = module('run_state'), module('completion')
 
 class Scenario:
     def __init__(self, tmp_path, monkeypatch, reviewers=('example',), cycles=5, descriptor_links=False,
-                 extra_filename=None, decisions_choices=False):
+                 extra_filename=None, decisions_choices=False, architecture_rule=None):
         self.package = p = Package(tmp_path)
+        if architecture_rule is not None:
+            architecture.edit(p.repo, architecture_rule,
+                expected=architecture.current(p.repo, baseline=p.head)['fingerprint'],
+                user={'actor': 'user', 'instruction': 'Keep the inspected transform boundary.', 'source': 'fixture user'})
         self.reviewers = list(reviewers)
         if len(reviewers) > 1:
             p.manifest['evidence']['reviewers'] = [str(p.write(name + '-reviewer.json',
@@ -780,6 +784,69 @@ def replace_result(s, result):
     item = s.session.finish(result)
     state.register_review(record, {'review_artifact': item}, s.reviewed_head)
     write(s.path, record)
+
+
+@pytest.mark.parametrize('invalid_current', ['missing', 'violation', 'stale'])
+def test_original_nonempty_coverage_survives_refresh_but_current_review_stays_live(
+    tmp_path, monkeypatch, invalid_current
+):
+    status = 'compliant'
+    def judge(prompt, checkout, validate):
+        packet = architecture.load(architecture._PACKET.get())
+        value = {'complete': True, 'reason': '', 'coverage': [
+            {'rule_id': r['id'], 'revision': r['revision'], 'status': status,
+             'rationale': 'Inspected the retained transform.',
+             'evidence': [{'path': 'transform.py', 'start': 1, 'end': 2}]} for r in packet['rules']]}
+        validate(value)
+        return value
+    monkeypatch.setattr(architecture, 'analyze', judge)
+    monkeypatch.setattr(sys.modules[__name__], 'architecture_review', lambda prepared, context, decisions:
+        architecture.review(prepared['architecture'], context, decisions, reviewer=judge))
+    rule = {'id': 'arch-transform', 'revision': 1, 'text': 'Keep the transform local.',
+            'origin': 'user-created', 'sources': [], 'agents': ['worker'], 'patterns': ['transform.py']}
+    s = Scenario(tmp_path, monkeypatch, architecture_rule=rule)
+    # This acceptance belongs solely to the isolated test fixture.
+    replace_result(s, {**s.result, 'complete': False, 'executed_reviewers': [],
+        'failed_reviewers': [{'reviewer': 'example', 'status': 'failed', 'reason': 'Fixture provider unavailable'}]})
+    state.mutate(s.path, {}, lambda record: state.accept_review_failures(record, s.reviewed_head,
+        ['example'], 'Fixture user accepted its recorded failure', 'Retain incomplete fixture coverage'))
+    reference, _ = state.current_review(read(s.path, {}), s.original)
+    original_bytes = Path(reference['path']).read_bytes()
+    architecture.edit(s.package.repo, {**rule, 'text': 'Keep the inspected transform independent.'},
+        expected=s.original['architecture']['catalog'],
+        user={'actor': 'user', 'instruction': 'Update the transform boundary.', 'source': 'fixture user'})
+    run, _, _, _ = setup_precheck(s, monkeypatch, no_op=True)
+    shutil.rmtree(s.original['workspace'])  # Original code citations must use the available current checkout.
+    assert run()['status'] == 'prechecked'  # Real snapshot -> coverage.verify(original, checkout=...) boundary.
+    receipt = s.run()
+    assert receipt['status'] == 'reconciled'
+    selected = reconcile.coverage_for(read(s.path, {}), s.current, state.reconciliation_api())
+    checkout = prep.context_for(s.current)['checkout']
+    verified = coverage.verify(reference, s.current, accepted_failures=['example'], reconciliation=selected,
+                               checkout=checkout)
+    assert not verified['result']['complete'] and verified['accepted_failures'] == ['example']
+    current_receipt = read(Path(receipt['reconciliation']['path']), {})
+    if invalid_current == 'missing':
+        current_receipt.pop('architecture_review')
+    elif invalid_current == 'stale':
+        current_receipt['architecture_review'] = s.result['architecture_review']
+    else:
+        status = 'violation'
+        current_receipt['architecture_review'] = architecture.review(s.current['architecture'],
+            prep.context_for(s.current), s.package.decisions, reviewer=judge)
+    path = s.package.write('invalid-current-architecture.json', current_receipt)
+    invalid = {**selected, 'artifact': {**selected['artifact'], 'path': str(path),
+                                       'sha256': coverage.digest(current_receipt)}}
+    with pytest.raises(ValueError, match='architecture evidence|catalog changed|violations|does not cover'):
+        coverage.verify(reference, s.current, accepted_failures=['example'], reconciliation=invalid,
+                        checkout=checkout)
+    architecture.edit(s.package.repo, rule, expected=s.current['architecture']['catalog'],
+        identity=s.package.context['repository_identity'],
+        user={'actor': 'user', 'instruction': 'Change the current boundary again.', 'source': 'fixture user'})
+    with pytest.raises(ValueError, match='catalog changed'):
+        coverage.verify(reference, s.current, accepted_failures=['example'], reconciliation=selected,
+                        checkout=checkout)
+    assert Path(reference['path']).read_bytes() == original_bytes
 
 
 def test_accepted_provider_failures_stay_incomplete_after_reconciliation(scenario):

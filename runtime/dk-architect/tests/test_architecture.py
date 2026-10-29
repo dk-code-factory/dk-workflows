@@ -689,8 +689,46 @@ def test_review_requires_complete_coverage_and_approved_exceptions(repo, tmp_pat
                  reviewer=lambda *_: {'complete': True, 'reason': '', 'coverage': coverage})
 
 
+@pytest.mark.parametrize('change', ['catalog', 'governing', 'missing_governing'])
+def test_historical_review_uses_immutable_packets_and_exception_bindings(repo, tmp_path, change):
+    initialize(repo, [obligation()])
+    ctx, decisions = context(repo, tmp_path)
+    instructions = tmp_path / 'instructions.md'
+    instructions.write_text('Keep the core boundary.\n')
+    governing = a.governing_sources({'user_instructions/0': instructions})
+    prepared = a.prepare(ctx, decisions, governing=governing)
+    worker = a.handoff(prepared, ctx, 'worker', ['src/core.py'])
+    approval = a.enforce(request(repo, worker), repo, user=USER)
+    prepared = a.prepare(ctx, decisions, governing=governing, exceptions=[approval])
+    result = {'complete': True, 'reason': '', 'coverage': [verdict(obligation(), 'approved_exception',
+              paths=['src/core.py'], exception=approval['fingerprint'])]}
+    reviewed = a.review(prepared, ctx, decisions, reviewer=lambda *_: result)
+    assert a.verify_review(reviewed, prepared, ctx, decisions)['result'] == result
+    if change == 'catalog':
+        a.edit(repo, obligation(text='Explicitly changed boundary.'), user=USER,
+               expected=prepared['catalog'])
+    elif change == 'governing':
+        instructions.write_text('Refreshed instructions.\n')
+    else:
+        instructions.unlink()
+    with pytest.raises((ValueError, OSError)):
+        a.verify_review(reviewed, prepared, ctx, decisions)
+    assert a.verify_review(reviewed, prepared, ctx, decisions, live=False)['result'] == result
+    saved = a.load(reviewed)
+    packet = a.load(saved['packet'])
+    # History still validates recipient and scope bindings of sealed artifacts.
+    for field, replacement in [('agent', 'coordinator'), ('task', 'different-task')]:
+        changed = a.seal({**{k: v for k, v in packet.items() if k != 'fingerprint'}, field: replacement})
+        reference = a.retain(Path(saved['packet']['path']).with_name(changed['fingerprint'] + '.json'), changed)
+        invalid = a.seal({**{k: v for k, v in saved.items() if k != 'fingerprint'}, 'packet': reference})
+        retained = a.retain(Path(reviewed['path']).with_name(invalid['fingerprint'] + '.json'), invalid)
+        with pytest.raises(ValueError, match='recipient|does not cover'):
+            a.verify_review(retained, prepared, ctx, decisions, live=False)
+
+
 @pytest.mark.parametrize('revision', ['baseline', 'head'])
-def test_not_applicable_requires_evidence_through_review_and_verification(repo, tmp_path, revision):
+@pytest.mark.parametrize('live', [True, False])
+def test_not_applicable_requires_evidence_through_review_and_verification(repo, tmp_path, revision, live):
     initialize(repo, [obligation()])
     ctx, decisions = context(repo, tmp_path)
     run(repo, 'rm', 'src/core.py')
@@ -707,14 +745,14 @@ def test_not_applicable_requires_evidence_through_review_and_verification(repo, 
     with pytest.raises(ValueError, match='requires code evidence'):
         a.review(prepared, ctx, decisions, reviewer=lambda *_: missing)
     reviewed = a.review(prepared, ctx, decisions, reviewer=lambda *_: result)
-    assert a.verify_review(reviewed, prepared, ctx, decisions)['result'] == result
+    assert a.verify_review(reviewed, prepared, ctx, decisions, live=live)['result'] == result
     # Previously sealed complete results must meet the same verification contract.
     historical = a.load(reviewed)
     historical['result'] = missing
     historical = a.seal({k: v for k, v in historical.items() if k != 'fingerprint'})
     reference = a.retain(Path(reviewed['path']).with_name(historical['fingerprint'] + '.json'), historical)
     with pytest.raises(ValueError, match='requires code evidence'):
-        a.verify_review(reference, prepared, ctx, decisions)
+        a.verify_review(reference, prepared, ctx, decisions, live=live)
 
 
 def test_incomplete_and_violation_never_pass_completion(repo, tmp_path):
