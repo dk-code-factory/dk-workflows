@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.6.4.
+Independent MIT plugin for Claude Code and Codex. Version 1.6.5.
 
 ## Install
 
@@ -128,6 +128,31 @@ This is an overview of the effective model; private files store reviewers and dr
 Skill bindings use the selected host's registry and manifest. Commands receive a `git-diff-v1` handoff through an argument vector, without a shell. No DK-specific provider manifest is required. Missing or ambiguous selected installations fail with diagnostics; unused plugins do not affect lookup. Legacy wrapper identities normalize in memory to the corresponding native skill and `host: claude`. Existing private-state and telemetry paths remain unchanged; aliases are recorded in `runtime/shared/bindings.py` without rewriting past observations.
 
 Providers return findings or draft content only. DK owns pinned revisions, engineering preparation, active Decisions, evidence checks, bounded correction/review loops, review-state tokens, aggregation, retries, telemetry, and authorized publication. Draft providers use the `dk-draft-v1` content contract and cannot grant publication authority. PR title/body and force-push guards still require completed review tokens and fresh evidence. The supplied `scripts/repo_rules_hook.py` is an optional generic JSON startup hook; installation does not change existing hooks.
+
+For a Codex startup integration that follows installed plugin versions, copy
+`scripts/codex_rules_hook.py` from the installed plugin to a stable local hooks
+directory. Configure your hook runner's `SessionStart` and `SubagentStart` commands
+to invoke `python3 /absolute/path/to/codex_rules_hook.py`, passing its JSON event
+payload on standard input. Set the outer timeout to at least **310 seconds**. This
+is an optional adapter for hook runners with the generic JSON protocol; plugin
+installation does not register it or change Codex settings.
+
+The copied adapter runs `codex plugin list --json` with a **90-second** timeout,
+selects the exact enabled `dk-workflows@dk-workflows` identity, and checks its
+installed manifest name and version before starting rule refresh. It uses the
+registered installation path when present, otherwise the versioned cache under
+`CODEX_HOME` (default `~/.codex`). Use `--plugin-id dk-workflows@MARKETPLACE` for
+another registered marketplace. Refresh has a separate **180-second** timeout.
+Both budgets are configurable with `--lookup-timeout` and `--refresh-timeout`;
+keep the outer timeout greater than their sum, with startup overhead allowed.
+
+Failures identify lookup, installation validation, or refresh, include the
+failing command and its timeout, and state whether refresh started. For a lookup
+failure, run `codex plugin list --json`, check the selected enabled identity and
+manifest version, then retry the hook; raise the lookup and outer timeouts
+together if needed. For a refresh failure, inspect that error and run
+`$dk-workflows:dk-config refresh` in the repository. Updating the copied adapter
+is explicit; installation changes are resolved through the registry on each run.
 
 Command providers receive the evidence handoff through their configured `{handoff}` argument. They receive output instructions on standard input, including validator errors and the prior response on a correction attempt; `DK_PROVIDER_ATTEMPT` starts at 0. Return the declared JSON contract on standard output and diagnostics on standard error. The handoff stays unchanged during correction.
 
