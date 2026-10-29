@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from test_review_sessions import pinned, original_pinned
-from test_stats_capture import runner
+from test_stats_capture import runner, prepare_current
 from shared import review_coverage as coverage
 from shared.private_state import read, write
 from shared.review_sessions import Session, result_artifact
@@ -44,14 +44,7 @@ def test_completed_checkpoint_requires_its_reviewer_status_and_session(pinned, r
             context = {**context, 'head_sha': git('rev-parse', 'HEAD')}
             decisions = {**decisions, 'head_sha': context['head_sha']}
             prepared = copy.deepcopy(prepared)
-            for key, value in (('context', context), ('decisions', decisions)):
-                path = Path(prepared['sources'][key]['path'])
-                write(path, value)
-                prepared['sources'][key]['sha256'] = runner.preparation_api.file_hash(path)
-            prepared['identity'].update(head_sha=context['head_sha'],
-                                        decisions_hash=runner.preparation_api.digest(decisions))
-            prepared['preparation_id'] = runner.preparation_api.digest(
-                {k: v for k, v in prepared.items() if k != 'preparation_id'})
+            prepare_current(context, decisions, prepared)
         session = Session(context, prepared, names)
     else:
         source, reviewer = session, names[0]
@@ -75,7 +68,7 @@ def test_completed_checkpoint_requires_its_reviewer_status_and_session(pinned, r
         session.cached(names[0])
 
 
-@pytest.mark.parametrize('change', ['missing', 'pr_url', 'head', 'base', 'preparation_id',
+@pytest.mark.parametrize('change', ['missing', 'pr_url', 'head', 'base', 'engineering_id',
                                     'tree', 'scope', 'scope_text', 'rules_text', 'reviewers'])
 def test_finished_result_requires_the_complete_unchanged_session_identity(pinned, change):
     context, decisions, prepared, names, git = pinned
@@ -94,7 +87,7 @@ def test_finished_result_requires_the_complete_unchanged_session_identity(pinned
         result_artifact(session.path, item)
 
 
-@pytest.mark.parametrize('change', ['missing', 'head', 'scope', 'preparation_id', 'pr_url', 'tree'])
+@pytest.mark.parametrize('change', ['missing', 'head', 'scope', 'engineering_id', 'pr_url', 'tree'])
 def test_result_headers_require_the_bound_generic_identity(pinned, change):
     context, decisions, prepared, names, git = pinned
     session = Session(context, prepared, names)
@@ -148,13 +141,11 @@ def test_legacy_main_validates_effective_selection_before_completed_reuse(
     names = [runner.bindings.key(provider)]
     prepared['reviewers'] = {names[0]: describe_reviewer(provider)}
     prepared['analysis']['reviewer_addenda'] = {names[0]: 'Review the pinned diff.'}
-    prepared['preparation_id'] = runner.preparation_api.digest(
-        {k: v for k, v in prepared.items() if k != 'preparation_id'})
+    prepare_current(context, decisions, prepared)
     preparation_path = root / 'preparation.json'
     write(preparation_path, prepared)
     record = {}
-    from preparation_fixtures import promote
-    promote(prepared, context, decisions)
+    from preparation_fixtures import architecture_review
     write(preparation_path, prepared)
     state.start_run(record)
     state.attach_preparation(record, preparation_path, context['url'], context['head_sha'])
@@ -164,6 +155,7 @@ def test_legacy_main_validates_effective_selection_before_completed_reuse(
     write(record_path, record)
     session = Session(context, prepared, names, path=binding['session_file'])
     result = {'complete': True, 'findings': [], 'executed_reviewers': names,
+              'architecture_review': architecture_review(prepared, context, decisions),
               'reused_reviewers': [], 'skipped_reviewers': []}
     session.finish(result)
     # Old descriptor files remain valid even after the effective registry/PATH
@@ -174,8 +166,8 @@ def test_legacy_main_validates_effective_selection_before_completed_reuse(
         else:
             select(plugins[1] if change == 'changed' else None)
     runner.validate_descriptor(prepared['reviewers'][names[0]])
-    argv = ['run_reviewers.py', '--context', prepared['sources']['context']['path'],
-            '--decisions-file', prepared['sources']['decisions']['path'],
+    argv = ['run_reviewers.py', '--context', runner.preparation_api.source_path(prepared, 'context'),
+            '--decisions-file', runner.preparation_api.source_path(prepared, 'decisions'),
             '--preparation-file', str(preparation_path), '--run-record', str(record_path)]
     with patch.object(sys, 'argv', argv), \
             patch.object(runner, 'run', return_value=json.dumps({'reviewers': [provider]})), \

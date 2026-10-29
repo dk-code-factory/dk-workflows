@@ -1,5 +1,16 @@
 ## Review and CI loop
 
+The independent [architecture review](../../dk-architecture-review/procedure.md)
+is mandatory beside configured reviewers and never satisfies their requirements.
+Retain its result and rule-linked violations. Treat architecture_findings as
+actionable work: fix violations or request independent exceptions and repeat
+architecture review before completion. Never report a clean review while those
+findings remain. Missing/incomplete architecture
+coverage cannot be accepted as a configured provider failure. CI repair workers
+declare paths as `ci-repair` (or their stable skill ID), obtain a fresh work-gate
+architecture_packet, and follow [delivery](../../dk-architect/procedure.md), including
+nested handoffs, scope expansion and exception requests before a breach.
+
 Within each cycle the shared runner executes independent configured reviewers
 concurrently with separate immutable handoffs and telemetry, then aggregates in
 configured order. Interruption aborts this invocation's in-flight provider

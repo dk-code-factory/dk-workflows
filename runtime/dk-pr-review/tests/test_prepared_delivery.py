@@ -13,9 +13,13 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'dk-pr-decisions/tests'))
 from preparation_fixtures import Package,analysis,prep
 from shared import review_coverage
-from shared.review_sessions import result_artifact
+from shared import architecture
+from shared.executors import ProviderExhausted, ProviderCancelled
+from shared.review_sessions import result_artifact, Session
 spec=importlib.util.spec_from_file_location('prepared_runner',ROOT/'dk-pr-review/scripts/run_reviewers.py')
 runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
+spec=importlib.util.spec_from_file_location('delivery_run_state',ROOT/'dk-pr-iter/scripts/run_state.py')
+state=importlib.util.module_from_spec(spec);spec.loader.exec_module(state)
 from stats_capture import api as stats_api
 
 class PreparedDeliveryTests(unittest.TestCase):
@@ -149,3 +153,125 @@ class PreparedDeliveryTests(unittest.TestCase):
         result=runner.review(self.package.context,[self.provider],'',self.package.decisions,'',artifact)
         self.assertTrue(result['complete'],result)
         self.assertTrue(self.received.is_file())
+
+    def test_worker_exception_architecture_gate_and_completion_coverage(self):
+        p=self.package
+        user={'actor':'user','instruction':'Allow an independent enforcer to approve this local adapter.',
+              'source':'fixture user request'}
+        rule={'id':'arch-local','revision':1,'text':'Keep the transform local.', 'origin':'user-created',
+              'sources':[], 'agents':['worker'], 'patterns':['transform.py'],
+              'auto_approve':True, 'approval_when':'The supported transform still returns its input.'}
+        architecture.edit(p.repo,rule,user=user,expected=architecture.current(p.repo,baseline=p.context['base_sha'])['fingerprint'])
+        prepared=self.prepare()
+        worker=architecture.handoff(prepared['architecture'],p.context,'worker',['transform.py'])
+        request=architecture.exception_request(worker,p.repo,'arch-local','One local adapter.', ['transform.py'],
+            [{'path':'transform.py','start':1,'end':2}],'The adapter preserves the transform.')
+        approved=architecture.enforce(request,p.repo,evaluator=lambda *_:{'established':True,
+            'rationale':'Inspected supported behavior.', 'evidence':[{'path':'transform.py','start':1,'end':2}]})
+        enforcer=architecture.load(architecture.load(approved)['enforcer_packet'])
+        self.assertIn('user_instructions/0',enforcer['governing_sources'])
+        self.assertIn('decisions',enforcer['scope_contents'])
+        p.manifest['architecture_exceptions']=[approved];p.write('manifest.json',p.manifest)
+        prepared=self.prepare()
+        verdict={'complete':True,'reason':'','coverage':[{'rule_id':'arch-local','revision':1,
+            'status':'approved_exception','exception':approved['fingerprint'],'paths':['transform.py'],
+            'rationale':'The approved adapter stays within scope.',
+            'evidence':[{'path':'transform.py','start':1,'end':2}]}]}
+        with patch.object(architecture,'analyze',return_value=verdict):
+            result=runner.review(p.context,[self.provider],'',p.decisions,'',prepared)
+        self.assertTrue(result['complete'],result)
+        self.assertEqual(result['executed_reviewers'],[self.name])
+        received=json.loads(self.received.read_text())
+        self.assertIn('architecture_packet',received)
+        self.assertEqual(architecture.load(received['architecture_packet'])['agent'],self.name)
+        session=Session(p.context,prepared,[self.name])
+        item=session.finish(result)
+        review_coverage.verify(item,prepared)
+        # Configured reviewer success cannot waive a missing architecture gate.
+        session=Session(p.context,prepared,[self.name])
+        without={k:v for k,v in result.items() if k!='architecture_review'}
+        item=session.finish(without)
+        with self.assertRaisesRegex(ValueError,'architecture evidence'):
+            review_coverage.verify(item,prepared,accepted_failures=[self.name])
+        # An unchanged PR/head cannot retain an exception after a user changes
+        # the governing task requirement outside the PR description/Decisions.
+        p.write('user.json',{'instruction':'The adapter must now preserve an additional public guarantee.'})
+        with self.assertRaisesRegex(ValueError,'does not cover'):
+            self.prepare()
+
+    def test_architecture_provider_failure_keeps_configured_success_incomplete(self):
+        prepared=self.prepare()
+        with patch.object(architecture,'analyze',side_effect=RuntimeError('Architecture provider unavailable')):
+            result=runner.review(self.package.context,[self.provider],'',self.package.decisions,'',prepared)
+        self.assertFalse(result['complete'])
+        self.assertTrue(result['guard_failure'])
+        self.assertEqual(result['executed_reviewers'],[self.name])
+        self.assertIn('Architecture provider unavailable',result['reason'])
+
+    def test_architecture_exhaustion_retry_requires_no_other_failure_and_keeps_coverage_mandatory(self):
+        p=self.package
+        p.manifest['mode']='iteration';p.write('manifest.json',p.manifest)
+        prepared=self.prepare()
+        for kind in ('exhausted','invalid_evidence','configured_failure'):
+            with self.subTest(kind=kind):
+                record={};state.start_run(record)
+                state.attach_preparation(record,self.artifact_path,p.context['url'],p.head)
+                for _ in range(5):state.next_cycle(record,p.head)
+                binding=state.review_session(record,p.head,p.root/'run.json')
+                session=Session(p.context,prepared,[self.name],path=binding['session_file'])
+                provider_result=({'status':'incomplete','findings':[],'message':'Configured provider unavailable'}
+                                 if kind=='configured_failure' else {'findings':[]})
+                failure=({'return_value':{'complete':True,'reason':'','coverage':[{}]}}
+                         if kind=='invalid_evidence' else {'side_effect':ProviderExhausted('Architecture quota reached')})
+                with session.execution(),patch.object(architecture,'analyze',**failure), \
+                        patch.object(runner,'run_skill_reviewer',return_value=provider_result):
+                    result=runner.review(p.context,[self.provider],'',p.decisions,'',prepared,session=session)
+                    reference=session.finish(result)
+                retained=Path(reference['path']).read_bytes()
+                state.register_review(record,{'review_artifact':reference},p.head)
+                self.assertFalse(result['complete'])
+                self.assertNotIn('architecture_review',result)
+                for accepted in ([],[self.name]):
+                    with self.assertRaisesRegex(ValueError,'architecture evidence'):
+                        review_coverage.verify(reference,prepared,accepted_failures=accepted)
+                if kind=='exhausted':
+                    self.assertEqual(result['outcome'],'usage_exhausted')
+                    self.assertFalse(result.get('guard_failure'))
+                    self.assertEqual(result['executed_reviewers'],[self.name])
+                    self.assertIn('Architecture quota reached',result['reason'])
+                    self.assertEqual(state.retry_exhausted_cycle(record,p.head)['number'],5)
+                    with self.assertRaisesRegex(ValueError,'retry already recorded'):
+                        state.retry_exhausted_cycle(record,p.head)
+                else:
+                    self.assertEqual(result['outcome'],'guard_failed' if kind=='invalid_evidence' else 'provider_failed')
+                    self.assertEqual(bool(result.get('guard_failure')),kind=='invalid_evidence')
+                    with self.assertRaisesRegex(ValueError,'not an incomplete usage-limited review'):
+                        state.retry_exhausted_cycle(record,p.head)
+                self.assertEqual(len(record['cycles']),5)
+                self.assertEqual(Path(reference['path']).read_bytes(),retained)
+
+    def test_architecture_cancellation_preserves_session_for_explicit_resume(self):
+        p=self.package;prepared=self.prepare()
+        path=p.root/'cancelled-session.json'
+        session=Session(p.context,prepared,[self.name],path=path)
+        with self.assertRaises(KeyboardInterrupt),session.execution(), \
+                patch.object(architecture,'analyze',side_effect=ProviderCancelled('Review interrupted')):
+            result=runner.review(p.context,[self.provider],'',p.decisions,'',prepared,session=session)
+            session.finish(result)
+        saved=json.loads(path.read_text())
+        self.assertEqual(saved['status'],'active')
+        self.assertEqual(saved['results'],[])
+        self.assertEqual(saved['reviews'][self.name]['status'],'completed')
+        checkpoint=saved['reviews'][self.name]['checkpoint']
+        checkpoint_bytes=Path(checkpoint['path']).read_bytes()
+        resumed=Session(p.context,prepared,[self.name],path=path,resume=True)
+        with resumed.execution(),patch.object(runner,'run_skill_reviewer') as launch, \
+                patch.object(architecture,'analyze',return_value={'complete':True,'reason':'','coverage':[]}) as analyze:
+            result=runner.review(p.context,[self.provider],'',p.decisions,'',prepared,session=resumed)
+            reference=resumed.finish(result)
+        launch.assert_not_called();analyze.assert_called_once()
+        self.assertTrue(result['complete'])
+        self.assertEqual(result['reused_reviewers'],[self.name])
+        self.assertEqual(result['executed_reviewers'],[])
+        review_coverage.verify(reference,prepared)
+        self.assertEqual(Path(checkpoint['path']).read_bytes(),checkpoint_bytes)

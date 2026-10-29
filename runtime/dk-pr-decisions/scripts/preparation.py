@@ -17,6 +17,7 @@ import tempfile
 from shared import preparation_graph as graph_api
 from shared.engineering_identity import engineering_id, compatible_reference
 from shared.workflow_storage import allocate, owned
+from shared import architecture
 
 VERSION = 3
 DIMENSIONS = ('correctness', 'remediation_depth', 'performance', 'compatibility', 'complexity')
@@ -50,7 +51,7 @@ def git(checkout, *args):
         raise ValueError('cannot verify prepared checkout: ' + exc.stderr.strip()) from exc
 
 
-def collect(manifest_path):
+def collect(manifest_path, *, on_call=None):
     """Require an explicit complete package; empty categories need a source explaining why."""
     manifest_path = Path(manifest_path).resolve()
     manifest = read(manifest_path)
@@ -108,6 +109,13 @@ def collect(manifest_path):
         raise ValueError('preparation checkout moved from pinned head')
     if git(context['checkout'], 'status', '--porcelain=v1'):
         raise ValueError('preparation requires a clean isolated checkout')
+    architecture_analyzer = (lambda prompt, checkout, validate: architecture.analyze(
+        prompt, checkout, validate, on_call=on_call)) if on_call else None
+    architecture_value = architecture.prepare(context, decisions, analyzer=architecture_analyzer,
+        exceptions=manifest.get('architecture_exceptions', []), governing=architecture.governing_sources(paths))
+    paths['architecture/0'] = architecture_value['packet']['path']
+    for index, reference in enumerate(architecture_value['exceptions']):
+        paths[f'architecture-exceptions/{index}'] = reference['path']
     sources = {key: {'path': str(Path(value).resolve()), 'sha256': file_hash(value)}
                for key, value in paths.items()}
     modes = manifest.get('source_modes', {})
@@ -117,7 +125,7 @@ def collect(manifest_path):
     for key, source in sources.items():
         category = key.split('/')[0]
         captured = (key in {'manifest', 'context', 'decisions', 'metadata', 'patch'}
-                    or category in {'reviewers', 'prior_preparation'}
+                    or category in {'reviewers', 'prior_preparation', 'architecture', 'architecture-exceptions'}
                     or category in {'production', 'tests'} and
                     Path(source['path']).is_relative_to(Path(context['checkout'])))
         if category == 'feedback':
@@ -132,6 +140,8 @@ def collect(manifest_path):
         if source['mode'] == 'capture':
             source['origin_identity'] = origins.get(key) or graph_api.source_identity(
                 key, source, context['checkout'], Path(source['path']).read_bytes())
+            if key == 'architecture/0':
+                source['origin_identity'] = 'architecture:' + architecture.load(architecture_value['packet'])['repository']
     prior = []
     for value in evidence['prior_preparation']:
         prior_path = path(value)
@@ -173,7 +183,7 @@ def analyze(prompt, checkout, *, validate=None, on_call=None):
     def counted(*args, **kwargs):
         if on_call:
             on_call()
-        return execute(*args, **kwargs)
+        return execute(*args, inherit_architecture=False, **kwargs)
     return execute_json(prompt, checkout, validate=validate, executor=counted,
                         correction_instructions='worker_instructions and completion_criteria must be nonempty strings.')
 
@@ -267,10 +277,15 @@ def readiness(analysis):
 
 def policy():
     import shared.engineering_identity as engineering
-    return digest({str(p.name): file_hash(p) for p in (
+    plugin = Path(__file__).resolve().parents[3]
+    return digest({p.resolve().relative_to(plugin).as_posix(): file_hash(p) for p in (
         Path(__file__), Path(graph_api.__file__), Path(engineering.__file__),
+        Path(architecture.__file__), architecture.PROCEDURE,
+        architecture.PROCEDURE.parent.parent / 'dk-architecture-review/procedure.md',
+        architecture.PROCEDURE.parent.parent / 'dk-architecture-enforcer/procedure.md',
         Path(__file__).resolve().parents[1] / 'references/preparation.md',
-        Path(__file__).resolve().parents[1] / 'references/preparation-contract.md')})
+        Path(__file__).resolve().parents[1] / 'references/preparation-contract.md',
+        plugin / 'common/instruction-sources.md')})
 
 
 def retained_source(artifact_path, artifact, key):
@@ -316,7 +331,11 @@ def reassessment_prompt(prompt, parent_path, parent, paths, changed_sources, sel
 
 
 def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=None, full_analysis=False):
-    manifest, context, decisions, sources, descriptors, prior = collect(manifest_path)
+    calls = 0
+    def count():
+        nonlocal calls
+        calls += 1
+    manifest, context, decisions, sources, descriptors, prior = collect(manifest_path, on_call=count)
     collection_sources = dict(sources)
     # Capture collection order before rebinding citation slots. Manifest aliases
     # can disappear after publication; retained paths must not resolve them again.
@@ -402,10 +421,6 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
                 'head_sha': context['head_sha'], 'body_hash': decisions['body_hash'],
                 'decisions_hash': digest(decisions)}
     phases = []
-    calls = 0
-    def count():
-        nonlocal calls
-        calls += 1
     def invoke(prompt, validator):
         def checked(value):
             try:
@@ -461,7 +476,7 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
     # Recollect the entire package: additions, removals and input movement cannot
     # hide behind the initial index. Check again immediately before publication.
     def unchanged():
-        again = collect(manifest_path)
+        again = collect(manifest_path, on_call=count)
         live = graph_api.inputs(again[1], again[3])
         live['policy'] = policy()
         live_sources = again[3]
@@ -556,7 +571,17 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
         write(manifest_target, recovery)
         context_path.chmod(0o400)
         manifest_target.chmod(0o400)
+        captured_paths = {(source['path'], source['sha256']): source['snapshot'] for source in sources.values()}
+        architecture_scope = architecture.governing_sources({key: captured_paths[source['path'], source['sha256']]
+            for key, source in collection_sources.items() if key.split('/')[0] in architecture.SCOPE_SOURCES})
+        unchanged()
+        report['model_call_count'] = calls
         artifact = {'preparation_version': VERSION, 'mode': manifest['mode'], 'identity': identity,
+                    'architecture': {'packet': {'path': sources['architecture/0']['snapshot'],
+                        'fingerprint': read(sources['architecture/0']['snapshot'])['fingerprint']},
+                        'catalog': read(sources['architecture/0']['snapshot'])['catalog'],
+                        'exceptions': manifest.get('architecture_exceptions', []),
+                        'governing': architecture_scope},
                     'workflow_dir': str(workflow_dir), 'workspace': str(workspace),
                     'recovery_manifest': {'path': str(manifest_target), 'sha256': file_hash(manifest_target)},
                     'recovery_context': {'path': str(context_path), 'sha256': file_hash(context_path)},
@@ -570,7 +595,6 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
         artifact['engineering_id'] = engineering_id(artifact)
         artifact['preparation_id'] = digest(artifact)
         validate(artifact, context, decisions, require_ready=False)
-        unchanged()
         target = version_dir / 'preparation.json'
         write(target, artifact)
         os.chmod(target, 0o400)
@@ -585,6 +609,8 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
 def validate(artifact, context, decisions, *, require_ready=True, check_sources=True):
     if not isinstance(artifact, dict) or artifact.get('preparation_version') not in {1, 2, VERSION}:
         raise ValueError('unsupported preparation artifact')
+    if check_sources and artifact['preparation_version'] < VERSION:
+        raise ValueError('historical preparation cannot authorize current work; refresh preparation')
     if artifact.get('mode') not in {'standalone', 'iteration'}:
         raise ValueError('invalid preparation mode')
     content = {k: v for k, v in artifact.items() if k != 'preparation_id'}
@@ -666,6 +692,9 @@ def validate(artifact, context, decisions, *, require_ready=True, check_sources=
             if file_hash(source['path']) != source['sha256']:
                 raise ValueError('preparation source changed; refresh preparation')
     if artifact['preparation_version'] >= 3:
+        if check_sources or artifact.get('architecture'):
+            architecture_context = {**context, 'metadata': source_path(artifact, 'metadata')}
+            architecture.validate_preparation(artifact.get('architecture'), architecture_context, decisions, live=check_sources)
         for key in ('recovery_manifest', 'recovery_context'):
             reference = artifact.get(key, {})
             if not Path(reference.get('path', '')).is_absolute() or file_hash(reference['path']) != reference.get('sha256'):

@@ -678,6 +678,8 @@ def main():
     prep.add_argument('--expected-parent')
     gate = sub.add_parser('work-gate')
     gate.add_argument('--head', required=True)
+    gate.add_argument('--agent', default='coordinator')
+    gate.add_argument('--paths-file', help='JSON intended worker paths; omitted scope receives all audience rules')
     fix = sub.add_parser('fix-plan')
     fix.add_argument('--head', required=True)
     fix.add_argument('--ref', required=True)
@@ -743,7 +745,13 @@ def main():
             elif a.command == 'work-gate':
                 artifact = work_gate(read(path, default), a.head)
                 result = {'gate': 'ready', 'preparation_id': artifact['preparation_id'],
-                          'engineering_id': engineering_id(artifact)}
+                          'engineering_id': engineering_id(artifact),
+                          'architecture': artifact.get('architecture')}
+                if artifact.get('architecture'):
+                    from shared import architecture
+                    result['architecture_packet'] = architecture.handoff(artifact['architecture'],
+                        preparation_api.context_for(artifact), a.agent,
+                        json.loads(Path(a.paths_file).read_text()) if a.paths_file else None)
             elif a.command == 'assess': result = mutate(path, default, lambda d: assess(d, a.ref, a.head, a.preparation_id, a.disposition, a.evidence, a.reason))
             elif a.command == 'fix-plan': result = fix_plan(read(path, default), a.ref, a.head)
             elif a.command == "thread": result = mutate(path, default, lambda d: classify(d, a.ref, a.head, a.classification, a.evidence, a.reason, a.production_lines))

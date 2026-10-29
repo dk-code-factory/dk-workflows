@@ -10,13 +10,13 @@ import sys
 
 import pytest
 
-from shared import executors, review_coverage as coverage, review_reconciliation as reconcile, review_sessions
+from shared import architecture, executors, review_coverage as coverage, review_reconciliation as reconcile, review_sessions
 from shared.command_results import classification
 from shared.private_state import read, write
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'dk-pr-decisions/tests'))
-from preparation_fixtures import Package, analysis, descriptor, prep, retain
+from preparation_fixtures import Package, analysis, descriptor, prep, retain, architecture_review
 sys.path.insert(0, str(ROOT / 'dk-pr-address-reviews/scripts'))
 import fetch_pr_conversation as conversation_exporter
 import fetch_unresolved_review_threads as inline_exporter
@@ -35,8 +35,12 @@ state, completion = module('run_state'), module('completion')
 
 class Scenario:
     def __init__(self, tmp_path, monkeypatch, reviewers=('example',), cycles=5, descriptor_links=False,
-                 extra_filename=None, decisions_choices=False):
+                 extra_filename=None, decisions_choices=False, architecture_rule=None):
         self.package = p = Package(tmp_path)
+        if architecture_rule is not None:
+            architecture.edit(p.repo, architecture_rule,
+                expected=architecture.current(p.repo, baseline=p.head)['fingerprint'],
+                user={'actor': 'user', 'instruction': 'Keep the inspected transform boundary.', 'source': 'fixture user'})
         self.reviewers = list(reviewers)
         if len(reviewers) > 1:
             p.manifest['evidence']['reviewers'] = [str(p.write(name + '-reviewer.json',
@@ -81,6 +85,7 @@ class Scenario:
         binding = state.review_session(record, self.reviewed_head, self.path)
         self.session = review_sessions.Session(p.context, self.original, self.reviewers, path=binding['session_file'])
         self.result = {'complete': True, 'executed_reviewers': self.reviewers, 'reused_reviewers': [],
+                       'architecture_review': architecture_review(self.original, p.context, p.decisions),
                        'skipped_reviewers': [], 'findings': []}
         self.reference = self.session.finish(self.result)
         state.register_review(record, {'review_artifact': self.reference}, self.reviewed_head)
@@ -92,7 +97,8 @@ class Scenario:
         self.calls = []
         self.different = None
         self.provider_hook = None
-        def provider(prompt, checkout, *, attempt=0):
+        def provider(prompt, checkout, *, attempt=0, inherit_architecture=True):
+            assert inherit_architecture is False
             self.calls.append(attempt)
             binding = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]['binding']
             if self.provider_hook:
@@ -213,6 +219,34 @@ def scenario(tmp_path, monkeypatch):
     return Scenario(tmp_path, monkeypatch)
 
 
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+def test_reconciliation_semantic_call_isolates_ambient_parent_packet(tmp_path, monkeypatch, host):
+    native_execute = executors.execute
+    s = Scenario(tmp_path, monkeypatch)
+    s.refresh()
+    packet = prep.architecture.packet(s.package.repo, 'worker', ['transform.py'],
+        task='parent-task', baseline=s.package.head)
+    monkeypatch.setenv('DK_HOST', host)
+    monkeypatch.setenv('DK_ARCHITECTURE_PACKET', json.dumps(packet))
+    monkeypatch.delenv('DK_ARCHITECTURE_AGENT', raising=False)
+    parent = os.environ['DK_ARCHITECTURE_PACKET']
+    attempts = []
+    def process(prompt, checkout, selected_host, env, resolved, attempt, timeout):
+        assert selected_host == host and resolved is None
+        assert 'DK_ARCHITECTURE_PACKET' not in env and 'DK_ARCHITECTURE_AGENT' not in env
+        assert os.environ['DK_ARCHITECTURE_PACKET'] == parent
+        attempts.append(attempt)
+        binding = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]['binding']
+        return 'invalid JSON' if attempt == 0 else json.dumps(s.comparison(binding))
+    monkeypatch.setattr(executors, 'execute', native_execute)
+    monkeypatch.setattr(executors, 'managed_update', lambda *_: None)
+    monkeypatch.setattr(executors, 'execute_process', process)
+    result = s.run()
+    assert result['status'] == 'reconciled' and attempts == [0, 1]
+    assert result['executed_reviewers'] == [] and len(read(s.path, {})['cycles']) == 5
+    assert os.environ['DK_ARCHITECTURE_PACKET'] == parent
+
+
 @pytest.mark.parametrize('legacy', [False, True])
 def test_retained_manifest_relative_order_survives_missing_originals(scenario, legacy):
     s = scenario
@@ -288,13 +322,13 @@ def test_reconciliation_prompt_roundtrips_non_utf8_git_filename(tmp_path, monkey
     assert filename in s.original['inputs']['tree']
     s.refresh(change=lambda value: value['placement']['production']['locations'].append(filename))
     provider = executors.execute
-    def utf8_provider(prompt, checkout, *, attempt=0):
+    def utf8_provider(prompt, checkout, *, attempt=0, inherit_architecture=True):
         transported = prompt.encode('utf-8').decode('utf-8')
         payload = json.JSONDecoder().raw_decode(transported[transported.index('{"binding":'):])[0]
         assert payload['original_analysis'] == s.original['analysis']
         assert payload['current_analysis'] == s.current['analysis']
         assert os.fsencode(payload['current_analysis']['placement']['production']['locations'][-1]) == filename_bytes
-        return provider(transported, checkout, attempt=attempt)
+        return provider(transported, checkout, attempt=attempt, inherit_architecture=inherit_architecture)
     monkeypatch.setattr(executors, 'execute', utf8_provider)
     receipt = s.run()
     assert receipt['status'] == 'reconciled' and receipt['executed_reviewers'] == []
@@ -548,7 +582,8 @@ def test_cross_path_opposite_verdicts_remain_terminally_blocked(scenario, monkey
     s.refresh()
     renewed = renewed_assessment(s)
     calls = []
-    def provider(prompt, checkout, *, attempt=0):
+    def provider(prompt, checkout, *, attempt=0, inherit_architecture=True):
+        assert inherit_architecture is False
         binding = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]['binding']
         outer = not calls
         calls.append(attempt)
@@ -619,7 +654,8 @@ def test_concurrent_opposite_verdicts_remain_terminally_blocked(scenario, monkey
     s = scenario
     s.refresh()
     calls = []
-    def provider(prompt, checkout, *, attempt=0):
+    def provider(prompt, checkout, *, attempt=0, inherit_architecture=True):
+        assert inherit_architecture is False
         binding = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]['binding']
         outer = not calls
         calls.append(attempt)
@@ -707,7 +743,8 @@ def test_fresh_review_supersedes_only_old_result_comparisons(tmp_path, monkeypat
     state.next_cycle(record, s.head)
     binding = state.review_session(record, s.head, s.path)
     session = review_sessions.Session(s.package.context, s.current, s.reviewers, path=binding['session_file'])
-    reference = session.finish(s.result)
+    reference = session.finish({**s.result, 'architecture_review': architecture_review(
+        s.current, s.package.context, s.package.decisions)})
     state.register_review(record, {'review_artifact': reference}, s.head)
     write(s.path, record)
     assert state.verify_review(s.path, s.current)['preparation_id'] == s.current['preparation_id']
@@ -747,6 +784,69 @@ def replace_result(s, result):
     item = s.session.finish(result)
     state.register_review(record, {'review_artifact': item}, s.reviewed_head)
     write(s.path, record)
+
+
+@pytest.mark.parametrize('invalid_current', ['missing', 'violation', 'stale'])
+def test_original_nonempty_coverage_survives_refresh_but_current_review_stays_live(
+    tmp_path, monkeypatch, invalid_current
+):
+    status = 'compliant'
+    def judge(prompt, checkout, validate):
+        packet = architecture.load(architecture._PACKET.get())
+        value = {'complete': True, 'reason': '', 'coverage': [
+            {'rule_id': r['id'], 'revision': r['revision'], 'status': status,
+             'rationale': 'Inspected the retained transform.',
+             'evidence': [{'path': 'transform.py', 'start': 1, 'end': 2}]} for r in packet['rules']]}
+        validate(value)
+        return value
+    monkeypatch.setattr(architecture, 'analyze', judge)
+    monkeypatch.setattr(sys.modules[__name__], 'architecture_review', lambda prepared, context, decisions:
+        architecture.review(prepared['architecture'], context, decisions, reviewer=judge))
+    rule = {'id': 'arch-transform', 'revision': 1, 'text': 'Keep the transform local.',
+            'origin': 'user-created', 'sources': [], 'agents': ['worker'], 'patterns': ['transform.py']}
+    s = Scenario(tmp_path, monkeypatch, architecture_rule=rule)
+    # This acceptance belongs solely to the isolated test fixture.
+    replace_result(s, {**s.result, 'complete': False, 'executed_reviewers': [],
+        'failed_reviewers': [{'reviewer': 'example', 'status': 'failed', 'reason': 'Fixture provider unavailable'}]})
+    state.mutate(s.path, {}, lambda record: state.accept_review_failures(record, s.reviewed_head,
+        ['example'], 'Fixture user accepted its recorded failure', 'Retain incomplete fixture coverage'))
+    reference, _ = state.current_review(read(s.path, {}), s.original)
+    original_bytes = Path(reference['path']).read_bytes()
+    architecture.edit(s.package.repo, {**rule, 'text': 'Keep the inspected transform independent.'},
+        expected=s.original['architecture']['catalog'],
+        user={'actor': 'user', 'instruction': 'Update the transform boundary.', 'source': 'fixture user'})
+    run, _, _, _ = setup_precheck(s, monkeypatch, no_op=True)
+    shutil.rmtree(s.original['workspace'])  # Original code citations must use the available current checkout.
+    assert run()['status'] == 'prechecked'  # Real snapshot -> coverage.verify(original, checkout=...) boundary.
+    receipt = s.run()
+    assert receipt['status'] == 'reconciled'
+    selected = reconcile.coverage_for(read(s.path, {}), s.current, state.reconciliation_api())
+    checkout = prep.context_for(s.current)['checkout']
+    verified = coverage.verify(reference, s.current, accepted_failures=['example'], reconciliation=selected,
+                               checkout=checkout)
+    assert not verified['result']['complete'] and verified['accepted_failures'] == ['example']
+    current_receipt = read(Path(receipt['reconciliation']['path']), {})
+    if invalid_current == 'missing':
+        current_receipt.pop('architecture_review')
+    elif invalid_current == 'stale':
+        current_receipt['architecture_review'] = s.result['architecture_review']
+    else:
+        status = 'violation'
+        current_receipt['architecture_review'] = architecture.review(s.current['architecture'],
+            prep.context_for(s.current), s.package.decisions, reviewer=judge)
+    path = s.package.write('invalid-current-architecture.json', current_receipt)
+    invalid = {**selected, 'artifact': {**selected['artifact'], 'path': str(path),
+                                       'sha256': coverage.digest(current_receipt)}}
+    with pytest.raises(ValueError, match='architecture evidence|catalog changed|violations|does not cover'):
+        coverage.verify(reference, s.current, accepted_failures=['example'], reconciliation=invalid,
+                        checkout=checkout)
+    architecture.edit(s.package.repo, rule, expected=s.current['architecture']['catalog'],
+        identity=s.package.context['repository_identity'],
+        user={'actor': 'user', 'instruction': 'Change the current boundary again.', 'source': 'fixture user'})
+    with pytest.raises(ValueError, match='catalog changed'):
+        coverage.verify(reference, s.current, accepted_failures=['example'], reconciliation=selected,
+                        checkout=checkout)
+    assert Path(reference['path']).read_bytes() == original_bytes
 
 
 def test_accepted_provider_failures_stay_incomplete_after_reconciliation(scenario):
@@ -1310,7 +1410,9 @@ def test_version_one_attestations_keep_original_restrictions(scenario):
     s.refresh()
     binding, _, _, _ = reconcile.snapshot(read(s.path, {}), s.head, s.assessment_path,
                                          state.reconciliation_api(), version=1)
-    value = {'reconciliation_version': 1, 'binding': binding, 'comparison': s.comparison(binding)}
+    # A legacy comparison format does not waive fresh architecture coverage.
+    value = {'reconciliation_version': 1, 'binding': binding, 'comparison': s.comparison(binding),
+             'architecture_review': architecture_review(s.current, s.package.context, s.package.decisions)}
     path = s.package.write('legacy-reconciliation.json', value)
     item = {'path': str(path), 'sha256': coverage.digest(value), 'binding_hash': coverage.digest(binding),
             'current_preparation_id': s.current['preparation_id']}

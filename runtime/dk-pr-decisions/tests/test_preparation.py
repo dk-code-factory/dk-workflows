@@ -11,7 +11,9 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from preparation_fixtures import Package, ROOT, analysis, prep, response, retain
+from preparation_fixtures import Package, ROOT, analysis, prep, response, retain, architecture_review
+
+NATIVE_ARCHITECTURE_ANALYZE = prep.architecture.analyze
 
 
 def module(name, relative):
@@ -26,6 +28,51 @@ class PreparationTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.package = Package(self.temp.name)
+
+    def test_legacy_preparation_is_historical_only_and_cannot_supply_current_coverage(self):
+        from shared import review_coverage, review_sessions
+        package = self.package
+        saved = package.prepare()
+        current = prep.read(saved['artifact'])
+        for version in (1, 2):
+            with self.subTest(version=version):
+                old = copy.deepcopy(current)
+                old['preparation_version'] = version
+                if version == 1:
+                    old = {key: old[key] for key in ('preparation_version', 'mode', 'identity',
+                        'sources', 'reviewers', 'analysis', 'readiness')}
+                    old['sources'] = {key: {field: source[field] for field in ('path', 'sha256')}
+                        for key, source in old['sources'].items() if not key.startswith('architecture')}
+                old['preparation_id'] = prep.digest({k: v for k, v in old.items() if k != 'preparation_id'})
+                path = Path(saved['artifact']).parent / ('legacy-' + str(version) + '.json')
+                path.write_text(json.dumps(old))
+                self.assertEqual(prep.historical(path), old)
+                with self.assertRaisesRegex(ValueError, 'historical preparation cannot authorize current work'):
+                    prep.gate(path, pr_url=package.context['url'], head_sha=package.head)
+                session = review_sessions.Session(package.context, old, ['example'])
+                reference = session.finish({'complete': True, 'findings': [],
+                    'executed_reviewers': ['example'], 'reused_reviewers': [], 'skipped_reviewers': []})
+                with self.assertRaisesRegex(ValueError, 'historical preparation cannot authorize current review coverage'):
+                    review_coverage.verify(reference, old)
+                historical = review_coverage.verify(reference, old, checkout=package.repo)
+                self.assertTrue(historical['result']['complete'])
+                self.assertNotIn('architecture_review', historical['result'])
+
+    def test_pre_architecture_history_remains_readable_but_cannot_authorize_work(self):
+        saved = self.package.prepare()
+        old = prep.read(saved['artifact'])
+        old.pop('architecture')
+        old['sources'].pop('architecture/0')
+        old['inputs']['sources'].pop('architecture/0')
+        old['inputs']['policy'] = 'previous-policy'
+        for node in old['graph'].values():
+            node['sources'] = [source for source in node['sources'] if source != 'architecture/0']
+        old['engineering_id'] = prep.engineering_id(old)
+        old['preparation_id'] = prep.digest({key: value for key, value in old.items() if key != 'preparation_id'})
+        path = self.package.write('past-preparation.json', old)
+        self.assertEqual(prep.historical(path), old)
+        with self.assertRaisesRegex(ValueError, 'policy changed|Architecture preparation missing'):
+            prep.gate(path, pr_url=self.package.context['url'], head_sha=self.package.head)
 
     def test_codex_output_failure_blocks_preparation_without_changing_iteration_history(self):
         package = self.package
@@ -288,6 +335,55 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(model.call_count, 2)
         self.assertIn('worker instructions and completion criteria required', model.call_args_list[1].args[0])
 
+    def test_call_count_includes_architecture_and_preparation_corrections(self):
+        architecture = prep.architecture
+        package = self.package
+        identity = architecture.context_identity(package.context)
+        catalog = architecture.current(package.repo, identity, baseline=package.context['base_sha'])
+        architecture_response = {key: catalog[key] for key in ('knowledge', 'rules', 'proposals', 'conflicts')}
+        directory, _ = architecture.folder(package.repo, identity)
+        architecture.baseline_pointer(directory, package.context['base_sha']).unlink()
+        invalid = response()
+        invalid['analysis']['worker_instructions'] = []
+        with patch.object(architecture, 'analyze', NATIVE_ARCHITECTURE_ANALYZE), \
+                patch('shared.executors.execute', side_effect=[
+                    'invalid JSON', json.dumps(architecture_response), json.dumps(invalid), json.dumps(response())]) as model:
+            result = prep.prepare(package.manifest_path, package.versions)
+        self.assertEqual(model.call_count, 4)
+        self.assertEqual(result['refresh']['model_call_count'], 4)
+        self.assertEqual(prep.read(result['artifact'])['refresh']['model_call_count'], 4)
+        with patch('shared.executors.execute') as model:
+            reused = prep.prepare(package.manifest_path, package.versions, previous_preparation=result['artifact'])
+        model.assert_not_called()
+        self.assertEqual(reused['refresh']['model_call_count'], 0)
+
+    def test_call_count_includes_architecture_reinitialization_during_source_recheck(self):
+        architecture = prep.architecture
+        package = self.package
+        identity = architecture.context_identity(package.context)
+        catalog = architecture.current(package.repo, identity, baseline=package.context['base_sha'])
+        architecture_response = {key: catalog[key] for key in ('knowledge', 'rules', 'proposals', 'conflicts')}
+        directory, _ = architecture.folder(package.repo, identity)
+        collect = prep.collect
+        for recheck in (2, 3):
+            collections = 0
+            def recollect(*args, **kwargs):
+                nonlocal collections
+                collections += 1
+                if collections == recheck:
+                    # A catalog may disappear before either source freshness recheck.
+                    architecture.baseline_pointer(directory, package.context['base_sha']).unlink()
+                return collect(*args, **kwargs)
+            with self.subTest(recheck=recheck), \
+                    patch.object(architecture, 'analyze', NATIVE_ARCHITECTURE_ANALYZE), \
+                    patch.object(prep, 'collect', side_effect=recollect), \
+                    patch('shared.executors.execute', side_effect=[
+                        json.dumps(response()), json.dumps(architecture_response)]) as model:
+                result = prep.prepare(package.manifest_path, package.versions)
+                self.assertEqual(model.call_count, 2)
+                self.assertEqual(result['refresh']['model_call_count'], 2)
+                self.assertEqual(prep.read(result['artifact'])['refresh']['model_call_count'], 2)
+
     def test_invalid_analysis_exhausts_correction_without_preparing(self):
         for raw in ('not JSON', json.dumps({'boundaries': {}}), '[]'):
             with self.subTest(raw=raw):
@@ -548,6 +644,7 @@ class PreparationTests(unittest.TestCase):
         package.write('run-record.json', record)
         session = Session(package.context, prep.read(saved['artifact']), ['example'], path=binding['session_file'])
         item = session.finish({'complete': True, 'findings': [], 'executed_reviewers': ['example'],
+                               'architecture_review': architecture_review(prep.read(saved['artifact']), package.context, package.decisions),
                                'reused_reviewers': [], 'skipped_reviewers': []})
         record = state.read(Path(record_path), {})
         state.register_review(record, {'review_artifact': item}, package.head)
@@ -590,6 +687,7 @@ class PreparationTests(unittest.TestCase):
         package.write('run-record.json', record)
         session = Session(package.context, prep.read(saved['artifact']), ['example'], path=binding['session_file'])
         item = session.finish({'complete': True, 'findings': [], 'executed_reviewers': ['example'],
+                               'architecture_review': architecture_review(prep.read(saved['artifact']), package.context, package.decisions),
                                'reused_reviewers': [], 'skipped_reviewers': []})
         record = state.read(Path(record_path), {})
         state.register_review(record, {'review_artifact': item}, package.head)
@@ -626,6 +724,7 @@ class PreparationTests(unittest.TestCase):
         package.write('run-record.json', record)
         session = Session(package.context, prep.read(restored['artifact']), ['example'], path=binding['session_file'])
         item = session.finish({'complete': True, 'findings': [], 'executed_reviewers': ['example'],
+                               'architecture_review': architecture_review(prep.read(restored['artifact']), package.context, package.decisions),
                                'reused_reviewers': [], 'skipped_reviewers': []})
         state.register_review(record, {'review_artifact': item}, package.head)
         package.write('run-record.json', record)

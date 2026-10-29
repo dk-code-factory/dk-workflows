@@ -1,6 +1,6 @@
 ---
 name: dk-config
-description: Manage private repository rules, ordered PR reviewers, and explicit flaky-test or pipeline exceptions at repository or user scope. Use when asked to list, add, change, remove, or refresh these settings.
+description: Manage private repository rules, scoped architecture rules, ordered PR reviewers, and explicit flaky-test or pipeline exceptions at repository or user scope. Use when asked to list, add, change, remove, or refresh these settings.
 ---
 
 Use Claude Code native agents and tools. `${CLAUDE_PLUGIN_ROOT}` is this plugin root. Do not require Codex for native execution. When shared instructions name a skill with a dollar prefix, use the corresponding Claude native skill in this plugin namespace.

@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from test_review_sessions import pinned
-from test_stats_capture import responses, pinned as original_pinned, finding, runner
+from test_stats_capture import responses, pinned as original_pinned, finding, runner, prepare_current
 from shared import review_coverage as coverage
 from shared import private_state
 from shared.private_state import read, write
@@ -38,12 +38,10 @@ def main_call(pinned, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(runner, 'for_iteration', lambda *args: None)
 
     def invoke(*options):
-        prepared['preparation_id'] = runner.preparation_api.digest(
-            {k: v for k, v in prepared.items() if k != 'preparation_id'})
         write(preparation_path, prepared)
         monkeypatch.setattr(sys, 'argv', ['run_reviewers.py', '--context',
-            prepared['sources']['context']['path'], '--decisions-file',
-            prepared['sources']['decisions']['path'], '--preparation-file',
+            runner.preparation_api.source_path(prepared, 'context'), '--decisions-file',
+            runner.preparation_api.source_path(prepared, 'decisions'), '--preparation-file',
             str(preparation_path), *map(str, options)])
         runner.main()
         return json.loads(capsys.readouterr().out)
@@ -55,9 +53,6 @@ def iteration_record(tmp_path, context, prepared, cycle=2):
     preparation_path = tmp_path / 'preparation.json'
     write(preparation_path, prepared)
     record = {}
-    from preparation_fixtures import promote
-    decisions = json.loads(Path(prepared["sources"]["decisions"]["path"]).read_text())
-    promote(prepared, context, decisions)
     write(preparation_path, prepared)
     state.start_run(record)
     state.attach_preparation(record, preparation_path, context['url'], context['head_sha'])
@@ -108,8 +103,7 @@ def test_main_resumes_checkpoint_after_interrupt_before_aggregate_finish(
         main_call, pinned, tmp_path, mode, route):
     context, decisions, prepared, names, git = pinned
     prepared['mode'] = mode
-    prepared['preparation_id'] = runner.preparation_api.digest(
-        {k: v for k, v in prepared.items() if k != 'preparation_id'})
+    prepare_current(context, decisions, prepared)
     if route == 'legacy':
         run_path = iteration_record(tmp_path, context, prepared)
         original_record = read(run_path, {})
@@ -177,6 +171,7 @@ def test_legacy_main_rejects_incompatible_options_before_allocation(
         main_call, pinned, tmp_path, mode, extra):
     context, decisions, prepared, names, git = pinned
     prepared['mode'] = mode
+    prepare_current(context, decisions, prepared)
     record_path = tmp_path / 'not-allocated.json'
     with patch.object(runner, 'run_skill_reviewer') as providers:
         with pytest.raises(ValueError, match='requires iteration mode.*session options'):

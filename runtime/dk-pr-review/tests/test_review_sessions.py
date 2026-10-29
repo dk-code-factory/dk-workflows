@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from test_stats_capture import pinned as original_pinned, finding, runner, responses
+from test_stats_capture import pinned as original_pinned, finding, runner, responses, prepare_current
 from stats_capture import api
 from shared.review_sessions import Session, result_artifact
 from shared import review_coverage
@@ -14,20 +14,14 @@ from preparation_fixtures import interrupt_after_checkpoint
 
 @pytest.fixture
 def pinned(original_pinned):
-    context, decisions, prep, names, git = original_pinned
-    for key, value in (('context', context), ('decisions', decisions)):
-        path = Path(context['patch']).parent / (key + '.json')
-        path.write_text(json.dumps(value))
-        prep['sources'][key] = {'path': str(path), 'sha256': runner.preparation_api.file_hash(path)}
-    prep['preparation_id'] = runner.preparation_api.digest({k: v for k, v in prep.items() if k != 'preparation_id'})
-    return context, decisions, prep, names, git
+    return original_pinned
 
 
 @pytest.mark.parametrize('mode', ['standalone', 'iteration'])
 def test_interrupted_review_reuses_completed_provider_without_analytics(pinned, mode):
     context, decisions, prep, names, git = pinned
     prep['mode'] = mode
-    prep['preparation_id'] = runner.preparation_api.digest({k: v for k, v in prep.items() if k != 'preparation_id'})
+    prepare_current(context, decisions, prep)
     path = Path(context['patch']).parent / 'session.json'
     session = Session(context, prep, names, path=path)
     with session.execution(), patch.object(runner, 'run_skill_reviewer',
@@ -134,13 +128,13 @@ def test_resumed_main_preserves_statistics_comparison_cohort(pinned, monkeypatch
     prep['reviewers'][third] = {**prep['reviewers'][names[0]], 'reviewer': third}
     prep['analysis']['reviewer_addenda'][third] = prep['analysis']['reviewer_addenda'][names[0]]
     names.append(third)
-    prep['preparation_id'] = runner.preparation_api.digest({k: v for k, v in prep.items() if k != 'preparation_id'})
+    prepare_current(context, decisions, prep)
     directory = Path(context['patch']).parent
     preparation_path = directory / 'preparation.json'
     preparation_path.write_text(json.dumps(prep))
     session_path = directory / 'session.json'
-    argv = ['run_reviewers.py', '--context', str(directory / 'context.json'),
-            '--decisions-file', str(directory / 'decisions.json'),
+    argv = ['run_reviewers.py', '--context', runner.preparation_api.source_path(prep, 'context'),
+            '--decisions-file', runner.preparation_api.source_path(prep, 'decisions'),
             '--preparation-file', str(preparation_path), '--session-file', str(session_path),
             '--stats-cycle', '1']
     real_run = runner.run
@@ -200,7 +194,8 @@ def test_resume_rejects_changed_evidence_before_provider_execution(pinned, chang
     if change in {'scope', 'rules'}:
         kwargs[change] = 'new request boundary'
     elif change == 'preparation':
-        prep = {**prep, 'preparation_id': 'different'}
+        prep['analysis']['worker_instructions'] += ' Inspect the changed boundary.'
+        prepare_current(context, decisions, prep)
     else:
         names = names[:1]
     with pytest.raises(ValueError, match='changed evidence'):

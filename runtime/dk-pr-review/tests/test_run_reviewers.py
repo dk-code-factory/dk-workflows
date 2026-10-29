@@ -10,29 +10,36 @@ SCRIPT = Path(__file__).resolve().parents[1]/'scripts/run_reviewers.py'
 spec=importlib.util.spec_from_file_location('run_reviewers',SCRIPT)
 mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
 sys.path.insert(0,str(SCRIPT.parents[2]/'dk-pr-decisions/tests'))
-from preparation_fixtures import artifact
+from preparation_fixtures import artifact, rebuild, Package, prep
 
 class RunnerTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         root=Path(self.tmp.name)
+        package=Package(root)
+        prep.git(package.repo,'mv','transform.py','x.py')
+        prep.git(package.repo,'commit','-qm','Reviewer fixture')
+        head=prep.git(package.repo,'rev-parse','HEAD')
         (root/'diff.patch').write_text('diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-old\n+new\n')
-        self.context={'patch':str(root/'diff.patch'),'checkout':str(root/'checkout'),'base_sha':'b'*40,'head_sha':'a'*40,
+        self.context={'patch':str(root/'diff.patch'),'checkout':str(package.repo),'repository':str(package.repo),'base_sha':head,'head_sha':head,
                       'url':'https://github.com/o/r/pull/2','metadata':str(root/'metadata.json')}
         body='## Decisions\n\n- Keep API';(root/'metadata.json').write_text(json.dumps({'body':body}))
-        self.decisions={'pr_url':self.context['url'],'head_sha':'a'*40,'body_hash':hashlib.sha256(body.encode()).hexdigest(),
+        self.decisions={'pr_url':self.context['url'],'head_sha':head,'body_hash':hashlib.sha256(body.encode()).hexdigest(),
                         'live_decisions':body,'discussion_decisions':[],'local_decisions':[],'verified':True}
         self.providers=[{'skill':'one:review','host':'claude'},{'skill':'two:review','host':'codex'}]
         names=[mod.bindings.key(p) for p in self.providers]
         self.finding={'severity':'Major','path':'x.py','line':1,'message':'broken behavior','fix':'restore behavior'}
         source=root/'metadata.json'
         self.preparation=artifact(self.context,self.decisions,{'production/0':{'path':str(source),'sha256':hashlib.sha256(source.read_bytes()).hexdigest()}},names)
+        self.decisions['decisions']=[mod.decision_api.record('Keep API','description',[self.context['url']],'published')]
+        rebuild(self.preparation,self.context,self.decisions)
+        self.context.update(mod.preparation_api.context_for(self.preparation))
         self.preparation_path=root/'preparation.json';self.preparation_path.write_text(json.dumps(self.preparation))
         patches=[patch.object(mod,'describe_reviewer',side_effect=lambda p:self.preparation['reviewers'][mod.bindings.key(p)]),
                  patch.object(mod,'skill_path',return_value=root)]
         for mocked in patches:mocked.start();self.addCleanup(mocked.stop)
     def git(self,argv,cwd=None):
-        if argv[:3]==['git','rev-parse','HEAD']:return 'a'*40
+        if argv[:3]==['git','rev-parse','HEAD']:return self.context['head_sha']
         if argv[:3]==['git','status','--porcelain=v1']:return ''
         raise AssertionError(argv)
     def review(self,values=None):
@@ -48,7 +55,7 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(result['findings'][0]['reviewers'],[mod.bindings.key(p) for p in self.providers])
         self.assertEqual(len(handoffs),2)
     def test_empty_configuration_fails(self):
-        with self.assertRaisesRegex(ValueError,'no PR review'):self.review([])
+        with self.assertRaisesRegex(ValueError,'no PR review|reviewer order changed'):self.review([])
     def test_incomplete_never_becomes_clean(self):
         with patch.object(mod,'run',side_effect=self.git),patch.object(mod,'run_skill_reviewer',return_value={'status':'incomplete','findings':[],'message':'no spec'}):result=self.review()
         self.assertFalse(result['complete']);self.assertEqual(result['reason'],'no spec')
@@ -115,7 +122,7 @@ class RunnerTests(unittest.TestCase):
     def test_changed_checkout_fails(self):
         with patch.object(mod,'run',side_effect=['wrong']):
             with self.assertRaisesRegex(RuntimeError,'moved'):self.review()
-        with patch.object(mod,'run',side_effect=['a'*40,'?? changed']):
+        with patch.object(mod,'run',side_effect=[self.context['head_sha'],'?? changed']):
             with self.assertRaisesRegex(RuntimeError,'dirty'):self.review()
     def test_descriptor_change_blocks_launch(self):
         with patch.object(mod,'run',side_effect=self.git),patch.object(mod,'describe_reviewer',return_value={}),patch.object(mod,'run_skill_reviewer') as provider:result=self.review()
@@ -153,16 +160,19 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn('"Major|Minor|Nit"',prompt)
 
     def test_verified_empty_decisions_are_valid(self):
+        self.context['metadata']=str(Path(self.tmp.name)/'metadata.json')
         (Path(self.context['metadata'])).write_text(json.dumps({'body': ''}))
-        empty = {**self.decisions, 'live_decisions': '', 'body_hash': hashlib.sha256(b'').hexdigest()}
+        empty = {**self.decisions, 'live_decisions': '', 'body_hash': hashlib.sha256(b'').hexdigest(), 'decisions': []}
         self.assertEqual(mod.validate_decisions(self.context, empty), empty)
 
     def test_body_edit_requires_refreshed_record(self):
+        self.context['metadata']=str(Path(self.tmp.name)/'metadata.json')
         Path(self.context['metadata']).write_text(json.dumps({'body': '## Decisions\n\n- New choice'}))
         with self.assertRaisesRegex(ValueError, 'body hash mismatch'):
             mod.validate_decisions(self.context, self.decisions)
         refreshed = {**self.decisions, 'body_hash': hashlib.sha256(b'## Decisions\n\n- New choice').hexdigest(),
-                     'live_decisions': '## Decisions\n\n- New choice'}
+                     'live_decisions': '## Decisions\n\n- New choice',
+                     'decisions': [mod.decision_api.record('New choice','description',[self.context['url']],'published')]}
         self.assertEqual(mod.validate_decisions(self.context, refreshed), refreshed)
 
     def test_versioned_context_rejects_missing_choices_or_bad_record(self):
