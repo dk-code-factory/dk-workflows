@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.6.2",
+      "description": "Recognize Codex usage-limit diagnostics as provider exhaustion while preserving authentication precedence and bounded redacted diagnostics, with classifier, Codex transport and reviewer-status regression coverage."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.6.0",
       "description": "Private architecture catalogs with architect, architecture reviewer and independent exception enforcer roles for both hosts; scoped rule packets, user-owned exception policy and mandatory preparation/review/completion evidence. Shared instruction-source guidance separates review evidence from active workflow requirements."
     },
