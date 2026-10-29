@@ -620,6 +620,52 @@ def test_missing_source_can_be_repaired_in_the_single_correction(scenario, monke
     assert s.run()['status'] == 'reconciled' and s.calls == [0, 1]
 
 
+@pytest.mark.parametrize('precheck', [False, True])
+@pytest.mark.parametrize('refresh', ['lineage', 'counter'])
+def test_operational_refresh_cannot_reset_exhausted_comparison_budget(scenario, monkeypatch, precheck, refresh):
+    s = scenario
+    if precheck:
+        run, _, guard_path, _ = setup_precheck(s, monkeypatch)
+        guard_bytes = guard_path.read_bytes()
+    else:
+        s.refresh()
+        run = s.run
+    if refresh == 'counter':
+        s.package.write('history.json', {'evidence_version': 1, 'source_id': 'run-history',
+            'governing': {'obligation': 'Inspect the supported transform'}, 'operational': {'cycles': 1}})
+        s.prepare()
+    original = s.comparison
+    def malformed(binding):
+        value = original(binding)
+        value['sources'] = []
+        return value
+    monkeypatch.setattr(s, 'comparison', malformed)
+    with pytest.raises(model_diagnostics.ValidationFailure) as caught:
+        run()
+    evidence = Path(caught.value.action['artifacts'][0])
+    evidence_bytes = evidence.read_bytes()
+    monkeypatch.setattr(s, 'comparison', original)
+    for index in range(2):
+        parent = s.current
+        if refresh == 'counter':
+            s.package.write('history.json', {'evidence_version': 1, 'source_id': 'run-history',
+                'governing': {'obligation': 'Inspect the supported transform'}, 'operational': {'cycles': index + 2}})
+        refreshed = s.prepare()
+        assert refreshed['refresh']['model_call_count'] == 0
+        assert s.current['preparation_id'] != parent['preparation_id']
+        assert s.current['engineering_id'] == parent['engineering_id']
+        with pytest.raises(model_diagnostics.ValidationFailure) as repeated:
+            run()
+        assert repeated.value.action['artifacts'] == [str(evidence)]
+        assert s.calls == [0, 1] and evidence.read_bytes() == evidence_bytes
+    record = read(s.path, {})
+    assert not record.get('cleanup_prechecks') and not record.get('review_reconciliations')
+    assert len(record['cycles']) == 5
+    assert Path(s.reference['path']).read_bytes() == s.original_bytes
+    if precheck:
+        assert guard_path.read_bytes() == guard_bytes
+
+
 def test_provider_failure_can_resume_without_a_cycle(scenario, monkeypatch):
     s = scenario
     s.refresh()

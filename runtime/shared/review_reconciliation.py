@@ -9,6 +9,7 @@ from pathlib import Path
 from shared import review_coverage as coverage, series_assessment as series, decision_restatements
 from shared.private_state import read, mutate
 from shared.executors import execute_json
+from shared.engineering_identity import engineering_id
 from shared.model_diagnostics import FieldError
 
 
@@ -291,6 +292,18 @@ def retained_comparison(record, binding, *, collection='review_reconciliations')
     return selected
 
 
+def diagnostic_identity(binding, original, current):
+    # Receipt provenance changes during zero-call preparation refreshes. Bind
+    # response budgets to computed governing evidence instead, without granting
+    # permission to reuse an answer or relaxing the exact receipt/snapshot gates.
+    identity = {key: binding[key] for key in (
+        'iteration_run_id', 'cycle', 'pr_url', 'reviewed_head', 'final_head', 'tree', 'base')}
+    return coverage.digest({**identity, 'attempt': binding.get('attempt'),
+                            'purpose': binding.get('purpose', 'review_reconciliation'),
+                            'review_artifact': binding['review_artifact']['sha256'],
+                            'original': engineering_id(original), 'current': engineering_id(current)})
+
+
 def reconcile(record_path, head, assessment_path, api, *, precheck=None):
     collection = 'cleanup_prechecks' if precheck else 'review_reconciliations'
     def capture(record, *, live=False):
@@ -352,7 +365,7 @@ def reconcile(record_path, head, assessment_path, api, *, precheck=None):
     comparison = execute_json(prompt, context['checkout'],
                               validate=lambda value: validate_comparison(value, binding),
                               diagnostic_scope={'operation': 'cleanup-comparison',
-                                                'evidence': comparison_identity(binding)},
+                                                'evidence': diagnostic_identity(binding, original, current)},
                               inherit_architecture=False)
     architecture_review = None
     if comparison['equivalent'] and current.get('preparation_version', 1) >= 3:

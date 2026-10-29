@@ -11,8 +11,10 @@ correction responses, validation details and available provider transport metada
 indexed keys and returns the evidence path. Read that file with bounded reads.
 Rejected responses grant no receipt or coverage. One correction is allowed; an
 unchanged retry after rejection or an uncertain interrupted exchange is blocked
-without another provider call. A recorded provider failure with no response can
-resume the same response slot manually after the provider is repaired.
+without another provider call. Provenance-only preparation refreshes preserve
+the same budget through the computed engineering identities. A recorded provider
+failure with no response can resume the same response slot manually after the
+provider is repaired.
 
 After exhaustion, inspect both responses against `required_keys` and the indexed
 evidence. Repair the governing evidence and refresh/attach preparation normally,
