@@ -17,6 +17,7 @@ import tempfile
 from shared import preparation_graph as graph_api
 from shared.engineering_identity import engineering_id, compatible_reference
 from shared.workflow_storage import allocate, owned
+from shared.model_diagnostics import FieldError
 
 VERSION = 3
 DIMENSIONS = ('correctness', 'remediation_depth', 'performance', 'compatibility', 'complexity')
@@ -168,13 +169,17 @@ def analysis_prompt(manifest, context, decisions, sources, descriptors):
             'sources': sources, 'reviewers': descriptors}, ensure_ascii=True))
 
 
-def analyze(prompt, checkout, *, validate=None, on_call=None):
+def analyze(prompt, checkout, *, validate=None, on_call=None, diagnostic_scope='engineering-preparation'):
     from shared.executors import execute_json, execute
     def counted(*args, **kwargs):
         if on_call:
             on_call()
         return execute(*args, **kwargs)
     return execute_json(prompt, checkout, validate=validate, executor=counted,
+                        diagnostic_scope=diagnostic_scope,
+                        retain_accepted=(lambda value: isinstance(value, dict) and value.get('full_reassessment') is True)
+                            if isinstance(diagnostic_scope, dict) and diagnostic_scope.get('phase') == 'incremental'
+                            else None,
                         correction_instructions='worker_instructions and completion_criteria must be nonempty strings.')
 
 
@@ -207,10 +212,11 @@ def validate_analysis(analysis, sources, reviewers, prior=()):
     placement = analysis.get('placement')
     if not isinstance(placement, dict) or set(placement) != {'production', 'tests', 'reuse', 'entrypoints', 'dependencies'}:
         raise ValueError('concrete production and test placement required')
-    for item in placement.values():
+    for name, item in placement.items():
         conclusion(item)
         if not isinstance(item.get('locations'), list) or not item['locations'] or any(not text(v) for v in item['locations']):
-            raise ValueError('placement requires concrete candidate locations')
+            raise FieldError('placement.' + name + '.locations',
+                             'expected a nonempty array of nonempty location strings')
     strategy = analysis.get('test_strategy')
     if not isinstance(strategy, list) or not strategy:
         raise ValueError('test strategy must map required behavior to sufficient validation')
@@ -401,19 +407,32 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
     identity = {'pr_url': context['url'], 'base_sha': context['base_sha'],
                 'head_sha': context['head_sha'], 'body_hash': decisions['body_hash'],
                 'decisions_hash': digest(decisions)}
+    # Reuse engineering compatibility's governing-evidence normalization before
+    # an analysis exists. Capture locations and transport formatting must not
+    # grant another correction; live opaque identities and unknown fields govern.
+    diagnostic_evidence = engineering_id({
+        'preparation_version': VERSION, 'mode': manifest['mode'], 'identity': identity,
+        'inputs': current, 'sources': {key: {**source, 'snapshot': source['path']}
+                                     for key, source in sources.items()},
+        'reviewers': descriptors,
+        'parent': {'path': str(previous_preparation), 'sha256': parent_hash,
+                   'preparation_id': parent['preparation_id']} if parent else None})
+    diagnostic_scope = {'operation': 'engineering-preparation', 'evidence': diagnostic_evidence,
+                        'parent': engineering_id(parent) if parent else None}
     phases = []
     calls = 0
     def count():
         nonlocal calls
         calls += 1
-    def invoke(prompt, validator):
+    def invoke(prompt, validator, phase):
         def checked(value):
             try:
                 return validator(value)
             except (KeyError, TypeError, AttributeError, IndexError) as exc:
                 raise ValueError('malformed preparation response: ' + str(exc)) from exc
         if analyzer is None:
-            value = analyze(prompt, context['checkout'], validate=checked, on_call=count)
+            value = analyze(prompt, context['checkout'], validate=checked, on_call=count,
+                            diagnostic_scope={**diagnostic_scope, 'phase': phase})
         else:
             count()
             value = analyzer(prompt, context['checkout'])
@@ -430,7 +449,7 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
     if migration:
         prompt += '\nMIGRATION: inspect original v1 preparation at ' + str(previous_preparation) + '\n' + json.dumps(parent)
     if not parent or migration:
-        result, graph = invoke(prompt, initial)
+        result, graph = invoke(prompt, initial, 'migration' if migration else 'initial')
         retired = []
         mode = 'migration' if migration else 'initial'
     elif not force_full and not paths and not changed_sources:
@@ -449,13 +468,13 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
             return result
         merged = invoke(reassessment_prompt(prompt, previous_preparation, parent, paths, changed_sources,
                                             selected, unmapped, full=force_full),
-                        lambda value: reassess(value, not force_full))
+                        lambda value: reassess(value, not force_full), 'full' if force_full else 'incremental')
         mode = 'full' if force_full else 'incremental'
         if merged is None:
             selected = set(parent['graph'])
             merged = invoke(reassessment_prompt(prompt, previous_preparation, parent, paths, changed_sources,
                                                 selected, unmapped, full=True),
-                            lambda value: reassess(value, False))
+                            lambda value: reassess(value, False), 'full')
             mode = 'full_fallback'
         result, graph, retired = merged
     # Recollect the entire package: additions, removals and input movement cannot

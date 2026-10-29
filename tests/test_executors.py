@@ -14,12 +14,14 @@ from unittest.mock import Mock
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'runtime'))
-from shared import executors
+from shared import executors, model_diagnostics
 from shared.diagnostics import Diagnostic
 
 
 @pytest.fixture(autouse=True)
-def clean_provider_environment(monkeypatch):
+def clean_provider_environment(monkeypatch, tmp_path):
+    # Pytest owns emergency evidence even when a test assertion fails.
+    monkeypatch.setattr(executors.tempfile, 'tempdir', str(tmp_path))
     monkeypatch.delenv('DK_PROVIDER_TIMEOUT_SECONDS', raising=False)
     monkeypatch.delenv('DK_BINDING_STACK', raising=False)
     monkeypatch.delenv('DK_REVIEW_STATS_TRACE', raising=False)
@@ -134,6 +136,146 @@ def test_codex_diagnostic_persistence_failure_retains_original_temp(
     assert calls[0].parent.stat().st_mode & 0o777 == 0o700
     assert calls[0].stat().st_mode & 0o777 == 0o600
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize('stage', ['transport', 'provider_failed'])
+@pytest.mark.parametrize('fallback_fails', [False, True])
+def test_scoped_journal_failure_preserves_provider_output_error(
+    tmp_path, monkeypatch, codex_output, stage, fallback_fails
+):
+    calls = codex_output(stdout='private stdout')
+    save = model_diagnostics.write
+
+    def write(path, value):
+        attempts = value.get('attempts', [])
+        if attempts and (('provider' in attempts[-1]) if stage == 'transport'
+                         else value.get('status') == 'provider_failed'):
+            if fallback_fails or str(path).startswith(str(tmp_path / 'state')):
+                raise OSError('journal disk full')
+        return save(path, value)
+
+    monkeypatch.setattr(model_diagnostics, 'write', write)
+    if fallback_fails:
+        monkeypatch.setattr(executors, 'write', Mock(side_effect=OSError('output disk full')))
+    with pytest.raises(Diagnostic) as caught:
+        executors.execute_json('Inspect', tmp_path, diagnostic_scope='engineering-preparation')
+    error = caught.value
+    assert error.code == 'provider_output_failed'
+    assert 'journal disk full' in str(error)
+    assert 'repair storage' in error.action['task']
+    assert len(calls) == 1
+    if fallback_fails:
+        assert calls[0].read_bytes() == b'{"partial":'
+        assert str(calls[0].parent) in error.action['artifacts']
+    else:
+        retained = json.loads(Path(error.action['artifacts'][0]).read_text())
+        assert base64.b64decode(retained['response_base64']) == b'{"partial":'
+    assert 'private stdout' not in str(error)
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+def test_scoped_transport_storage_failure_consumes_response_slot(tmp_path, monkeypatch, codex_output, host):
+    calls = codex_output(b'{"ok":true}', stderr=lambda _: '')
+    monkeypatch.setenv('DK_HOST', host)
+    if host == 'claude':
+        monkeypatch.setattr(executors.subprocess, 'run', Mock(return_value=subprocess.CompletedProcess(
+            ['claude'], 0, '{"subtype":"success","result":"{}"}', 'private stderr')))
+    save = model_diagnostics.write
+
+    def write(path, value):
+        if value.get('attempts') and 'provider' in value['attempts'][-1]:
+            raise OSError('journal disk full')
+        return save(path, value)
+
+    monkeypatch.setattr(model_diagnostics, 'write', write)
+    with pytest.raises(model_diagnostics.StorageFailure) as caught:
+        executors.execute_json('Inspect', tmp_path, diagnostic_scope='engineering-preparation')
+    temp = Path(caught.value.action['artifacts'][-1])
+    if host == 'codex':
+        assert calls[0].read_bytes() == b'{"ok":true}'
+    monkeypatch.setattr(model_diagnostics, 'write', save)
+    blocked = Mock(side_effect=AssertionError('must not grant another provider call'))
+    with pytest.raises(model_diagnostics.ValidationFailure):
+        executors.execute_json('Inspect', tmp_path, executor=blocked,
+                               diagnostic_scope='engineering-preparation')
+    blocked.assert_not_called()
+    retained = json.loads(Path(caught.value.action['artifacts'][0]).read_text())
+    assert retained['status'] == 'running'
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+@pytest.mark.parametrize('failure_stage', ['cleanup', 'lifecycle'])
+def test_received_correction_cannot_replay_after_local_finalization_failure(
+    tmp_path, monkeypatch, host, failure_stage
+):
+    monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
+    monkeypatch.setenv('DK_HOST', host)
+    received = []
+
+    def capture(*args, **kwargs):
+        response = 'invalid first response' if not received else '{"accepted":true}'
+        received.append(response)
+        kwargs['telemetry_output'].write_text(response)
+        return subprocess.CompletedProcess(['provider'], 0,
+                                           json.dumps({'subtype': 'success', 'result': response}), '')
+
+    monkeypatch.setattr(executors, 'capture', capture)
+    if failure_stage == 'cleanup':
+        cleanup = executors.shutil.rmtree
+        def remove(path):
+            if len(received) == 2:
+                raise OSError('cleanup failed')
+            cleanup(path)
+        monkeypatch.setattr(executors.shutil, 'rmtree', remove)
+    else:
+        def lifecycle(*args):
+            if args[2] == 'complete' and len(received) == 2:
+                raise OSError('lifecycle failed')
+            return {'token': 'test-invocation'}
+        monkeypatch.setattr(executors, 'managed_update', lifecycle)
+    with pytest.raises((model_diagnostics.StorageFailure, OSError), match=failure_stage + ' failed'):
+        executors.execute_json('Inspect', tmp_path, diagnostic_scope='engineering-preparation')
+    journal, = (tmp_path / 'state').rglob('model-exchange.json')
+    saved = json.loads(journal.read_text())
+    assert saved['status'] == 'running'
+    assert [item['response'] for item in saved['attempts']] == received
+    assert 'provider_error' not in saved['attempts'][-1]
+    assert len(received) == 2
+    with pytest.raises(model_diagnostics.ValidationFailure):
+        executors.execute_json('Inspect', tmp_path, diagnostic_scope='engineering-preparation')
+    assert len(received) == 2
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+def test_scoped_timeout_retains_exceptional_streams_and_response(tmp_path, monkeypatch, host):
+    monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
+    monkeypatch.setenv('DK_HOST', host)
+    outputs = []
+    timeout = subprocess.TimeoutExpired(['provider'], 5, output=b'private stdout\xff',
+                                        stderr=b'private stderr')
+
+    def capture(*args, **kwargs):
+        output = kwargs['telemetry_output']
+        output.write_bytes(b'partial response\xff')
+        outputs.append(output)
+        raise timeout
+
+    monkeypatch.setattr(executors, 'capture', capture)
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        executors.execute_json('Inspect', tmp_path, diagnostic_scope='engineering-preparation')
+    assert caught.value is timeout
+    journal, = (tmp_path / 'state').rglob('model-exchange.json')
+    saved = json.loads(journal.read_text())
+    assert saved['status'] == 'provider_failed'
+    attempt, = saved['attempts']
+    assert attempt['provider']['stdout'] == 'private stdout\ufffd'
+    assert attempt['provider']['stderr'] == 'private stderr'
+    assert base64.b64decode(attempt['provider']['response_base64']) == b'partial response\xff'
+    assert attempt['provider_error']['stdout'] == 'private stdout\ufffd'
+    assert attempt['provider_error']['stderr'] == 'private stderr'
+    assert not outputs[0].parent.exists()
+    assert journal.stat().st_mode & 0o777 == 0o600
+    assert 'private stdout' not in str(caught.value)
 
 
 def test_codex_cleanup_failure_preserves_primary_diagnostic(tmp_path, monkeypatch, codex_output):

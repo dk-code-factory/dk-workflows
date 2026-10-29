@@ -3,7 +3,9 @@ import copy
 import hashlib
 import itertools
 import json
+import multiprocessing
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -248,9 +250,104 @@ class IncrementalPreparationTests(unittest.TestCase):
         self.assertEqual(result['refresh']['mode'], 'full_fallback')
         self.assertEqual(result['refresh']['model_call_count'], 2)
         with patch('shared.executors.execute', return_value=json.dumps(escalation)) as model:
-            with self.assertRaisesRegex(ValueError, 'cannot escalate again'):
+            with self.assertRaisesRegex(ValueError, 'invalid after one correction') as caught:
                 prep.prepare(self.package.manifest_path, self.package.versions, previous_preparation=first['artifact'])
-        self.assertEqual(model.call_count, 3)  # Initial escalation, full phase and its one correction.
+        self.assertEqual(model.call_count, 2)  # Retained escalation, full phase and its one correction.
+        exchange = prep.read(caught.exception.action['artifacts'][0])
+        self.assertIn('cannot escalate again', exchange['attempts'][-1]['validation']['detail'])
+
+    def test_exhausted_full_fallback_blocks_incremental_restart_until_evidence_changes(self):
+        package = self.package
+        first = package.prepare()
+        parent = prep.read(first['artifact'])
+        package.write('user.json', {'instruction': 'Cross-cutting change'})
+        escalation = {'full_reassessment': True, 'reason': 'Inspect all interactions'}
+        artifacts = set(package.versions.glob('*/preparation.json'))
+        with patch('shared.executors.execute', side_effect=[json.dumps(escalation), '{}', '{}']) as model:
+            with self.assertRaisesRegex(ValueError, 'invalid after one correction') as rejected:
+                prep.prepare(package.manifest_path, package.versions, previous_preparation=first['artifact'])
+        self.assertEqual(model.call_count, 3)
+        evidence = Path(rejected.exception.action['artifacts'][0])
+        retained = evidence.read_bytes()
+        with patch('shared.executors.execute', return_value=json.dumps(retain(parent))) as model:
+            with self.assertRaisesRegex(ValueError, 'invalid after one correction') as repeated:
+                prep.prepare(package.manifest_path, package.versions, previous_preparation=first['artifact'])
+        model.assert_not_called()
+        self.assertEqual(repeated.exception.action['artifacts'], [str(evidence)])
+        self.assertEqual(set(package.versions.glob('*/preparation.json')), artifacts)
+        package.write('user.json', {'instruction': 'Corrected governing constraint'})
+        with patch('shared.executors.execute', return_value=json.dumps(retain(parent))) as model:
+            recovered = prep.prepare(package.manifest_path, package.versions, previous_preparation=first['artifact'])
+        self.assertEqual(model.call_count, 1)
+        self.assertEqual(recovered['readiness'], 'ready')
+        self.assertEqual(evidence.read_bytes(), retained)
+
+    def test_retained_escalation_resumes_full_provider_failure_in_same_slot(self):
+        package = self.package
+        first = package.prepare()
+        parent = prep.read(first['artifact'])
+        package.write('user.json', {'instruction': 'Cross-cutting change'})
+        escalation = {'full_reassessment': True, 'reason': 'Inspect all interactions'}
+        with patch('shared.executors.execute', side_effect=[json.dumps(escalation), '{}', RuntimeError('offline')]):
+            with self.assertRaisesRegex(RuntimeError, 'offline'):
+                prep.prepare(package.manifest_path, package.versions, previous_preparation=first['artifact'])
+        with patch('shared.executors.execute', return_value=json.dumps(retain(parent))) as model:
+            recovered = prep.prepare(package.manifest_path, package.versions, previous_preparation=first['artifact'])
+        self.assertEqual(model.call_count, 1)
+        self.assertEqual(model.call_args.kwargs['attempt'], 1)
+        self.assertEqual(recovered['refresh']['mode'], 'full_fallback')
+
+    def test_competing_restart_cannot_replace_escalation_while_full_phase_exhausts(self):
+        from shared import model_diagnostics
+        package = self.package
+        first = package.prepare()
+        parent = prep.read(first['artifact'])
+        package.write('user.json', {'instruction': 'Cross-cutting change'})
+        artifacts = set(package.versions.glob('*/preparation.json'))
+        context = multiprocessing.get_context('fork')
+        entered, competing, release = (context.Event() for _ in range(3))
+        results = context.Queue()
+        def worker(first_worker):
+            calls = []
+            def provider(*args, **kwargs):
+                calls.append(kwargs['attempt'])
+                if not first_worker:
+                    return json.dumps(retain(parent))
+                if len(calls) == 1:
+                    return json.dumps({'full_reassessment': True, 'reason': 'Inspect all interactions'})
+                if len(calls) == 2:
+                    entered.set()
+                    if not release.wait(5):
+                        raise AssertionError('release deadline expired')
+                return '{}'
+            flock = model_diagnostics.fcntl.flock
+            def lock(fd, flags):
+                if not first_worker:
+                    competing.set()
+                return flock(fd, flags)
+            with patch('shared.executors.execute', side_effect=provider), patch.object(model_diagnostics.fcntl, 'flock', lock):
+                try:
+                    prep.prepare(package.manifest_path, package.versions, previous_preparation=first['artifact'])
+                except BaseException as exc:
+                    results.put((first_worker, calls, type(exc).__name__))
+        processes = [context.Process(target=worker, args=(first_worker,)) for first_worker in (True, False)]
+        try:
+            processes[0].start()
+            self.assertTrue(entered.wait(5))
+            processes[1].start()
+            self.assertTrue(competing.wait(5))
+            release.set()
+            self.assertEqual(sorted(results.get(timeout=5) for _ in processes),
+                             [(False, [], 'ValidationFailure'), (True, [0, 0, 1], 'ValidationFailure')])
+            self.assertEqual(set(package.versions.glob('*/preparation.json')), artifacts)
+        finally:
+            release.set()
+            for process in processes:
+                if process.pid:
+                    process.join(5)
+                    if process.is_alive():
+                        process.kill()
+                        process.join(5)
 
     def test_new_conclusions_get_fresh_ids_deleted_ids_stay_retired(self):
         first = self.package.prepare()
@@ -1350,11 +1447,78 @@ class IncrementalPreparationTests(unittest.TestCase):
         first = self.package.prepare()
         self.package.write('user.json', {'instruction': 'A new human constraint'})
         for invalid in ({'dispositions': []}, {'dispositions': [{'id': []}], 'additions': [], 'impacts': []}):
+            self.package.write('user.json', {'instruction': 'A new human constraint', 'case': invalid})
             with patch('shared.executors.execute', return_value=json.dumps(invalid)) as model:
                 with self.assertRaisesRegex(ValueError, 'invalid after one correction'):
                     prep.prepare(self.package.manifest_path, self.package.versions, previous_preparation=first['artifact'])
             self.assertEqual(model.call_count, 2)
         self.assertEqual(list((self.package.versions).glob('*/preparation.json')), [Path(first['artifact'])])
+
+    def test_relocated_captures_and_checkout_preserve_exhausted_initial_budget(self):
+        package = self.package
+        package.write('user.json', {'evidence_version': 1, 'source_id': 'user',
+                                   'governing': {'instruction': 'Keep changes local.'},
+                                   'operational': {'cycles': 1}})
+        package.manifest['source_modes'] = {key: 'capture' for key in prep.collect(package.manifest_path)[3]}
+        package.write('manifest.json', package.manifest)
+        with patch('shared.executors.execute', return_value='{}') as model:
+            with self.assertRaisesRegex(ValueError, 'invalid after one correction') as first:
+                prep.prepare(package.manifest_path, package.versions)
+            self.assertEqual(model.call_count, 2)
+            evidence = Path(first.exception.action['artifacts'][0])
+            retained = evidence.read_bytes()
+            relocated = package.root / 'recaptured'
+            relocated.mkdir()
+            for source in package.root.iterdir():
+                if source.is_file():
+                    shutil.copyfile(source, relocated / source.name)
+            checkout = package.root / 'relocated-checkout'
+            package.repo.rename(checkout)
+            context = {**package.context, 'checkout': str(checkout), 'repository': str(checkout),
+                       'patch': str(relocated / 'diff.patch'), 'metadata': str(relocated / 'metadata.json')}
+            (relocated / 'context.json').write_text(json.dumps(context))
+            descriptor = prep.read(relocated / 'reviewer.json')
+            descriptor['sources'][0]['path'] = str(checkout / 'transform.py')
+            (relocated / 'reviewer.json').write_text(json.dumps(descriptor))
+            manifest = copy.deepcopy(package.manifest)
+            manifest['evidence']['production'] = [str(checkout / 'transform.py')]
+            (relocated / 'manifest.json').write_text(json.dumps(manifest))
+            user = prep.read(relocated / 'user.json')
+            user['operational']['cycles'] += 1
+            (relocated / 'user.json').write_text(json.dumps(user, sort_keys=True))
+            with self.assertRaisesRegex(ValueError, 'invalid after one correction') as repeated:
+                prep.prepare(relocated / 'manifest.json', package.versions)
+            self.assertEqual(model.call_count, 2)
+            self.assertEqual(repeated.exception.action['artifacts'], [str(evidence)])
+            self.assertEqual(evidence.read_bytes(), retained)
+            self.assertFalse(list(package.versions.glob('*/preparation.json')))
+        user['governing']['instruction'] = 'A corrected concrete engineering constraint.'
+        (relocated / 'user.json').write_text(json.dumps(user))
+        with patch('shared.executors.execute', return_value=json.dumps(response())) as model:
+            recovered = prep.prepare(relocated / 'manifest.json', package.versions)
+        self.assertEqual(model.call_count, 1)
+        self.assertEqual(recovered['readiness'], 'ready')
+        self.assertEqual(evidence.read_bytes(), retained)
+
+    def test_equivalent_parent_recapture_preserves_exhausted_phase_budget(self):
+        package = self.package
+        first, recaptured = package.prepare(), package.prepare()
+        self.assertEqual(first['engineering_id'], recaptured['engineering_id'])
+        package.write('user.json', {'instruction': 'A new governing constraint'})
+        with patch('shared.executors.execute', return_value='{}') as model:
+            with self.assertRaisesRegex(ValueError, 'invalid after one correction') as rejected:
+                prep.prepare(package.manifest_path, package.versions, previous_preparation=first['artifact'])
+            with self.assertRaisesRegex(ValueError, 'invalid after one correction') as repeated:
+                prep.prepare(package.manifest_path, package.versions, previous_preparation=recaptured['artifact'])
+            self.assertEqual(model.call_count, 2)
+            self.assertEqual(repeated.exception.action['artifacts'], rejected.exception.action['artifacts'])
+        # Full assessment has its own contract and one correction budget.
+        parent = prep.read(recaptured['artifact'])
+        with patch('shared.executors.execute', side_effect=['{}', json.dumps(retain(parent))]) as model:
+            result = prep.prepare(package.manifest_path, package.versions,
+                                  previous_preparation=recaptured['artifact'], full_analysis=True)
+        self.assertEqual(model.call_count, 2)
+        self.assertEqual(result['refresh']['mode'], 'full')
 
     def test_reviewer_instruction_changes_and_new_rules_invalidate_governing_conclusions(self):
         package = self.package

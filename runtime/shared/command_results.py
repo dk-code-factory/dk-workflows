@@ -87,6 +87,8 @@ def classification(command, code, data):
         error = value.get('error') if isinstance(value.get('error'), dict) else {}
         if value.get('status') == 'error' and error.get('code') == 'metadata_conflict':
             return 'blocked', 'metadata_conflict', error.get('next_action', 'Reconcile the retained proposal explicitly.')
+        if value.get('status') == 'error' and error.get('code') == 'model_validation_failed':
+            return 'error', 'model_validation_failed', 'Inspect the private exchange and correct governing inputs before resuming.'
         payload = value.get('data')
         if isinstance(payload, dict) and payload.get('readiness') in {'needs_decision', 'sync_pending'}:
             reason = payload['readiness']

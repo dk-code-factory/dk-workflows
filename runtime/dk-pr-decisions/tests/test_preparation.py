@@ -291,6 +291,9 @@ class PreparationTests(unittest.TestCase):
     def test_invalid_analysis_exhausts_correction_without_preparing(self):
         for raw in ('not JSON', json.dumps({'boundaries': {}}), '[]'):
             with self.subTest(raw=raw):
+                # Each malformed response is an independent request; restarting
+                # identical failed evidence must not replenish its corrections.
+                self.package.write('user.json', {'request': 'Validate response case: ' + raw})
                 with patch('shared.executors.execute', return_value=raw) as model:
                     with self.assertRaisesRegex(ValueError, 'invalid after one correction'):
                         prep.prepare(self.package.manifest_path, self.package.root / 'versions')

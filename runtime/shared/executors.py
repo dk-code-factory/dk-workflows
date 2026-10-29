@@ -169,26 +169,64 @@ def provider_timeout():
     return seconds
 
 
-def execute_json(prompt, checkout, *, validate=None, executor=None, correction_instructions=''):
+def execute_json(prompt, checkout, *, validate=None, executor=None, correction_instructions='',
+                 diagnostic_scope=None, retain_accepted=None):
     """Correct model JSON once, without retrying provider failures or coercing data."""
+    from shared.model_diagnostics import exchange
+    with exchange(prompt, checkout, diagnostic_scope, retain_accepted=retain_accepted) as journal:
+        if journal and journal.value['status'] == 'accepted':
+            result = json.loads(journal.value['attempts'][-1]['response'])
+            if validate is not None:
+                validate(result)
+            return result
+        return _execute_json(prompt, checkout, validate, executor, correction_instructions, journal)
+
+
+def _execute_json(prompt, checkout, validate, executor, correction_instructions, journal):
+    from shared.model_diagnostics import StorageFailure, preserve_failure
     original_prompt = prompt
-    for attempt in range(2):
-        raw = (executor or execute)(prompt, checkout, attempt=attempt)
+    start = 0
+    if journal and journal.value['status'] == 'provider_failed':
+        prior = journal.value['attempts'][-1]
+        start, prompt = prior['attempt'], prior['prompt']
+    for attempt in range(start, 2):
+        if journal:
+            journal.start(prompt, attempt)
+        try:
+            raw = (executor or execute)(prompt, checkout, attempt=attempt)
+        except StorageFailure:
+            raise
+        except Exception as exc:
+            if journal and 'response' not in journal.value['attempts'][-1]:
+                try:
+                    journal.provider_failed(exc)
+                except StorageFailure as failure:
+                    preserve_failure(exc, failure)
+            raise
+        if journal and journal.value['attempts'][-1].get('response') != raw:
+            journal.response(raw)
         try:
             result = json.loads(raw)
             if not isinstance(result, dict):
                 raise ValueError('expected one JSON object')
             if validate is not None:
                 validate(result)
-            return result
         except (ValueError, RuntimeError) as exc:
+            if journal:
+                journal.rejected(exc)
             if attempt:
+                if journal:
+                    raise journal.failure() from exc
                 raise ValueError('Model JSON invalid after one correction: ' + str(exc)) from exc
             prompt = (original_prompt + '\n\nCorrection: ' + str(exc) +
                       '\nReturn the complete result as exactly one JSON object without Markdown fences. '
                       'Follow the declared field types and preserve the same evidence and constraints. '
                       'Do not invent missing evidence or grant publication authority. ' + correction_instructions +
                       '\nPrior response:\n' + raw)
+        else:
+            if journal:
+                journal.accepted()
+            return result
 
 
 MAX_PROVIDER_ERROR_CHARS = 8192
@@ -382,6 +420,7 @@ def output_failure(output, proc, checkout, argv, attempt, timeout, reason):
 def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
     temp = tempfile.mkdtemp(prefix='dk-provider-')
     retain_temp = False
+    proc, started, original, received = None, False, None, None
     try:
         output = Path(temp) / 'result.txt'
         if host == 'codex':
@@ -392,6 +431,7 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
                     '--output-format', 'json', '--disallowedTools', 'Edit,Write,NotebookEdit', '-p']
             if resolved:
                 argv += ['--plugin-dir', resolved['root']]
+        started = True
         proc = capture(run_provider, argv, input=prompt, text=True, capture_output=True,
                        cwd=checkout, env=env, timeout=timeout, telemetry_prompt=prompt,
                        telemetry_attempt=attempt, telemetry_provider=host, telemetry_output=output)
@@ -402,7 +442,8 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
                 reason = 'Codex failed to write the requested response file'
             else:
                 try:
-                    return output.read_text()
+                    received = output.read_text()
+                    return received
                 except (OSError, UnicodeError) as exc:
                     reason = 'Codex response file could not be read: ' + str(exc)
             retain_temp = True
@@ -424,15 +465,46 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
         result = envelope.get('result')
         if not isinstance(result, str) or not result.strip():
             raise RuntimeError('Claude did not produce a final response')
-        return result
+        received = result
+        return received
+    except BaseException as exc:
+        original = exc
+        raise
     finally:
-        if not retain_temp:
-            original = sys.exception()
-            try:
-                shutil.rmtree(temp)
-            except OSError:
-                if original is None:
-                    raise
+        try:
+            if started:
+                from shared.model_diagnostics import transport, StorageFailure, preserve_failure
+                from shared.reviewer_telemetry import output_text
+                result = proc if proc is not None else original
+                try:
+                    transport(host=host, argv=argv, returncode=getattr(result, 'returncode', None),
+                              stdout=output_text(getattr(result, 'stdout', None)),
+                              stderr=output_text(getattr(result, 'stderr', None)),
+                              timeout_seconds=timeout, output=output, failure=original, response=received)
+                except (StorageFailure, OSError) as exc:
+                    retain_temp = True
+                    if not isinstance(exc, StorageFailure):
+                        exc = StorageFailure('model_diagnostics_failed', str(exc),
+                                             task('Repair private diagnostic storage.'), outcome='error')
+                    exc.action['artifacts'].append(temp)
+                    if original is None:
+                        raise exc
+                    preserve_failure(original, exc)
+        finally:
+            if not retain_temp:
+                try:
+                    shutil.rmtree(temp)
+                except OSError as exc:
+                    if original is None:
+                        from shared.model_diagnostics import CURRENT, StorageFailure
+                        journal = CURRENT.get()
+                        if journal is not None and received is not None:
+                            raise StorageFailure(
+                                'model_cleanup_failed', 'Provider response retained, but temporary cleanup failed: ' + str(exc),
+                                task('Inspect the private response and repair cleanup permissions. '
+                                     'Do not retry the consumed response slot.', journal.path, temp),
+                                outcome='error') from exc
+                        raise
 
 
 def invoke(binding, handoff_path, checkout, prompt, *, attempt=0):
