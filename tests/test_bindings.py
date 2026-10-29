@@ -162,27 +162,47 @@ def test_by_name_agent_and_custom_command_resources_are_fingerprinted(tmp_path,m
     assert runner.describe_reviewer('third-party:review')!=first
 
 
-@pytest.mark.parametrize('detail',['Usage limit reached','You hit your session limit','Insufficient credits'])
+@pytest.mark.parametrize('detail',[
+    "ERROR: You've hit your usage limit. Try again at Nov 4th, 2026 2:35 AM.",
+    'ERROR: You’ve hit your usage limit. Try again at Nov 4th, 2026 2:35 AM.',
+    'Usage limit reached','Usage limit exceeded',
+    'You hit your session limit','You have reached your session limit',
+    'You hit your limit','You reached your limit',
+    'Out of credits','No tokens','Insufficient credits','Insufficient tokens',
+    'Token exhausted','Tokens exhausted',
+])
 def test_explicit_provider_exhaustion_is_classified(detail):
-    with pytest.raises(e.ProviderExhausted):e.provider_failure(detail)
+    with pytest.raises(e.ProviderExhausted) as failure:e.provider_failure(detail)
+    assert str(failure.value)==detail
 
 
-def test_authentication_and_ordinary_failures_remain_blocking():
-    for detail in ['invalid access token; insufficient credits','network timeout','max turns exhausted']:
-        with pytest.raises(RuntimeError) as failure:e.provider_failure(detail)
-        assert not isinstance(failure.value,e.ProviderExhausted)
+@pytest.mark.parametrize('detail',[
+    'invalid access token; insufficient credits',
+    "authentication failed; You've hit your usage limit",
+    'You’ve hit your usage limit; unauthorized',
+    'network timeout','max turns exhausted',
+])
+def test_authentication_and_ordinary_failures_remain_blocking(detail):
+    with pytest.raises(RuntimeError) as failure:e.provider_failure(detail)
+    assert type(failure.value) is RuntimeError
+    assert str(failure.value)==detail
 
 
-def test_usage_exhaustion_reaches_reviewers_as_explicit_skipped_coverage(tmp_path,monkeypatch):
+@pytest.mark.parametrize('detail',[
+    'Usage limit reached',
+    "ERROR: You've hit your usage limit. Try again at Nov 4th, 2026 2:35 AM.",
+    'ERROR: You’ve hit your usage limit. Try again at Nov 4th, 2026 2:35 AM.',
+])
+def test_usage_exhaustion_reaches_reviewers_as_explicit_skipped_coverage(tmp_path,monkeypatch,detail):
     import importlib.util
     file=Path(__file__).resolve().parents[1]/'runtime/dk-pr-review/scripts/run_reviewers.py'
     spec=importlib.util.spec_from_file_location('exhausted_provider',file);runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
     patch_file=tmp_path/'diff.patch';patch_file.write_text('')
     handoff=tmp_path/'handoff.json';handoff.write_text(json.dumps({'patch':str(patch_file)}))
-    def invoke(*a,**kw):raise e.ProviderExhausted('Usage limit reached')
+    def invoke(*a,**kw):e.provider_failure(detail)
     monkeypatch.setattr(runner,'invoke',invoke)
     result=runner.run_skill_reviewer({'skill':'provider:review'},tmp_path,handoff,tmp_path)
-    assert result=={'status':'tokens_exhausted','findings':[],'message':'Usage limit reached'}
+    assert result=={'status':'tokens_exhausted','findings':[],'message':detail}
 
 
 def test_command_quota_failure_preserves_exhaustion_in_real_subprocess(tmp_path):

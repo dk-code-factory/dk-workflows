@@ -278,7 +278,7 @@ def provider_failure(detail, prompt=None, fallback='Provider execution failed'):
     detail = redact_provider_input(detail, prompt)
     authentication = re.search(r'authentication failed|not authenticated|unauthorized|invalid credentials|'
                                r'(?:invalid|expired|revoked) (?:oauth |access |auth(?:entication)? )?token', detail, re.I)
-    exhausted = re.search(r'usage limit (?:reached|exceeded)|(?:hit|reached) your (?:session )?limit|'
+    exhausted = re.search(r'usage limit (?:reached|exceeded)|(?:hit|reached) your (?:(?:session|usage) )?limit|'
                          r'(?:out of|no|insufficient) (?:credits|tokens)|tokens? exhausted', detail, re.I)
     detail = detail.strip() or fallback
     if len(detail) > MAX_PROVIDER_ERROR_CHARS:

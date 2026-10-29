@@ -916,11 +916,25 @@ def test_explicit_size_check_uses_serialized_characters_and_inclusive_boundary()
         executors.check_prompt_size(prompt, serialized_size - 1)
 
 
+@pytest.mark.parametrize('apostrophe', ["'", '’'])
+def test_codex_usage_limit_preserves_diagnostic_without_retry(tmp_path, monkeypatch, apostrophe):
+    monkeypatch.setenv('DK_HOST', 'codex')
+    diagnostic = f'ERROR: You{apostrophe}ve hit your usage limit. Try again at Nov 4th, 2026 2:35 AM.'
+    process = Mock(return_value=subprocess.CompletedProcess([], 1, '', diagnostic))
+    monkeypatch.setattr(executors.subprocess, 'run', process)
+    with pytest.raises(executors.ProviderExhausted) as failure:
+        executors.execute('Review the pinned changes.', tmp_path)
+    assert str(failure.value) == diagnostic
+    process.assert_called_once()
+    assert process.call_args.args[0][:2] == ['codex', 'exec']
+
+
 @pytest.mark.parametrize('escaped', [False, True])
 @pytest.mark.parametrize('diagnostic,prompt_phrase,expected', [
     ('Input exceeds maximum length.', '', RuntimeError),
     ('transport failure.', 'usage limit reached', RuntimeError),
     ('usage limit reached.', 'authentication failed', executors.ProviderExhausted),
+    ('You’ve hit your usage limit.', 'authentication failed', executors.ProviderExhausted),
 ])
 def test_provider_error_redacts_prompt_and_bounds_output(
     tmp_path, monkeypatch, escaped, diagnostic, prompt_phrase, expected
