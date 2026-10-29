@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.6.1.
+Independent MIT plugin for Claude Code and Codex. Version 1.6.2.
 
 ## Install
 
@@ -378,3 +378,9 @@ Terminal receipts add bounded `message` and structured `action` fields
 remain in artifacts. `run-state next --head SHA` describes the current gate and
 required artifacts without consuming review budgets. Load
 [recovery details](common/recovery.md) only when a diagnostic requires them.
+
+PR iteration shares a [waiting and communication policy](runtime/dk-pr-iter/references/waiting-communication.md)
+across nested handoffs. Material changes are reported promptly; host-required
+updates during unchanged waits use one brief pending-stage sentence. User-update
+timing never drives extra worker polling, evidence queries, provider calls or CI
+observations. The reference includes behavioral acceptance examples.
