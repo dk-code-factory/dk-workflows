@@ -1,4 +1,4 @@
-"""Durable, private preparation exchanges and correction budgets."""
+"""Durable, private semantic exchanges and correction budgets."""
 from contextlib import contextmanager
 from contextvars import ContextVar
 import base64
@@ -20,7 +20,7 @@ CURRENT = ContextVar('model_diagnostics', default=None)
 
 
 class ValidationFailure(Diagnostic, ValueError):
-    """A rejected exchange is evidence, never a preparation assessment."""
+    """A rejected exchange is evidence, never an accepted semantic assessment."""
 
 
 class StorageFailure(Diagnostic):
@@ -132,13 +132,26 @@ class Exchange:
         fields = sorted({item['validation']['field'] for item in self.value['attempts']
                          if 'field' in item.get('validation', {})})
         detail = (' Invalid field(s): ' + ', '.join(fields) + '.') if fields else ''
+        scope = self.value['identity']['scope']
+        cleanup = isinstance(scope, dict) and scope.get('operation') == 'cleanup-comparison'
+        validations = [item['validation']['detail'] for item in self.value['attempts'] if 'validation' in item]
+        if cleanup and validations:
+            detail += ' Last validation: ' + validations[-1] + '.'
+        recovery = (
+            'Inspect the retained request, required_keys, responses and validation details. '
+            'Repair governing evidence or the comparison provider contract before rerunning the original '
+            'precheck-cleanup or reconcile-review command. A contract repair requires a corrected runtime; '
+            'retain the original exchange, PR run/counters, review results, split state and recovery ref. '
+            'Do not retry unchanged consumed inputs, allocate a review cycle solely for malformed output, '
+            'or publish without a valid comparison.' if cleanup else
+            'Inspect the retained responses and validation details. Correct the governing evidence '
+            'or provider contract before preparing again. Do not retry unchanged inputs, reset '
+            'the PR run or correction budget, or use rejected responses as an assessment.')
         return ValidationFailure(
             'model_validation_failed',
             'Model JSON invalid after one correction or interrupted validation.' + detail +
             f' Private diagnostics: {self.path}.',
-            task('Inspect the retained responses and validation details. Correct the governing evidence '
-                 'or provider contract before preparing again. Do not retry unchanged inputs, reset '
-                 'the PR run or correction budget, or use rejected responses as an assessment.', self.path),
+            task(recovery, self.path),
             outcome='error')
 
 

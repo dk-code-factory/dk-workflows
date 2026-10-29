@@ -9,6 +9,7 @@ from pathlib import Path
 from shared import review_coverage as coverage, series_assessment as series, decision_restatements
 from shared.private_state import read, mutate
 from shared.executors import execute_json
+from shared.model_diagnostics import FieldError
 
 
 class NotEquivalent(ValueError):
@@ -193,8 +194,12 @@ def validate_comparison(value, binding):
     verdicts = []
     for category, expected in categories:
         entries = value[category]
-        if not isinstance(entries, dict) or set(entries) != set(expected):
-            raise ValueError('comparison must assess every indexed ' + category + ' entry')
+        if not isinstance(entries, dict):
+            raise FieldError(category, 'expected an object keyed by indexed identities; got ' + type(entries).__name__)
+        missing, unexpected = set(expected) - entries.keys(), entries.keys() - set(expected)
+        if missing or unexpected:
+            raise FieldError(category, 'indexed keys differ; missing: ' + json.dumps(sorted(missing)) +
+                             '; unexpected: ' + json.dumps(sorted(unexpected)))
         for key, entry in entries.items():
             if (not isinstance(entry, dict) or set(entry) != ({'verdict', 'rationale', 'evidence', 'maps_to', 'discussion_sources'}
                                                       if category == 'decisions' else {'verdict', 'rationale', 'evidence'})
@@ -322,12 +327,17 @@ def reconcile(record_path, head, assessment_path, api, *, precheck=None):
         'identical engineering meaning qualify. A substantive or ambiguous difference blocks equivalence. '
         'Return exactly {"equivalent":boolean,"rationale":string,"fields":{FIELD:VERDICT},'
         '"sources":{SOURCE:VERDICT}}. '
-        'Include every required field pointer and changed source key. '
+        'Include every required field pointer and changed source key exactly, including empty objects. '
+        'Use the required_keys index below to enumerate each response object; do not abbreviate identities. '
         'Each VERDICT is {"verdict":"equivalent"|"different"|"ambiguous","rationale":string,'
         '"evidence":["original/INDEX#location","current/INDEX#location"]}. Cite both preparations '
         'using the evidence index, and cite each changed source in its verdict. '
         'equivalent is true only if every verdict is equivalent. Missing evidence blocks equivalence.\n' +
-        json.dumps({'binding': binding, 'original_analysis': original['analysis'],
+        json.dumps({'binding': binding,
+                    'required_keys': {'fields': binding['fields'], 'sources': binding['changed_sources'],
+                                      **({'decisions': list(binding['decision_additions'])}
+                                         if binding.get('comparison_version') == 2 else {})},
+                    'original_analysis': original['analysis'],
                     'current_analysis': current['analysis']}, ensure_ascii=True))
     if binding.get('comparison_version') == 2:
         prompt += ('\nAlso return decisions:{ADDITION:VERDICT} for every indexed decision_additions entry. '
@@ -341,6 +351,8 @@ def reconcile(record_path, head, assessment_path, api, *, precheck=None):
                    'Raw fingerprints remain provenance and must not be rewritten.')
     comparison = execute_json(prompt, context['checkout'],
                               validate=lambda value: validate_comparison(value, binding),
+                              diagnostic_scope={'operation': 'cleanup-comparison',
+                                                'evidence': comparison_identity(binding)},
                               inherit_architecture=False)
     architecture_review = None
     if comparison['equivalent'] and current.get('preparation_version', 1) >= 3:

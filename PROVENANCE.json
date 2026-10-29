@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.6.4",
+      "description": "Precise cleanup comparison index diagnostics, explicit required response identities, durable private rejected exchanges and correction budgets, with recovery guidance and guard-preservation regressions."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.6.3",
       "description": "Shared PR iteration waiting and communication policy, nested handoff delivery and behavioral long-wait acceptance examples; brief host-required pending updates remain independent of evidence collection, provider calls and CI observation."
     },

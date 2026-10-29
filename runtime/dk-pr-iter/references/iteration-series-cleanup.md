@@ -4,6 +4,36 @@ Follow [waiting and communication](waiting-communication.md) during this stage.
 Include its retained runtime path in every handoff; recipients read it and pass
 it to their nested workers.
 
+Both comparison commands retain private `model-exchange.json` diagnostics,
+independently of telemetry: the complete request and `required_keys`, initial and
+correction responses, validation details and available provider transport metadata.
+`model_validation_failed` identifies incorrect container types or missing/unexpected
+indexed keys and returns the evidence path. Read that file with bounded reads.
+Rejected responses grant no receipt or coverage. One correction is allowed; an
+unchanged retry after rejection or an uncertain interrupted exchange is blocked
+without another provider call. A recorded provider failure with no response can
+resume the same response slot manually after the provider is repaired.
+
+After exhaustion, inspect both responses against `required_keys` and the indexed
+evidence. Repair the governing evidence and refresh/attach preparation normally,
+or repair the comparison contract in a corrected runtime before rerunning the
+original `precheck-cleanup` or `reconcile-review` command with current inputs.
+Keep the original exchange, run/counters, review session/results, split guard,
+unpublished candidate and recovery ref. Do not edit diagnostics, move identical
+inputs to new paths, change candidates, delete state or allocate a review cycle
+solely to obtain more schema attempts. A corrected runtime is deliberate defect
+recovery, never an automatic runtime switch or a way to retry an unchanged
+contract. For a runtime repair, finish the stopped invocation's lifecycle normally
+and enter the corrected runtime in a new lifecycle invocation, resuming the same
+PR run and retaining both runtimes' provenance. The repair must support the
+retained run/preparation/review contracts; legacy adoption restrictions still
+apply. Never switch an active invocation to replacement code or start a new PR
+run to reset counters.
+
+All live evidence, semantic equivalence, publication and final-head
+completion gates still apply; equal trees and green CI cannot authorize cleanup.
+If no actual evidence/contract repair is available, report cleanup incomplete.
+
 For an incomplete review with explicitly recorded human acceptance, omit `--review-complete`; the gate verifies exact-result acceptance without changing review status. Continue all cleanup/completion stages when that gate is clean, reporting accepted failures. Already-authorized thread resolution belongs to initial reply cleanup and does not wait for this gate.
 
 Intermediate pushes for review and CI remain allowed. After the review and fix loop ends, assess each engineering completion criterion and save a current verification artifact using [the preparation verification contract](../../dk-pr-decisions/references/preparation.md#work-selection-and-completion-evidence). Record behavior, placement, test sufficiency, compatibility and cumulative complexity with rationale and fingerprinted evidence; review convergence alone does not satisfy these. Then refresh both feedback artifacts and account for every new or edited actionable item; route any remaining fix back through verification and any missing reply through the same reply agent's inline-then-top-level sequence. Run `scripts/completion.py --cwd REPO --pr PR_URL gate --stage review --start-head START_SHA --final-head REVIEWED_SHA --preparation-file PREPARATION.json --verification-file VERIFICATION.json --run-record RUN_RECORD.json --review-complete` (add `--actionable` when work remains). Require `gate: clean` before cleanup when the current preparation already has coverage. If refreshed discussion Decisions or operational evidence require equivalence assessment, hand off local assessment and candidate construction only; defer publication until the precheck and review gate below pass. Other review or CI failures remain blockers. This stage checks review readiness and fresh CI policy; it does not authorize completion.
