@@ -51,10 +51,10 @@ print(os.environ['MOCK_REGISTRY'])
     env = dict(os.environ, PATH=str(binary.parent) + os.pathsep + os.environ['PATH'],
                CODEX_HOME=str(tmp_path / 'codex'), MOCK_REFRESH_MARKER=str(marker))
 
-    def invoke(records=None, payload=None, raw=None, **changes):
+    def invoke(records=None, payload=None, raw=None, options=(), **changes):
         current = dict(env, MOCK_REGISTRY=json.dumps({'installed': [record] if records is None else records}))
         current.update(changes)
-        result = subprocess.run([sys.executable, str(copied_hook), '--lookup-timeout', '0.8',
+        result = subprocess.run([sys.executable, str(copied_hook), *options, '--lookup-timeout', '0.8',
                                  '--refresh-timeout', '0.8'],
                                 input=raw if raw is not None else json.dumps(payload or {
                                     'cwd': str(tmp_path / 'repo with spaces'), 'hook_event_name': 'SubagentStart'}),
@@ -65,10 +65,12 @@ print(os.environ['MOCK_REGISTRY'])
     return invoke, record, marker, root
 
 
-def test_copied_hook_tolerates_slow_lookup_and_refreshes_exact_installation(startup):
+@pytest.mark.parametrize('event', ['SessionStart', 'SubagentStart'])
+def test_copied_hook_tolerates_slow_lookup_and_refreshes_exact_installation(startup, event):
     invoke, _, marker, _ = startup
-    result = invoke(MOCK_LOOKUP_DELAY='0.15')
-    assert result == {'hookSpecificOutput': {'hookEventName': 'SubagentStart',
+    result = invoke(payload={'cwd': str(marker.parent / 'repo with spaces'), 'hook_event_name': event},
+                    MOCK_LOOKUP_DELAY='0.15')
+    assert result == {'hookSpecificOutput': {'hookEventName': event,
                                            'additionalContext': 'fixture repository rules'}}
     observed = json.loads(marker.read_text())
     assert observed['host'] == 'codex'
@@ -91,6 +93,16 @@ def test_default_lookup_budget_exceeds_old_ten_second_cutoff(startup, monkeypatc
     assert 'hookSpecificOutput' in hook.hook({}, args, env)
     assert calls == [90, 180]
     assert calls[0] > 11
+
+
+def test_custom_marketplace_cli_selects_its_versioned_installation(startup):
+    invoke, record, marker, root = startup
+    selected = root.parents[2] / 'custom-marketplace/dk-workflows/1.2.3'
+    selected.parent.mkdir(parents=True)
+    root.rename(selected)
+    record.update(pluginId='dk-workflows@custom-marketplace', marketplaceName='custom-marketplace')
+    assert 'hookSpecificOutput' in invoke(options=['--plugin-id', record['pluginId']])
+    assert marker.is_file()
 
 
 @pytest.mark.parametrize('field', ['installedPath', 'installPath'])
@@ -116,6 +128,55 @@ def test_phase_specific_failures_include_command_timeout_and_recovery(startup, c
     assert 'Command:' in message and 'Timeout: 0.8s' in message and 'Recovery:' in message
     assert ('repo_rules.py' if started else 'codex plugin list --json') in message
     assert marker.exists() is started
+    assert 'hookSpecificOutput' not in result
+
+
+def test_refresh_launch_failure_reports_no_refresh_and_refresh_recovery(startup, monkeypatch):
+    _, record, marker, root = startup
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if command == hook.LOOKUP_COMMAND:
+            return subprocess.CompletedProcess(command, 0, json.dumps({'installed': [record]}), '')
+        raise OSError('fixture could not launch Python')
+
+    monkeypatch.setattr(hook.subprocess, 'run', run)
+    args = argparse.Namespace(plugin_id=record['pluginId'], lookup_timeout=0.8, refresh_timeout=0.8)
+    result = hook.hook({}, args, dict(os.environ, CODEX_HOME=str(root.parents[4])))
+    message = result['systemMessage']
+    assert message.startswith('Repository rule refresh failed; rule refresh did not start.')
+    assert 'fixture could not launch Python' in message
+    assert f'Command: {sys.executable}' in message and 'repo_rules.py' in message
+    assert 'Timeout: 0.8s' in message
+    assert 'Recovery: Run $dk-workflows:dk-config refresh' in message
+    assert 'codex plugin list' not in message
+    assert len(calls) == 2
+    assert not marker.exists()
+    assert 'hookSpecificOutput' not in result
+
+
+@pytest.mark.parametrize('problem', ['missing manifest', 'malformed manifest', 'missing helper', 'escaping helper'])
+def test_invalid_local_installation_reports_validation_without_a_failing_command(startup, problem):
+    invoke, _, marker, root = startup
+    manifest = root / '.codex-plugin/plugin.json'
+    helper = root / 'runtime/dk-config/scripts/repo_rules.py'
+    if problem == 'missing manifest':
+        manifest.unlink()
+    elif problem == 'malformed manifest':
+        manifest.write_text('not json')
+    elif problem == 'missing helper':
+        helper.unlink()
+    else:
+        outside = marker.parent / 'outside.py'
+        helper.rename(outside)
+        helper.symlink_to(outside)
+    result = invoke()
+    message = result['systemMessage']
+    assert message.startswith('Plugin validation failed; rule refresh did not start.')
+    assert 'Command:' not in message and 'Timeout:' not in message
+    assert 'Recovery: Run codex plugin list --json' in message
+    assert not marker.exists()
     assert 'hookSpecificOutput' not in result
 
 

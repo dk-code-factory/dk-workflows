@@ -69,19 +69,17 @@ def hook(payload, args, env):
     phase = 'Hook input'
     command = None
     timeout = None
-    refresh_started = False
     try:
         if (not isinstance(payload, dict) or not isinstance(payload.get('cwd', '.'), str)
                 or not isinstance(payload.get('hook_event_name', 'SessionStart'), str)):
             raise ValueError('expected a JSON object with string cwd and hook_event_name')
         phase, command, timeout = 'Plugin lookup', LOOKUP_COMMAND, args.lookup_timeout
         registry = json.loads(run(command, timeout, env))
-        phase = 'Plugin validation'
+        phase, command, timeout = 'Plugin validation', None, None
         helper = installation(registry, args.plugin_id, env)
         phase = 'Repository rule refresh'
         command = [sys.executable, str(helper), '--cwd', payload.get('cwd', '.'), 'refresh']
         timeout = args.refresh_timeout
-        refresh_started = True
         context = run(command, timeout, dict(env, DK_HOST='codex'))
         return {'hookSpecificOutput': {
             'hookEventName': payload.get('hook_event_name', 'SessionStart'),
@@ -89,11 +87,12 @@ def hook(payload, args, env):
         }}
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         detail = f'command timed out after {timeout:g}s' if isinstance(exc, subprocess.TimeoutExpired) else str(exc)
+        refresh_started = phase == 'Repository rule refresh' and not isinstance(exc, OSError)
         state = 'started' if refresh_started else 'did not start'
         diagnostic = f'{phase} failed; rule refresh {state}. {detail}'
         if command:
             diagnostic += f' Command: {shlex.join(command)}. Timeout: {timeout:g}s.'
-        if refresh_started:
+        if phase == 'Repository rule refresh':
             recovery = 'Run $dk-workflows:dk-config refresh in the repository; inspect the refresh error first.'
         else:
             recovery = (f'Run {shlex.join(LOOKUP_COMMAND)} and verify {args.plugin_id} is enabled and its '
