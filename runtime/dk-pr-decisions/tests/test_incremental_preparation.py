@@ -708,7 +708,8 @@ class IncrementalPreparationTests(unittest.TestCase):
             'target_tip': package.context['base_sha'], 'final_head': package.head, 'final_tree': tree, 'commit_count': 1}
         assessment_path = package.write('series-assessment.json', assessment)
         comparisons = []
-        def compare(prompt, checkout, *, attempt=0):
+        def compare(prompt, checkout, *, attempt=0, inherit_architecture=True):
+            self.assertFalse(inherit_architecture)
             comparisons.append(attempt)
             binding = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]['binding']
             self.assertEqual(binding['original_preparation_id'], first['preparation_id'])

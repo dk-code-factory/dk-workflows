@@ -340,7 +340,8 @@ def reconcile(record_path, head, assessment_path, api, *, precheck=None):
                    'Decisions-backed choices may change head only when their content is that preparation context. '
                    'Raw fingerprints remain provenance and must not be rewritten.')
     comparison = execute_json(prompt, context['checkout'],
-                              validate=lambda value: validate_comparison(value, binding))
+                              validate=lambda value: validate_comparison(value, binding),
+                              inherit_architecture=False)
     architecture_review = None
     if comparison['equivalent'] and current.get('preparation_version', 1) >= 3:
         from shared import architecture

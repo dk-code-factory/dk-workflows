@@ -2,6 +2,7 @@
 from copy import deepcopy
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -66,12 +67,14 @@ def deliver(root, agent='worker', paths=None, **kwargs):
     ('src/*.py', 'src/a/core.py', False), ('src/*.py', 'src/core.py', True),
     ('src/**', 'Src/core.py', False), ('src/[ab]?.py', 'src/a1.py', True),
     ('**/core.py', 'coreXpy', False), ('a/**/b/**/c', 'a/b/c', True),
+    ('src/name\\literal.py', 'src/name\\literal.py', True),
+    ('src/name\\literal.py', 'src/name/literal.py', False),
 ])
 def test_posix_globs(pattern, path, expected):
     assert a.matches(pattern, path) is expected
 
 
-@pytest.mark.parametrize('path', ['/abs', '../bad', 'a/../b', 'a//b', './bad', 'a\\b'])
+@pytest.mark.parametrize('path', ['/abs', '../bad', 'a/../b', 'a//b', './bad', 'a\x00b'])
 def test_bad_paths(path):
     with pytest.raises(ValueError, match='POSIX'):
         a.relative(path)
@@ -101,9 +104,35 @@ def test_worker_expansion_and_nested_identity_require_fresh_delivery(repo):
         a.validate_packet(packet, repo, paths=['tests/test.py'])
     with pytest.raises(ValueError, match='recipient'):
         a.validate_packet(packet, repo, agent='ci-repair')
+    directory = Path(packet['path']).parent
+    before = set(directory.glob('*.json'))
     refreshed = a.provider_packet(packet, repo, 'ci-repair')
+    after = set(directory.glob('*.json'))
+    assert after - before == {Path(refreshed['path'])}
+    assert a.provider_packet(packet, repo, 'ci-repair') == refreshed
+    assert set(directory.glob('*.json')) == after
     assert [r['id'] for r in a.load(refreshed)['rules']] == ['arch-ci']
     assert a.load(refreshed)['paths'] is None
+    for field in ('scope', 'scope_contents', 'governing_sources', 'head', 'tree', 'task', 'catalog'):
+        assert a.load(refreshed)[field] == a.load(packet)[field]
+
+
+def test_handoff_rejects_catalog_changed_after_parent_validation(repo, monkeypatch):
+    initialize(repo, [obligation()])
+    parent = deliver(repo, paths=['src/core.py'])
+    directory = Path(parent['path']).parent
+    before = set(directory.glob('*.json'))
+    validate = a.validate_packet
+    def validate_then_edit(*args, **kwargs):
+        delivered = validate(*args, **kwargs)
+        a.edit(repo, obligation(text='Explicitly changed boundary.'), user=USER,
+               expected=delivered['catalog'])
+        return delivered
+    monkeypatch.setattr(a, 'validate_packet', validate_then_edit)
+    with pytest.raises(ValueError, match='catalog changed'):
+        a.handoff({'packet': parent}, {'checkout': str(repo)}, 'worker', ['src/core.py'])
+    assert set(directory.glob('*.json')) == before
+    assert a.current(repo, baseline='HEAD')['rules'][0]['text'] == 'Explicitly changed boundary.'
 
 
 def test_renames_and_deletions_include_both_paths(repo):
@@ -112,6 +141,31 @@ def test_renames_and_deletions_include_both_paths(repo):
     run(repo, 'rm', 'old.py')
     run(repo, 'commit', '-qm', 'rename and delete')
     assert a.changed_paths(repo, base, 'HEAD') == ['old.py', 'src/core.py', 'src/renamed.py']
+
+
+def test_literal_backslashes_in_git_additions_renames_deletions_and_packets(repo, tmp_path):
+    original, added, renamed = 'src/name\\literal.py', 'src/added\\literal.py', 'src/renamed\\literal.py'
+    (repo / original).write_text('def literal(): return 1\n')
+    run(repo, 'add', '.')
+    run(repo, 'commit', '-qm', 'literal filename baseline')
+    ctx, decisions = context(repo, tmp_path)
+    rule = obligation(sources=[{'path': original, 'start': 1, 'end': 1}], patterns=[original, added, renamed])
+    initialize(repo, [rule])
+    (repo / added).write_text('added = True\n')
+    run(repo, 'mv', original, renamed)
+    run(repo, 'rm', 'old.py')
+    run(repo, 'add', '.')
+    run(repo, 'commit', '-qm', 'add rename and delete literal paths')
+    ctx['head_sha'] = run(repo, 'rev-parse', 'HEAD')
+    paths = sorted(['old.py', original, added, renamed])
+    assert a.changed_paths(repo, ctx['base_sha'], ctx['head_sha']) == paths
+    prepared = a.prepare(ctx, decisions)
+    assert a.load(prepared['packet'])['paths'] == paths
+    delivered = a.handoff(prepared, ctx, 'worker', paths)
+    assert [r['id'] for r in a.validate_packet(delivered, repo, paths=paths)['rules']] == ['arch-core']
+    run(repo, 'rm', renamed)
+    run(repo, 'commit', '-qm', 'delete literal filename')
+    assert a.changed_paths(repo, ctx['head_sha'], 'HEAD') == [renamed]
 
 
 def test_clean_local_baseline_and_automatic_reuse(repo):
@@ -204,6 +258,31 @@ def test_user_deletion_survives_refresh_until_explicit_readdition(repo):
                        'fingerprint': historical['fingerprint']}) == historical
 
 
+def test_conflict_resolution_does_not_adopt_withheld_alternatives(repo):
+    result = model_result(rules=[obligation('a'), obligation('b')])
+    result['conflicts'] = [{'text': 'Choose one core boundary', 'sources': ['src/core.py']}]
+    # Proposals are ordinary model data, not necessarily held-rule records.
+    result['proposals'] = ['Possible convention', None, {'rule': None},
+        {'reason': 'Conflicting obligations require user resolution', 'rule': {'id': []}},
+        {'reason': 'Possible convention', 'rule': obligation('ordinary')}]
+    catalog = a.ensure(repo, analyzer=lambda *_: result)
+    catalog = a.edit(repo, obligation('a'), user=USER, expected=catalog['fingerprint'], resolve_conflicts=True)
+    refreshed = model_result(rules=[obligation('a'), obligation('b'), obligation('new'), obligation('ordinary')])
+    for _ in range(2):
+        catalog = a.ensure(repo, catalog['baseline'], force=True, analyzer=lambda *_: refreshed)
+        assert {r['id'] for r in catalog['rules']} == {'arch-a', 'arch-new', 'arch-ordinary'}
+        assert not catalog['conflicts']
+        assert result['proposals'][0] in catalog['proposals']
+    catalog = a.edit(repo, obligation('b'), user=USER, expected=catalog['fingerprint'])
+    catalog = a.ensure(repo, catalog['baseline'], force=True, analyzer=lambda *_: refreshed)
+    assert {r['id'] for r in catalog['rules']} == {'arch-a', 'arch-b', 'arch-new', 'arch-ordinary'}
+    refreshed['conflicts'] = [{'text': 'New guidance conflict', 'sources': ['src/core.py']}]
+    catalog = a.ensure(repo, catalog['baseline'], force=True, analyzer=lambda *_: refreshed)
+    assert catalog['conflicts'] == refreshed['conflicts']
+    with pytest.raises(ValueError, match='user resolution'):
+        deliver(repo)
+
+
 @pytest.mark.parametrize('choice', ['delete', 'resolve'])
 def test_user_refresh_choices_are_independent_per_baseline(repo, choice):
     result = model_result(rules=[obligation()])
@@ -242,22 +321,34 @@ def test_new_baseline_derives_its_own_obligations_without_invalidating_old(repo)
     a.validate_packet(old, repo)
 
 
-def test_concurrent_refresh_cannot_overwrite_new_catalog(repo):
-    initialize(repo)
+@pytest.mark.parametrize('force', [False, True])
+def test_concurrent_same_baseline_initialization_reuses_winner_but_force_requires_cas(repo, force):
+    if force:
+        initialize(repo)
     barrier = Barrier(2)
+    calls = []
     def refresh():
         def analyze(*_):
+            calls.append(True)
             barrier.wait(timeout=10)
             return model_result()
         try:
-            return a.ensure(repo, force=True, analyzer=analyze)
+            return a.ensure(repo, force=force, analyzer=analyze)
         except ValueError as exc:
             return str(exc)
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: refresh(), range(2)))
-    assert sum(isinstance(result, dict) for result in results) == 1
-    assert any('concurrently' in str(result) for result in results)
-    assert a.current(repo, baseline='HEAD')['generation'] == 2
+    assert len(calls) == 2  # Both already-spent model calls remain real calls.
+    catalog = a.current(repo, baseline='HEAD')
+    if force:
+        assert sum(isinstance(result, dict) for result in results) == 1
+        assert any('concurrently' in str(result) for result in results)
+        assert catalog['generation'] == 2
+    else:
+        assert results == [catalog, catalog]
+        directory, _ = a.folder(repo)
+        assert len(list((directory / 'catalogs').glob('*.json'))) == 1
+        assert catalog['generation'] == 1
 
 
 @pytest.mark.parametrize('order', [('a', 'b'), ('b', 'a')])
@@ -458,6 +549,60 @@ def context(repo, tmp_path):
             'base_sha': head, 'head_sha': head, 'metadata': str(metadata)}, decisions
 
 
+@pytest.mark.parametrize('head_repository', [None, {'id': 'R_deleted'}, {'databaseId': 202}])
+def test_collected_deleted_head_context_retains_verified_base_identity(repo, monkeypatch, head_repository):
+    from shared import pr_identity
+    spec = importlib.util.spec_from_file_location('review_context', ROOT / 'runtime/dk-pr-review/scripts/review_context.py')
+    collector = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(collector)
+    base = run(repo, 'rev-parse', 'HEAD')
+    (repo / 'src/core.py').write_text('def core(): return 2\n')
+    run(repo, 'add', '.')
+    run(repo, 'commit', '-qm', 'reachable deleted-fork head')
+    head = run(repo, 'rev-parse', 'HEAD')
+    url = 'https://github.com/base/repo/pull/1'
+    metadata = {'number': 1, 'url': url, 'title': 'Core task', 'body': 'Core change',
+        'baseRefName': 'main', 'baseRefOid': base, 'headRefName': 'topic', 'headRefOid': head,
+        'headRepository': head_repository, 'isCrossRepository': True, 'files': [{'path': 'src/core.py'}]}
+    rest = {'number': 1, 'html_url': url, 'head': {'sha': head, 'ref': 'topic', 'repo': None},
+        'base': {'sha': base, 'ref': 'main',
+                 'repo': {'full_name': 'base/repo', 'name': 'repo', 'node_id': 'R_base', 'id': 101}}}
+    patch = run(repo, 'diff', base + '...' + head)
+    resolutions = []
+    def github(args, **kwargs):
+        if args[0] != 'gh':
+            return subprocess.run(args, **kwargs)
+        if args[1:3] == ['pr', 'diff']:
+            return subprocess.CompletedProcess(args, 0, patch, '')
+        if args[1:3] == ['pr', 'view']:
+            result = metadata
+        elif 'repos/base/repo/pulls/1/files' in args:
+            result = [[{'filename': 'src/core.py', 'status': 'modified', 'additions': 1, 'deletions': 1}]]
+        else:
+            assert args[1:] == ['api', '--hostname', 'github.com', 'repos/base/repo/pulls/1']
+            resolutions.append(True)
+            result = rest
+        return subprocess.CompletedProcess(args, 0, json.dumps(result), '')
+    monkeypatch.setattr(collector, 'github_run', github)
+    monkeypatch.setattr(pr_identity, 'github_run', github)
+    ctx = collector.fetch(repo, url)
+    assert ctx['repository_identity'] == 'remote:github.com/base/repo'
+    assert json.loads(Path(ctx['metadata']).read_text())['headRepository'] == head_repository
+    prepared = a.prepare(ctx, {'head_sha': head, 'decisions': []},
+                         analyzer=lambda *_: model_result(rules=[obligation()]))
+    assert a.load(prepared['packet'])['repository'] == ctx['repository_identity']
+    assert len(resolutions) == (2 if head_repository else 1)
+    if head_repository:
+        with pytest.raises(ValueError, match='differs from pinned PR identity'):
+            a.context_identity({**ctx, 'repository_identity': 'remote:github.com/other/repo'})
+        rest['head']['sha'] = 'a' * 40
+        with pytest.raises(RuntimeError, match='identity is inconsistent'):
+            a.context_identity(ctx)
+    else:
+        assert a.context_identity(ctx) == ctx['repository_identity']
+        assert len(resolutions) == 1  # Keep the collector's verified null-head fallback without another read.
+
+
 def test_pr_initialization_reads_target_not_changed_head(repo, tmp_path):
     ctx, decisions = context(repo, tmp_path)
     (repo / 'src/core.py').write_text('PR tries to replace governing source\n')
@@ -490,10 +635,16 @@ def verdict(rule, status='compliant', **kwargs):
 def test_worker_exception_review_completion_flow(repo, tmp_path, monkeypatch, capsys, cli):
     ctx, decisions = context(repo, tmp_path)
     initialize(repo, [obligation()])
-    prepared = a.prepare(ctx, decisions)
+    instructions = tmp_path / 'user-instructions.md'
+    instructions.write_text('Keep the core boundary.\n')
+    governing = a.governing_sources({'user_instructions/0': instructions})
+    prepared = a.prepare(ctx, decisions, governing=governing)
     worker = a.handoff(prepared, ctx, 'worker', ['src/core.py'])
+    assert a.load(worker)['governing_sources'] == governing
+    for field in ('scope', 'scope_contents'):
+        assert a.load(worker)[field] == a.load(prepared['packet'])[field]
     approved = a.enforce(request(repo, worker), repo, user=USER)
-    prepared = a.prepare(ctx, decisions, exceptions=[approved])
+    prepared = a.prepare(ctx, decisions, exceptions=[approved], governing=governing)
     result = {'complete': True, 'reason': '', 'coverage': [verdict(obligation(), 'approved_exception',
               paths=['src/core.py'], exception=approved['fingerprint'])]}
     if cli:
@@ -515,6 +666,10 @@ def test_worker_exception_review_completion_flow(repo, tmp_path, monkeypatch, ca
     else:
         reviewed = a.review(prepared, ctx, decisions, reviewer=lambda *_: result)
     assert a.verify_review(reviewed, prepared, ctx, decisions)['exceptions'] == [approved]
+    instructions.write_text('Change the governing boundary.\n')
+    with pytest.raises(ValueError, match='governing scope evidence changed'):
+        a.validate_packet(worker, repo)
+    instructions.write_text('Keep the core boundary.\n')
     # Even unchanged code needs a fresh decision about materially changed scope.
     decisions['decisions'].append({'text': 'Broaden public API'})
     with pytest.raises(ValueError, match='scope or Decisions changed'):
@@ -715,7 +870,8 @@ def test_native_execution_preserves_role_packet_and_redelivers_nested_scope(repo
     monkeypatch.setattr(executors, 'current_host', lambda: host)
     monkeypatch.setattr(executors, 'managed_update', lambda *_: None)
     def process(prompt, checkout, selected_host, environment, *args):
-        captured.append((prompt, selected_host, json.loads(environment['DK_ARCHITECTURE_PACKET'])))
+        captured.append((prompt, selected_host, json.loads(environment['DK_ARCHITECTURE_PACKET'])
+                         if environment.get('DK_ARCHITECTURE_PACKET') else None))
         return '{}'
     monkeypatch.setattr(executors, 'execute_process', process)
     executors.execute('Inspect code.', repo, architecture_packet=worker)
@@ -735,6 +891,15 @@ def test_native_execution_preserves_role_packet_and_redelivers_nested_scope(repo
     assert [r['id'] for r in child['rules']] == ['arch-ci']
     with pytest.raises(ValueError, match='scope became known'):
         a.validate_packet(captured[-1][2], repo, paths=['tests/test.py'])
+    monkeypatch.delenv('DK_ARCHITECTURE_AGENT')
+    a.analyze('Inspect architecture semantics.', repo, lambda value: value)
+    assert captured[-1][2] is None
+    assert json.loads(os.environ['DK_ARCHITECTURE_PACKET']) == worker
+    for recipient in ('dk-architecture-review', 'dk-architecture-enforcer'):
+        explicit = a.provider_packet(worker, repo, recipient, ['src/core.py'])
+        a.role_analysis(a.analyze, 'Inspect explicit role evidence.', repo, lambda value: value, explicit)
+        assert captured[-1][2] == explicit
+        assert a.load(captured[-1][2])['agent'] == recipient
 
 
 def test_unknown_scope_requires_declared_paths_before_coding(repo):

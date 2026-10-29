@@ -93,7 +93,8 @@ class Scenario:
         self.calls = []
         self.different = None
         self.provider_hook = None
-        def provider(prompt, checkout, *, attempt=0):
+        def provider(prompt, checkout, *, attempt=0, inherit_architecture=True):
+            assert inherit_architecture is False
             self.calls.append(attempt)
             binding = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]['binding']
             if self.provider_hook:
@@ -214,6 +215,34 @@ def scenario(tmp_path, monkeypatch):
     return Scenario(tmp_path, monkeypatch)
 
 
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+def test_reconciliation_semantic_call_isolates_ambient_parent_packet(tmp_path, monkeypatch, host):
+    native_execute = executors.execute
+    s = Scenario(tmp_path, monkeypatch)
+    s.refresh()
+    packet = prep.architecture.packet(s.package.repo, 'worker', ['transform.py'],
+        task='parent-task', baseline=s.package.head)
+    monkeypatch.setenv('DK_HOST', host)
+    monkeypatch.setenv('DK_ARCHITECTURE_PACKET', json.dumps(packet))
+    monkeypatch.delenv('DK_ARCHITECTURE_AGENT', raising=False)
+    parent = os.environ['DK_ARCHITECTURE_PACKET']
+    attempts = []
+    def process(prompt, checkout, selected_host, env, resolved, attempt, timeout):
+        assert selected_host == host and resolved is None
+        assert 'DK_ARCHITECTURE_PACKET' not in env and 'DK_ARCHITECTURE_AGENT' not in env
+        assert os.environ['DK_ARCHITECTURE_PACKET'] == parent
+        attempts.append(attempt)
+        binding = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]['binding']
+        return 'invalid JSON' if attempt == 0 else json.dumps(s.comparison(binding))
+    monkeypatch.setattr(executors, 'execute', native_execute)
+    monkeypatch.setattr(executors, 'managed_update', lambda *_: None)
+    monkeypatch.setattr(executors, 'execute_process', process)
+    result = s.run()
+    assert result['status'] == 'reconciled' and attempts == [0, 1]
+    assert result['executed_reviewers'] == [] and len(read(s.path, {})['cycles']) == 5
+    assert os.environ['DK_ARCHITECTURE_PACKET'] == parent
+
+
 @pytest.mark.parametrize('legacy', [False, True])
 def test_retained_manifest_relative_order_survives_missing_originals(scenario, legacy):
     s = scenario
@@ -289,13 +318,13 @@ def test_reconciliation_prompt_roundtrips_non_utf8_git_filename(tmp_path, monkey
     assert filename in s.original['inputs']['tree']
     s.refresh(change=lambda value: value['placement']['production']['locations'].append(filename))
     provider = executors.execute
-    def utf8_provider(prompt, checkout, *, attempt=0):
+    def utf8_provider(prompt, checkout, *, attempt=0, inherit_architecture=True):
         transported = prompt.encode('utf-8').decode('utf-8')
         payload = json.JSONDecoder().raw_decode(transported[transported.index('{"binding":'):])[0]
         assert payload['original_analysis'] == s.original['analysis']
         assert payload['current_analysis'] == s.current['analysis']
         assert os.fsencode(payload['current_analysis']['placement']['production']['locations'][-1]) == filename_bytes
-        return provider(transported, checkout, attempt=attempt)
+        return provider(transported, checkout, attempt=attempt, inherit_architecture=inherit_architecture)
     monkeypatch.setattr(executors, 'execute', utf8_provider)
     receipt = s.run()
     assert receipt['status'] == 'reconciled' and receipt['executed_reviewers'] == []
@@ -549,7 +578,8 @@ def test_cross_path_opposite_verdicts_remain_terminally_blocked(scenario, monkey
     s.refresh()
     renewed = renewed_assessment(s)
     calls = []
-    def provider(prompt, checkout, *, attempt=0):
+    def provider(prompt, checkout, *, attempt=0, inherit_architecture=True):
+        assert inherit_architecture is False
         binding = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]['binding']
         outer = not calls
         calls.append(attempt)
@@ -620,7 +650,8 @@ def test_concurrent_opposite_verdicts_remain_terminally_blocked(scenario, monkey
     s = scenario
     s.refresh()
     calls = []
-    def provider(prompt, checkout, *, attempt=0):
+    def provider(prompt, checkout, *, attempt=0, inherit_architecture=True):
+        assert inherit_architecture is False
         binding = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]['binding']
         outer = not calls
         calls.append(attempt)

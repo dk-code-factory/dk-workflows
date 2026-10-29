@@ -39,7 +39,7 @@ def git(root, *args, binary=False):
 
 
 def relative(value, *, pattern=False):
-    if (not isinstance(value, str) or not value or value.startswith('/') or '\\' in value
+    if (not isinstance(value, str) or not value or value.startswith('/')
             or any(part in {'', '.', '..'} for part in value.split('/'))
             or '\x00' in value):
         raise ValueError('Expected a repository-relative POSIX path' + (' pattern' if pattern else ''))
@@ -173,7 +173,7 @@ def analyze(prompt, checkout, validate, *, on_call=None):
             on_call()
         if packet is not None:
             kwargs['architecture_packet'] = packet
-        return execute(prompt, checkout, **kwargs)
+        return execute(prompt, checkout, inherit_architecture=False, **kwargs)
     return execute_json(prompt, checkout, validate=validate, executor=counted)
 
 
@@ -283,8 +283,15 @@ def refresh_choices(directory, catalog):
                 if before.get(rule_id) != after.get(rule_id):
                     # Walk newest first so a later explicit re-add/edit wins.
                     deleted.setdefault(rule_id, rule_id not in after)
-            resolved.update({digest(c) for c in parent['conflicts']} -
-                            {digest(c) for c in catalog['conflicts']})
+            cleared = {digest(c) for c in parent['conflicts']} - {digest(c) for c in catalog['conflicts']}
+            resolved.update(cleared)
+            if cleared:
+                for proposal in parent['proposals']:
+                    if (isinstance(proposal, dict)
+                            and proposal.get('reason') == 'Conflicting obligations require user resolution'):
+                        held = proposal.get('rule')
+                        if isinstance(held, dict) and isinstance(held.get('id'), str) and held['id'] not in after:
+                            deleted.setdefault(held['id'], True)
         catalog = parent
     return {rule_id for rule_id, removed in deleted.items() if removed}, resolved
 
@@ -341,7 +348,7 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
         item = rule(item)
         item['sources'] = [source(root, baseline, ref) for ref in item['sources']]
         if item['id'] in deleted:
-            proposal = {'rule': item, 'reason': 'Deleted obligation requires explicit user reconsideration'}
+            proposal = {'rule': item, 'reason': 'Excluded obligation requires explicit user reconsideration'}
             proposals[digest(proposal)] = proposal
             continue
         previous = next((r for r in rules if r['id'] == item['id']), None)
@@ -382,6 +389,8 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
     with locked(directory):
         pointer = read(baseline_pointer(directory, baseline), None)
         if (pointer['fingerprint'] if pointer else None) != expected:
+            if not force and pointer:
+                return current(root, identity, baseline=baseline)
             raise ValueError('Architecture catalog changed concurrently; refresh before retrying')
         return publish(directory, catalog)
 
@@ -449,7 +458,7 @@ def selected(catalog, agent, paths):
                  or any(matches(pattern, path) for pattern in r['patterns'] for path in paths))]
 
 
-def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, identity=None, catalog=None):
+def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, governing=None, identity=None, catalog=None):
     if not agent or not task:
         raise ValueError('Agent identity and task/PR scope required')
     if paths is not None:
@@ -469,7 +478,7 @@ def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, id
                   'catalog': catalog['fingerprint'], 'baseline': catalog['baseline'],
                   'agent': agent, 'paths': paths, 'task': task, 'head': head,
                   'tree': git(root, 'rev-parse', head + '^{tree}').strip(), 'scope': digest(scope),
-                  'scope_contents': scope, 'governing_sources': {},
+                  'scope_contents': scope, 'governing_sources': governing or {},
                   'rules': selected(catalog, agent, paths)})
     directory, _ = folder(root, catalog['repository'])
     return retain(directory / 'packets' / (value['fingerprint'] + '.json'), value)
@@ -503,11 +512,12 @@ def validate_packet(reference, root, *, agent=None, paths=None, current_catalog=
 
 def context_identity(context):
     metadata = read(Path(context['metadata']), {})
-    # review_context already verifies these identities. No additional GitHub read.
+    # Reuse review_context's read-only identity validation, including deleted heads.
     if metadata.get('headRepository'):
         from shared.pr_identity import resolve
-        host, _, head = resolve({**metadata, 'url': context['url']}, context['checkout'])
-        identity = 'remote:' + host + '/' + head
+        host, base, head = resolve({**metadata, 'url': context['url']}, context['checkout'],
+                                   allow_unavailable_head=True)
+        identity = 'remote:' + host + '/' + (head or base)
         if context.get('repository_identity', identity) != identity:
             raise ValueError('Architecture repository differs from pinned PR identity')
         return identity
@@ -565,17 +575,13 @@ def validate_preparation(value, context, decisions, *, live=True):
 
 def handoff(value, context, agent, paths=None):
     coordinator = validate_packet(value['packet'], context['checkout'])
-    catalog = current(context['checkout'], coordinator['repository'], baseline=coordinator['baseline'])
-    reference = packet(context['checkout'], agent, paths, task=coordinator['task'],
-                       head=coordinator['head'], identity=coordinator['repository'], catalog=catalog,
-                       scope=None)
+    catalog = current(context['checkout'], coordinator['repository'], baseline=coordinator['baseline'],
+                      catalog=coordinator['catalog'])
     # Keep exactly the coordinator's governing scope, rather than hashing a hash.
-    saved = load(reference)
-    saved = seal({**{k: v for k, v in saved.items() if k != 'fingerprint'}, 'scope': coordinator['scope'],
-                  'scope_contents': coordinator['scope_contents'],
-                  'governing_sources': value.get('governing', coordinator.get('governing_sources', {}))})
-    directory, _ = folder(context['checkout'], coordinator['repository'])
-    return retain(directory / 'packets' / (saved['fingerprint'] + '.json'), saved)
+    return packet(context['checkout'], agent, paths, task=coordinator['task'],
+                  head=coordinator['head'], identity=coordinator['repository'], catalog=catalog,
+                  scope=coordinator['scope_contents'],
+                  governing=value.get('governing', coordinator.get('governing_sources', {})))
 
 
 def provider_packet(reference, root, agent, paths=None):

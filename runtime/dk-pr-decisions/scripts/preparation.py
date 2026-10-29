@@ -183,7 +183,7 @@ def analyze(prompt, checkout, *, validate=None, on_call=None):
     def counted(*args, **kwargs):
         if on_call:
             on_call()
-        return execute(*args, **kwargs)
+        return execute(*args, inherit_architecture=False, **kwargs)
     return execute_json(prompt, checkout, validate=validate, executor=counted,
                         correction_instructions='worker_instructions and completion_criteria must be nonempty strings.')
 

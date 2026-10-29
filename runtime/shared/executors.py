@@ -169,11 +169,17 @@ def provider_timeout():
     return seconds
 
 
-def execute_json(prompt, checkout, *, validate=None, executor=None, correction_instructions=''):
-    """Correct model JSON once, without retrying provider failures or coercing data."""
+def execute_json(prompt, checkout, *, validate=None, executor=None, correction_instructions='',
+                 inherit_architecture=True):
+    """Correct JSON once; architecture inheritance applies only to the default executor."""
     original_prompt = prompt
     for attempt in range(2):
-        raw = (executor or execute)(prompt, checkout, attempt=attempt)
+        if executor:
+            raw = executor(prompt, checkout, attempt=attempt)
+        elif inherit_architecture:
+            raw = execute(prompt, checkout, attempt=attempt)
+        else:
+            raw = execute(prompt, checkout, attempt=attempt, inherit_architecture=False)
         try:
             result = json.loads(raw)
             if not isinstance(result, dict):
@@ -284,7 +290,8 @@ def update_process(resolved, env, phase, token=None):
     return receipt
 
 
-def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, architecture_packet=None):
+def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, architecture_packet=None,
+            inherit_architecture=True):
     if _CANCELLATION.get() is not None:
         _CANCELLATION.get().check()
     timeout = provider_timeout() if timeout is None else timeout
@@ -292,6 +299,10 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, archite
     if host not in ('codex', 'claude'):
         raise ValueError('Model execution requires a native host')
     env = dict(os.environ, DK_HOST=host)
+    if not inherit_architecture:
+        # Internal semantic helpers have no agent role in the caller's scope.
+        env.pop('DK_ARCHITECTURE_PACKET', None)
+        env.pop('DK_ARCHITECTURE_AGENT', None)
     inherited_architecture = architecture_packet or env.get('DK_ARCHITECTURE_PACKET')
     if inherited_architecture:
         from shared import architecture
