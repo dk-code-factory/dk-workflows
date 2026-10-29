@@ -543,6 +543,41 @@ def test_damaged_retained_state_never_replenishes_correction(tmp_path, monkeypat
         assert isinstance(caught.value.__cause__, RecursionError)
 
 
+def test_retained_evidence_symlink_loop_preserves_diagnostics_and_history(tmp_path, monkeypatch):
+    monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
+    checkout = tmp_path / 'repo'
+    checkout.mkdir()
+    provider = Mock(return_value='invalid')
+    kwargs = {'executor': provider, 'diagnostic_scope': 'engineering-preparation'}
+    with pytest.raises(ValidationFailure) as exhausted:
+        executors.execute_json('Frozen evidence', checkout, **kwargs)
+    evidence = Path(exhausted.value.action['artifacts'][0])
+    index, = (tmp_path / 'state/dk-code-factory/workflows/model-exchanges').glob('*.json')
+    loop = index.parent.parent / 'workflow-loop'
+    loop.symlink_to(loop.name, target_is_directory=True)
+    try:
+        value = json.loads(index.read_text())
+        pointer = loop / 'model-exchange.json'
+        value['evidence'] = str(pointer)
+        private_state.write(index, value)
+        paths = (index, evidence, index.with_suffix('.lock'))
+        before = {path: path.read_bytes() for path in paths}
+        journals = {path: path.read_bytes() for path in (tmp_path / 'state').rglob('model-exchange.json')}
+        with pytest.raises(model_diagnostics.StorageFailure) as caught:
+            executors.execute_json('Frozen evidence', checkout, **kwargs)
+        assert caught.value.code == 'model_diagnostics_invalid'
+        assert type(caught.value.__cause__) in (OSError, RuntimeError)
+        assert caught.value.action['artifacts'] == [str(index), str(pointer)]
+        assert 'correction budget' in caught.value.action['task']
+        assert str(loop) not in str(caught.value)
+        assert provider.call_count == 2
+        assert {path: path.read_bytes() for path in paths} == before
+        assert {path: path.read_bytes() for path in (tmp_path / 'state').rglob('model-exchange.json')} == journals
+        assert os.readlink(loop) == loop.name
+    finally:
+        loop.unlink()
+
+
 @pytest.mark.parametrize('interrupted', [False, True])
 @pytest.mark.parametrize('stage', ['setup', 'provider'])
 def test_same_key_competitors_cannot_replay_consumed_exchange(tmp_path, monkeypatch, interrupted, stage):

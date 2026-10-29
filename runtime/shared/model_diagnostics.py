@@ -166,10 +166,14 @@ def retained(path, identity):
                 or not isinstance(index['evidence'], str)):
             raise ValueError('invalid index schema')
         evidence = Path(index['evidence'])
-        resolved = evidence.resolve()
+        try:
+            resolved = evidence.resolve(strict=True)
+            owned_root = path.parent.parent.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise retained_failure('exchange evidence path could not be resolved', path, evidence) from exc
         if (not evidence.is_absolute() or resolved.name != 'model-exchange.json'
                 or not resolved.parent.name.startswith('workflow-')
-                or resolved.parent.parent != path.parent.parent.resolve()):
+                or resolved.parent.parent != owned_root):
             raise ValueError('index evidence pointer is outside owned exchange storage')
         try:
             value = read(evidence, None)
