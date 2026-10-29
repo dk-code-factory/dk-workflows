@@ -166,6 +166,65 @@ def test_uncertain_and_conflicting_conventions_are_not_adopted(repo):
     assert a.ensure(repo) == catalog
     assert held in catalog['proposals']
     deliver(repo)
+    resolved = catalog
+    for _ in range(2):
+        catalog = a.ensure(repo, catalog['baseline'], force=True, analyzer=lambda *_: result)
+        assert not catalog['conflicts']
+        assert catalog['rules'] == resolved['rules']
+        deliver(repo)
+    new_conflict = {'text': 'New disagreement about core', 'sources': ['src/core.py']}
+    result['conflicts'].append(new_conflict)
+    catalog = a.ensure(repo, catalog['baseline'], force=True, analyzer=lambda *_: result)
+    assert catalog['conflicts'] == [new_conflict]
+    with pytest.raises(ValueError, match='user resolution'):
+        deliver(repo)
+    catalog = a.edit(repo, obligation(), user=USER, expected=catalog['fingerprint'], resolve_conflicts=True)
+    catalog = a.ensure(repo, catalog['baseline'], force=True, analyzer=lambda *_: result)
+    assert not catalog['conflicts']
+    deliver(repo)
+
+
+def test_user_deletion_survives_refresh_until_explicit_readdition(repo):
+    original = initialize(repo, [obligation()])
+    deleted = a.edit(repo, delete='arch-core', user=USER, expected=original['fingerprint'])
+    catalog = deleted
+    for _ in range(2):
+        catalog = a.ensure(repo, catalog['baseline'], force=True,
+                           analyzer=lambda *_: model_result(rules=[obligation()]))
+        assert not catalog['rules']
+        assert any(p.get('rule', {}).get('id') == 'arch-core' for p in catalog['proposals'])
+    readded = a.edit(repo, obligation(text='Explicitly restored boundary.'), user=USER,
+                     expected=catalog['fingerprint'])
+    catalog = a.ensure(repo, catalog['baseline'], force=True,
+                       analyzer=lambda *_: model_result(rules=[obligation()]))
+    assert catalog['rules'] == readded['rules']
+    directory, _ = a.folder(repo)
+    for historical in (original, deleted, readded):
+        assert a.load({'path': str(directory / 'catalogs' / (historical['fingerprint'] + '.json')),
+                       'fingerprint': historical['fingerprint']}) == historical
+
+
+@pytest.mark.parametrize('choice', ['delete', 'resolve'])
+def test_user_refresh_choices_are_independent_per_baseline(repo, choice):
+    result = model_result(rules=[obligation()])
+    catalog = initialize(repo, [obligation()])
+    if choice == 'resolve':
+        result['conflicts'] = [{'text': 'Guidance disagrees about core', 'sources': ['src/core.py']}]
+        catalog = a.ensure(repo, catalog['baseline'], force=True, analyzer=lambda *_: result)
+    catalog = a.edit(repo, obligation(), delete='arch-core' if choice == 'delete' else None,
+                     user=USER, expected=catalog['fingerprint'], resolve_conflicts=choice == 'resolve')
+    (repo / 'old.py').write_text('second = True\n')
+    run(repo, 'add', '.')
+    run(repo, 'commit', '-qm', 'independent baseline')
+    sibling = a.ensure(repo, analyzer=lambda *_: result)
+    if choice == 'delete':
+        assert [r['id'] for r in sibling['rules']] == ['arch-core']
+    else:
+        assert sibling['conflicts'] == result['conflicts']
+    for _ in range(2):
+        catalog = a.ensure(repo, catalog['baseline'], force=True, analyzer=lambda *_: result)
+        assert not catalog['rules' if choice == 'delete' else 'conflicts']
+        assert a.current(repo, baseline=sibling['baseline']) == sibling
 
 
 def test_new_baseline_derives_its_own_obligations_without_invalidating_old(repo):
@@ -475,6 +534,34 @@ def test_review_requires_complete_coverage_and_approved_exceptions(repo, tmp_pat
                  reviewer=lambda *_: {'complete': True, 'reason': '', 'coverage': coverage})
 
 
+@pytest.mark.parametrize('revision', ['baseline', 'head'])
+def test_not_applicable_requires_evidence_through_review_and_verification(repo, tmp_path, revision):
+    initialize(repo, [obligation()])
+    ctx, decisions = context(repo, tmp_path)
+    run(repo, 'rm', 'src/core.py')
+    run(repo, 'commit', '-qm', 'delete governed file')
+    ctx['head_sha'] = run(repo, 'rev-parse', 'HEAD')
+    prepared = a.prepare(ctx, decisions)
+    judgment = verdict(obligation(), 'not_applicable', evidence_revision=ctx[
+                       'base_sha' if revision == 'baseline' else 'head_sha'])
+    if revision == 'head':
+        judgment['evidence'] = [{'path': 'old.py', 'start': 1, 'end': 1}]
+    result = {'complete': True, 'reason': '', 'coverage': [judgment]}
+    missing = deepcopy(result)
+    missing['coverage'][0]['evidence'] = []
+    with pytest.raises(ValueError, match='requires code evidence'):
+        a.review(prepared, ctx, decisions, reviewer=lambda *_: missing)
+    reviewed = a.review(prepared, ctx, decisions, reviewer=lambda *_: result)
+    assert a.verify_review(reviewed, prepared, ctx, decisions)['result'] == result
+    # Previously sealed complete results must meet the same verification contract.
+    historical = a.load(reviewed)
+    historical['result'] = missing
+    historical = a.seal({k: v for k, v in historical.items() if k != 'fingerprint'})
+    reference = a.retain(Path(reviewed['path']).with_name(historical['fingerprint'] + '.json'), historical)
+    with pytest.raises(ValueError, match='requires code evidence'):
+        a.verify_review(reference, prepared, ctx, decisions)
+
+
 def test_incomplete_and_violation_never_pass_completion(repo, tmp_path):
     initialize(repo, [obligation()])
     ctx, decisions = context(repo, tmp_path)
@@ -554,8 +641,8 @@ def test_architect_cannot_enable_autoapproval(repo):
         a.ensure(repo, analyzer=lambda *_: model_result(rules=[obligation(auto_approve=True, approval_when='always')]))
 
 
-@pytest.mark.parametrize('role', ['knowledge', 'rule', 'review', 'enforcer'])
-@pytest.mark.parametrize('malformed', ['string', 'missing_path', 'container'])
+@pytest.mark.parametrize('role', ['knowledge', 'rule', 'review', 'not_applicable', 'enforcer'])
+@pytest.mark.parametrize('malformed', ['string', 'missing_path', 'container', 'empty'])
 def test_malformed_model_evidence_gets_one_counted_correction(repo, tmp_path, monkeypatch, role, malformed):
     from shared import executors
     calls = []
@@ -567,11 +654,12 @@ def test_malformed_model_evidence_gets_one_counted_correction(repo, tmp_path, mo
         refs = (invalid['knowledge']['module_map'][0] if role == 'knowledge' else invalid['rules'][0])
         field = 'sources'
         invoke = lambda: a.ensure(repo, analyzer=analyze)
-    elif role == 'review':
+    elif role in ('review', 'not_applicable'):
         initialize(repo, [obligation()])
         ctx, decisions = context(repo, tmp_path)
         prepared = a.prepare(ctx, decisions)
-        valid = {'complete': True, 'reason': '', 'coverage': [verdict(obligation())]}
+        valid = {'complete': True, 'reason': '', 'coverage': [verdict(obligation(),
+                 'not_applicable' if role == 'not_applicable' else 'compliant')]}
         invalid = deepcopy(valid)
         refs, field = invalid['coverage'][0], 'evidence'
         invoke = lambda: a.review(prepared, ctx, decisions, reviewer=analyze)
@@ -585,7 +673,7 @@ def test_malformed_model_evidence_gets_one_counted_correction(repo, tmp_path, mo
         invalid = deepcopy(valid)
         refs, field = invalid, 'evidence'
         invoke = lambda: a.enforce(pending, repo, evaluator=analyze)
-    refs[field] = {'string': ['src/core.py'], 'missing_path': [{}], 'container': 1}[malformed]
+    refs[field] = {'string': ['src/core.py'], 'missing_path': [{}], 'container': 1, 'empty': []}[malformed]
     responses = iter([invalid, valid])
     prompts = []
     def execute(prompt, *_args, **kwargs):
@@ -596,7 +684,7 @@ def test_malformed_model_evidence_gets_one_counted_correction(repo, tmp_path, mo
     assert result and len(calls) == 2
     assert [attempt for _, attempt in prompts] == [0, 1]
     assert 'Correction:' in prompts[-1][0]
-    if role == 'review':
+    if role in ('review', 'not_applicable'):
         a.verify_review(result, prepared, ctx, decisions)
     elif role == 'enforcer':
         assert a.load(result)['approved']

@@ -268,6 +268,27 @@ def publish(directory, catalog):
     return saved
 
 
+def refresh_choices(directory, catalog):
+    """Recover explicit choices from immutable edits, including existing history."""
+    deleted, resolved = {}, set()
+    while catalog and catalog['parent']:
+        parent = load({'path': str(directory / 'catalogs' / (catalog['parent'] + '.json')),
+                       'fingerprint': catalog['parent']})
+        if any(parent[key] != catalog[key] for key in ('repository', 'baseline')):
+            raise ValueError('Architecture edit history differs from selected baseline/repository')
+        if 'user_resolution' in catalog:
+            before = {r['id']: r for r in parent['rules']}
+            after = {r['id']: r for r in catalog['rules']}
+            for rule_id in before.keys() | after.keys():
+                if before.get(rule_id) != after.get(rule_id):
+                    # Walk newest first so a later explicit re-add/edit wins.
+                    deleted.setdefault(rule_id, rule_id not in after)
+            resolved.update({digest(c) for c in parent['conflicts']} -
+                            {digest(c) for c in catalog['conflicts']})
+        catalog = parent
+    return {rule_id for rule_id, removed in deleted.items() if removed}, resolved
+
+
 def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
     root = Path(root).resolve()
     if baseline is None:
@@ -283,6 +304,7 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
         if old and not force:
             return old
         expected = old['fingerprint'] if old else None
+    deleted, resolved = refresh_choices(directory, old)
     # Analyze an isolated baseline, never PR-derived head guidance or local edits.
     workspace = workflow_storage.allocate(repository=root)
     checkout = workspace / 'baseline'
@@ -310,10 +332,18 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
         proposals[digest(item)] = deepcopy(item)
     for item in value['conflicts']:
         conflicts[digest(item)] = deepcopy(item)
-    rules = deepcopy(old['rules'] if old else [])
+    for fingerprint in [key for key in conflicts if key in resolved]:
+        proposal = {'conflict': conflicts.pop(fingerprint),
+                    'reason': 'Resolved conflict requires explicit user reconsideration'}
+        proposals[digest(proposal)] = proposal
+    rules = [deepcopy(r) for r in old['rules'] if r['id'] not in deleted] if old else []
     for item in value['rules']:
         item = rule(item)
         item['sources'] = [source(root, baseline, ref) for ref in item['sources']]
+        if item['id'] in deleted:
+            proposal = {'rule': item, 'reason': 'Deleted obligation requires explicit user reconsideration'}
+            proposals[digest(proposal)] = proposal
+            continue
         previous = next((r for r in rules if r['id'] == item['id']), None)
         if previous:
             # Semantic changes, including potentially stronger/conflicting ones,
@@ -659,7 +689,7 @@ def validate_review_result(result, delivered, root, approvals):
             raise ValueError('Architecture review cites evidence outside the pinned baseline/head')
         for ref in item['evidence']:
             source(root, item.get('evidence_revision', delivered['head']), ref)
-        if not item['evidence'] and item['status'] != 'not_applicable':
+        if not item['evidence']:
             raise ValueError('Architecture judgment requires code evidence')
         if item['status'] == 'approved_exception':
             if not isinstance(item.get('paths'), list):
