@@ -413,6 +413,62 @@ def test_actions_command_preamble_requires_one_test_command():
     assert not archive_report(archive(FAIL), JOB, step, [JOB, JOB])['complete']
 
 
+@pytest.mark.parametrize('bom', ['', '\ufeff'])
+@pytest.mark.parametrize('command,expected', [
+    ('go test -json ./...', None),
+    ('bash scripts/integration.sh', 'unsupported step command'),
+    ('test "$RESULT" = success', 'unsupported step command'),
+    ('go test -json ./...; deploy', 'compound test step'),
+    ('go test -json ./...\ndeploy', 'unsupported step command'),
+])
+def test_actions_bom_preserves_go_command_and_failure_coverage(bom, command, expected):
+    from shared.flaky_actions import archive_report
+    events = [
+        {'Action': 'run', 'Package': 'fixture', 'Test': 'TestOne'},
+        {'Action': 'output', 'Package': 'fixture', 'Test': 'TestOne', 'Output': 'expected 1, got 2'},
+        {'Action': 'fail', 'Package': 'fixture', 'Test': 'TestOne'},
+        {'Action': 'fail', 'Package': 'fixture'},
+    ]
+    output = '\n'.join(json.dumps(event) for event in events)
+    text = (f'##[group]Run {command}\n{command}\nshell: /usr/bin/bash -e {{0}}\n'
+            f'##[endgroup]\n{output}\n##[error]Process completed with exit code 1.')
+    timestamp = '2026-10-01T00:00:00.1234567Z '
+    text = bom + timestamp + text.replace('\n', '\n' + timestamp)
+    report = archive_report(archive(text), JOB, {'number': 1}, [JOB])
+    if expected:
+        assert not report['complete'] and report['tests'] == []
+        assert expected in report['reason']
+    else:
+        assert report['complete']
+        assert report['tests'] == [{'test': 'fixture::TestOne', 'outcome': 'fail',
+                                    'signature': 'expected 1, got 2'}]
+
+
+@pytest.mark.parametrize('bom', ['', '\ufeff'])
+@pytest.mark.parametrize('output,reason', [
+    ('integration harness failed', 'unsupported test report format'),
+    ('Some required jobs failed', 'unsupported test report format'),
+    ('{"result": "failure"}', 'unsupported JSON test report'),
+    ('================ test session starts ================', 'pytest completion summaries'),
+    ('{"Action":"run","Package":"fixture","Test":"TestOne"}', 'incomplete Go test events'),
+    (FAIL + '\nError: deployment failed', 'non-test error'),
+])
+def test_report_selection_requires_recognized_evidence(bom, output, reason):
+    timestamp = '2026-10-01T00:00:00.1234567Z '
+    report = parse_report(bom + timestamp + output.replace('\n', '\n' + timestamp))
+    assert not report['complete']
+    assert reason in report['reason']
+
+
+@pytest.mark.parametrize('bom', ['', '\ufeff'])
+def test_bom_does_not_hide_incomplete_actions_preamble(bom):
+    from shared.flaky_actions import archive_report
+    report = archive_report(archive(bom + '##[group]Run go test -json\ngo test -json'),
+                            JOB, {'number': 1}, [JOB])
+    assert not report['complete']
+    assert report['reason'] == 'incomplete Actions command preamble'
+
+
 def test_every_failed_step_requires_coverage_and_complete_metadata(registry):
     api = FakeAPI()
     decide(api, registry)

@@ -104,7 +104,7 @@ def archive_report(archive, job_name, step, job_names):
             members = [m for m in bundle.infolist() if m.filename.startswith(prefix) and m.filename.endswith('.txt')]
             if len(members) != 1 or members[0].file_size > MAX_REPORT_BYTES:
                 return result(reason='missing/ambiguous step log or 10 MiB report limit')
-            text = bundle.read(members[0]).decode('utf-8', errors='strict')
+            text = bundle.read(members[0]).decode('utf-8-sig', errors='strict')
             # Actions command preamble is not test output. Remove a single closed
             # group containing only the invocation/environment (not test results).
             lines = text.splitlines()
@@ -127,7 +127,8 @@ def archive_report(archive, job_name, step, job_names):
                 if (len(commands) != 1 or not re.match(
                         r'^(?:pytest\b|python[23]?(?:\.\d+)? -m pytest\b|go test\b|(?:npx )?jest\b)',
                         commands[0])):
-                    return result(reason='step command does not prove exclusive test execution')
+                    return result(reason='unsupported step command (wrapper or aggregate gate): '
+                                  'step command does not prove exclusive test execution')
                 text = '\n'.join(lines[end + 1:])
             return parse_report(text) | {'archive_member': members[0].filename}
     except (zipfile.BadZipFile, UnicodeError, KeyError, RuntimeError):
