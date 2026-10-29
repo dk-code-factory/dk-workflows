@@ -197,7 +197,8 @@ def validate_analysis(value, root, baseline):
             if (not isinstance(item, dict) or not isinstance(item.get('text'), str) or not item['text'].strip()
                     or not isinstance(item.get('rationale'), str) or not item['rationale'].strip()
                     or item.get('origin') not in ('documented', 'inferred')
-                    or not isinstance(item.get('sources'), list) or not item['sources']):
+                    or not isinstance(item.get('sources'), list)
+                    or not item['sources'] and git(root, 'ls-tree', baseline)):
                 raise ValueError('Knowledge requires text, rationale, origin and sources')
             for ref in item['sources']:
                 source(root, baseline, ref)
@@ -327,8 +328,16 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
               'Only adopt established evidence-backed rules; uncertain conventions are proposals. '
               'Report conflicting obligations in conflicts and propose resolutions, never silently weaken old rules. '
               'Existing catalog: ' + json.dumps(old) + '\nBaseline: ' + baseline)
-    value = (analyzer or analyze)(prompt, checkout,
-                                  lambda v: validate_analysis(v, root, baseline))
+    if not git(root, 'ls-tree', tree):
+        # The pinned commit/tree sealed in the catalog witnesses these absences.
+        value = {'knowledge': {category: [{
+            'text': 'No ' + category + ': the committed baseline tree is empty.',
+            'rationale': 'Git reports no entries in the pinned baseline tree.',
+            'origin': 'inferred', 'sources': []}] for category in KNOWLEDGE},
+            'rules': [], 'proposals': [], 'conflicts': []}
+    else:
+        value = (analyzer or analyze)(prompt, checkout,
+                                      lambda v: validate_analysis(v, root, baseline))
     validate_analysis(value, root, baseline)
     if git(checkout, 'status', '--porcelain=v1').strip() or git(checkout, 'rev-parse', 'HEAD').strip() != baseline:
         raise ValueError('Architect changed its baseline checkout')
@@ -712,9 +721,12 @@ def validate_review_result(result, delivered, root, approvals):
 
 
 def review(value, context, decisions, *, exceptions=None, reviewer=None):
+    prepared_exceptions = value.get('exceptions', [])
+    if exceptions is not None and exceptions != prepared_exceptions:
+        raise ValueError('Architecture review exceptions differ from preparation')
     delivered = validate_preparation(value, context, decisions)
     reference = handoff(value, context, 'dk-architecture-review', delivered['paths'])
-    exceptions = value.get('exceptions', []) if exceptions is None else exceptions
+    exceptions = prepared_exceptions
     approvals = [validate_exception(ref, delivered, context['checkout']) for ref in exceptions]
     def validate(result):
         return validate_review_result(result, delivered, context['checkout'], approvals)

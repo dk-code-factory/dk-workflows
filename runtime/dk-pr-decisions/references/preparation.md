@@ -5,8 +5,9 @@ collected evidence or deriving workflow requirements.
 
 Prepare before initial iteration work, rebasing, feedback fixes or standalone review.
 Preparation is read-only: it records evidence and guidance outside the repository.
-Collection initializes/refreshes the private architecture catalog from the target
-baseline and pins the complete coordinator packet as architecture/0. Optional
+Collection initializes a missing private architecture catalog from the target
+baseline or reuses its existing catalog, then pins the complete coordinator packet
+as architecture/0. Reanalysis requires explicit `architecture refresh`. Optional
 architecture_exceptions in the manifest is an array of immutable approval
 references. Collection and work gates revalidate their rule revisions, paths,
 code and scope/Decisions. Read [architecture delivery](../../dk-architect/procedure.md).

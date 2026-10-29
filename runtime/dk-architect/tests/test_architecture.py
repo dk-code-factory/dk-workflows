@@ -56,6 +56,14 @@ def initialize(root, rules=()):
     return a.ensure(root, analyzer=lambda *_: model_result(rules=rules))
 
 
+@pytest.fixture
+def empty_repo(repo):
+    run(repo, 'checkout', '--orphan', 'empty-baseline')
+    run(repo, 'rm', '-rf', '.')
+    run(repo, 'commit', '--allow-empty', '-qm', 'empty committed baseline')
+    return repo
+
+
 def deliver(root, agent='worker', paths=None, **kwargs):
     kwargs.setdefault('baseline', run(root, 'rev-parse', 'HEAD'))
     return a.packet(root, agent, paths, task='task-1', scope={'goal': 'core'}, **kwargs)
@@ -178,6 +186,69 @@ def test_clean_local_baseline_and_automatic_reuse(repo):
         initialize(repo)
     # An explicitly pinned baseline remains valid while local coding proceeds.
     assert a.ensure(repo, catalog['baseline']) == catalog
+
+
+def test_empty_committed_baseline_initialization_and_refresh_preserve_user_policy(empty_repo, monkeypatch):
+    monkeypatch.setattr(a, 'analyze', lambda *_: pytest.fail('Empty tree needs no model inference'))
+    catalog = a.ensure(empty_repo)
+    assert catalog['baseline'] == run(empty_repo, 'rev-parse', 'HEAD')
+    assert catalog['tree'] == run(empty_repo, 'rev-parse', 'HEAD^{tree}')
+    assert run(empty_repo, 'ls-tree', catalog['tree']) == ''
+    assert set(catalog['knowledge']) == set(a.KNOWLEDGE)
+    for items in catalog['knowledge'].values():
+        assert len(items) == 1 and items[0]['sources'] == []
+        assert items[0]['text'] and items[0]['rationale']
+    assert catalog['rules'] == catalog['proposals'] == catalog['conflicts'] == []
+    assert a.ensure(empty_repo) == catalog
+    configured = a.edit(empty_repo, obligation(origin='user-created', sources=[],
+        auto_approve=True, approval_when='Explicit user condition.'), user=USER,
+        expected=catalog['fingerprint'])
+    refreshed = a.ensure(empty_repo, force=True)
+    assert refreshed['rules'] == configured['rules']
+    assert refreshed['knowledge'] == catalog['knowledge']
+    assert refreshed['parent'] == configured['fingerprint']
+
+
+@pytest.mark.parametrize('invalid', ['missing_category', 'missing_rationale', 'missing_sources', 'invented_path', 'rule'])
+def test_empty_baseline_absences_keep_knowledge_and_rule_validation(empty_repo, invalid):
+    catalog = a.ensure(empty_repo)
+    value = {key: deepcopy(catalog[key]) for key in ('knowledge', 'rules', 'proposals', 'conflicts')}
+    item = value['knowledge']['module_map'][0]
+    if invalid == 'missing_category':
+        value['knowledge']['module_map'] = []
+    elif invalid == 'missing_rationale':
+        item['rationale'] = ''
+    elif invalid == 'missing_sources':
+        del item['sources']
+    elif invalid == 'invented_path':
+        item['sources'] = [{'path': 'nonexistent.py'}]
+    else:
+        value['rules'] = [{**obligation(), 'sources': []}]
+    with pytest.raises(ValueError):
+        a.validate_analysis(value, empty_repo, catalog['baseline'])
+
+
+def test_first_files_pr_uses_empty_baseline_and_still_requires_independent_review(empty_repo, tmp_path, monkeypatch):
+    ctx, decisions = context(empty_repo, tmp_path)
+    (empty_repo / 'first.py').write_text('first = True\n')
+    run(empty_repo, 'add', '.')
+    run(empty_repo, 'commit', '-qm', 'first files')
+    ctx['head_sha'] = run(empty_repo, 'rev-parse', 'HEAD')
+    monkeypatch.setattr(a, 'analyze', lambda *_: pytest.fail('Baseline absence needs no model inference'))
+    prepared = a.prepare(ctx, decisions)
+    catalog = a.current(empty_repo, baseline=ctx['base_sha'])
+    packet = a.load(prepared['packet'])
+    assert packet['baseline'] == ctx['base_sha'] and packet['paths'] == ['first.py']
+    value = {key: catalog[key] for key in ('knowledge', 'rules', 'proposals', 'conflicts')}
+    with pytest.raises(ValueError, match='Knowledge requires'):
+        a.validate_analysis(value, empty_repo, ctx['head_sha'])
+    calls = []
+    def review(prompt, checkout, validate):
+        calls.append((checkout, prompt))
+        return {'complete': True, 'reason': '', 'coverage': []}
+    reviewed = a.review(prepared, ctx, decisions, reviewer=review)
+    assert len(calls) == 1
+    assert a.verify_review(reviewed, prepared, ctx, decisions)['result']['complete']
 
 
 def test_same_baseline_refresh_keeps_obligations_and_user_policy(repo):
@@ -687,6 +758,22 @@ def test_review_requires_complete_coverage_and_approved_exceptions(repo, tmp_pat
     with pytest.raises(ValueError):
         a.review(prepared, ctx, decisions,
                  reviewer=lambda *_: {'complete': True, 'reason': '', 'coverage': coverage})
+
+
+@pytest.mark.parametrize('prepared_has_exception', [False, True])
+def test_review_rejects_divergent_exceptions_before_handoff_or_model(repo, tmp_path, monkeypatch, prepared_has_exception):
+    initialize(repo, [obligation()])
+    ctx, decisions = context(repo, tmp_path)
+    prepared = a.prepare(ctx, decisions)
+    worker = a.handoff(prepared, ctx, 'worker', ['src/core.py'])
+    approved = a.enforce(request(repo, worker), repo, user=USER)
+    if prepared_has_exception:
+        prepared = a.prepare(ctx, decisions, exceptions=[approved])
+    monkeypatch.setattr(a, 'handoff', lambda *_: pytest.fail('Divergent exceptions must fail before handoff'))
+    monkeypatch.setattr(a, 'analyze', lambda *_: pytest.fail('Divergent exceptions must not spend a model call'))
+    with pytest.raises(ValueError, match='exceptions differ from preparation'):
+        a.review(prepared, ctx, decisions, exceptions=[] if prepared_has_exception else [approved])
+    assert not (a.folder(repo)[0] / 'reviews').exists()
 
 
 @pytest.mark.parametrize('change', ['catalog', 'governing', 'missing_governing'])

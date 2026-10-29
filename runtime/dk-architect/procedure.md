@@ -19,6 +19,10 @@ one baseline preserves sibling baselines and their packets, preparations, review
 and approvals. Same-baseline catalog changes require fresh evidence for that
 baseline. Keep generated knowledge private.
 
+An empty committed baseline records absent architecture knowledge using its
+sealed commit and empty-tree identity. Those knowledge entries have no file
+sources. Rules, reviews and exception approvals retain their citation requirements.
+
 Inspect production code, guidance, dependencies, entrypoints and tests before
 writing the module map. Record rationale, documented decisions versus inferred
 conventions, source locations and fingerprints. Adopt only established,

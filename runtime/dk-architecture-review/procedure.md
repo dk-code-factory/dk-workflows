@@ -9,8 +9,11 @@ paths/locations, code evidence, rationale and consequence. You cannot grant or
 broaden exceptions. Unmet, ambiguous or disabled policies require the user.
 
 Use `architecture review --preparation FILE --context FILE --decisions FILE`
-with optional `--exceptions-file FILE` (an array of approval references). Return
-one coverage judgment for every catalog rule, including evidence-backed
+with approvals supplied by the preparation manifest's `architecture_exceptions`.
+Optional `--exceptions-file FILE` must contain the same approval references in the
+same order; a different list is rejected before review. To change approvals,
+refresh preparation with the intended manifest first. Return one coverage
+judgment for every catalog rule, including evidence-backed
 not-applicable judgments. Missing/duplicate coverage, provider failure and stale
 evidence block the gate. Incomplete means complete:false, a reason, and no coverage.
 The shared PR runner invokes this mandatory independent gate alongside configured

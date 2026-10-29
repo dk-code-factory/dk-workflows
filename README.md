@@ -87,13 +87,16 @@ rules may be adopted automatically; uncertain conventions remain proposals.
 Conflicts and changes to existing obligations require explicit user resolution.
 
 Rules carry IDs/revisions, origin, source locations/fingerprints, POSIX file globs,
-recipient IDs and user-owned autoapproval policy. Empty recipients target the
-coordinator and architecture reviewer; `all` targets everyone. Empty patterns
-remove file filtering; ** spans directories. Mandatory recipients always see the
-full catalog. Workers declare paths before editing and receive a refreshed packet
-when scope expands, including rename/deletion paths and nested handoffs. Export
-packets explicitly for agents outside DK execution. Exceptions cover one task/PR,
-revision, deviation, paths, code evidence and scope/Decisions; only the user can
+recipient IDs and user-owned autoapproval policy. Empty recipients target only
+mandatory recipients: the coordinator, architecture reviewer, `dk-pr-iter`,
+`dk-pr-review`, `dk-pr-address-reviews` and `dk-pr-split-commits`. Skill identities
+also accept the `dk-workflows:` prefix and host suffixes. `all` targets everyone.
+Empty patterns remove file filtering; ** spans directories. Mandatory recipients
+always see the full catalog. Workers declare paths before editing and receive a
+refreshed packet when scope expands, including rename/deletion paths and nested
+handoffs. Export packets explicitly for agents outside DK execution. Exceptions
+cover one task/PR, revision, deviation, paths, code evidence and scope/Decisions;
+only the user can
 enable automatic approval or broaden its conditions. An independent enforcer
 retains approvals/rejections; reviewers cannot grant exceptions.
 
