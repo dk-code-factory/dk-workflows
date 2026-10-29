@@ -266,7 +266,7 @@ def cleanup_receipt(repo, tmp_path):
     from shared.private_state import write
     from unittest.mock import patch
     sys.path.insert(0, str(ROOT / 'dk-pr-decisions/tests'))
-    from preparation_fixtures import Package, analysis, descriptor, prep, retain
+    from preparation_fixtures import Package, analysis, descriptor, prep, retain, bind_agreements
     spec = importlib.util.spec_from_file_location('regroup_run_state', ROOT / 'dk-pr-iter/scripts/run_state.py')
     state = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(state)
@@ -281,6 +281,7 @@ def cleanup_receipt(repo, tmp_path):
     p.context.update(url=PR, repository=str(work), checkout=str(isolated),
                      head_sha=data['original_head'], base_sha=data['base'])
     p.decisions.update(pr_url=PR, head_sha=data['original_head'])
+    bind_agreements(p.context, p.decisions)
     p.write('context.json', p.context)
     p.write('decisions.json', p.decisions)
     p.manifest['mode'] = 'iteration'

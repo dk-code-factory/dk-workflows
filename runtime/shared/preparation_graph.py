@@ -106,10 +106,21 @@ def semantic(key, content):
         return {k: v for k, v in value.items()
                 if k not in {'head_sha', 'checkout', 'repository', 'patch', 'metadata',
                              'local_head', 'worktree_clean', 'local_matches_pr', 'workflow_dir', 'context_file'}}
-    if key == 'decisions':
+    data = value.get('data', value) if isinstance(value, dict) else None
+    binding = data.get('agreement_binding') if isinstance(data, dict) else None
+    bound_copy = (category == 'choices' and isinstance(data, dict) and data.get('verified') is True
+                  and {'pr_url', 'head_sha', 'body_hash', 'decisions', 'live_decisions',
+                       'discussion_decisions', 'local_decisions'} <= data.keys()
+                  and isinstance(binding, dict) and type(binding.get('version')) is int and binding['version'] == 1)
+    if key == 'decisions' or bound_copy:
+        # Store selection gates execution but does not alter engineering content.
+        if isinstance(binding, dict) and type(binding.get('version')) is int and binding['version'] == 1:
+            data = {**data, 'agreement_binding': {k: v for k, v in binding.items() if k != 'store_root'}}
+        if bound_copy:
+            return {**value, 'data': data} if 'data' in value else data
         if 'data' in value:
-            return {**value, 'data': {k: v for k, v in value['data'].items() if k != 'head_sha'}}
-        return {k: v for k, v in value.items() if k != 'head_sha'}
+            return {**value, 'data': {k: v for k, v in data.items() if k != 'head_sha'}}
+        return {k: v for k, v in data.items() if k != 'head_sha'}
     if key == 'metadata' and isinstance(value, dict):
         return {k: v for k, v in value.items() if k != 'headRefOid'}
     if key == 'patch':

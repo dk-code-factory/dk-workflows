@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 import sys
+from threading import Barrier
 from pathlib import Path
 from unittest.mock import Mock, patch
 SCRIPT = Path(__file__).resolve().parents[1]/'scripts/run_reviewers.py'
@@ -76,10 +77,12 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(result['failed_reviewers'][0]['reason'], 'API DNS failed')
     def test_checkout_mutation_is_a_guard_failure_after_draining_reviewers(self):
         changed = False
+        launched = Barrier(2)
         def git(argv, cwd=None):
             return '?? changed' if changed and argv[:3] == ['git','status','--porcelain=v1'] else self.git(argv,cwd)
         def reviewer(*args):
             nonlocal changed
+            launched.wait(timeout=5)
             changed = True
             raise RuntimeError('provider failed after editing checkout')
         with patch.object(mod,'run',side_effect=git), patch.object(

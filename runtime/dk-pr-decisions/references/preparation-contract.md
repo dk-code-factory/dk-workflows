@@ -90,7 +90,11 @@ remain significant. Exact supported exceptions:
 
 - Context transport paths, head and local-checkout status are operational; metadata
   ignores `headRefOid`, Decisions ignore only record `head_sha` (`data.head_sha` in
-  an envelope), patches derive from Git. All other Decisions envelope fields govern.
+  an envelope), patches derive from Git. The additive version-1
+  `agreement_binding.store_root` is operational for engineering identity; binding
+  version, persisted IDs and fingerprint govern. Complete bound Decisions contexts
+  copied as choice evidence compare structurally, excluding only that store root;
+  their head and unknown fields still govern. All other Decisions envelope fields govern.
   Manifest locations are transport, with each source compared separately. Reviewer
   descriptors compare structurally; verified prior preparation supplies lineage.
 - Complete inline feedback uses integer `schemaVersion:1`, `threads`/`items` and

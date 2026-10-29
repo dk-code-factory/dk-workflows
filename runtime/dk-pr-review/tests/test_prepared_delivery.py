@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'dk-pr-decisions/tests'))
-from preparation_fixtures import Package,analysis,prep
+from preparation_fixtures import Package,analysis,prep,bind_agreements
 from shared import review_coverage
 from shared.review_sessions import result_artifact
 spec=importlib.util.spec_from_file_location('prepared_runner',ROOT/'dk-pr-review/scripts/run_reviewers.py')
@@ -69,6 +69,8 @@ class PreparedDeliveryTests(unittest.TestCase):
         self.package.manifest['mode']='iteration';self.package.write('manifest.json',self.package.manifest)
         value=analysis((self.name,));value['placement']['production']['locations']=[name]
         with patch.dict(os.environ,{'XDG_DATA_HOME':str(self.package.root/'private')}):
+            bind_agreements(self.package.context,self.package.decisions)
+            self.package.write('decisions.json',self.package.decisions)
             artifact=self.prepare(value)
             self.assertEqual(review_coverage.digest({'路径':'café/😀.py'}),
                              'b0b00c3f2839ac87ddfbc1327e54cb1eb3c7ad03f2caf309ca7720e31d67c12e')

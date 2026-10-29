@@ -76,6 +76,7 @@ def descriptor(name, source):
 
 
 def artifact(context, decisions, sources, reviewers=('example',), result=None):
+    bind_agreements(context, decisions)
     result = result or analysis(reviewers)
     source = next(iter(sources.values()))
     sources = {**{key: dict(source) for key in ('manifest', 'context', 'decisions', 'metadata', 'patch')},
@@ -137,6 +138,7 @@ class Package:
         self.decisions = {'pr_url': self.context['url'], 'head_sha': self.head,
                           'body_hash': hashlib.sha256(b'').hexdigest(), 'live_decisions': '',
                           'discussion_decisions': [], 'local_decisions': [], 'verified': True, 'decisions': []}
+        bind_agreements(self.context, self.decisions)
         self.write('context.json', self.context)
         self.write('decisions.json', self.decisions)
         self.write('absence.json', {'verified_absence': True, 'reason': 'No previous run or linked issue in this fixture'})
@@ -156,3 +158,16 @@ class Package:
     def prepare(self, result=None):
         return prep.prepare(self.manifest_path, self.versions,
                             analyzer=lambda prompt, checkout: response(result or analysis()))
+
+
+def bind_agreements(context, decisions):
+    """Create a real empty or description-backed private store for live-gate fixtures."""
+    spec = importlib.util.spec_from_file_location('fixture_decisions', ROOT / 'dk-pr-decisions/scripts/decisions.py')
+    api = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(api)
+    state = {'version': 2, 'pr': {'url': context['url'], 'number': int(context['url'].split('/')[-1]),
+             'headRefOid': context['head_sha'], 'body': prep.read(context['metadata'])['body']},
+             'decisions': [], 'comments': {}, 'threads': {}, 'summaries': {}}
+    api.retain_agreements(state)
+    api.storage.atomic_write(api.storage.cache_path(context['url']), json.dumps(state))
+    decisions['agreement_binding'] = api.agreement_binding(api.decision_records(state), api.storage.root())

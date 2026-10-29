@@ -371,6 +371,8 @@ class PreparationTests(unittest.TestCase):
         api.retain_agreements(state)
 
         def context():
+            state.update(threads={}, summaries={})
+            api.storage.atomic_write(api.storage.cache_path(pr['url']), json.dumps(state))
             with patch.object(api, 'gh_json', return_value=pr):
                 data = api.decision_context(state)
             data['decisions'] = api.decision_records(state)

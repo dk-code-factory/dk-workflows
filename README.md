@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.5.3.
+Independent MIT plugin for Claude Code and Codex. Version 1.5.4.
 
 ## Install
 
@@ -285,6 +285,22 @@ fallback. Hosts provide persistent storage and access. See the
 [Decisions storage contract](runtime/dk-pr-decisions/references/storage.md) for
 seeding, migration, locking and interruption recovery. Recovered choices require
 live context refresh and engineering preparation before dependent work.
+
+Persist material human agreements immediately with Decisions `add` or explicit
+`replace`, preserving exact instructions or discussion evidence, then refresh context
+and preparation. Drafts and run records remain supporting history; local decision
+imports are temporary. Publication still uses the existing authorization and guards.
+
+Exported API v2 contexts now include `agreement_binding` version 1, covering the
+resolved store root, sorted persisted IDs and a fingerprint of exact agreement
+evidence and supersession. Preparation v3 and all live review/work/completion gates
+check the configured store locally without network, models, migration or writes.
+Changed agreements, missing/corrupt records, different store selection or pending
+publication require reconciliation and refreshed context/preparation. Routine cache
+bookkeeping does not invalidate review evidence. Older artifacts remain readable as
+history or parents; current execution requires bound context. Discussion extraction
+retains complete general comments and review bodies outside the prompt for bounded
+reads, including unchanged proposals needed to interpret short acceptances.
 
 
 Fresh workflows allocate durable private directories under
