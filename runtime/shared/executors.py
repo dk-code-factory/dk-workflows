@@ -173,13 +173,27 @@ def execute_json(prompt, checkout, *, validate=None, executor=None, correction_i
                  diagnostic_scope=None, retain_accepted=None):
     """Correct model JSON once, without retrying provider failures or coercing data."""
     from shared.model_diagnostics import exchange
-    with exchange(prompt, checkout, diagnostic_scope, retain_accepted=retain_accepted) as journal:
+    retained_result = None
+    def select(result):
+        nonlocal retained_result
+        # Selection may permit a fresh response, so validate before classifying.
+        _validate_result(result, validate)
+        selected = retain_accepted(result)
+        if selected:
+            retained_result = result
+        return selected
+    with exchange(prompt, checkout, diagnostic_scope,
+                  retain_accepted=select if retain_accepted is not None else None) as journal:
         if journal and journal.value['status'] == 'accepted':
-            result = json.loads(journal.value['attempts'][-1]['response'])
-            if validate is not None:
-                validate(result)
-            return result
+            return retained_result
         return _execute_json(prompt, checkout, validate, executor, correction_instructions, journal)
+
+
+def _validate_result(result, validate):
+    if not isinstance(result, dict):
+        raise ValueError('expected one JSON object')
+    if validate is not None:
+        validate(result)
 
 
 def _execute_json(prompt, checkout, validate, executor, correction_instructions, journal):
@@ -207,10 +221,7 @@ def _execute_json(prompt, checkout, validate, executor, correction_instructions,
             journal.response(raw)
         try:
             result = json.loads(raw)
-            if not isinstance(result, dict):
-                raise ValueError('expected one JSON object')
-            if validate is not None:
-                validate(result)
+            _validate_result(result, validate)
         except (ValueError, RuntimeError) as exc:
             if journal:
                 journal.rejected(exc)

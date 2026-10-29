@@ -261,9 +261,10 @@ def exchange(prompt, checkout, scope, *, retain_accepted=None):
         if prior and prior['status'] == 'accepted' and retain_accepted is not None:
             try:
                 response = json.loads(prior['attempts'][-1]['response'])
-            except (ValueError, RecursionError) as exc:
+                selected = retain_accepted(response)
+            except (ValueError, RuntimeError) as exc:
                 raise retained_failure('accepted routing response is invalid', path, index['evidence']) from exc
-            if retain_accepted(response):
+            if selected:
                 journal = Exchange(Path(index['evidence']), prior)
                 if prior.get('request') != request:
                     raise journal.failure()

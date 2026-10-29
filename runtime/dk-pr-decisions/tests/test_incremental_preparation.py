@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from preparation_fixtures import Package, analysis, prep, response, retain
 from test_preparation import module
 from shared import preparation_graph as graph
+from shared.private_state import write
 
 
 class IncrementalPreparationTests(unittest.TestCase):
@@ -275,6 +276,28 @@ class IncrementalPreparationTests(unittest.TestCase):
         model.assert_not_called()
         self.assertEqual(repeated.exception.action['artifacts'], [str(evidence)])
         self.assertEqual(set(package.versions.glob('*/preparation.json')), artifacts)
+        indexes = package.versions.parent / 'model-exchanges'
+        routing_index, = [path for path in indexes.glob('*.json')
+                          if prep.read(prep.read(path)['evidence'])['identity']['scope']['phase'] == 'incremental']
+        routing_evidence = Path(prep.read(routing_index)['evidence'])
+        routing = prep.read(routing_evidence)
+        for damaged in ({}, [], None, {'full_reassessment': False}, {'full_reassessment': True, 'reason': ''}):
+            with self.subTest(damaged=damaged):
+                value = copy.deepcopy(routing)
+                value['attempts'][-1]['response'] = json.dumps(damaged)
+                write(routing_evidence, value)
+                paths = (routing_index, routing_evidence, routing_index.with_suffix('.lock'), evidence)
+                before = {path: path.read_bytes() for path in paths}
+                with patch('shared.executors.execute', return_value=json.dumps(retain(parent))) as model:
+                    with self.assertRaises(RuntimeError) as invalid:
+                        prep.prepare(package.manifest_path, package.versions, previous_preparation=first['artifact'])
+                self.assertEqual(invalid.exception.code, 'model_diagnostics_invalid')
+                self.assertIsInstance(invalid.exception.__cause__, ValueError)
+                self.assertEqual(invalid.exception.action['artifacts'], [str(routing_index), str(routing_evidence)])
+                model.assert_not_called()
+                self.assertEqual({path: path.read_bytes() for path in paths}, before)
+                self.assertEqual(set(package.versions.glob('*/preparation.json')), artifacts)
+                self.assertEqual(evidence.read_bytes(), retained)
         package.write('user.json', {'instruction': 'Corrected governing constraint'})
         with patch('shared.executors.execute', return_value=json.dumps(retain(parent))) as model:
             recovered = prep.prepare(package.manifest_path, package.versions, previous_preparation=first['artifact'])

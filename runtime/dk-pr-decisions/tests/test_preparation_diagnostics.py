@@ -219,7 +219,7 @@ def test_provider_repair_resumes_remaining_correction_without_reset(tmp_path, mo
     assert journal['attempts'][1]['provider_error']['detail'] == 'provider unavailable'
 
 
-@pytest.mark.parametrize('change', ['validation', 'prompt', 'checkout'])
+@pytest.mark.parametrize('change', ['prompt', 'checkout'])
 def test_retained_escalation_revalidates_and_guards_the_request(tmp_path, monkeypatch, change):
     monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
     checkout = tmp_path / 'repo'
@@ -231,16 +231,67 @@ def test_retained_escalation_revalidates_and_guards_the_request(tmp_path, monkey
     monkeypatch.setattr(executors, 'execute', provider)
     scope = {'evidence': 'same governing inputs', 'phase': 'incremental'}
     assert prep.analyze('Frozen evidence', checkout, diagnostic_scope=scope) == routing
-    validate = Mock(side_effect=ValueError('routing no longer valid'))
-    with pytest.raises(ValueError):
+    validate = Mock()
+    with pytest.raises(ValidationFailure):
         prep.analyze('Changed prompt' if change == 'prompt' else 'Frozen evidence',
                      moved if change == 'checkout' else checkout,
                      validate=validate, diagnostic_scope=scope)
     assert provider.call_count == 1
-    if change == 'validation':
-        validate.assert_called_once_with(routing)
+    validate.assert_called_once_with(routing)
+
+
+@pytest.mark.parametrize('error_type', [ValueError, RuntimeError])
+@pytest.mark.parametrize('source', ['validator', 'selector'])
+def test_retained_response_callback_failure_is_private(tmp_path, monkeypatch, error_type, source):
+    monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
+    checkout = tmp_path / 'repo'
+    checkout.mkdir()
+    provider = Mock(return_value='{"routing": true}')
+    selector = Mock(return_value=False)
+    kwargs = {'executor': provider, 'diagnostic_scope': {'phase': 'incremental'}, 'retain_accepted': selector}
+    assert executors.execute_json('Frozen evidence', checkout, **kwargs) == {'routing': True}
+    index, = (tmp_path / 'state/dk-code-factory/workflows/model-exchanges').glob('*.json')
+    evidence = Path(json.loads(index.read_text())['evidence'])
+    paths = (index, evidence, index.with_suffix('.lock'))
+    before = {path: path.read_bytes() for path in paths}
+    failure = error_type('private-credential-in-validator')
+    if source == 'selector':
+        selector.side_effect = failure
+    validator = Mock(side_effect=failure if source == 'validator' else None)
+    with pytest.raises(model_diagnostics.StorageFailure) as caught:
+        executors.execute_json('Frozen evidence', checkout, validate=validator, **kwargs)
+    assert caught.value.code == 'model_diagnostics_invalid'
+    assert caught.value.__cause__ is failure
+    assert caught.value.action['artifacts'] == [str(index), str(evidence)]
+    assert 'private-credential' not in str(caught.value)
+    assert provider.call_count == 1
+    if source == 'validator':
+        selector.assert_not_called()
     else:
-        validate.assert_not_called()
+        selector.assert_called_once_with({'routing': True})
+    assert {path: path.read_bytes() for path in paths} == before
+
+
+@pytest.mark.parametrize('routing', [False, True])
+def test_valid_retained_response_preserves_selective_replay(tmp_path, monkeypatch, routing):
+    monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
+    checkout = tmp_path / 'repo'
+    checkout.mkdir()
+    original = {'routing': routing, 'value': 'original'}
+    fresh = {'routing': False, 'value': 'fresh'}
+    provider = Mock(side_effect=[json.dumps(original), json.dumps(fresh)])
+    validator = Mock()
+    selector = Mock(side_effect=lambda value: value['routing'])
+    kwargs = {'executor': provider, 'validate': validator, 'retain_accepted': selector,
+              'diagnostic_scope': {'phase': 'incremental'}}
+    assert executors.execute_json('Frozen evidence', checkout, **kwargs) == original
+    evidence, = (tmp_path / 'state').rglob('model-exchange.json')
+    before = evidence.read_bytes()
+    assert executors.execute_json('Frozen evidence', checkout, **kwargs) == (original if routing else fresh)
+    assert provider.call_count == (1 if routing else 2)
+    assert validator.call_count == (2 if routing else 3)
+    selector.assert_called_once_with(original)
+    assert evidence.read_bytes() == before
 
 
 def test_retained_escalation_decoder_failure_preserves_evidence(tmp_path, monkeypatch):
