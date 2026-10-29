@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 
 
 def clean(text):
+    text = text.removeprefix('\ufeff')
     text = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', text)
     return re.sub(r'(?m)^\d{4}-\d\d-\d\dT[\d:.]+Z ?', '', text).strip()
 
@@ -188,10 +189,19 @@ def parse_report(text):
             candidate = None
         if isinstance(candidate, dict) and 'testResults' in candidate:
             return jest_output(text)
-        return go_output(text)
+        try:
+            first = json.loads(text.splitlines()[0])
+        except ValueError:
+            first = None
+        if isinstance(first, dict) and 'Action' in first and 'Package' in first:
+            return go_output(text)
+        return result(reason='unsupported JSON test report')
     # Errors outside a recognized test result cannot disappear behind a summary.
     if re.search(r'(?im)^(?:npm (?:ERR!|error)|error:|fatal:|Error:|##\[error\](?!Process completed with exit code))', text):
         return result(reason='non-test error in step output')
     if re.search(r'(?m)^Test Suites:', text):
         return jest_text(text)
-    return pytest_output(text)
+    if re.search(r'(?m)^(?:=+ test session starts =+|=+ .+ in [\d.]+s(?: \([^\n]*\))? =+|'
+                 r'FAILED \S+::\S+ - |\S+::\S+ (?:PASSED|FAILED|SKIPPED)\b)', text):
+        return pytest_output(text)
+    return result(reason='unsupported test report format')
