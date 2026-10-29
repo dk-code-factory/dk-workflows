@@ -46,7 +46,7 @@ def pinned(tmp_path, monkeypatch):
     patchfile.write_text('diff --git a/x.py b/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-old\n+new\n')
     metadata = tmp_path / 'metadata.json'
     metadata.write_text('{"body":""}')
-    context = dict(url='https://GitHub.com/O/R/pull/2', repository=str(checkout), checkout=str(checkout),
+    context = dict(url='https://github.com/O/R/pull/2', repository=str(checkout), checkout=str(checkout),
                    head_sha=sha, base_sha='b' * 40, patch=str(patchfile), metadata=str(metadata))
     decisions = dict(pr_url=context['url'], head_sha=sha, body_hash=runner.hashlib.sha256(b'').hexdigest(),
                      live_decisions='', discussion_decisions=[], local_decisions=[], verified=True)

@@ -17,6 +17,7 @@ import tempfile
 from shared import preparation_graph as graph_api
 from shared.engineering_identity import engineering_id, compatible_reference
 from shared.workflow_storage import allocate, owned
+from shared import agreement_binding
 
 VERSION = 3
 DIMENSIONS = ('correctness', 'remediation_depth', 'performance', 'compatibility', 'complexity')
@@ -67,6 +68,7 @@ def collect(manifest_path):
     runner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(runner)
     decisions = runner.validate_decisions(context, read(decisions_path))
+    agreement_binding.check(decisions)
     if not isinstance(decisions.get('decisions'), list):
         raise ValueError('preparation requires unified decision records')
     if manifest.get('mode') not in ('iteration', 'standalone'):
@@ -268,7 +270,8 @@ def readiness(analysis):
 def policy():
     import shared.engineering_identity as engineering
     return digest({str(p.name): file_hash(p) for p in (
-        Path(__file__), Path(graph_api.__file__), Path(engineering.__file__),
+        Path(__file__), Path(graph_api.__file__), Path(engineering.__file__), Path(agreement_binding.__file__),
+        Path(__file__).with_name('decision_storage.py'), Path(__file__).with_name('decisions.py'),
         Path(__file__).resolve().parents[1] / 'references/preparation.md',
         Path(__file__).resolve().parents[1] / 'references/preparation-contract.md')})
 
@@ -583,6 +586,8 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
 
 
 def validate(artifact, context, decisions, *, require_ready=True, check_sources=True):
+    if check_sources:
+        agreement_binding.check(decisions)
     if not isinstance(artifact, dict) or artifact.get('preparation_version') not in {1, 2, VERSION}:
         raise ValueError('unsupported preparation artifact')
     if artifact.get('mode') not in {'standalone', 'iteration'}:

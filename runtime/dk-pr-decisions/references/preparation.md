@@ -93,7 +93,12 @@ Current source freshness and engineering completion verification remain mandator
 
 ## Human answers and synchronization
 
-Keep exact answers and replacement history. In iteration, synchronize material agreed
+Immediately persist each material human agreement with Decisions `add` or explicit
+`replace --id`, preserving exact answers, discussion evidence and replacement history.
+Drafts and run records are supporting history; `--local-decisions-file` is a temporary
+import and does not automatically promote text. Refresh verified context and preparation
+before dependent work. GitHub publication remains separately authorized and guarded.
+In iteration, synchronize material agreed
 changes in scope prose and Decisions through the [combined publisher](api.md#preparation-and-combined-publication)
 before dependent work resumes. Use reviewed description prose and one body writer;
 preserve unrelated text/title. Uncertain publication stays `sync_pending` until
@@ -186,3 +191,23 @@ and captured evidence while retaining live source paths. Its `source_origins` ma
 preserves captured source identities across relocation; this bookkeeping does not
 replace governing content fingerprints. Retain these files unchanged; construct a
 new manifest when current evidence changes. Required live inputs still block if lost.
+
+
+## Recorded agreement freshness
+
+Current execution requires a Decisions context with `agreement_binding` version 1:
+resolved `store_root`, sorted persisted `decision_ids` and a `fingerprint` of all
+persisted records, including exact evidence and supersession links. Publication
+status and cache bookkeeping are excluded; imported local choices retain their
+existing evidence checks. Store selection is operational for engineering identity,
+but must match the configured store at every live gate.
+
+Preparation collection/finalization, reviewer launch/checkpoint reuse/result acceptance,
+and work/completion gates read the configured store without network requests, model
+calls, migration or writes. Changed agreements, missing/corrupt records, changed store
+selection and pending publication block. Reconcile as needed, then refresh context
+and preparation. Routine cache scans do not invalidate review evidence. GitHub refreshes
+remain at the existing workflow stages; local freshness does not assert live discussion
+freshness. API v2 and preparation v3 are unchanged. Unbound older artifacts remain
+readable as history or preparation parents, but need refreshed context/preparation
+for current execution. Interrupted older workflows use their retained runtime.

@@ -154,7 +154,7 @@ def validate_decisions(context, decisions):
             seen.add(item['id'])
         if any(item['status'] == 'superseded' and item['superseded_by'] not in seen for item in records):
             raise ValueError('missing replacement decision')
-    if not isinstance(decisions, dict) or set(decisions) - {'decisions'} != {
+    if not isinstance(decisions, dict) or set(decisions) - {'decisions', 'agreement_binding'} != {
             'pr_url', 'head_sha', 'body_hash', 'live_decisions',
             'discussion_decisions', 'local_decisions', 'verified'}:
         raise ValueError('invalid decisions context structure')
@@ -362,6 +362,9 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
         checking = False
         shared_guard = False
         try:
+            checking = shared_guard = True
+            unchanged()
+            checking = shared_guard = False
             with worker_stats.invocation(name, job['handoff'], preparation['reviewers'][name]) if worker_stats else nullcontext():
                 try:
                     result = run_skill_reviewer(provider_map[name], job['skill'], job['path'], checkout)

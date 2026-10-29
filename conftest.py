@@ -21,3 +21,5 @@ def prevent_unmocked_model_calls(monkeypatch):
 @pytest.fixture(autouse=True)
 def private_workflow_state(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path_factory.mktemp("workflow-state")))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path_factory.mktemp("private-data")))
+    monkeypatch.delenv('DK_PR_DECISIONS_HOME', raising=False)

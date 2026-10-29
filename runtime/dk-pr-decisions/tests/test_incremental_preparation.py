@@ -427,6 +427,8 @@ class IncrementalPreparationTests(unittest.TestCase):
         path.write_text(original)
         self.package.context['url'] = 'https://github.com/example/fixture/pull/2'
         self.package.decisions['pr_url'] = self.package.context['url']
+        from preparation_fixtures import bind_agreements
+        bind_agreements(self.package.context, self.package.decisions)
         self.package.write('context.json', self.package.context)
         self.package.write('decisions.json', self.package.decisions)
         with self.assertRaisesRegex(ValueError, 'different PR'):
