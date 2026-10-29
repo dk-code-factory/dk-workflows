@@ -1,5 +1,28 @@
 # Repository rule configuration
 
+Read [instruction sources](../../common/instruction-sources.md) before interpreting
+repository guidance or generated rule summaries.
+
+## Architecture rules
+
+Use `dk-config architecture inspect|init|refresh|edit|delete|packet|export|request|enforce`
+for private scoped architecture knowledge, or the shared `architecture` route.
+Both routes use independent baseline catalogs: inspect/export require `--baseline SHA`
+or a current `--catalog HASH`; edit/delete require the inspected `--expected HASH`,
+which also selects its baseline. User rules and exception settings apply only to
+that baseline. Reinitialize formerly shared live catalogs; retained files remain
+readable as history.
+Read [architecture delivery and policy](../dk-architect/procedure.md) before use.
+This catalog is separate from the existing plain-English rule store and does not
+change its lookup or reviewer settings. Accept plain-English requests and derive
+the rule record; do not ask the user to choose flags. Only explicit user requests
+may enable auto_approve, broaden approval_when or resolve conflicting obligations.
+Preserve the exact instruction/source in --user-file. Revisions and immutable
+history invalidate old delivery and exceptions. Inspect existing obligations
+before editing; --expected prevents concurrent lost updates. Use
+--resolve-conflicts only for the user's explicit reconciliation of the inspected
+conflicts. Uncertain conventions stay proposals until resolved.
+
 Accept requests in plain English, such as “make PR titles start with a verb” or “show my rules for issue descriptions.” Do not ask the user to choose a category or use a flag. Store each rule as a complete English statement that says when it applies. Preserve the user's wording when it already does so; otherwise add only the context needed to make it clear, such as “For pull request titles, …”. When listing rules, select the relevant statements for the user's request and report their IDs and text.
 
 Internally run `python3 PLUGIN_ROOT/runtime/dk-config/scripts/repo_rules.py --cwd . <command>`. For a PR, pass `--pr PR_URL` before the command so lookup starts with the PR head repository even when the checkout is upstream. Commands: `list`, `get ID`, `add TEXT`, `update ID TEXT`, `delete ID`, `refresh`. `delete` accepts a private rule or conflict resolution ID; deleting a rule removes its dependent resolutions. `index` is an alias for refresh. Private rules and reviewer settings resolve in order: fork repository, upstream repository, then user-wide. `add`, `update`, and `delete` target the fork repository by default; `--scope user` manages user-wide private rules. Remote identity is normalized across clones; repos without an origin use canonical local path. The existing private data store remains in use, and older categorized rules are presented as plain English statements with their original applicability preserved.

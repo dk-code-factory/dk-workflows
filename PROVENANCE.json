@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.6.0",
+      "description": "Private architecture catalogs with architect, architecture reviewer and independent exception enforcer roles for both hosts; scoped rule packets, user-owned exception policy and mandatory preparation/review/completion evidence. Shared instruction-source guidance separates review evidence from active workflow requirements."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.5.3",
       "description": "Concurrent configured PR reviewers with immutable per-reviewer handoffs, isolated telemetry, deterministic aggregation and interruption-safe mandatory checkpoints, with offline command-provider regression coverage."
     },

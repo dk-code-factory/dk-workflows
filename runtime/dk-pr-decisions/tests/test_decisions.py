@@ -314,7 +314,8 @@ class DecisionTests(unittest.TestCase):
                 + 'large patch \" \u2603 ' * 100000 + '\n')
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / 'state.json'
-            def model(prompt, checkout):
+            def model(prompt, checkout, *, inherit_architecture=True):
+                self.assertFalse(inherit_architecture)
                 self.assertLess(len(json.dumps(prompt)), 20000)
                 self.assertNotIn('large patch', prompt)
                 manifest = json.loads((checkout / 'manifest.json').read_text())
@@ -421,7 +422,8 @@ class DecisionTests(unittest.TestCase):
                 original = json.dumps(state)
                 path.write_text(original)
                 replies = []
-                def model(request, checkout):
+                def model(request, checkout, *, inherit_architecture=True):
+                    self.assertFalse(inherit_architecture)
                     reason = 'Inspection unavailable: usage limit reached while reading evidence'
                     if mode == 'raw':
                         response = reason + '\n' + request + 'x' * 100000 + '\ninspection failed'
@@ -902,7 +904,8 @@ def test_code_links_preserve_verified_fork_and_deleted_head_base_fallback(tmp_pa
     repository = 'o/r' if deleted else 'contributor/repo'
     prefix = 'https://github.com/' + repository + '/blob/' + 'a' * 40 + '/'
     candidate = {'text': 'Use cache', 'references': [prefix + 'x.py#L1']}
-    def model(prompt, checkout):
+    def model(prompt, checkout, *, inherit_architecture=True):
+        assert inherit_architecture is False
         links = json.loads((checkout / 'code-permalinks.json').read_text())
         assert links['prefix'] == prefix
         return json.dumps({'decisions': [candidate]})

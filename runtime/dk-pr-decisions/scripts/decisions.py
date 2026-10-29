@@ -9,6 +9,7 @@ import base64
 from shared.pr_identity import resolve as resolve_pr_identity
 from shared.executors import check_prompt_size, execute, execute_json, provider_failure
 from contextlib import contextmanager
+from functools import partial
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import decision_storage as storage
 import hashlib
@@ -495,7 +496,8 @@ def analyze(repo_dir, context, prior, comments, threads, changed_ids, invalid_th
         workspace.mkdir()
         try:
             result = execute_json("Required JSON schema: " + json.dumps(SCHEMA) + "\n" + instructions,
-                                  workspace, validate=validate_discussion, executor=execute)
+                                  workspace, validate=validate_discussion,
+                                  executor=partial(execute, inherit_architecture=False))
         except ValueError as exc:
             raise RuntimeError("Model analysis invalid after one correction: " + str(exc)) from exc
     return validate_discussion(result)
@@ -946,7 +948,7 @@ def suggest_from_code(state, path):
     try:
         request = "Required JSON schema: " + json.dumps(schema) + "\n" + prompt
         check_prompt_size(request, MAX_CODE_DISCOVERY_PROMPT_CHARS)
-        output = execute(request, evidence_dir)
+        output = execute(request, evidence_dir, inherit_architecture=False)
     except (ValueError, RuntimeError) as exc:
         exc.args = (f'{exc} Code evidence retained at {evidence_dir / "manifest.json"}.',)
         raise
@@ -1202,7 +1204,8 @@ def suggest_from_description(state, path):
         schema_path = Path(td) / 'schema.json'
         schema_path.write_text(json.dumps(schema))
         result = execute_json("Required JSON schema: " + json.dumps(schema) + "\n" + prompt, td,
-                              validate=validate_description, executor=execute)
+                              validate=validate_description,
+                              executor=partial(execute, inherit_architecture=False))
     state['description_suggestions'] = {'body_hash': digest, 'items': result['decisions']}
     save_state(state, path)
     return result['decisions']

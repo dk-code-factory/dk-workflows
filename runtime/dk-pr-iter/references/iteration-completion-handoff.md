@@ -1,5 +1,12 @@
 ## Completion handoff
 
+Include architecture catalog fingerprint, packet references, approved exceptions
+and independent architecture review in the completion handoff. The coverage gate
+requires complete rule coverage with current rule/code/scope evidence. Scope or
+Decisions changes trigger fresh architecture judgment during reconciliation even
+on an unchanged tree. Do not treat configured-reviewer failure acceptance as an
+architecture waiver; unresolved violations remain blocking.
+
 A prepublication `cleanup_prechecks` receipt cannot supply final review coverage or authorize completion. `--cleanup-precheck` is accepted only by the review-stage gate. Report review readiness separately from cleanup and completion readiness.
 
 After cleanup, consume the refreshed preparation and current engineering verification. With preparation v3 and review-result v3, an operational refresh that changes `preparation_id` can retain review coverage at the same head when the runtime-computed `engineering_id` is unchanged and the existing coverage gate accepts reuse. Do not request reconciliation solely because provenance IDs differ. Current evidence, retained reviewer bindings, engineering verification and exact-head CI still require validation. A changed head, including tree-equivalent regrouping, follows the guarded cleanup and reconciliation path; matching engineering IDs alone cannot authorize it.

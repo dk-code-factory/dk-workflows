@@ -12,3 +12,5 @@ Read [the shared procedure](../../../runtime/dk-pr-review/procedure.md) and perf
 On preparation refresh, select the active artifact with `prepare --previous-preparation FILE`; follow [the incremental preparation contract](../../../runtime/dk-pr-decisions/references/preparation.md). Preserve review budgets and exact session/coverage gates.
 
 Fresh workflows use preparation v3, session v2, review-result v3 and completion-verification v2. Preserve both preparation and engineering IDs. Use returned private workflow paths for all generated evidence and child handoffs. Operational refresh may preserve engineering identity; validate current evidence and retained reviewer bindings before reuse. Resume legacy active runs only through their retained runtime.
+
+Before coding or review, follow [architecture delivery](../../../runtime/dk-architect/procedure.md). Every child handoff includes its recipient/path packet reference and fingerprint; refresh before expanding scope.

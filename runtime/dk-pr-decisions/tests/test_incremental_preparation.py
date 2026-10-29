@@ -787,7 +787,9 @@ class IncrementalPreparationTests(unittest.TestCase):
             binding = state.review_session(record, package.head, record_path)
             write(record_path, record)
             session = review_sessions.Session(package.context, prepared, ['example'], path=binding['session_file'])
+            from preparation_fixtures import architecture_review
             item = session.finish({'complete': True, 'findings': [], 'executed_reviewers': ['example'],
+                                   'architecture_review': architecture_review(prepared, package.context, package.decisions),
                                    'reused_reviewers': [], 'skipped_reviewers': []})
             state.register_review(record, {'review_artifact': item}, package.head)
         write(record_path, record)
@@ -826,7 +828,8 @@ class IncrementalPreparationTests(unittest.TestCase):
             'target_tip': package.context['base_sha'], 'final_head': package.head, 'final_tree': tree, 'commit_count': 1}
         assessment_path = package.write('series-assessment.json', assessment)
         comparisons = []
-        def compare(prompt, checkout, *, attempt=0):
+        def compare(prompt, checkout, *, attempt=0, inherit_architecture=True):
+            self.assertFalse(inherit_architecture)
             comparisons.append(attempt)
             binding = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]['binding']
             self.assertEqual(binding['original_preparation_id'], first['preparation_id'])
@@ -928,7 +931,7 @@ class IncrementalPreparationTests(unittest.TestCase):
         self.assertEqual(fresh['identity']['head_sha'], parent['identity']['head_sha'])
         self.assertEqual(fresh['inputs']['tree'], parent['inputs']['tree'])
         self.assertEqual(result['refresh']['changed_paths'], [])
-        self.assertEqual(result['refresh']['changed_sources'], ['context'])
+        self.assertEqual(result['refresh']['changed_sources'], ['architecture/0', 'context'])
         self.assertEqual(result['refresh']['mode'], 'full')
         self.assertEqual(result['refresh']['model_call_count'], 1)
         self.assertEqual(set(result['refresh']['affected_conclusions']), set(parent['graph']))
@@ -956,6 +959,22 @@ class IncrementalPreparationTests(unittest.TestCase):
         self.package.write('manifest.json', self.package.manifest)
         result = self.refresh(first, retain(parent), full_analysis=True)
         self.assertEqual(result['refresh']['mode'], 'full')
+
+    def test_each_governing_procedure_change_requires_full_reassessment(self):
+        first = self.package.prepare()
+        parent = prep.read(first['artifact'])
+        runtime = Path(prep.__file__).resolve().parents[2]
+        file_hash = prep.file_hash
+        procedures = [runtime / name / 'procedure.md' for name in (
+            'dk-architect', 'dk-architecture-review', 'dk-architecture-enforcer')]
+        procedures.append(runtime.parent / 'common/instruction-sources.md')
+        for procedure in procedures:
+            with self.subTest(procedure=str(procedure)), patch.object(prep, 'file_hash', side_effect=
+                    lambda path: '0' * 64 if Path(path) == procedure else file_hash(path)):
+                self.assertNotEqual(prep.policy(), parent['inputs']['policy'])
+                result = self.refresh(first, retain(parent))
+                self.assertEqual(result['refresh']['mode'], 'full')
+                self.assertEqual(set(result['refresh']['affected_conclusions']), set(parent['graph']))
 
     def test_old_policy_parent_reaches_full_reassessment_without_current_normalization(self):
         semantic, identity = graph.semantic, graph.source_identity

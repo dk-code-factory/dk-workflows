@@ -139,14 +139,18 @@ def verify(item, prepared, *, accepted_failures=(), reconciliation=None, checkou
     if reconciliation and reconciliation['binding'].get('purpose') == 'cleanup_precheck':
         raise ValueError('cleanup prechecks cannot supply final review coverage')
     artifact = load(item)
+    historical = checkout is not None and reconciliation is None
+    if not historical and prepared.get('preparation_version', 1) < 3:
+        raise ValueError('historical preparation cannot authorize current review coverage; refresh preparation')
     if prepared.get('preparation_version', 1) >= 3:
-        if checkout is None:
+        if not historical:
             context = validate_current(prepared)
         else:
             # Cleanup checks original coverage from its immutable captures while
             # separately validating current preparation and the candidate tree.
             api = preparation_api()
             context = api.context_for(prepared)
+            context['checkout'] = str(checkout)
             raw = api.read(api.source_path(prepared, 'decisions'))
             api.validate(prepared, context, raw.get('data', raw), check_sources=False)
     else:
@@ -169,6 +173,15 @@ def verify(item, prepared, *, accepted_failures=(), reconciliation=None, checkou
             or artifact['tree'] != tree or ((artifact['scope'] != current_scope or changed_head) and reconciliation is None)):
         raise ValueError('final tree or scope lacks review coverage')
     result = artifact['result']
+    if prepared.get('preparation_version', 1) >= 3:
+        from shared import architecture
+        api = preparation_api()
+        raw_decisions = api.read(api.source_path(prepared, 'decisions'))
+        architecture_result = result.get('architecture_review', {})
+        if reconciliation is not None:
+            architecture_result = read(Path(reconciliation['artifact']['path']), {}).get('architecture_review', {})
+        architecture.verify_review(architecture_result, prepared.get('architecture'),
+                                   context, raw_decisions.get('data', raw_decisions), live=not historical)
     completed = result['executed_reviewers'] + result['reused_reviewers']
     skipped = result['skipped_reviewers']
     failed = failures(result)

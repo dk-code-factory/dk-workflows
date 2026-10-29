@@ -129,8 +129,8 @@ def fetch(cwd, pr=None):
         raise RuntimeError('PR head SHA is invalid')
     if not re.fullmatch(r'[0-9a-fA-F]{40,64}', metadata['baseRefOid']):
         raise RuntimeError('PR base SHA is invalid')
-    resolve(metadata, cwd, api=lambda *args: json.loads(command(['gh', *args], cwd)),
-            allow_unavailable_head=True)
+    identity_host, identity_base, identity_head = resolve(metadata, cwd,
+            api=lambda *args: json.loads(command(['gh', *args], cwd)), allow_unavailable_head=True)
     if not metadata['files']:
         raise RuntimeError('PR has no changed files')
     try:
@@ -190,6 +190,7 @@ def fetch(cwd, pr=None):
     (folder/'metadata.json').write_text(json.dumps(metadata, indent=2, ensure_ascii=False)+'\n')
     (folder/'diff.patch').write_text(patch)
     context = {'url': metadata['url'], 'repository': str(root), 'base_sha': metadata['baseRefOid'], 'head_sha': head,
+            'repository_identity': 'remote:' + identity_host + '/' + (identity_head or identity_base),
             'local_head': local_head, 'worktree_clean': worktree_clean,
             'local_matches_pr': worktree_clean and local_head == metadata['headRefOid'],
             'metadata': str(folder/'metadata.json'), 'patch': str(folder/'diff.patch'),

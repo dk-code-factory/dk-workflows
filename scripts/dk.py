@@ -21,6 +21,7 @@ ARTIFACT_DEFAULTS = {'run-state', 'replies', 'reviewers', 'conversation', 'inlin
                      'split', 'decisions'}
 # Each row is a packaged script, cwd argument placement, PR argument, repo argument.
 ROUTES = {
+    'architecture': ('runtime/dk-architect/scripts/architecture.py', 'before', 'url', False),
     'config': ('runtime/dk-config/scripts/repo_rules.py', 'before', 'url', False),
     'decisions': ('runtime/dk-pr-decisions/scripts/decisions.py', None, 'url', False),
     'run-state': ('runtime/dk-pr-iter/scripts/run_state.py', None, 'number', True),

@@ -8,6 +8,9 @@ import pytest
 from shared import review_coverage as coverage, review_sessions
 from shared.private_state import read, write
 
+sys.path.insert(0, str(Path(__file__).parents[2] / 'dk-pr-decisions/tests'))
+from preparation_fixtures import Package, analysis, architecture_review, descriptor, prep, retain
+
 
 def load(name):
     spec = importlib.util.spec_from_file_location('coverage_' + name,
@@ -41,38 +44,53 @@ def retain_review(path, context, prepared, result, number):
 
 @pytest.fixture
 def reviewed(tmp_path, monkeypatch):
-    repo = tmp_path / 'repo'
-    repo.mkdir()
+    package = Package(tmp_path)
+    repo = package.repo
     def git(*args):
         return coverage.git(repo, *args)
-    git('init', '-q')
-    git('config', 'user.name', 'Test')
-    git('config', 'user.email', 'test@example.test')
-    (repo / 'code.py').write_text('old\n')
-    git('add', '.')
-    git('commit', '-qm', 'Initial')
-    head = git('rev-parse', 'HEAD')
-    context = {'checkout': str(repo), 'repository': str(repo), 'head_sha': head,
-               'url': 'https://github.com/o/r/pull/1'}
-    context_path = tmp_path / 'context.json'
-    context_path.write_text(json.dumps(context))
-    decisions = tmp_path / 'decisions.json'
-    decisions.write_text(json.dumps({'head_sha': head, 'body_hash': 'body', 'decisions': []}))
-    prepared = {'identity': {'head_sha': head, 'base_sha': head, 'pr_url': context['url']},
-                'sources': {'context': {'path': str(context_path)}, 'decisions': {'path': str(decisions)}},
-                'analysis': {'boundaries': 'original'}, 'reviewers': {'one': {}, 'two': {}},
-                'preparation_id': 'original-preparation'}
-    monkeypatch.setattr(state, 'work_gate', lambda *a: prepared)
+    head, context = package.head, package.context
+    package.manifest['mode'] = 'iteration'
+    package.manifest['evidence']['reviewers'] = [str(package.write(name + '.json',
+        descriptor(name, repo / 'transform.py'))) for name in ('one', 'two')]
+    package.write('manifest.json', package.manifest)
+    saved = package.prepare(analysis(('one', 'two')))
+    prepared = prep.read(saved['artifact'])
     record = {}
-    run = state.start_run(record)
+    state.start_run(record)
+    state.attach_preparation(record, saved['artifact'], context['url'], head)
     for _ in range(5):
         state.next_cycle(record, head)
     record_path = tmp_path / 'run.json'
     write(record_path, record)
     result = {'complete': True, 'findings': [], 'executed_reviewers': ['one'],
-              'reused_reviewers': [], 'skipped_reviewers': [{'reviewer': 'two', 'reason': 'usage limit'}]}
+              'reused_reviewers': [], 'skipped_reviewers': [{'reviewer': 'two', 'reason': 'usage limit'}],
+              'architecture_review': architecture_review(prepared, context, package.decisions)}
     item = retain_review(record_path, context, prepared, result, 5)
     return record_path, context, prepared, result, item, git
+
+
+def refresh_prepared(path, context, prepared):
+    """Retain a valid descendant after the test changes head or governing inputs."""
+    record = read(path, {})
+    previous = record['preparation']['path']
+    old = prep.read(previous)
+    context['head_sha'] = coverage.git(context['checkout'], 'rev-parse', 'HEAD')
+    write(Path(old['sources']['context']['path']), context)
+    decisions_path = Path(old['sources']['decisions']['path'])
+    decisions = read(decisions_path, {})
+    decisions['head_sha'] = context['head_sha']
+    write(decisions_path, decisions)
+    def reassess(prompt, checkout):
+        batch = json.JSONDecoder().raw_decode(prompt.split(
+            'REASSESSMENT (one batch, read original changed and governing sources):\n', 1)[1])[0]
+        return retain(old, ids=batch['affected'], unmapped=batch['unmapped_changes'])
+    saved = prep.prepare(old['sources']['manifest']['path'], old['workflow_dir'],
+        previous_preparation=previous, full_analysis=True,
+        analyzer=reassess)
+    prepared.clear()
+    prepared.update(prep.read(saved['artifact']))
+    state.attach_preparation(record, saved['artifact'], context['url'], context['head_sha'])
+    write(path, record)
 
 
 def test_completed_five_cycle_request_starts_distinct_run_and_preserves_history(reviewed):
@@ -95,6 +113,8 @@ def test_completed_five_cycle_request_starts_distinct_run_and_preserves_history(
     assert record['events'][0]['key'] == 'published'
     assert record['reply_workflow']['verified'] == ['reply-url']
     assert record['reruns'][0]['number'] == 3
+    state.attach_preparation(record, record['run_history'][-1]['preparation']['path'],
+                             context['url'], context['head_sha'])
     state.next_cycle(record, context['head_sha'])
     write(path, record)
     with pytest.raises(ValueError, match='no configured-reviewer'):
@@ -120,29 +140,25 @@ def test_final_cycle_fix_blocks_passing_ci_completion(reviewed, monkeypatch, sta
     (Path(context['checkout']) / 'code.py').write_text('fixed after cycle five\n')
     git('add', '.')
     git('commit', '-qm', 'Final fix')
-    prepared['identity']['head_sha'] = git('rev-parse', 'HEAD')
+    refresh_prepared(path, context, prepared)
     assert gate() == 'review_coverage_invalid'
     with pytest.raises(ValueError, match='five review cycles'):
         state.next_cycle(read(path, {}), prepared['identity']['head_sha'])
 
 
-def test_tree_equivalent_regroup_preserves_coverage_but_scope_changes_do_not(reviewed):
+def test_regroup_and_scope_changes_require_current_reconciliation_or_review(reviewed):
     path, context, prepared, result, item, git = reviewed
     git('commit', '--amend', '-qm', 'Regrouped message')
     regrouped = git('rev-parse', 'HEAD')
     assert regrouped != context['head_sha']
-    prepared['identity']['head_sha'] = regrouped
-    decisions_path = Path(prepared['sources']['decisions']['path'])
-    decisions = json.loads(decisions_path.read_text())
-    decisions['head_sha'] = regrouped
-    decisions_path.write_text(json.dumps(decisions))
-    assert state.verify_review(path, prepared)['head'] == context['head_sha']
-    prepared['sources']['rules/0'] = {'sha256': 'new rules'}
+    refresh_prepared(path, context, prepared)
+    # Positive tree-equivalent reuse is covered by the real reconciliation Scenario.
+    # A current preparation alone cannot replace that mandatory receipt.
     with pytest.raises(ValueError, match='scope lacks'):
         state.verify_review(path, prepared)
-    del prepared['sources']['rules/0']
-    decisions['decisions'] = ['new scope']
-    decisions_path.write_text(json.dumps(decisions))
+    write(Path(prepared['sources']['rules/0']['path']),
+          {'verified_absence': True, 'reason': 'Changed governing rules'})
+    refresh_prepared(path, context, prepared)
     with pytest.raises(ValueError, match='scope lacks'):
         state.verify_review(path, prepared)
 
@@ -168,7 +184,8 @@ def test_invalid_results_cannot_authorize_completion(reviewed, change):
                 ref = 'review-finding:' + coverage.digest(finding)
                 record['threads'] = {ref: {context['head_sha']: {'disposition': 'fix'}}}
                 record['assessments'] = [{'reference': ref, 'head': context['head_sha'],
-                    'preparation_id': prepared['preparation_id'], 'disposition': 'within_scope'}]
+                    'preparation_id': prepared['preparation_id'], 'engineering_id': prepared['engineering_id'],
+                    'disposition': 'within_scope'}]
                 write(path, record)
         retain_review(path, context, prepared, result, 5)
     with pytest.raises((ValueError, OSError)):
@@ -272,9 +289,11 @@ def test_acceptance_is_bound_to_run_result_tree_and_scope(reviewed, change):
         (Path(context['checkout']) / 'code.py').write_text('new fix\n')
         git('add', '.')
         git('commit', '-qm', 'New fix')
-        prepared['identity']['head_sha'] = git('rev-parse', 'HEAD')
+        refresh_prepared(path, context, prepared)
     elif change == 'scope':
-        prepared['analysis'] = {'boundaries': 'different'}
+        write(Path(prepared['sources']['user_instructions/0']['path']),
+              {'instruction': 'Changed engineering requirement'})
+        refresh_prepared(path, context, prepared)
     elif change == 'result':
         result['failed_reviewers'][0]['reason'] = 'different failure'
         retain_review(path, context, prepared, result, 5)
@@ -282,6 +301,8 @@ def test_acceptance_is_bound_to_run_result_tree_and_scope(reviewed, change):
         record = read(path, {})
         state.finish_run(record, 'limited', 'Previous request ended')
         state.start_run(record)
+        state.attach_preparation(record, record['run_history'][-1]['preparation']['path'],
+                                 context['url'], context['head_sha'])
         state.next_cycle(record, context['head_sha'])
         write(path, record)
         retain_review(path, context, prepared, result, 1)
@@ -293,7 +314,7 @@ def test_acceptance_is_bound_to_run_result_tree_and_scope(reviewed, change):
         state.verify_review(path, prepared)
 
 
-def test_acceptance_does_not_waive_findings_and_survives_only_equivalent_regroup(reviewed):
+def test_acceptance_does_not_waive_findings_or_replace_regroup_reconciliation(reviewed):
     path, context, prepared, result, item, git = failed_review(reviewed)
     result['findings'] = [{'path': 'code.py', 'line': 1, 'message': 'bug', 'reviewers': ['one']}]
     retain_review(path, context, prepared, result, 5)
@@ -304,11 +325,14 @@ def test_acceptance_does_not_waive_findings_and_survives_only_equivalent_regroup
     ref = 'review-finding:' + coverage.digest(result['findings'][0])
     record['threads'] = {ref: {context['head_sha']: {'disposition': 'no_change'}}}
     record['assessments'] = [{'reference': ref, 'head': context['head_sha'],
-        'preparation_id': prepared['preparation_id'], 'disposition': 'outside_scope'}]
+        'preparation_id': prepared['preparation_id'], 'engineering_id': prepared['engineering_id'],
+        'disposition': 'outside_scope'}]
     write(path, record)
-    git('commit', '--amend', '-qm', 'Equivalent regroup')
-    prepared['identity']['head_sha'] = git('rev-parse', 'HEAD')
     assert state.verify_review(path, prepared)['accepted_failures'] == ['two']
+    git('commit', '--amend', '-qm', 'Equivalent regroup')
+    refresh_prepared(path, context, prepared)
+    with pytest.raises(ValueError, match='scope lacks'):
+        state.verify_review(path, prepared)
 
 
 def test_acceptance_cli_retains_exact_human_source(reviewed, monkeypatch):

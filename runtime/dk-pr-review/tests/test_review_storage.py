@@ -9,7 +9,7 @@ import pytest
 
 from test_review_sessions import pinned, original_pinned
 from test_review_entrypoints import main_call, iteration_record
-from test_stats_capture import runner
+from test_stats_capture import runner, prepare_current
 from shared import review_coverage as coverage
 from shared.private_state import read, write
 from shared.review_sessions import Session, result_artifact
@@ -21,11 +21,7 @@ def storage_layout(pinned, tmp_path):
     repository = tmp_path / 'repository'
     subprocess.check_call(['git', 'clone', '-q', context['checkout'], str(repository)])
     context['repository'] = str(repository)
-    path = Path(prepared['sources']['context']['path'])
-    write(path, context)
-    prepared['sources']['context']['sha256'] = runner.preparation_api.file_hash(path)
-    prepared['preparation_id'] = runner.preparation_api.digest(
-        {k: v for k, v in prepared.items() if k != 'preparation_id'})
+    prepare_current(context, decisions, prepared)
     return context, decisions, prepared, names
 
 
@@ -35,12 +31,14 @@ def assert_clean(context):
 
 
 @pytest.mark.parametrize('name', ['review-results', 'review-checkpoints'])
-@pytest.mark.parametrize('root', ['repository', 'checkout'])
-def test_derived_directory_name_collision_rejected_before_execution(storage_layout, tmp_path, name, root):
+def test_derived_directory_name_collision_rejected_before_execution(storage_layout, tmp_path, name):
     context, decisions, prepared, names = storage_layout
+    # Current preparation owns a fixed checkout basename; direct collisions use
+    # the repository root. Symlink cases below exercise both protected roots.
     destination = tmp_path / name
-    Path(context[root]).rename(destination)
-    context[root] = str(destination)
+    Path(context['repository']).rename(destination)
+    context['repository'] = str(destination)
+    prepare_current(context, decisions, prepared)
     session_path = tmp_path / 'session.json'
     with patch.object(runner, 'run_skill_reviewer') as provider:
         with pytest.raises(ValueError, match='outside'):

@@ -4,6 +4,15 @@ Use with [the preparation procedure](preparation.md). Return JSON only. Evidence
 references name indexed original sources, optionally with locators (`production/0#L42`).
 All strings below are nonempty unless stated otherwise; evidence arrays are nonempty.
 
+Fresh artifacts also retain architecture (catalog fingerprint, coordinator packet
+reference/fingerprint and explicit exception references). The automatic
+architecture/0 source and architecture-exceptions/* sources participate in the
+conclusion graph and engineering identity. Every worker/nested handoff exports its
+own recipient/path packet. Full-catalog architecture review is an independent
+mandatory gate beside configured reviewers; complete applicable-rule coverage and
+valid approvals are required for completion. A scope/Decisions change triggers
+fresh architecture judgment, including during semantic cleanup reconciliation.
+
 ## Initial response
 
 Return `{"analysis": ANALYSIS, "graph": NODES}`. Analysis contains:

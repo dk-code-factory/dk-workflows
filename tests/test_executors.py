@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import importlib.util
 import json
 import os
 import threading
@@ -16,6 +17,181 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'runtime'))
 from shared import executors, model_diagnostics
 from shared.diagnostics import Diagnostic
+
+
+@pytest.fixture
+def ambient_architecture_packet(tmp_path, monkeypatch):
+    from shared import architecture
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
+    repository = tmp_path / 'parent-repository'
+    repository.mkdir()
+    def git(*args):
+        return subprocess.check_output(['git', '-C', str(repository), *args], text=True).strip()
+    git('init', '-q')
+    git('config', 'user.name', 'Fixture')
+    git('config', 'user.email', 'fixture@example.test')
+    (repository / 'core.py').write_text('def core(): return 1\n')
+    git('add', '.')
+    git('commit', '-qm', 'Parent baseline')
+    source = {'text': 'Inspected core.', 'origin': 'inferred', 'rationale': 'Core is the entry point.',
+              'sources': [{'path': 'core.py', 'start': 1, 'end': 1}]}
+    architecture.ensure(repository, analyzer=lambda *_: {
+        'knowledge': {key: [source] for key in architecture.KNOWLEDGE},
+        'rules': [], 'proposals': [], 'conflicts': []})
+    packet = architecture.packet(repository, 'worker', ['core.py'], task='parent-task', baseline=git('rev-parse', 'HEAD'))
+    monkeypatch.setenv('DK_ARCHITECTURE_PACKET', json.dumps(packet))
+    monkeypatch.delenv('DK_ARCHITECTURE_AGENT', raising=False)
+    return repository, packet
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+@pytest.mark.parametrize('agent', [None, 'nested-worker'])
+def test_semantic_transport_isolates_only_ambient_architecture(
+    tmp_path, monkeypatch, ambient_architecture_packet, host, agent
+):
+    repository, packet = ambient_architecture_packet
+    monkeypatch.setenv('DK_HOST', host)
+    monkeypatch.setenv('SEMANTIC_HELPER_SETTING', 'preserved')
+    if agent:
+        monkeypatch.setenv('DK_ARCHITECTURE_AGENT', agent)
+    parent = dict(os.environ)
+    seen = []
+    def process(prompt, checkout, selected_host, env, *args):
+        seen.append(env)
+        assert selected_host == host
+        assert env['SEMANTIC_HELPER_SETTING'] == 'preserved'
+        assert 'DK_ARCHITECTURE_PACKET' not in env and 'DK_ARCHITECTURE_AGENT' not in env
+        assert prompt == 'Index rules.'
+        return '{}'
+    monkeypatch.setattr(executors, 'execute_process', process)
+    assert executors.execute('Index rules.', tmp_path, inherit_architecture=False) == '{}'
+    assert dict(os.environ) == parent
+    monkeypatch.delenv('DK_ARCHITECTURE_AGENT', raising=False)
+    with pytest.raises(ValueError, match='explicit recipient identity'):
+        executors.execute('Unknown nested agent.', repository)
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+def test_explicit_architecture_packet_survives_semantic_transport_opt_out(
+    monkeypatch, ambient_architecture_packet, host
+):
+    from shared import architecture
+    repository, packet = ambient_architecture_packet
+    monkeypatch.setenv('DK_HOST', host)
+    monkeypatch.setenv('DK_ARCHITECTURE_AGENT', 'unrelated-ambient-agent')
+    seen = []
+    def process(prompt, checkout, selected_host, env, *args):
+        delivered = architecture.load(json.loads(env['DK_ARCHITECTURE_PACKET']))
+        assert delivered['agent'] == 'worker' and delivered['paths'] == ['core.py']
+        assert 'DK_ARCHITECTURE_AGENT' not in env
+        assert 'Read your architecture packet' in prompt and selected_host == host
+        seen.append(delivered)
+        return '{}'
+    monkeypatch.setattr(executors, 'execute_process', process)
+    executors.execute('Inspect core.', repository, architecture_packet=packet, inherit_architecture=False)
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize('scoped', [False, True])
+def test_json_semantic_opt_out_preserves_custom_executor_signature(tmp_path, monkeypatch, scoped):
+    monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
+    calls = []
+    def custom(prompt, checkout, *, attempt=0):
+        calls.append(attempt)
+        return 'invalid' if attempt == 0 else '{"complete": true}'
+    assert executors.execute_json('Inspect.', tmp_path, executor=custom,
+                                  diagnostic_scope='semantic-opt-out' if scoped else None,
+                                  inherit_architecture=False) == {'complete': True}
+    assert calls == [0, 1]
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+@pytest.mark.parametrize('helper', ['rule_indexer', 'discussion', 'description', 'code', 'preparation', 'architecture'])
+def test_known_semantic_helpers_execute_under_ambient_parent_packet(
+    tmp_path, monkeypatch, ambient_architecture_packet, host, helper
+):
+    from shared import architecture
+    repository, _ = ambient_architecture_packet
+    monkeypatch.setenv('DK_HOST', host)
+    monkeypatch.setenv('DK_ARCHITECTURE_AGENT', 'ambient-parent')
+    monkeypatch.delenv('REPO_RULES_SUMMARIZER', raising=False)
+    parent = {name: os.environ[name] for name in ('DK_ARCHITECTURE_PACKET', 'DK_ARCHITECTURE_AGENT')}
+    paths = {'rule_indexer': 'dk-config/scripts/repo_rules.py',
+             'preparation': 'dk-pr-decisions/scripts/preparation.py',
+             **{name: 'dk-pr-decisions/scripts/decisions.py' for name in ('discussion', 'description', 'code')}}
+    if helper != 'architecture':
+        spec = importlib.util.spec_from_file_location('semantic_' + helper,
+            Path(__file__).resolve().parents[1] / 'runtime' / paths[helper])
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    value = {'decisions': [], **({'thread_summaries': []} if helper == 'discussion' else {})}
+    if helper in ('preparation', 'architecture'):
+        value = {'complete': True}
+    calls = []
+    def process(prompt, checkout, selected_host, env, resolved, attempt, timeout):
+        assert selected_host == host and resolved is None
+        assert 'DK_ARCHITECTURE_PACKET' not in env and 'DK_ARCHITECTURE_AGENT' not in env
+        assert 'Read your architecture packet' not in prompt
+        assert all(os.environ[name] == content for name, content in parent.items())
+        calls.append(attempt)
+        if helper == 'rule_indexer':
+            assert not (Path(checkout) / '.git').exists() and timeout == 120
+            assert 'Source: README.md' in prompt and 'read-only rule indexer' in prompt
+            return '- Keep public functions documented.'
+        if helper == 'code':
+            assert (checkout / 'manifest.json').is_file()
+            return json.dumps(value)
+        return 'invalid JSON' if attempt == 0 else json.dumps(value)
+    monkeypatch.setattr(executors, 'execute_process', process)
+    if helper == 'rule_indexer':
+        source = repository / 'README.md'
+        source.write_text('Document public functions.')
+        assert module.summarize(source, repository) == '- Keep public functions documented.'
+    elif helper == 'discussion':
+        context = {'pr': {'title': 'Fixture', 'headRefOid': 'a' * 40}, 'linked_issues': [], 'diff': ''}
+        assert module.analyze(tmp_path, context, {}, {}, {}, set(), set(), set()) == ([], {})
+    elif helper == 'description':
+        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'body': 'Keep public APIs.'}}
+        assert module.suggest_from_description(state, tmp_path / 'description.json') == []
+    elif helper == 'code':
+        state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a' * 40}, 'decisions': []}
+        monkeypatch.setattr(module, 'pr_diff', lambda *_: 'diff --git a/core.py b/core.py\n+++ b/core.py\n@@ -0,0 +1 @@\n+core()\n')
+        monkeypatch.setattr(module, 'resolve_pr_identity', lambda *a, **kw: ('github.com', 'o/r', 'o/r'))
+        assert module.suggest_from_code(state, tmp_path / 'code.json') == []
+    else:
+        counted = []
+        analyze = architecture.analyze if helper == 'architecture' else module.analyze
+        assert analyze('Analyze retained evidence.', tmp_path, validate=None,
+                       on_call=lambda: counted.append(True)) == value
+        assert len(counted) == 2
+    assert calls == ([0] if helper in ('rule_indexer', 'code') else [0, 1])
+    assert all(os.environ[name] == content for name, content in parent.items())
+
+
+def test_legacy_rule_summarizer_isolates_ambient_architecture(
+    tmp_path, monkeypatch, ambient_architecture_packet
+):
+    repository, _ = ambient_architecture_packet
+    monkeypatch.setenv('DK_ARCHITECTURE_AGENT', 'ambient-parent')
+    monkeypatch.setenv('SUMMARIZER_SETTING', 'preserved')
+    script = tmp_path / 'summarizer'
+    script.write_text('#!' + sys.executable + '\nimport os,sys\n'
+                      'assert "DK_ARCHITECTURE_PACKET" not in os.environ\n'
+                      'assert "DK_ARCHITECTURE_AGENT" not in os.environ\n'
+                      'assert os.environ["SUMMARIZER_SETTING"] == "preserved"\n'
+                      'print("- " + sys.stdin.read().strip())\n')
+    script.chmod(0o755)
+    monkeypatch.setenv('REPO_RULES_SUMMARIZER', str(script))
+    spec = importlib.util.spec_from_file_location('semantic_legacy_rules',
+        Path(__file__).resolve().parents[1] / 'runtime/dk-config/scripts/repo_rules.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    source = repository / 'README.md'
+    source.write_text('Document public functions.')
+    parent = dict(os.environ)
+    assert module.summarize(source, repository) == '- Document public functions.'
+    assert dict(os.environ) == parent
 
 
 @pytest.fixture(autouse=True)

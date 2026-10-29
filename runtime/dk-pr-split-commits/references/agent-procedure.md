@@ -1,5 +1,12 @@
 # Split procedure for the delegated agent
 
+Read [architecture delivery](../../dk-architect/procedure.md) and retain your
+`series-cleanup` (or selected skill ID) packet reference/fingerprint. Include all
+old/new rename and deletion paths when declaring file scope, or use unknown scope
+until paths are known. Refresh before expanding it and deliver packets for nested
+agents. Request authorization before breaching a delivered rule. A tree-preserving
+regroup does not waive baseline architecture obligations or the completion gate.
+
 Use the root workflow's `DK_CLI_REFERENCE` command map and relevant retained help
 sections before discovering commands again. Keep that path in helper environments
 and handoffs. If missing, query current help through the stable CLI; never reuse
