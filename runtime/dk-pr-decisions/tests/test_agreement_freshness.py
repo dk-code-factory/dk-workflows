@@ -99,8 +99,27 @@ def test_unusable_store_blocks_without_model_network_or_writes(package, monkeypa
     assert before == {str(p): p.read_bytes() for p in path.parent.rglob('*') if p.is_file()}
 
 
+@pytest.mark.parametrize('revision', [-1, True, '1', 1.5, None],
+                         ids=['negative', 'boolean', 'string', 'float', 'null'])
+def test_invalid_revision_blocks_preparation_and_work_without_rewriting_store(package, revision):
+    saved = package.prepare()
+    state, path = stored(package)
+    state['revision'] = revision
+    path.write_text(json.dumps(state))
+    before = {str(p): p.read_bytes() for p in path.parent.rglob('*') if p.is_file()}
+    with patch.object(prep, 'analyze') as model:
+        with pytest.raises(ValueError, match='Invalid Decisions revision.*refresh context and preparation'):
+            prep.prepare(package.manifest_path, package.versions, previous_preparation=saved['artifact'])
+        with pytest.raises(ValueError, match='Invalid Decisions revision.*refresh context and preparation'):
+            prep.gate(saved['artifact'], pr_url=package.context['url'], head_sha=package.head)
+    model.assert_not_called()
+    assert before == {str(p): p.read_bytes() for p in path.parent.rglob('*') if p.is_file()}
+    assert prep.historical(saved['artifact'])['preparation_id'] == saved['preparation_id']
+
+
 @pytest.mark.parametrize('with_agreement', [False, True])
-def test_operational_refresh_preserves_even_empty_verified_agreements(package, with_agreement):
+@pytest.mark.parametrize('revision', [None, 0, 17], ids=['missing', 'zero', 'incremented'])
+def test_operational_refresh_preserves_even_empty_verified_agreements(package, with_agreement, revision):
     if with_agreement:
         add(package)
         export(package)
@@ -109,7 +128,11 @@ def test_operational_refresh_preserves_even_empty_verified_agreements(package, w
     state.update(run_number=999, viewer='another-viewer', summaries={}, publication_history=[])
     for record in state['saved_decisions'].values():
         record['publication_status'] = 'published'
-    api.save_state(state, path)
+    if revision is None:
+        state.pop('revision', None)
+    else:
+        state['revision'] = revision
+    path.write_text(json.dumps(state))
     prep.gate(saved['artifact'], pr_url=package.context['url'], head_sha=package.head)
     export(package)
     refreshed = prep.prepare(package.manifest_path, package.versions, previous_preparation=saved['artifact'])
