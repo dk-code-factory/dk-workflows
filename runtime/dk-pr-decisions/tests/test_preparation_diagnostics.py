@@ -243,6 +243,32 @@ def test_retained_escalation_revalidates_and_guards_the_request(tmp_path, monkey
         validate.assert_not_called()
 
 
+def test_retained_escalation_decoder_failure_preserves_evidence(tmp_path, monkeypatch):
+    monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
+    checkout = tmp_path / 'repo'
+    checkout.mkdir()
+    routing = {'full_reassessment': True, 'reason': 'Inspect all interactions'}
+    provider = Mock(return_value=json.dumps(routing))
+    monkeypatch.setattr(executors, 'execute', provider)
+    scope = {'evidence': 'same governing inputs', 'phase': 'incremental'}
+    assert prep.analyze('Frozen evidence', checkout, diagnostic_scope=scope) == routing
+    index, = (tmp_path / 'state/dk-code-factory/workflows/model-exchanges').glob('*.json')
+    evidence = Path(json.loads(index.read_text())['evidence'])
+    value = json.loads(evidence.read_text())
+    value['attempts'][-1]['response'] = '[' * 100000 + '0' + ']' * 100000
+    private_state.write(evidence, value)
+    paths = (index, evidence, index.with_suffix('.lock'))
+    before = {path: path.read_bytes() for path in paths}
+    with pytest.raises(model_diagnostics.StorageFailure) as caught:
+        prep.analyze('Frozen evidence', checkout, diagnostic_scope=scope)
+    assert caught.value.code == 'model_diagnostics_invalid'
+    assert isinstance(caught.value.__cause__, RecursionError)
+    assert caught.value.action['artifacts'] == [str(index), str(evidence)]
+    assert 'correction budget' in caught.value.action['task']
+    assert provider.call_count == 1
+    assert {path: path.read_bytes() for path in paths} == before
+
+
 @pytest.mark.parametrize('stage', ['response', 'rejected', 'accepted'])
 @pytest.mark.parametrize('destination', ['external', 'repository', 'plugin'])
 def test_correction_storage_failure_does_not_grant_another_response(tmp_path, monkeypatch, stage, destination):
@@ -397,6 +423,7 @@ def test_optional_accepted_index_failure_preserves_validated_success(tmp_path, m
 
 @pytest.mark.parametrize('target,damage', [
     ('index', 'null'), ('index', 'empty'), ('index', 'json'), ('index', 'status'),
+    ('index', 'nesting'), ('exchange', 'nesting'),
     ('index', 'relative'), ('index', 'outside'), ('index', 'other_exchange'),
     ('exchange', 'missing'), ('exchange', 'null'), ('exchange', 'empty'), ('exchange', 'json'),
     ('exchange', 'version'), ('exchange', 'identity'), ('exchange', 'status'),
@@ -417,6 +444,8 @@ def test_damaged_retained_state_never_replenishes_correction(tmp_path, monkeypat
     value = json.loads(path.read_text())
     if damage == 'missing':
         path.unlink()
+    elif damage == 'nesting':
+        path.write_text('[' * 100000 + '0' + ']' * 100000)
     elif damage in {'null', 'empty', 'json'}:
         path.write_text({'null': 'null', 'empty': '{}', 'json': '{'}[damage])
     else:
@@ -448,12 +477,19 @@ def test_damaged_retained_state_never_replenishes_correction(tmp_path, monkeypat
         elif damage == 'validation':
             value['attempts'][1]['validation'] = {'detail': 'private invalid diagnostic'}
         path.write_text(json.dumps(value))
+    paths = [item for item in (index, evidence, index.with_suffix('.lock')) if item.exists()]
+    before = {item: item.read_bytes() for item in paths}
     with pytest.raises(model_diagnostics.StorageFailure) as caught:
         executors.execute_json('Frozen evidence', checkout, executor=provider,
                                diagnostic_scope='engineering-preparation')
     assert caught.value.code == 'model_diagnostics_invalid'
     assert 'private invalid diagnostic' not in str(caught.value)
     assert provider.call_count == 2
+    assert str(index) in caught.value.action['artifacts']
+    assert 'correction budget' in caught.value.action['task']
+    assert {item: item.read_bytes() for item in paths} == before
+    if damage == 'nesting':
+        assert isinstance(caught.value.__cause__, RecursionError)
 
 
 @pytest.mark.parametrize('interrupted', [False, True])

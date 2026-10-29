@@ -155,7 +155,10 @@ def retained(path, identity):
     """Validate stored authority before it can permit any further response."""
     missing = object()
     try:
-        index = read(path, missing)
+        try:
+            index = read(path, missing)
+        except RecursionError as exc:
+            raise retained_failure(str(exc), path) from exc
         if index is missing:
             return None, None
         if (not isinstance(index, dict) or set(index) != {'status', 'evidence'}
@@ -168,7 +171,10 @@ def retained(path, identity):
                 or not resolved.parent.name.startswith('workflow-')
                 or resolved.parent.parent != path.parent.parent.resolve()):
             raise ValueError('index evidence pointer is outside owned exchange storage')
-        value = read(evidence, None)
+        try:
+            value = read(evidence, None)
+        except RecursionError as exc:
+            raise retained_failure(str(exc), path, evidence) from exc
         if (not isinstance(value, dict)
                 or set(value) != {'schema_version', 'identity', 'request', 'status', 'attempts'}
                 or type(value['schema_version']) is not int or value['schema_version'] != 1
@@ -255,7 +261,7 @@ def exchange(prompt, checkout, scope, *, retain_accepted=None):
         if prior and prior['status'] == 'accepted' and retain_accepted is not None:
             try:
                 response = json.loads(prior['attempts'][-1]['response'])
-            except ValueError as exc:
+            except (ValueError, RecursionError) as exc:
                 raise retained_failure('accepted routing response is invalid', path, index['evidence']) from exc
             if retain_accepted(response):
                 journal = Exchange(Path(index['evidence']), prior)
