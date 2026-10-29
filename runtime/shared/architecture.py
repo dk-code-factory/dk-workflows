@@ -303,7 +303,13 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
     validate_analysis(value, root, baseline)
     if git(checkout, 'status', '--porcelain=v1').strip() or git(checkout, 'rev-parse', 'HEAD').strip() != baseline:
         raise ValueError('Architect changed its baseline checkout')
-    proposals = deepcopy(value['proposals'])
+    # A model refresh cannot resolve pending user decisions by omission.
+    proposals = {digest(item): deepcopy(item) for item in (old['proposals'] if old else [])}
+    conflicts = {digest(item): deepcopy(item) for item in (old['conflicts'] if old else [])}
+    for item in value['proposals']:
+        proposals[digest(item)] = deepcopy(item)
+    for item in value['conflicts']:
+        conflicts[digest(item)] = deepcopy(item)
     rules = deepcopy(old['rules'] if old else [])
     for item in value['rules']:
         item = rule(item)
@@ -314,17 +320,19 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
             # require explicit user resolution; source refresh alone is allowed.
             fields = ('text', 'origin', 'patterns', 'agents')
             if any(previous[k] != item[k] for k in fields):
-                proposals.append({'rule': item, 'reason': 'Existing obligation requires user resolution'})
+                proposal = {'rule': item, 'reason': 'Existing obligation requires user resolution'}
+                proposals[digest(proposal)] = proposal
             elif previous['sources'] != item['sources']:
                 # Evidence can advance without changing the obligation or its
                 # user-owned policy. A new revision invalidates old exceptions.
                 previous['sources'] = item['sources']
                 previous['revision'] += 1
             continue
-        if not value['conflicts']:
+        if not conflicts:
             rules.append(item)
         else:
-            proposals.append({'rule': item, 'reason': 'Conflicting obligations require user resolution'})
+            proposal = {'rule': item, 'reason': 'Conflicting obligations require user resolution'}
+            proposals[digest(proposal)] = proposal
     stale = []
     for item in rules:
         for ref in item['sources']:
@@ -339,8 +347,8 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
             item['sources'] = [source(root, baseline, ref) for ref in item['sources']]
     catalog = {'schema_version': 1, 'repository': key, 'baseline': baseline, 'tree': tree,
                'parent': expected, 'generation': (old['generation'] + 1 if old else 1),
-               'knowledge': knowledge, 'rules': rules, 'proposals': proposals,
-               'conflicts': value['conflicts'], 'stale_rules': sorted(set(stale))}
+               'knowledge': knowledge, 'rules': rules, 'proposals': list(proposals.values()),
+               'conflicts': list(conflicts.values()), 'stale_rules': sorted(set(stale))}
     with locked(directory):
         pointer = read(baseline_pointer(directory, baseline), None)
         if (pointer['fingerprint'] if pointer else None) != expected:

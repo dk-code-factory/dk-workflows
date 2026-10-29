@@ -151,6 +151,14 @@ def test_uncertain_and_conflicting_conventions_are_not_adopted(repo):
     held = catalog['proposals'][-1]
     assert held['rule']['id'] == 'arch-core' and 'resolution' in held['reason']
     assert held['rule']['sources'][0]['sha256']
+    pending = deepcopy(catalog['proposals'])
+    for refreshed in (model_result(rules=[obligation()]), result):
+        catalog = a.ensure(repo, catalog['baseline'], force=True, analyzer=lambda *_: refreshed)
+        assert not catalog['rules']
+        assert catalog['conflicts'] == result['conflicts']
+        assert catalog['proposals'] == pending
+        with pytest.raises(ValueError, match='user resolution'):
+            deliver(repo)
     catalog = a.edit(repo, obligation(origin='user-created', sources=[]), user=USER, expected=catalog['fingerprint'])
     assert catalog['conflicts']  # An unrelated edit cannot clear an unresolved conflict.
     catalog = a.edit(repo, obligation(origin='user-created', sources=[]), user=USER,
