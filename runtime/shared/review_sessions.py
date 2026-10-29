@@ -152,6 +152,8 @@ class Session:
 
     def finish(self, result):
         self.validate_storage()
+        if self.prepared.get('preparation_version', 1) >= 3:
+            coverage.validate_current(self.prepared)
         item = coverage.retain(self.path, self.context, self.prepared, result, self.id)
         def save(data):
             data['results'].append(item)
