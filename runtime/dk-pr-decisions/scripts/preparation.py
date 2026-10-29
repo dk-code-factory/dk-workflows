@@ -609,6 +609,8 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
 def validate(artifact, context, decisions, *, require_ready=True, check_sources=True):
     if not isinstance(artifact, dict) or artifact.get('preparation_version') not in {1, 2, VERSION}:
         raise ValueError('unsupported preparation artifact')
+    if check_sources and artifact['preparation_version'] < VERSION:
+        raise ValueError('historical preparation cannot authorize current work; refresh preparation')
     if artifact.get('mode') not in {'standalone', 'iteration'}:
         raise ValueError('invalid preparation mode')
     content = {k: v for k, v in artifact.items() if k != 'preparation_id'}

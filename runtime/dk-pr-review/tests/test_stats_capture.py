@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / 'dk-pr-review/scripts'))
 sys.path.insert(0, str(ROOT / 'dk-pr-decisions/tests'))
 import run_reviewers as runner
 from stats_capture import Capture, for_iteration, api
-from preparation_fixtures import artifact
+from preparation_fixtures import artifact, rebuild
 from shared.reviewer_telemetry import ENV, capture, trace_path
 from shared.review_sessions import Session
 from shared import executors
@@ -28,6 +28,11 @@ def responses(names, values):
             raise value
         return value
     return respond
+
+
+def prepare_current(context, decisions, prepared):
+    rebuild(prepared, context, decisions)
+    context.update(runner.preparation_api.context_for(prepared))
 
 
 @pytest.fixture
@@ -53,11 +58,14 @@ def pinned(tmp_path, monkeypatch):
     names = ['code-review-ad', 'code-review-matpocock']
     prep = artifact(context, decisions, {'production/0': {
         'path': str(metadata), 'sha256': runner.hashlib.sha256(metadata.read_bytes()).hexdigest()}}, names)
+    prepare_current(context, decisions, prep)
+    def git(*args):
+        return subprocess.check_output(['git', *args], cwd=context['checkout'], text=True).strip()
     monkeypatch.setattr(runner, 'describe_reviewer', lambda name: prep['reviewers'][runner.bindings.key(name)])
     procedure=tmp_path/'SKILL.md';procedure.write_text('Read-only review fixture')
     monkeypatch.setattr(runner, 'skill_path', lambda name: procedure)
     from shared import executors
-    monkeypatch.setattr(executors, 'resolve', lambda name: {'binding':runner.bindings.normalize(name), 'executor':'codex', 'root':str(tmp_path), 'procedure':str(procedure)})
+    monkeypatch.setattr(executors, 'resolve', lambda name: {'binding':runner.bindings.normalize(name), 'identity':runner.bindings.key(name), 'executor':'codex', 'root':str(tmp_path), 'procedure':str(procedure)})
     return context, decisions, prep, names, git
 
 
@@ -76,7 +84,8 @@ def test_capture_before_aggregation_and_independent_review_session(pinned):
     with patch.object(runner, 'run_skill_reviewer', side_effect=fake) as calls:
         result = runner.review(context, names, '', decisions, '', prep, stats=stats)
     assert calls.call_count == 2
-    assert result == {'complete': True, 'outcome': 'completed', 'findings': [{**finding(), 'reviewers': names}], 'skipped_reviewers': [], 'executed_reviewers': names, 'reused_reviewers': []}
+    assert runner.architecture.load(result['architecture_review'])['result']['complete']
+    assert {key: value for key, value in result.items() if key != 'architecture_review'} == {'complete': True, 'outcome': 'completed', 'findings': [{**finding(), 'reviewers': names}], 'skipped_reviewers': [], 'executed_reviewers': names, 'reused_reviewers': []}
     data = api.ledger('github.com/o/r')
     reviews = data['runs'][stats.run_id]['reviews']
     assert len({rev['findings'][0]['id'] for rev in reviews.values()}) == 2
@@ -103,7 +112,7 @@ def test_partial_failure_retains_completed_and_later_reviewers(pinned, monkeypat
     third = 'dk-pr-read-comments'
     prep['reviewers'][third] = {**prep['reviewers'][names[0]], 'reviewer': third}
     prep['analysis']['reviewer_addenda'][third] = prep['analysis']['reviewer_addenda'][names[0]]
-    prep['preparation_id'] = runner.preparation_api.digest({k: v for k, v in prep.items() if k != 'preparation_id'})
+    prepare_current(context, decisions, prep)
     names.append(third)
     stats = Capture(context, prep, names, cycle=1)
     with patch.object(runner, 'run_skill_reviewer', side_effect=responses(names, [
@@ -125,7 +134,7 @@ def test_exhaustion_and_analytics_failure_do_not_change_review_contract(pinned, 
     exhausted = {'status': 'tokens_exhausted', 'findings': [], 'message': 'usage limit reached'}
     with patch.object(runner, 'run_skill_reviewer', side_effect=responses(names, [exhausted, {'findings': []}])):
         result = runner.review(context, names, '', decisions, '', prep, stats=stats)
-    assert result['complete']
+    assert result['complete'], result.get('reason', result)
     assert result['skipped_reviewers'] == [{'reviewer': names[0], 'reason': 'usage limit reached'}]
     assert api.summary()['total']['reviews']['exhausted'] == 1
     assert api.summary()['total']['reviews']['clean'] == 1
@@ -133,7 +142,7 @@ def test_exhaustion_and_analytics_failure_do_not_change_review_contract(pinned, 
     monkeypatch.setattr(api, 'record_review', lambda *a, **k: (_ for _ in ()).throw(OSError('disk error')))
     with patch.object(runner, 'run_skill_reviewer', return_value={'findings': [finding()]}):
         result = runner.review(context, names, '', decisions, '', prep, stats=stats2)
-    assert result['complete']
+    assert result['complete'], result.get('reason', result)
     assert len(result['findings']) == 1
     assert 'missing data' in capsys.readouterr().err
     assert list(api.ledger_path(stats.repo).parent.glob('review-stats-artifacts/results/*.json'))
@@ -141,6 +150,9 @@ def test_exhaustion_and_analytics_failure_do_not_change_review_contract(pinned, 
 
 def test_execution_corrections_retained_without_nested_double_counting(pinned, monkeypatch):
     context, decisions, prep, names, git = pinned
+    prep['reviewers'] = {names[0]: prep['reviewers'][names[0]]}
+    prep['analysis']['reviewer_addenda'] = {names[0]: prep['analysis']['reviewer_addenda'][names[0]]}
+    prepare_current(context, decisions, prep)
     stats = Capture(context, prep, names[:1], cycle=1)
     responses = ['not json', json.dumps({'findings': [finding()]})]
     def fake(args, input, **kwargs):
@@ -150,7 +162,7 @@ def test_execution_corrections_retained_without_nested_double_counting(pinned, m
     # Replace the owned provider transport; git validation stays real.
     with patch.object(executors, 'run_provider', side_effect=fake):
         result = runner.review(context, names[:1], '', decisions, '', prep, stats=stats)
-    assert result['complete']
+    assert result['complete'], result.get('reason', result)
     rev = api.ledger(stats.repo)['runs'][stats.run_id]['reviews'][names[0]]
     assert rev['correction_retries'] == 1
     assert rev['usage'] == [{'total_tokens': 7, 'source': 'codex_cli_summary'}] * 2
@@ -182,7 +194,7 @@ def test_private_initialization_failure_retains_replayable_results(pinned, monke
     stats = for_iteration(context, prep, names, cycle=1)
     with patch.object(runner, 'run_skill_reviewer', return_value={'findings': [finding()]}):
         result = runner.review(context, names, '', decisions, '', prep, stats=stats)
-    assert result['complete']
+    assert result['complete'], result.get('reason', result)
     recovery = Path(context['patch']).parent / 'review-stats-recovery'
     begin = json.loads(next(recovery.glob('begin-*.json')).read_text())
     reviews = [json.loads(p.read_text()) for p in recovery.glob('record-review-*.json')]

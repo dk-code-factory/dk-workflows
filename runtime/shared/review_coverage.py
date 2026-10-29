@@ -140,6 +140,8 @@ def verify(item, prepared, *, accepted_failures=(), reconciliation=None, checkou
         raise ValueError('cleanup prechecks cannot supply final review coverage')
     artifact = load(item)
     historical = checkout is not None and reconciliation is None
+    if not historical and prepared.get('preparation_version', 1) < 3:
+        raise ValueError('historical preparation cannot authorize current review coverage; refresh preparation')
     if prepared.get('preparation_version', 1) >= 3:
         if not historical:
             context = validate_current(prepared)

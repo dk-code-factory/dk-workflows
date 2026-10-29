@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from test_stats_capture import pinned, runner, finding, Capture, for_iteration, api
+from test_stats_capture import pinned, runner, finding, Capture, for_iteration, api, prepare_current
 from shared import bindings, executors
 from shared.review_sessions import Session
 from shared.reviewer_telemetry import ENV
@@ -71,7 +71,7 @@ def commands(pinned, tmp_path, monkeypatch):
         prep['reviewers'] = {name: {**prep['reviewers'][old_names[i]], 'reviewer': name}
                              for i, name in enumerate(names)}
         prep['analysis']['reviewer_addenda'] = {name: 'addendum for ' + name for name in names}
-        prep['preparation_id'] = runner.preparation_api.digest({k: v for k, v in prep.items() if k != 'preparation_id'})
+        prepare_current(context, decisions, prep)
         monkeypatch.setattr(runner, 'skill_path', lambda provider: None)
         return context, decisions, prep, providers, names, tmp_path
     return setup
@@ -297,6 +297,9 @@ def test_shared_checkout_guard_does_not_blame_an_observer_or_trust_tainted_resul
 def test_interruption_does_not_count_terminated_providers_as_failures(commands, target, count):
     context, decisions, prep, providers, names, root = commands(('ok', 'ok'))
     providers, names = providers[:count], names[:count]
+    prep['reviewers'] = {name: prep['reviewers'][name] for name in names}
+    prep['analysis']['reviewer_addenda'] = {name: prep['analysis']['reviewer_addenda'][name] for name in names}
+    prepare_current(context, decisions, prep)
     Path(providers[0]['command'][1]).write_text('''import sys, time
 from pathlib import Path
 name, root = sys.argv[2], Path(sys.argv[4])
@@ -524,6 +527,9 @@ def test_shared_guard_retains_original_provider_or_storage_diagnostic(pinned, ca
 def test_terminal_analytics_measure_provider_end_and_finish_after_storage_failure(pinned, terminal):
     context, decisions, prep, names, git = pinned
     names = names[:1]
+    prep['reviewers'] = {names[0]: prep['reviewers'][names[0]]}
+    prep['analysis']['reviewer_addenda'] = {names[0]: prep['analysis']['reviewer_addenda'][names[0]]}
+    prepare_current(context, decisions, prep)
     session = Session(context, prep, names)
     stats = for_iteration(context, prep, names, cycle=1, attempt=terminal)
     clock = threading.local()

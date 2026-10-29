@@ -29,6 +29,35 @@ class PreparationTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.package = Package(self.temp.name)
 
+    def test_legacy_preparation_is_historical_only_and_cannot_supply_current_coverage(self):
+        from shared import review_coverage, review_sessions
+        package = self.package
+        saved = package.prepare()
+        current = prep.read(saved['artifact'])
+        for version in (1, 2):
+            with self.subTest(version=version):
+                old = copy.deepcopy(current)
+                old['preparation_version'] = version
+                if version == 1:
+                    old = {key: old[key] for key in ('preparation_version', 'mode', 'identity',
+                        'sources', 'reviewers', 'analysis', 'readiness')}
+                    old['sources'] = {key: {field: source[field] for field in ('path', 'sha256')}
+                        for key, source in old['sources'].items() if not key.startswith('architecture')}
+                old['preparation_id'] = prep.digest({k: v for k, v in old.items() if k != 'preparation_id'})
+                path = Path(saved['artifact']).parent / ('legacy-' + str(version) + '.json')
+                path.write_text(json.dumps(old))
+                self.assertEqual(prep.historical(path), old)
+                with self.assertRaisesRegex(ValueError, 'historical preparation cannot authorize current work'):
+                    prep.gate(path, pr_url=package.context['url'], head_sha=package.head)
+                session = review_sessions.Session(package.context, old, ['example'])
+                reference = session.finish({'complete': True, 'findings': [],
+                    'executed_reviewers': ['example'], 'reused_reviewers': [], 'skipped_reviewers': []})
+                with self.assertRaisesRegex(ValueError, 'historical preparation cannot authorize current review coverage'):
+                    review_coverage.verify(reference, old)
+                historical = review_coverage.verify(reference, old, checkout=package.repo)
+                self.assertTrue(historical['result']['complete'])
+                self.assertNotIn('architecture_review', historical['result'])
+
     def test_pre_architecture_history_remains_readable_but_cannot_authorize_work(self):
         saved = self.package.prepare()
         old = prep.read(saved['artifact'])

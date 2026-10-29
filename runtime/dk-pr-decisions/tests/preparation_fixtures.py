@@ -111,9 +111,17 @@ def promote(value, context, decisions):
     """Use the fresh contract in tests of the former run-record CLI adapter."""
     if value['preparation_version'] >= 3:
         return
+    rebuild(value, context, decisions)
+
+
+def rebuild(value, context, decisions):
+    """Prepare real current evidence after a fixture changes its declared inputs."""
     # Legacy unit fixtures use a synthetic base OID. Fresh architecture needs a
     # readable target baseline; their single real commit is the fixture baseline.
-    context['base_sha'] = context['head_sha']
+    try:
+        prep.git(context['checkout'], 'rev-parse', '--verify', context['base_sha'] + '^{commit}')
+    except ValueError:
+        context['base_sha'] = context['head_sha']
     context['repository_identity'] = 'path:' + str(Path(context['repository']).resolve())
     seed_architecture(context['checkout'])
     directory = Path(context['patch']).parent / 'fresh-inputs'
@@ -125,7 +133,8 @@ def promote(value, context, decisions):
     decisions.setdefault('decisions', [])
     absence = put('absence.json', {'verified_absence': True, 'reason': 'No other fixture evidence'})
     evidence = {name: [absence] for name in prep.EVIDENCE}
-    evidence['production'] = [str(Path(context['checkout']) / 'x.py')]
+    evidence['production'] = [str(Path(context['checkout']) /
+        prep.git(context['checkout'], 'ls-files').splitlines()[0])]
     evidence['reviewers'] = [put('reviewer-' + str(i) + '.json', d) for i, d in enumerate(value['reviewers'].values())]
     manifest = put('manifest.json', {'mode': value['mode'], 'context': put('context.json', context),
                                     'decisions': put('decisions.json', decisions), 'evidence': evidence})
