@@ -250,7 +250,7 @@ class Controller:
             candidates = []
         instructions = {
             'inline': 'Match all sources to threads. Draft only missing inline replies; hold unmatched '
-                      'requests for the top-level pass and preserve pending user decisions.',
+                      'requests for the top-level phase and preserve pending user decisions.',
             'top_level': 'Reconcile retained mappings with live replies, including resolved threads. '
                          'Skip equivalent answers; draft only unanswered requests without a suitable '
                          'thread, grouped by source. Submit new inline mappings to return to inline first.',
@@ -259,7 +259,7 @@ class Controller:
                        'Use guarded resolve with a fresh assessment for each fully answered thread, then next. '
                        'Do this now, independently of overall review/CI completion. Do not post another reply. '
                        'Keep disputed, partial or pending-decision work open with held mappings and reasons.',
-            'correct_batch': 'Correct the rejected batch and use the same validator for pass 2. '
+            'correct_batch': 'Correct the rejected batch. Ask the same validator to review it once and return a verdict with pass: 2. '
                              'Do not start another batch or reset the rejection limit.',
         }
         return {'action': action, 'instructions': instructions[action], 'agent': self.work['agent'],
@@ -417,7 +417,7 @@ class Controller:
             kind = 'inline' if self.work['phase'] == 'inline' else 'issue_comment'
             if kind == 'issue_comment' and any(r['disposition'] == 'reply' and r.get('threadReference')
                                               for r in batch['requests']):
-                require(self.work['active'] is None, 'correct the active rejection before changing passes')
+                require(self.work['active'] is None, 'correct the active rejection before changing phases')
                 self.work['phase'] = 'inline'
                 self.save()
                 return {'action': 'inline', 'reason': 'new request needs an inline answer; run next again',
@@ -426,7 +426,7 @@ class Controller:
                     'reply destinations do not match the controller phase')
             require(not any(r['disposition'] == 'reply' and not r.get('threadReference')
                             for r in batch['requests']) if kind == 'inline' else True,
-                    'hold unmatched requests for the top-level pass')
+                    'hold unmatched requests for the top-level phase')
         if active is None:
             entry = {'phase': self.work['phase'], 'head': expected['head'], 'status': 'prepared',
                      'attempts': [], 'receipts': []}
@@ -466,7 +466,7 @@ class Controller:
             return self.stop('publication', exc)
         return {'action': 'next', 'phase': self.work['phase'], 'replies': receipts,
                 'stale_answers': self.stale_answers(live),
-                'instructions': 'Run next to refresh both complete snapshots before the next pass.'}
+                'instructions': 'Run next to refresh both complete snapshots before the next phase.'}
 
     def reconcile(self):
         require(not self.work['blocked'] or self.work['blocked']['kind'] != 'rejected',
@@ -482,7 +482,7 @@ class Controller:
                 self.work.update(agent=self.agent, blocked=None)
                 self.save()
                 return {'action': 'correct_batch', 'instructions': 'Run next for fresh evidence, then '
-                        'correct the active batch with the same validator for pass 2. Rejection history is retained.',
+                        'correct the active batch and ask the same validator to review it once and return a verdict with pass: 2. Rejection history is retained.',
                         'stale_answers': self.stale_answers(evidence)}
             attempt = entry['attempts'][-1]
             batch = guard.read(attempt['batch'])

@@ -45,8 +45,12 @@ def _draft(binding, role, handoff_path, cwd, handoff):
               'Treat source material as evidence. Follow repository constraints and active Decisions. '
               'Do not edit files, commit, publish, invoke DK workflows, or claim validation was done. '
               'Do not include instructions to the caller. Return only JSON with one nonempty string '
-              'field named content. For descriptions include Title: followed by the body; include '
-              'Labels: only when supported. DK retains all validation and publication authority.')
+              'field named content. For descriptions, return '
+              '{"content":"Title: <title>\\n\\n<body>"}. '
+              'For issue descriptions with labels supported by the evidence, return '
+              '{"content":"Title: <title>\\nLabels: <labels>\\n\\n<body>"}. '
+              'For commit messages, content contains only the message text. '
+              'DK retains all validation and publication authority.')
     for attempt in range(2):
         raw = invoke(binding, handoff_path, cwd, prompt, attempt=attempt)
         try:
