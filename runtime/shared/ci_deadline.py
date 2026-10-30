@@ -63,7 +63,7 @@ class BoundedAPI:
                     result = target(*args, **kwargs)
             except subprocess.TimeoutExpired as exc:
                 self.budget.remaining()
-                raise RuntimeError(f'GitHub {name} request timed out before the classification deadline') from exc
+                raise RuntimeError(str(exc)) from exc
             self.budget.remaining()
             return result
         return call

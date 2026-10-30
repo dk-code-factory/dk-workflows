@@ -270,12 +270,16 @@ def decide(api, registry, snapshot, refresh_snapshot, auto_discover=True, *,
                 timed_out = True
         if getattr(exc, 'evidence_file', None):
             partial['evidence_file'] = exc.evidence_file
-        reason = ('CI classification deadline exceeded: ' if timed_out else
-                  'GitHub request timed out before the classification deadline: ')
+        if isinstance(exc, ClassificationTimeout):
+            reason = str(exc)
+        else:
+            prefix = ('CI classification deadline exceeded: ' if timed_out else
+                      'GitHub request timed out before the classification deadline: ')
+            reason = prefix + str(exc)
         decision = {'result': 'failure', 'raw_result': snapshot['result'], 'head': snapshot['head'],
                     'checks': snapshot.get('checks', []), 'ignored_failures': [],
                     'blockers': list(partial.get('blockers', [])) +
-                        [{'reason': reason + str(exc)}]}
+                        [{'reason': reason}]}
         for name in ('evidence_file', 'targets_file', 'discovery'):
             if name in partial:
                 decision[name] = partial[name]

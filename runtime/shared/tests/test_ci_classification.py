@@ -285,6 +285,7 @@ def test_initial_expiry_retains_blocking_decision(registry):
     result = decide(FakeAPI(), registry, classification_timeout=1, clock=clock)
     assert result['result'] == 'failure' and result['classification']['timed_out']
     assert result['classification']['phase'] == 'classification'
+    assert result['blockers'][-1]['reason'].count('CI classification deadline exceeded') == 1
     assert Path(result['decision_file']).is_file()
 
 
@@ -459,7 +460,8 @@ def test_request_timeout_with_remaining_budget_is_missing_evidence(registry):
     api.open_issues = timeout
     result = decide(api, registry, classification_timeout=120, clock=lambda: tick[0])
     assert result['result'] == 'failure' and not result['classification']['timed_out']
-    assert any('request timed out' in detail for detail in result['discovery']['missing'])
+    assert any('gh issue list' in detail and '60' in detail
+               for detail in result['discovery']['missing'])
     assert all(scan['status'] != 'timed_out' for scan in registry.load()['scans'].values())
 
 
@@ -542,3 +544,16 @@ def test_per_call_deadline_checks_do_not_flood_phase_progress():
     with pytest.raises(ClassificationTimeout):
         api.request('actions/runs/10')
     assert len(api.api.calls) == 100 and len(updates) == 1
+
+
+def test_request_timeout_keeps_command_endpoint_and_duration():
+    endpoint = 'actions/runs/10/attempts/2/logs'
+    api = FakeAPI()
+    def timeout(requested, binary=False):
+        raise subprocess.TimeoutExpired(['gh', 'api', 'repos/acme/project/' + requested], 60)
+    api.request = timeout
+    bounded = BoundedAPI(api, Budget(120, clock=lambda: 0))
+    with pytest.raises(RuntimeError) as failed:
+        bounded.request(endpoint)
+    assert endpoint in str(failed.value) and 'gh' in str(failed.value)
+    assert '60' in str(failed.value)
