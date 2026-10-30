@@ -10,7 +10,7 @@ import sys
 
 import pytest
 
-from shared import architecture, executors, review_coverage as coverage, review_reconciliation as reconcile, review_sessions
+from shared import architecture, executors, model_diagnostics, review_coverage as coverage, review_reconciliation as reconcile, review_sessions
 from shared.command_results import classification
 from shared.private_state import read, write
 
@@ -503,16 +503,178 @@ def test_malformed_provider_output_gets_one_correction(scenario, monkeypatch, ki
     assert s.calls == [0, 1] and not read(s.path, {}).get('review_reconciliations')
 
 
-def test_provider_failure_and_interruption_can_resume_without_a_cycle(scenario, monkeypatch):
+@pytest.mark.parametrize('category', ['fields', 'sources', 'decisions'])
+@pytest.mark.parametrize('kind', ['missing', 'unexpected', 'both', 'list', 'null'])
+def test_comparison_index_diagnostics(category, kind):
+    binding = {'fields': ['field'], 'changed_sources': ['source'], 'comparison_version': 2,
+               'decision_additions': {'decision': {}}, 'evidence': {}}
+    value = {'equivalent': True, 'rationale': 'Inspect all required identities.',
+             'fields': {}, 'sources': {}, 'decisions': {}}
+    # Empty preceding categories let this test reach the selected index check.
+    for preceding in ['fields', 'sources', 'decisions']:
+        if preceding == category:
+            break
+        binding[{'fields': 'fields', 'sources': 'changed_sources', 'decisions': 'decision_additions'}[preceding]] = []
+    required = {'fields': 'field', 'sources': 'source', 'decisions': 'decision'}[category]
+    value[category] = {'missing': {}, 'unexpected': {required: {}, 'extra': {}},
+                       'both': {'extra': {}}, 'list': [], 'null': None}[kind]
+    with pytest.raises(model_diagnostics.FieldError) as caught:
+        reconcile.validate_comparison(value, binding)
+    assert caught.value.field == category
+    detail = str(caught.value)
+    if kind in ('list', 'null'):
+        assert 'expected an object' in detail and ('list' if kind == 'list' else 'NoneType') in detail
+    else:
+        assert ('missing: ' + json.dumps([] if kind == 'unexpected' else [required])) in detail
+        assert ('unexpected: ' + json.dumps([] if kind == 'missing' else ['extra'])) in detail
+
+
+@pytest.mark.parametrize('kind', ['missing', 'unexpected', 'list'])
+def test_precheck_retains_rejected_responses_and_blocks_unchanged_retry(scenario, monkeypatch, capsys, kind):
+    s = scenario
+    run, candidate, guard_path, guard = setup_precheck(s, monkeypatch)
+    original = s.comparison
+    prompts, responses = [], []
+    def malformed(prompt, checkout, *, attempt=0, inherit_architecture=True):
+        s.calls.append(attempt)
+        prompts.append(prompt)
+        inputs = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]
+        binding = inputs['binding']
+        assert inputs['required_keys']['sources'] == binding['changed_sources']
+        value = original(binding)
+        assert value['sources']
+        if kind == 'missing': value['sources'] = {}
+        if kind == 'unexpected': value['sources']['extra'] = {}
+        if kind == 'list': value['sources'] = []
+        raw = json.dumps(value)
+        responses.append(raw)
+        return raw
+    monkeypatch.setattr(executors, 'execute', malformed)
+    before = s.path.read_bytes()
+    guard_bytes = guard_path.read_bytes()
+    with pytest.raises(model_diagnostics.ValidationFailure) as caught:
+        run()
+    error = caught.value
+    assert error.code == 'model_validation_failed'
+    assert 'sources' in str(error) and 'Last validation:' in str(error)
+    diagnostic_path = Path(error.action['artifacts'][0])
+    saved = read(diagnostic_path, {})
+    assert saved['status'] == 'rejected'
+    assert [item['response'] for item in saved['attempts']] == responses
+    assert [item['attempt'] for item in saved['attempts']] == [0, 1]
+    assert saved['request']['prompt'] == prompts[0]
+    assert saved['attempts'][0]['validation']['detail'] in prompts[1]
+    assert saved['attempts'][0]['validation']['field'] == 'sources'
+    assert diagnostic_path.stat().st_mode & 0o777 == 0o600
+    assert diagnostic_path.parent.stat().st_mode & 0o777 == 0o700
+    assert not diagnostic_path.is_relative_to(s.package.repo)
+    assert 'precheck-cleanup' in error.action['task']
+    # Reinvocation cannot buy another correction or modify run/split evidence.
+    with pytest.raises(model_diagnostics.ValidationFailure): run()
+    assert s.calls == [0, 1] and s.path.read_bytes() == before
+    destination = s.path.with_name('pr-1.json')
+    destination.write_bytes(before)
+    monkeypatch.setattr(state, 'root', lambda repo: destination.parent)
+    monkeypatch.setattr(sys, 'argv', ['run_state.py', '--repo', 'github.com/example/fixture', '--pr', '1',
+        'precheck-cleanup', '--head', s.reviewed_head, '--candidate-head', candidate,
+        '--split-state', str(guard_path)])
+    with pytest.raises(SystemExit) as stopped: state.main()
+    captured = capsys.readouterr()
+    receipt = json.loads(captured.out)
+    assert stopped.value.code == 2 and captured.err == ''
+    assert classification('run-state', 2, receipt)[:2] == ('error', 'model_validation_failed')
+    assert receipt['diagnostic']['action']['artifacts'] == [str(diagnostic_path)]
+    assert destination.read_bytes() == before and s.calls == [0, 1]
+    assert guard_path.read_bytes() == guard_bytes and read(guard_path, {}) == guard
+    assert Path(s.reference['path']).read_bytes() == s.original_bytes
+    assert s.git('rev-parse', guard['recovery_ref']) == s.reviewed_head
+    assert s.git('ls-remote', '--heads', 'origin', guard['remote_branch']).split()[0] == s.reviewed_head
+    assert s.git('rev-parse', candidate + '^{tree}') == guard['original_tree']
+    # Corrected governing evidence uses the same command, run and review budget.
+    old_diagnostic = diagnostic_path.read_bytes()
+    s.feedback('Corrected evidence for cleanup comparison')
+    s.prepare(analysis(s.reviewers))
+    monkeypatch.setattr(s, 'comparison', original)
+    def valid(prompt, checkout, *, attempt=0, inherit_architecture=True):
+        s.calls.append(attempt)
+        binding = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]['binding']
+        return json.dumps(original(binding))
+    monkeypatch.setattr(executors, 'execute', valid)
+    assert run()['status'] == 'prechecked' and s.calls == [0, 1, 0]
+    assert diagnostic_path.read_bytes() == old_diagnostic
+    assert len(read(s.path, {})['cycles']) == 5
+    assert guard_path.read_bytes() == guard_bytes
+    assert Path(s.reference['path']).read_bytes() == s.original_bytes
+
+
+def test_missing_source_can_be_repaired_in_the_single_correction(scenario, monkeypatch):
+    s = scenario
+    s.refresh()
+    original = s.comparison
+    def malformed_once(binding):
+        value = original(binding)
+        if len(s.calls) == 1:
+            value['sources'] = {}
+        return value
+    monkeypatch.setattr(s, 'comparison', malformed_once)
+    assert s.run()['status'] == 'reconciled' and s.calls == [0, 1]
+
+
+@pytest.mark.parametrize('precheck', [False, True])
+@pytest.mark.parametrize('refresh', ['lineage', 'counter'])
+def test_operational_refresh_cannot_reset_exhausted_comparison_budget(scenario, monkeypatch, precheck, refresh):
+    s = scenario
+    if precheck:
+        run, _, guard_path, _ = setup_precheck(s, monkeypatch)
+        guard_bytes = guard_path.read_bytes()
+    else:
+        s.refresh()
+        run = s.run
+    if refresh == 'counter':
+        s.package.write('history.json', {'evidence_version': 1, 'source_id': 'run-history',
+            'governing': {'obligation': 'Inspect the supported transform'}, 'operational': {'cycles': 1}})
+        s.prepare()
+    original = s.comparison
+    def malformed(binding):
+        value = original(binding)
+        value['sources'] = []
+        return value
+    monkeypatch.setattr(s, 'comparison', malformed)
+    with pytest.raises(model_diagnostics.ValidationFailure) as caught:
+        run()
+    evidence = Path(caught.value.action['artifacts'][0])
+    evidence_bytes = evidence.read_bytes()
+    monkeypatch.setattr(s, 'comparison', original)
+    for index in range(2):
+        parent = s.current
+        if refresh == 'counter':
+            s.package.write('history.json', {'evidence_version': 1, 'source_id': 'run-history',
+                'governing': {'obligation': 'Inspect the supported transform'}, 'operational': {'cycles': index + 2}})
+        refreshed = s.prepare()
+        assert refreshed['refresh']['model_call_count'] == 0
+        assert s.current['preparation_id'] != parent['preparation_id']
+        assert s.current['engineering_id'] == parent['engineering_id']
+        with pytest.raises(model_diagnostics.ValidationFailure) as repeated:
+            run()
+        assert repeated.value.action['artifacts'] == [str(evidence)]
+        assert s.calls == [0, 1] and evidence.read_bytes() == evidence_bytes
+    record = read(s.path, {})
+    assert not record.get('cleanup_prechecks') and not record.get('review_reconciliations')
+    assert len(record['cycles']) == 5
+    assert Path(s.reference['path']).read_bytes() == s.original_bytes
+    if precheck:
+        assert guard_path.read_bytes() == guard_bytes
+
+
+def test_provider_failure_can_resume_without_a_cycle(scenario, monkeypatch):
     s = scenario
     s.refresh()
     provider = executors.execute
-    for error in (RuntimeError('Provider unavailable'), KeyboardInterrupt()):
-        def fail(*a, **kw): raise error
-        monkeypatch.setattr(executors, 'execute', fail)
-        with pytest.raises(type(error)): s.run()
-        assert not read(s.path, {}).get('review_reconciliations')
-        assert len(read(s.path, {})['cycles']) == 5
+    def fail(*a, **kw): raise RuntimeError('Provider unavailable')
+    monkeypatch.setattr(executors, 'execute', fail)
+    with pytest.raises(RuntimeError, match='Provider unavailable'): s.run()
+    assert not read(s.path, {}).get('review_reconciliations')
+    assert len(read(s.path, {})['cycles']) == 5
     monkeypatch.setattr(executors, 'execute', provider)
     assert s.run()['status'] == 'reconciled'
 
@@ -590,7 +752,10 @@ def test_cross_path_opposite_verdicts_remain_terminally_blocked(scenario, monkey
         s.different = ('sources', 'feedback/0') if outer != negative_first else None
         value = s.comparison(binding)
         if outer:
-            s.run()
+            # A separate retained runtime can finish while this call is paused.
+            with monkeypatch.context() as rival:
+                rival.setattr(model_diagnostics, '__file__', str(s.package.root / 'other-runtime/model_diagnostics.py'))
+                s.run()
         return json.dumps(value)
     monkeypatch.setattr(executors, 'execute', provider)
     assert reconcile.reconcile(s.path, s.head, renewed, state.reconciliation_api())['status'] == 'blocked'
@@ -659,12 +824,14 @@ def test_concurrent_opposite_verdicts_remain_terminally_blocked(scenario, monkey
         binding = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]['binding']
         outer = not calls
         calls.append(attempt)
-        # The first invocation is suspended outside the lock while the second
-        # compares and registers exactly the same retained evidence.
+        # Separate retained runtimes have independent exchange locks/budgets,
+        # but still share the run's terminal semantic disagreement gate.
         s.different = ('sources', 'feedback/0') if outer != negative_first else None
         value = s.comparison(binding)
         if outer:
-            s.run()
+            with monkeypatch.context() as rival:
+                rival.setattr(model_diagnostics, '__file__', str(s.package.root / 'other-runtime/model_diagnostics.py'))
+                s.run()
         return json.dumps(value)
     monkeypatch.setattr(executors, 'execute', provider)
     assert s.run()['status'] == 'blocked'
@@ -1322,6 +1489,10 @@ def test_precheck_disagreement_and_interruption_preserve_budget(scenario, monkey
     with pytest.raises(KeyboardInterrupt): run()
     assert not read(s.path, {}).get('cleanup_prechecks')
     monkeypatch.setattr(executors, 'execute', provider)
+    with pytest.raises(model_diagnostics.ValidationFailure): run()
+    assert s.calls == []
+    s.feedback('Corrected governing evidence after interrupted comparison')
+    s.prepare(analysis(s.reviewers))
     s.different = ('sources', 'feedback/0')
     assert run()['status'] == 'blocked'
     s.different = None
