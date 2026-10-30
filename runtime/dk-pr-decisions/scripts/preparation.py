@@ -198,6 +198,8 @@ def bounded_prompt(prompt, checkout):
     source = {'path': str(path), 'sha256': fingerprint,
               'bytes': len(content), 'serialized_characters': size}
     try:
+        if path.is_symlink():
+            raise ValueError('retained preparation input must not be a symbolic link')
         if path.exists():
             if path.read_bytes() != content:
                 raise ValueError('retained preparation input differs from its content address')

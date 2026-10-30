@@ -110,7 +110,8 @@ def test_large_correction_resumes_same_spill_and_response_slot(tmp_path, monkeyp
     assert journal['attempts'][1]['input_file'] == journal['attempts'][2]['input_file'] == correction
 
 
-def test_corrupt_retained_input_blocks_unchanged_retry(tmp_path, monkeypatch):
+@pytest.mark.parametrize('corruption', ['bytes', 'dangling_symlink'])
+def test_corrupt_retained_input_blocks_unchanged_retry(tmp_path, monkeypatch, corruption):
     prompt = 'governing evidence ' * 80_000
     provider = Mock(side_effect=RuntimeError('provider unavailable'))
     monkeypatch.setattr(executors, 'execute', provider)
@@ -119,21 +120,42 @@ def test_corrupt_retained_input_blocks_unchanged_retry(tmp_path, monkeypatch):
     reference = source(provider.call_args.args[0])
     path = Path(reference['path'])
     exact = path.read_bytes()
-    path.write_bytes(b'corrupt retained evidence')
+    journal = path.parent / 'model-exchange.json'
+    prior = json.loads(journal.read_text())
+    missing = tmp_path / 'missing-input.txt'
+    if corruption == 'dangling_symlink':
+        path.unlink()
+        path.symlink_to(missing)
+    else:
+        path.write_bytes(b'corrupt retained evidence')
     with pytest.raises(Diagnostic) as failure:
         prep.analyze(prompt, tmp_path)
     assert failure.value.code == 'preparation_input_failed'
     assert str(path) in failure.value.action['artifacts']
-    assert path.read_bytes() == b'corrupt retained evidence'
+    if corruption == 'dangling_symlink':
+        assert path.is_symlink() and path.readlink() == missing
+        assert not missing.exists()
+    else:
+        assert path.read_bytes() == b'corrupt retained evidence'
     assert provider.call_count == 1
+    blocked = json.loads(journal.read_text())
+    assert blocked['attempts'][:-1] == prior['attempts']
+    assert [item['attempt'] for item in blocked['attempts']] == [0, 0]
+    assert 'response' not in blocked['attempts'][-1]
     # A pre-dispatch failure consumes no response; restoring exact evidence
     # resumes that slot without requiring deletion/reset of the private index.
+    if corruption == 'dangling_symlink':
+        path.unlink()
     path.write_bytes(exact)
     provider.side_effect = None
     provider.return_value = '{}'
     assert prep.analyze(prompt, tmp_path) == {}
     assert provider.call_count == 2
     assert provider.call_args_list[0] == provider.call_args_list[1]
+    recovered = json.loads(journal.read_text())
+    assert recovered['request'] == prior['request']
+    assert recovered['attempts'][:-1] == blocked['attempts']
+    assert [item['attempt'] for item in recovered['attempts']] == [0, 0, 0]
 
 
 @pytest.mark.parametrize('slot', [0, 1])
