@@ -94,7 +94,8 @@ def evaluate(snapshot, evidence, verification, repo, exceptions=None):
                 if report.get('complete') is not True or not (related or configured):
                     inactive = [{'url': e['issue_url'], 'status': e.get('status')}
                                 for e in verification.get('entries', []) if identity(e) == identity(test_context)]
-                    block('test failure has no verified open issue', code='unverified_named_test',
+                    block('test failure has no verified open issue', code=('unverified_named_test' if report.get('complete') is True
+                                 else 'incomplete_named_test'),
                           **context, test=test.get('test'),
                           signature=test.get('signature'), related_issues=inactive)
                 else:
@@ -148,7 +149,22 @@ def discovery_targets(evidence, blockers, budget):
     return list(targets.values())
 
 
-def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget):
+def finish_scan(registry, key, status, partial, **fields):
+    """Bound metadata finalization separately; retain pending writes in the decision."""
+    terminal = {'status': status, 'finished_at': now(), **fields}
+    partial['discovery'].update(terminal, finalization_grace_seconds=0.1)
+    grace = Budget(0.1)
+    grace.phase = 'scan_finalization'
+    try:
+        with grace.activate():
+            registry.update(lambda data: data['scans'][key].update(terminal))
+    except ClassificationTimeout as exc:
+        partial['discovery'].update(registry_status='pending', finalization_error=str(exc))
+    else:
+        partial['discovery']['registry_status'] = 'recorded'
+
+
+def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, partial):
     """One-shot decision after the sole waiter settles checks; never poll/rerun."""
     try:
         exceptions = ci_exceptions.load('remote:' + registry.repo)
@@ -159,9 +175,11 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget):
         return decision
     budget.progress('collect_current', raw_result=snapshot['result'])
     evidence = collect_snapshot(api, registry, snapshot, exceptions['entries']) if snapshot['result'] == 'failure' else {}
+    partial['evidence_file'] = evidence.get('evidence_file')
     # New observations can prove a pass or match an existing issue.
     verification = registry.synchronize([], api.issue)
     decision = evaluate(snapshot, evidence, verification, registry.repo, exceptions)
+    partial['blockers'] = decision['blockers']
     discovery = None
     # History cannot repair malformed reports, missing provenance or unsettled CI.
     # Only wholly classifiable named failures with missing issue proof can benefit.
@@ -172,23 +190,28 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget):
     targets = (discovery_targets(evidence, unknown, budget) if eligible
                and key not in registry.load().get('scans', {}) else [])
     if targets:
+        targets_file = evidence_file(registry, {'head': snapshot['head'], 'fingerprint': key, 'targets': targets})
+        partial['targets_file'] = targets_file
         def claim(data):
             scans = data.setdefault('scans', {})
             if key in scans:
                 return False
-            scans[key] = {'head': snapshot['head'], 'started_at': now(), 'status': 'running', 'targets': targets}
+            scans[key] = {'head': snapshot['head'], 'started_at': now(), 'status': 'running',
+                          'target_count': len(targets), 'targets_file': targets_file}
             return True
         if registry.update(claim):
+            partial['discovery'] = {'fingerprint': key, 'targets_file': targets_file,
+                                    'target_count': len(targets), 'status': 'running'}
             try:
                 budget.progress('discover_unknown', target_count=len(targets))
                 discovery = discover(api, registry, targets=targets)
             except ClassificationTimeout:
-                registry.update(lambda data: data['scans'][key].update(finished_at=now(), status='timed_out'))
+                finish_scan(registry, key, 'timed_out', partial)
                 raise
-            registry.update(lambda data: data['scans'][key].update(
-                finished_at=now(), status='completed', evidence_file=discovery['evidence_file']))
+            finish_scan(registry, key, 'completed', partial, evidence_file=discovery['evidence_file'])
             verification = registry.synchronize([], api.issue)
             decision = evaluate(snapshot, evidence, verification, registry.repo, exceptions)
+            partial['blockers'] = decision['blockers']
     # A rerun changes classification even if the PR SHA is unchanged. Read the
     # attempt after collection/discovery, and compare the entire check snapshot.
     for item in evidence.get('checks', []):
@@ -217,7 +240,8 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget):
         decision['result'] = 'failure'
     decision['evidence_file'] = evidence.get('evidence_file')
     if discovery:
-        decision['discovery'] = {k: discovery[k] for k in ('limits', 'limits_reached', 'missing', 'evidence_file')}
+        decision['discovery'] = partial['discovery'] | {
+            k: discovery[k] for k in ('limits', 'limits_reached', 'missing', 'evidence_file')}
     return decision
 
 
@@ -225,18 +249,23 @@ def decide(api, registry, snapshot, refresh_snapshot, auto_discover=True, *,
            classification_timeout=60, clock=time.monotonic, on_progress=None):
     """Bound live classification; timeout always leaves terminal CI unaccepted."""
     budget = Budget(classification_timeout, clock, on_progress)
+    partial = {}
     try:
         budget.progress('classification', raw_result=snapshot['result'], head=snapshot['head'])
         with budget.activate():
             decision = _decide(BoundedAPI(api, budget), registry, snapshot, refresh_snapshot,
-                               auto_discover, budget)
+                               auto_discover, budget, partial)
         budget.remaining()
         timed_out = False
     except (ClassificationTimeout, subprocess.TimeoutExpired) as exc:
         timed_out = True
         decision = {'result': 'failure', 'raw_result': snapshot['result'], 'head': snapshot['head'],
                     'checks': snapshot.get('checks', []), 'ignored_failures': [],
-                    'blockers': [{'reason': 'CI classification deadline exceeded: ' + str(exc)}]}
+                    'blockers': list(partial.get('blockers', [])) +
+                        [{'reason': 'CI classification deadline exceeded: ' + str(exc)}]}
+        for name in ('evidence_file', 'targets_file', 'discovery'):
+            if name in partial:
+                decision[name] = partial[name]
     decision['classification'] = {'timeout_seconds': classification_timeout,
         'elapsed_seconds': round(clock() - budget.started, 1), 'phase': budget.phase,
         'timed_out': timed_out}

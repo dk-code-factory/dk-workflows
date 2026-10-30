@@ -55,8 +55,17 @@ collector/parser identity; verified retained evidence can
 be reused while current checks, latest attempts, linked issue state and exception
 configuration are still read live for every decision.
 
-Timed-out scans retain their allocation and status. Automatic observation does
-not silently repeat an unchanged failure scan. Use the existing explicit
+Scan inventories live in private evidence files; registry scan entries retain
+only their count and reference. Timeout decisions preserve current evidence links,
+known blockers and target references alongside the deadline diagnostic.
+
+Scan finalization gets a separate bounded 100 ms lock-wait grace period, including
+after the classification budget expires. If contention prevents recording the
+terminal status, the decision retains the scan fingerprint, intended terminal
+status, `registry_status: pending` and `finalization_error`. The registry allocation
+remains reserved; a pending finalization is not proof of a live or completed scan
+and never permits automatic replay. Automatic observation does not silently repeat
+an unchanged failure scan. Use the existing explicit
 `dk-flaky-tests discover` command with narrowed `--days`, `--max-runs` and
 `--max-issues` to collect missing historical evidence, then rerun the one-shot
 decision. Fix unsupported report collection or parsing before retrying those

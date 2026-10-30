@@ -231,7 +231,13 @@ def test_exact_job_targeting_excludes_other_jobs_and_avoids_unneeded_archive(reg
         return original_request(endpoint, binary)
     api.jobs, api.request = jobs, request
     target = dict(workflow=WORKFLOW, job=JOB, test=TEST, signature=SIGNATURE)
-    collected = actions.collect_attempt(api, registry, api.run, 1, targets=[target])
+    class OneTargetPass(list):
+        def __iter__(self):
+            assert not getattr(self, 'visited', False), 'targets were rescanned per job'
+            self.visited = True
+            return super().__iter__()
+    collected = actions.collect_attempt(api, registry, api.run, 1,
+                                        targets=OneTargetPass([target] * 50000))
     assert [item['job'] for item in collected['jobs']] == [JOB]
     assert {item['job'] for item in registry.load()['observations']} == {JOB}
     count = sum(call[0] == 'request' and call[1].endswith('/logs') for call in api.calls)
@@ -360,3 +366,72 @@ else:
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == 'deadline respected'
     assert 'unexpected' not in registry.load()
+
+
+def test_incomplete_success_step_cannot_trigger_historical_discovery(registry, monkeypatch):
+    api = FakeAPI()
+    assert decide(api, registry)['result'] == 'known_flakes'
+    original = actions.collect_snapshot
+    def collect(*args):
+        value = original(*args)
+        value['checks'][0]['steps'].append({'number': 2, 'status': 'completed', 'conclusion': 'success',
+            'report': {'complete': False, 'tests': [{'test': 'partial_test', 'signature': 'truncated',
+                                                   'outcome': 'fail'}]}})
+        return value
+    monkeypatch.setattr(policy, 'collect_snapshot', collect)
+    api.calls.clear()
+    before = len(registry.load()['scans'])
+    result = decide(api, registry)
+    assert result['result'] == 'failure'
+    assert any(b.get('code') == 'incomplete_named_test' for b in result['blockers'])
+    assert not any(call[0] == 'issues' for call in api.calls)
+    assert len(registry.load()['scans']) == before
+
+
+@pytest.mark.parametrize('status', ['timed_out', 'completed'])
+def test_scan_finalization_contention_is_bounded_and_retained(registry, status):
+    # Run the complete lock/timeout interaction in a bounded child so a blocking
+    # flock regression fails the test instead of hanging the test runner.
+    driver = f'''
+import fcntl, json, sys
+from pathlib import Path
+sys.path.insert(0, {str(Path(__file__).parent)!r})
+from test_flaky_tests import FakeAPI, REPO, snapshot
+from shared import ci_policy as policy
+from shared.ci_deadline import ClassificationTimeout
+from shared.flaky_tests import Registry
+registry = Registry(REPO)
+tick = [0]
+held = None
+def discover(*args, **kwargs):
+    global held
+    lock = registry.path.parent / (registry.path.name + '.lock')
+    held = lock.open('w')
+    fcntl.flock(held, fcntl.LOCK_EX)
+    tick[0] = 10
+    if {status!r} == 'timed_out':
+        raise ClassificationTimeout('discovery expired while another writer holds the lock')
+    return {{'limits': {{}}, 'limits_reached': [], 'missing': [],
+             'evidence_file': policy.evidence_file(registry, {{'discovery': 'complete'}})}}
+policy.discover = discover
+try:
+    result = policy.decide(FakeAPI(body='unrelated'), registry, snapshot(), snapshot,
+                           classification_timeout=5, clock=lambda: tick[0])
+    print(json.dumps(result))
+finally:
+    if held:
+        held.close()
+'''
+    child = subprocess.run([sys.executable, '-c', driver], capture_output=True, text=True, timeout=3)
+    assert child.returncode == 0, child.stderr
+    result = json.loads(child.stdout)
+    assert result['result'] == 'failure' and result['classification']['timed_out']
+    assert result['discovery']['status'] == status
+    assert result['discovery']['registry_status'] == 'pending'
+    assert 'scan_finalization' in result['discovery']['finalization_error']
+    assert Path(result['evidence_file']).is_file() and Path(result['targets_file']).is_file()
+    assert any(blocker.get('test') == TEST for blocker in result['blockers'])
+    scan = next(iter(registry.load()['scans'].values()))
+    assert scan['status'] == 'running'  # Failure is explicitly retained in the decision.
+    assert 'targets' not in scan and scan['target_count'] == 1
+    assert json.loads(Path(scan['targets_file']).read_text())['targets'][0]['test'] == TEST

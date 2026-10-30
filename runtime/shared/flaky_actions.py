@@ -143,14 +143,16 @@ def archive_report(archive, job_name, step, job_names):
         return result(reason='unavailable or invalid attempt logs')
 
 
-def collect_attempt(api, registry, run, attempt, pipeline_exceptions=(), *, reuse=False, targets=None):
+def collect_attempt(api, registry, run, attempt, pipeline_exceptions=(), *, reuse=False, targets=None, job_scope=None):
     run_id = run['id']
     metadata = api.request(f'actions/runs/{run_id}/attempts/{attempt}')
     if (metadata.get('id') != run_id or metadata.get('run_attempt') != attempt
             or metadata.get('head_sha') != run['head_sha'] or metadata.get('path') != run.get('path')):
         raise RuntimeError('run attempt provenance mismatch')
     require_head(metadata['head_sha'])
-    jobs_scope = sorted({t['job'] for t in targets if t['workflow'] == run.get('path')}) if targets else None
+    if job_scope is None and targets:
+        job_scope = {(t['workflow'], t['job']) for t in targets}
+    jobs_scope = sorted(job for workflow, job in job_scope if workflow == run.get('path')) if job_scope is not None else None
     cache_key = digest({'repo': registry.repo, 'head': run['head_sha'], 'run_id': run_id,
                         'attempt': attempt, 'workflow': run.get('path'),
                         'jobs': jobs_scope, 'reader': ATTEMPT_READER})
@@ -176,8 +178,8 @@ def collect_attempt(api, registry, run, attempt, pipeline_exceptions=(), *, reus
                                                   {'workflow': metadata['path'], 'job': job['name']})}
     try:
         archive = b''
-        if any(job['id'] not in exempt and (not targets or any(
-                t['workflow'] == metadata['path'] and t['job'] == job['name'] for t in targets)) for job in jobs):
+        if any(job['id'] not in exempt and (job_scope is None or
+                (metadata['path'], job['name']) in job_scope) for job in jobs):
             archive = api.request(f'actions/runs/{run_id}/attempts/{attempt}/logs', binary=True)
             evidence['archive_file'] = evidence_file(registry, archive, '.zip')
     except ClassificationTimeout:
@@ -187,7 +189,7 @@ def collect_attempt(api, registry, run, attempt, pipeline_exceptions=(), *, reus
         evidence['missing'].append(str(exc))
     observations = []
     for job in jobs:
-        if targets and not any(t['workflow'] == metadata['path'] and t['job'] == job['name'] for t in targets):
+        if job_scope is not None and (metadata['path'], job['name']) not in job_scope:
             continue
         if (job.get('run_id') != run_id or job.get('head_sha') != metadata['head_sha']
                 or job.get('run_attempt', attempt) != attempt):
@@ -250,6 +252,8 @@ def discover(api, registry, days=30, max_runs=100, max_issues=500, *, targets=No
             report['verification'] = verification
             report['evidence_file'] = evidence_file(registry, report)
             return report
+    job_scope = {(t['workflow'], t['job']) for t in targets} if targets else None
+    workflows = {workflow for workflow, job in job_scope} if job_scope is not None else None
     try:
         query = urlencode({'status': 'completed', 'created': '>=' + since, 'per_page': max_runs})
         response = api.request('actions/runs?' + query)
@@ -259,11 +263,11 @@ def discover(api, registry, days=30, max_runs=100, max_issues=500, *, targets=No
         report['runs'] = len(runs)
         evidence_file(registry, response)
         for run in runs:
-            if targets and not any(target['workflow'] == run.get('path') for target in targets):
+            if workflows is not None and run.get('path') not in workflows:
                 continue
             for attempt in range(1, run['run_attempt'] + 1):
                 try:
-                    evidence = collect_attempt(api, registry, run, attempt, reuse=True, targets=targets)
+                    evidence = collect_attempt(api, registry, run, attempt, reuse=True, job_scope=job_scope)
                     report['cached_attempts'] += int(evidence.get('cached', False))
                     report['attempts'] += 1
                     report['missing'].extend(evidence['missing'])
