@@ -146,7 +146,8 @@ another registered marketplace. Refresh has a separate **180-second** timeout.
 Both budgets are configurable with `--lookup-timeout` and `--refresh-timeout`;
 keep the outer timeout greater than their sum, with startup overhead allowed.
 Timed-out commands and their summarizer descendants are terminated together in
-an isolated process group before the hook returns.
+an isolated process group before the hook returns. Cancelling the adapter with
+`SIGTERM` also stops these workers and exits with a failure status.
 
 Failures identify lookup, installation validation, or refresh, include the
 failing command and its timeout, and state whether refresh started. For a lookup

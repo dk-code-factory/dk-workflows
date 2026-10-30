@@ -201,6 +201,61 @@ print('NONE')
                     pass
 
 
+def test_sigterm_cancellation_stops_refresh_and_worker(startup):
+    _, record, marker, root = startup
+    heartbeat = marker.parent / 'heartbeat'
+    trace = marker.parent / 'worker-pids.json'
+    worker = marker.parent / 'worker.py'
+    worker.write_text('''import pathlib, sys, time
+marker = pathlib.Path(sys.argv[1])
+deadline = time.monotonic() + 10
+count = 0
+while time.monotonic() < deadline:
+    marker.write_text(str(count))
+    count += 1
+    time.sleep(0.02)
+''')
+    helper = root / 'runtime/dk-config/scripts/repo_rules.py'
+    helper.write_text('''import json, os, pathlib, subprocess, sys
+child = subprocess.Popen([sys.executable, os.environ['WORKER'], os.environ['HEARTBEAT']])
+pathlib.Path(os.environ['TRACE']).write_text(json.dumps([os.getpid(), child.pid]))
+child.wait()
+''')
+    env = dict(os.environ, PATH=str(marker.parent / 'bin') + os.pathsep + os.environ['PATH'],
+               CODEX_HOME=str(root.parents[4]), MOCK_REGISTRY=json.dumps({'installed': [record]}),
+               WORKER=str(worker), HEARTBEAT=str(heartbeat), TRACE=str(trace))
+    event = marker.parent / 'event.json'
+    event.write_text(json.dumps({'cwd': str(marker.parent)}))
+    command = [sys.executable, str(marker.parent / 'stable-hooks/codex_rules_hook.py'),
+               '--lookup-timeout', '5', '--refresh-timeout', '20']
+    with event.open() as source:
+        process = subprocess.Popen(command, stdin=source, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True, env=env, start_new_session=True)
+    try:
+        deadline = time.monotonic() + 15
+        while not heartbeat.is_file():
+            assert process.poll() is None, 'hook exited before its refresh worker started'
+            assert time.monotonic() < deadline, 'refresh worker did not start'
+            time.sleep(0.01)
+        os.killpg(process.pid, signal.SIGTERM)
+        stdout, stderr = process.communicate(timeout=5)
+        assert process.returncode != 0, 'cancellation must not become successful completion'
+        assert 'hookSpecificOutput' not in stdout and 'Traceback' not in stderr
+        last_heartbeat = heartbeat.read_bytes()
+        time.sleep(0.2)
+        assert heartbeat.read_bytes() == last_heartbeat, 'worker survived hook cancellation'
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+        if trace.is_file():
+            for pid in reversed(json.loads(trace.read_text())):
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+
 def test_refresh_launch_failure_reports_no_refresh_and_refresh_recovery(startup, monkeypatch):
     _, record, marker, root = startup
     calls = []

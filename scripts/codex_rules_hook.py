@@ -128,5 +128,11 @@ def main():
     print(json.dumps(hook(payload, args, dict(os.environ))))
 
 
+def terminate(signum, frame):
+    """Unwind process-group cleanup when the hook runner cancels this adapter."""
+    raise SystemExit(128 + signum)
+
+
 if __name__ == '__main__':
+    signal.signal(signal.SIGTERM, terminate)
     main()
