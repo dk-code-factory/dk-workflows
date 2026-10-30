@@ -31,7 +31,9 @@ class GitHub:
         command = ['gh', 'api', '--hostname', self.host, f'repos/{self.name}/{endpoint}']
         try:
             completed = github_run(command, capture_output=True, timeout=60)
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(str(exc)) from exc
+        except OSError as exc:
             raise RuntimeError(f'GitHub request unavailable: {endpoint}') from exc
         if completed.returncode:
             raise RuntimeError(f'GitHub request failed: {endpoint}: ' + completed.stderr.decode(errors='replace').strip())

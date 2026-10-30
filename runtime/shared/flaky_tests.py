@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from shared.repository_scope import inside_checkout
+from shared.ci_deadline import ClassificationTimeout
 from shared.private_state import root, read, mutate
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -148,6 +149,7 @@ class Registry:
         urls.update(i['html_url'] for i in issues if i.get('html_url') and not i.get('pull_request')
                     and any(issue_match(i, o) for o in failures))
         live = {}
+        errors = {}
         for url in sorted(urls):
             try:
                 number = issue_number(self.repo, url)
@@ -155,13 +157,21 @@ class Registry:
                 if issue.get('html_url', '').lower() != url.lower() or issue.get('pull_request'):
                     raise ValueError('issue identity mismatch')
                 live[url] = issue
-            except (RuntimeError, OSError, ValueError):
+            except ClassificationTimeout as exc:
+                exc.issue_errors = errors | {url: str(exc)}
+                raise
+            except (RuntimeError, OSError, ValueError) as exc:
                 live[url] = None
+                errors[url] = str(exc)
         checked = now()
 
         def sync(data):
             entries = data.setdefault('entries', {})
             sources = data.setdefault('issue_snapshots', {})
+            for url, error in errors.items():
+                history = data.setdefault('issue_failures', {}).setdefault(url, [])
+                if not history or history[-1]['error'] != error:
+                    history.append({'checked_at': checked, 'error': error})
             for issue in live.values():
                 if issue:
                     sources.setdefault(digest(issue), issue)
@@ -192,7 +202,8 @@ class Registry:
                     history.append(event | {'at': checked})
                 entry.update(event, active=active, checked_at=checked)
             return {'checked_at': checked, 'entries': list(entries.values()),
-                    'unavailable_issues': [url for url, issue in live.items() if issue is None]}
+                    'unavailable_issues': [url for url, issue in live.items() if issue is None],
+                    'issue_errors': errors}
         return self.update(sync)
 
 

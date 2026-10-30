@@ -557,3 +557,44 @@ def test_request_timeout_keeps_command_endpoint_and_duration():
         bounded.request(endpoint)
     assert endpoint in str(failed.value) and 'gh' in str(failed.value)
     assert '60' in str(failed.value)
+
+
+def timeout_production_transport(monkeypatch):
+    from shared import github_reads
+    failures = []
+    def run(argv, **kwargs):
+        error = subprocess.TimeoutExpired(argv, kwargs['timeout'])
+        failures.append(error)
+        raise error
+    monkeypatch.setattr(subprocess, 'run', run)
+    monkeypatch.setattr(github_reads.time, 'sleep', lambda seconds: None)
+    return failures
+
+
+def test_production_request_timeout_keeps_original_transport_details(monkeypatch):
+    failures = timeout_production_transport(monkeypatch)
+    endpoint = 'actions/runs/10/attempts/2/logs'
+    api = BoundedAPI(actions.GitHub(REPO), Budget(120))
+    with pytest.raises(RuntimeError) as failed:
+        api.request(endpoint)
+    assert len(failures) == 3
+    assert str(failures[-1]) in str(failed.value)
+    assert endpoint in str(failed.value)
+
+
+def test_production_issue_timeout_survives_registry_and_decision(registry, monkeypatch):
+    from test_flaky_tests import URL
+    fake = FakeAPI()
+    assert decide(fake, registry)['result'] == 'known_flakes'
+    evidence = actions.collect_snapshot(fake, registry, snapshot())
+    failures = timeout_production_transport(monkeypatch)
+    api = BoundedAPI(actions.GitHub(REPO), Budget(120))
+    verification = registry.synchronize([], api.issue)
+    error = verification['issue_errors'][URL]
+    assert str(failures[-1]) in error and 'issues/7' in error
+    assert verification['unavailable_issues'] == [URL]
+    saved = registry.load()['issue_failures'][URL][-1]
+    assert saved['error'] == error
+    decision = policy.evaluate(snapshot(), evidence, verification, REPO)
+    assert decision['result'] == 'failure' and decision['issue_errors'][URL] == error
+    assert not decision['ignored_failures']

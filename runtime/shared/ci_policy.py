@@ -18,7 +18,8 @@ def evaluate(snapshot, evidence, verification, repo, exceptions=None):
     outcome = {'result': raw, 'raw_result': raw, 'head': snapshot.get('head'),
                'checks': snapshot.get('checks', []), 'ignored_failures': [], 'blockers': [],
                'verified_at': verification.get('checked_at'),
-               'unavailable_issues': verification.get('unavailable_issues', [])}
+               'unavailable_issues': verification.get('unavailable_issues', []),
+               'issue_errors': verification.get('issue_errors', {})}
     outcome['exception_config'] = exceptions
     def block(reason, **context):
         outcome['blockers'].append({'reason': reason, **context})
@@ -179,6 +180,7 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, pa
     # New observations can prove a pass or match an existing issue.
     verification = (registry.synchronize([], api.issue) if snapshot['result'] == 'failure'
                     else {})
+    partial['issue_errors'] = verification.get('issue_errors', {})
     decision = evaluate(snapshot, evidence, verification, registry.repo, exceptions)
     partial['blockers'] = decision['blockers']
     discovery = None
@@ -211,6 +213,7 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, pa
                 raise
             finish_scan(registry, key, 'completed', partial, evidence_file=discovery['evidence_file'])
             verification = registry.synchronize([], api.issue)
+            partial['issue_errors'] = verification.get('issue_errors', {})
             decision = evaluate(snapshot, evidence, verification, registry.repo, exceptions)
             partial['blockers'] = decision['blockers']
     # A rerun changes classification even if the PR SHA is unchanged. Read the
@@ -270,6 +273,8 @@ def decide(api, registry, snapshot, refresh_snapshot, auto_discover=True, *,
                 timed_out = True
         if getattr(exc, 'evidence_file', None):
             partial['evidence_file'] = exc.evidence_file
+        if getattr(exc, 'issue_errors', None):
+            partial['issue_errors'] = exc.issue_errors
         if isinstance(exc, ClassificationTimeout):
             reason = str(exc)
         else:
@@ -280,7 +285,7 @@ def decide(api, registry, snapshot, refresh_snapshot, auto_discover=True, *,
                     'checks': snapshot.get('checks', []), 'ignored_failures': [],
                     'blockers': list(partial.get('blockers', [])) +
                         [{'reason': reason}]}
-        for name in ('evidence_file', 'targets_file', 'discovery'):
+        for name in ('evidence_file', 'targets_file', 'discovery', 'issue_errors'):
             if name in partial:
                 decision[name] = partial[name]
     decision['classification'] = {'timeout_seconds': classification_timeout,
