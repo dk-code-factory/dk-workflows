@@ -9,6 +9,13 @@ import time
 ACTIVE_BUDGET = ContextVar('ci_classification_budget', default=None)
 
 
+def check_budget():
+    """Cooperate with the active deadline during local report processing."""
+    budget = ACTIVE_BUDGET.get()
+    if budget is not None:
+        budget.remaining()
+
+
 class ClassificationTimeout(Exception):
     evidence_file = None
 

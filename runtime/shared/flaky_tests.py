@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from shared.repository_scope import inside_checkout
-from shared.ci_deadline import ClassificationTimeout
+from shared.ci_deadline import ClassificationTimeout, check_budget
 from shared.private_state import root, read, mutate
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -51,8 +51,10 @@ def issue_match(issue, item):
     Structured declarations or exact backtick-quoted context avoid fuzzy identity
     matches. No issue text is executed or treated as agent instructions.
     """
+    check_budget()
     text = (issue.get('title') or '') + '\n' + (issue.get('body') or '')
     for block in re.findall(r'```dk-flaky\s*\n(.*?)\n```', text, re.S):
+        check_budget()
         try:
             value = json.loads(block)
         except ValueError:
@@ -73,12 +75,18 @@ def issue_match(issue, item):
 
 
 def historical_proof(observations, item):
-    same = [o for o in observations if o.get('complete') is True and
-            all(o.get(k) == item.get(k) for k in ('workflow', 'job', 'test'))]
+    same = []
+    for observation in observations:
+        check_budget()
+        if observation.get('complete') is True and all(
+                observation.get(k) == item.get(k) for k in ('workflow', 'job', 'test')):
+            same.append(observation)
     for fail in same:
+        check_budget()
         if fail.get('outcome') != 'fail' or fail.get('signature') != item['signature']:
             continue
         for passed in same:
+            check_budget()
             if (passed.get('outcome') == 'pass' and passed.get('head') == fail.get('head')
                     and passed.get('completed_at', '') > fail.get('completed_at', '~')
                     and (passed.get('run_id'), passed.get('attempt'), passed.get('job_id')) !=
@@ -131,6 +139,7 @@ class Registry:
             stored = data.setdefault('observations', [])
             seen = {digest(o) for o in stored}
             for item in items:
+                check_budget()
                 require_head(item['head'])
                 if item.get('repo') != self.repo or not all(item.get(k) for k in
                         ('workflow', 'job', 'test', 'run_id', 'attempt', 'job_id', 'url', 'completed_at')):
@@ -143,6 +152,7 @@ class Registry:
 
     def synchronize(self, issues, fetch_issue):
         """Refresh every linked issue directly, then verify against current evidence."""
+        check_budget()
         saved = self.load()
         urls = {e['issue_url'] for e in saved.get('entries', {}).values()}
         failures = [o for o in saved.get('observations', []) if o.get('outcome') == 'fail']
@@ -166,6 +176,7 @@ class Registry:
         checked = now()
 
         def sync(data):
+            check_budget()
             entries = data.setdefault('entries', {})
             sources = data.setdefault('issue_snapshots', {})
             for url, error in errors.items():
@@ -188,6 +199,7 @@ class Registry:
                     entries.setdefault(key, dict(zip(('workflow', 'job', 'test', 'signature'), identity(item))))
                     entries[key].update(issue_url=url)
             for entry in entries.values():
+                check_budget()
                 issue = live.get(entry['issue_url'])
                 state = issue.get('state') if issue else 'unavailable'
                 match = issue_match(issue, entry) if issue else None

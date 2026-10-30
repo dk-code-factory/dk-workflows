@@ -337,7 +337,7 @@ def test_completion_cli_operational_subprocess_errors_have_diagnostics(tmp_path,
         completion.main()
     assert stopped.value.code == 2
     captured = capsys.readouterr()
-    assert captured.out == '' and captured.err.startswith('completion: ')
+    assert captured.out == '' and captured.err.splitlines()[-1].startswith('completion: ')
     assert 'Traceback' not in captured.err
     if phase != 'initial_scope':
         assert len(reads) == 1 and reads[0][1:] == (60, True)
@@ -379,7 +379,11 @@ def test_review_precheck_cli_reports_live_errors(monkeypatch, capsys, failure_st
     assert output['gate'] == 'review_coverage_invalid'
     assert output['review_limitation'] == 'Live repository identity changed'
     assert not any(output[key] for key in ('review_ready', 'cleanup_ready', 'completion_ready'))
-    assert len(calls) == 2 and captured.err == ''
+    assert len(calls) == 2
+    if failure_stage == 'gate':
+        assert captured.err == ''
+    else:
+        assert json.loads(captured.err)['phase'] == 'terminal'
 
 
 def test_completion_prompt_precedence_and_reset(tmp_path, monkeypatch):
@@ -621,6 +625,7 @@ def test_waiter_reports_terminal_status_before_classification(monkeypatch, capsy
     def classify(*args, **kwargs):
         update = json.loads(capsys.readouterr().err)
         assert update['phase'] == 'terminal' and update['raw_result'] == 'failure'
+        assert update['check_count'] == 1 and 'checks' not in update
         assert kwargs['classification_timeout'] == 7
         kwargs['on_progress']({'phase': 'discover_unknown'})
         return raw
@@ -681,3 +686,46 @@ def test_completion_rejects_invalid_budget_before_live_queries(monkeypatch, caps
         completion.main()
     assert invalid.value.code == 2
     assert 'classification timeout must be positive' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('raw_result', ['success', 'failure'])
+def test_completion_reports_terminal_and_phase_progress_before_blocking_timeout(
+        monkeypatch, capsys, raw_result):
+    import json
+    import sys
+    from shared import ci_policy, flaky_tests
+    monkeypatch.setitem(sys.modules, 'ci_wait', ci)
+    monkeypatch.setattr(sys, 'argv', ['completion.py', '--pr', PR, 'gate', '--stage', 'review',
+        '--start-head', OTHER, '--final-head', SHA, '--review-complete',
+        '--preparation-file', 'fixture', '--verification-file', 'fixture', '--run-record', 'fixture',
+        '--classification-timeout', '7'])
+    raw = {'result': raw_result, 'head': SHA,
+           'checks': [{'bucket': 'pass' if raw_result == 'success' else 'fail'}]}
+    observations = []
+    def observe(*args):
+        observations.append(raw_result)
+        return raw
+    monkeypatch.setattr(ci, 'observe', observe)
+    monkeypatch.setattr(flaky_tests, 'Registry', lambda *a, **k: object())
+    def classify(*args, **kwargs):
+        # A user must already know the terminal raw state when classification begins.
+        diagnostic = capsys.readouterr().err
+        assert diagnostic, 'completion must report terminal CI before classification'
+        terminal = json.loads(diagnostic)
+        assert terminal == {'phase': 'terminal', 'raw_result': raw_result,
+                            'head': SHA, 'check_count': 1}
+        assert kwargs['classification_timeout'] == 7
+        kwargs['on_progress']({'phase': 'verify_current', 'elapsed_seconds': 7})
+        return raw | {'result': 'failure', 'raw_result': raw_result,
+                      'classification': {'timed_out': True},
+                      'blockers': [{'reason': 'CI classification deadline exceeded during verify_current'}]}
+    monkeypatch.setattr(ci_policy, 'decide', classify)
+    with pytest.raises(SystemExit) as blocked:
+        completion.main()
+    assert blocked.value.code == 1
+    captured = capsys.readouterr()
+    assert json.loads(captured.err) == {'phase': 'verify_current', 'elapsed_seconds': 7}
+    output = json.loads(captured.out)
+    assert output['gate'] == 'ci_not_green' and output['ci']['classification']['timed_out']
+    assert not any(output[key] for key in ('review_ready', 'cleanup_ready', 'completion_ready'))
+    assert observations == [raw_result, raw_result]

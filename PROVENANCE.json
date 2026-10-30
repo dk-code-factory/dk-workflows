@@ -66,7 +66,7 @@
     {
       "source": "dk-code-factory/dk-workflows",
       "version": "1.6.5",
-      "description": "Bound live CI classification with immediate terminal reporting, named-failure targeted discovery, verified historical attempt reuse, deadline-aware registry locks, scalable target mapping, terminal diagnostics and regression coverage preserving exact-head, attempt and issue guards."
+      "description": "Bound live CI classification with compact immediate terminal and phase reporting in the waiter and completion gate, workflow-scoped named-failure discovery, verified historical attempt reuse, deadline-aware registry locks, report parsing and issue-proof matching, validated Go event types and linear grouping, iterative nested JUnit totals, scalable target mapping, retained partial attempt diagnostics and regression coverage preserving exact-head, attempt and issue guards."
     },
     {
       "source": "dk-code-factory/dk-workflows",

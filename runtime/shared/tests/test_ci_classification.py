@@ -134,6 +134,28 @@ def test_deadline_after_live_refresh_revokes_known_flake_acceptance(registry):
     assert result['ignored_failures'] == []
 
 
+def test_final_attempt_expiry_reports_live_verification_phase(registry):
+    api = FakeAPI()
+    tick, run_reads, updates = [0], [0], []
+    original = api.request
+    def request(endpoint, binary=False):
+        if endpoint == 'actions/runs/10':
+            run_reads[0] += 1
+            if run_reads[0] == 2:
+                tick[0] = 10
+        return original(endpoint, binary)
+    api.request = request
+    def refresh():
+        raise AssertionError('expired live attempt verification must stop further reads')
+    result = policy.decide(api, registry, snapshot(), refresh,
+                          classification_timeout=5, clock=lambda: tick[0],
+                          on_progress=updates.append)
+    assert result['result'] == 'failure' and result['classification']['timed_out']
+    assert result['classification']['phase'] == updates[-1]['phase'] == 'verify_current'
+    assert result['ignored_failures'] == []
+    assert run_reads[0] == 2
+
+
 def test_real_transport_caps_requests_retries_and_issue_scan_to_remaining_budget(monkeypatch):
     tick = [0]
     calls = []
@@ -658,3 +680,221 @@ finally:
     result = json.loads(child.stdout)
     assert result['result'] == 'failure' and result['classification']['timed_out']
     assert not result['ignored_failures']
+
+
+def test_targeted_discovery_finds_history_beyond_busy_unrelated_workflows(registry):
+    api = FakeAPI(body=declaration(False), attempts=2)
+    api.texts[2] = PASS
+    original = api.request
+    def request(endpoint, binary=False):
+        if endpoint.startswith('actions/runs?'):
+            return {'total_count': 101, 'workflow_runs': [
+                dict(api.run, id=1000 + i, path='.github/workflows/unrelated.yml')
+                for i in range(100)]}
+        if endpoint.startswith('actions/workflows/ci.yml/runs?'):
+            api.calls.append(('request', endpoint))
+            return {'total_count': 1, 'workflow_runs': [copy.deepcopy(api.run)]}
+        return original(endpoint, binary)
+    api.request = request
+    report = actions.discover(api, registry, targets=[
+        dict(workflow=WORKFLOW, job=JOB, test=TEST, signature=SIGNATURE)])
+    assert report['attempts'] == 2 and report['runs'] == 1
+    assert report['verification']['entries'][0]['active']
+
+
+def test_report_parsing_checks_deadline_and_retains_downloaded_sources(registry, monkeypatch):
+    from shared import test_evidence
+    events = [{'Action': 'run', 'Package': 'p', 'Test': f'Test{i}'} for i in range(1000)]
+    api = FakeAPI(text='\n'.join(map(json.dumps, events)))
+    tick = [0]
+    original = test_evidence.json.loads
+    reads = []
+    def loads(text, *args, **kwargs):
+        if isinstance(text, str) and text.startswith('{"Action"') and '\n' not in text:
+            reads.append(text)
+            if len(reads) == 10:
+                tick[0] = 10
+        return original(text, *args, **kwargs)
+    monkeypatch.setattr(test_evidence.json, 'loads', loads)
+    result = decide(api, registry, classification_timeout=5, clock=lambda: tick[0])
+    assert result['classification']['timed_out'] and result['result'] == 'failure'
+    assert len(reads) < 100
+    snapshot_evidence = json.loads(Path(result['evidence_file']).read_text())
+    attempt = json.loads(Path(snapshot_evidence['checks'][0]['attempt_evidence_file']).read_text())
+    assert Path(attempt['archive_file']).is_file() and Path(attempt['source_file']).is_file()
+
+
+def test_large_go_report_groups_events_without_repeated_scans():
+    from shared import test_evidence
+    # Counting equality calls detects rescanning every event for every test.
+    class Package(str):
+        comparisons = 0
+        def __eq__(self, other):
+            Package.comparisons += 1
+            return super().__eq__(other)
+        __hash__ = str.__hash__
+    count = 1000
+    events = [dict(Action=action, Package=Package('p'), Test=f'Test{i}')
+              for i in range(count) for action in ('run', 'pass')]
+    events.append(dict(Action='pass', Package=Package('p')))
+    from unittest.mock import patch
+    with patch.object(test_evidence.json, 'loads', side_effect=events):
+        report = test_evidence.go_output('\n'.join(['{}'] * len(events)))
+    assert report['complete'] and len(report['tests']) == count
+    assert Package.comparisons < count * 20
+
+
+def test_targeted_workflow_queries_share_one_run_limit(registry, monkeypatch):
+    api = FakeAPI(body='unrelated')
+    queries, collected = [], []
+    original = api.request
+    def request(endpoint, binary=False):
+        if endpoint.startswith('actions/workflows/'):
+            queries.append(endpoint)
+            workflow = '.github/workflows/' + endpoint.split('/')[2]
+            return {'total_count': 1, 'workflow_runs': [dict(api.run, path=workflow)]}
+        return original(endpoint, binary)
+    api.request = request
+    def collect(api, registry, run, attempt, **kwargs):
+        collected.append(run['path'])
+        return {'missing': []}
+    monkeypatch.setattr(actions, 'collect_attempt', collect)
+    targets = [dict(workflow=f'.github/workflows/{name}.yml', job=JOB, test=TEST, signature=SIGNATURE)
+               for name in ('one', 'two', 'three')]
+    report = actions.discover(api, registry, max_runs=2, targets=targets)
+    assert len(queries) == len(collected) == report['runs'] == 2
+    assert 'per_page=2' in queries[0] and 'per_page=1' in queries[1]
+    assert 'runs' in report['limits_reached']
+
+
+def test_historical_parse_timeout_keeps_both_current_and_attempt_evidence(registry, monkeypatch):
+    from shared import test_evidence
+    api = FakeAPI(body=declaration(False))
+    original = actions.archive_report
+    tick, parses = [0], []
+    def parse(*args):
+        parses.append(args)
+        if len(parses) == 2:
+            tick[0] = 10
+            test_evidence.parse_report('')
+        return original(*args)
+    monkeypatch.setattr(actions, 'archive_report', parse)
+    result = decide(api, registry, classification_timeout=5, clock=lambda: tick[0])
+    assert result['classification']['timed_out'] and result['result'] == 'failure'
+    current = json.loads(Path(result['evidence_file']).read_text())
+    historical = json.loads(Path(result['discovery']['evidence_file']).read_text())
+    assert current['checks'][0]['job_id'] == 101
+    assert Path(historical['archive_file']).is_file() and historical['missing']
+
+
+@pytest.mark.parametrize('historical', [False, True])
+def test_log_download_expiry_retains_attempt_provenance(registry, historical):
+    api = FakeAPI(body=declaration(False))
+    original = api.request
+    tick, downloads = [0], [0]
+    def request(endpoint, binary=False):
+        if endpoint.endswith('/logs'):
+            downloads[0] += 1
+            if downloads[0] == (2 if historical else 1):
+                tick[0] = 10
+        return original(endpoint, binary)
+    api.request = request
+    result = decide(api, registry, classification_timeout=5, clock=lambda: tick[0])
+    assert result['classification']['timed_out'] and result['result'] == 'failure'
+    current = json.loads(Path(result['evidence_file']).read_text())
+    attempt_path = (result['discovery']['evidence_file'] if historical else
+                    current['checks'][0]['attempt_evidence_file'])
+    attempt = json.loads(Path(attempt_path).read_text())
+    source = json.loads(Path(attempt['source_file']).read_text())
+    assert source['run']['id'] == attempt['run_id'] == 10
+    assert source['jobs'][0]['id'] == 101
+    assert any('deadline' in missing for missing in attempt['missing'])
+    assert Path(json.loads(Path(result['decision_file']).read_text())['evidence_file']).is_file()
+
+
+def test_large_issue_matching_respects_classification_deadline(registry, monkeypatch):
+    from shared import flaky_tests
+    text = '\n'.join(f'FAILED test_{i} - error' for i in range(200))
+    api = FakeAPI(text=text + '\n================ 200 failed in 1.00s ================', body='unrelated')
+    api.open_issues = lambda limit: [copy.deepcopy(api.issue_data) for _ in range(100)]
+    original = flaky_tests.issue_match
+    tick, matches = [0], []
+    def match(*args):
+        matches.append(args)
+        if len(matches) == 10:
+            tick[0] = 10
+        return original(*args)
+    monkeypatch.setattr(flaky_tests, 'issue_match', match)
+    result = decide(api, registry, classification_timeout=5, clock=lambda: tick[0])
+    assert result['classification']['timed_out'] and result['result'] == 'failure'
+    assert result['classification']['phase'] == 'discover_unknown'
+    assert len(matches) <= 10
+
+
+def test_historical_proof_checks_deadline_while_scanning_observations():
+    from shared.flaky_tests import historical_proof
+    target = dict(workflow=WORKFLOW, job=JOB, test=TEST, signature=SIGNATURE)
+    observations = [target | {'complete': True, 'outcome': 'fail'} for _ in range(1000)]
+    tick = [0]
+    def clock():
+        tick[0] += 1
+        return tick[0]
+    with Budget(5, clock=clock).activate(), pytest.raises(ClassificationTimeout):
+        historical_proof(observations, target)
+
+
+@pytest.mark.parametrize('field,value', [('Package', []), ('Package', 1), ('Action', []),
+                                        ('Test', ['TestOne']), ('Test', 1),
+                                        ('Output', 7), ('Output', None)])
+def test_malformed_go_field_types_return_blockers_without_discovery(registry, field, value):
+    events = [dict(Action='output', Package='p', Test='TestOne', Output='late'),
+              dict(Action='fail', Package='p', Test='TestOne'), dict(Action='fail', Package='p')]
+    events[0][field] = value
+    api = FakeAPI(text='\n'.join(map(json.dumps, events)))
+    result = decide(api, registry)
+    assert result['result'] == result['raw_result'] == 'failure'
+    assert result['blockers'] and not result['ignored_failures']
+    assert not any(call[0] == 'issues' for call in api.calls)
+    assert not registry.load()['scans']
+    assert Path(result['evidence_file']).is_file() and Path(result['decision_file']).is_file()
+
+
+def test_nested_junit_suite_counts_use_bounded_traversal(monkeypatch):
+    from shared import test_evidence
+    visits = [0]
+    class CountingElement(test_evidence.ET.Element):
+        def iter(self, tag=None):
+            for element in super().iter(tag):
+                visits[0] += 1
+                yield element
+    count = 1000
+    text = ''.join(f'<testsuite tests="{count - i}"><testcase name="test_{i}"/>'
+                   for i in range(count)) + '</testsuite>' * count
+    tree = test_evidence.ET.fromstring(text, parser=test_evidence.ET.XMLParser(
+        target=test_evidence.ET.TreeBuilder(element_factory=CountingElement)))
+    monkeypatch.setattr(test_evidence.ET, 'fromstring', lambda text: tree)
+    report = test_evidence.parse_report(text)
+    assert report['complete'] and len(report['tests']) == count
+    assert visits[0] < count * 10, 'nested suites repeatedly traverse the same descendant cases'
+
+
+def test_wide_junit_counts_cooperate_with_classification_deadline(monkeypatch):
+    from shared import test_evidence
+    tick, visits = [0], [0]
+    # ElementTree's Element has sequence iteration rather than __iter__.
+    class AdvancingChildren(test_evidence.ET.Element):
+        def __iter__(self):
+            for index in range(len(self)):
+                visits[0] += 1
+                if visits[0] == 10:
+                    tick[0] = 10
+                yield self[index]
+    count = 1000
+    text = f'<testsuite tests="{count}">' + ''.join(
+        f'<testcase name="test_{i}"/>' for i in range(count)) + '</testsuite>'
+    tree = test_evidence.ET.fromstring(text, parser=test_evidence.ET.XMLParser(
+        target=test_evidence.ET.TreeBuilder(element_factory=AdvancingChildren)))
+    monkeypatch.setattr(test_evidence.ET, 'fromstring', lambda text: tree)
+    with Budget(5, clock=lambda: tick[0]).activate(), pytest.raises(ClassificationTimeout):
+        test_evidence.parse_report(text)
+    assert visits[0] < 100

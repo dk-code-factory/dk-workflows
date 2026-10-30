@@ -1,7 +1,7 @@
 """Shared exact-head CI decision: every failed test and step needs coverage."""
 import time
 import subprocess
-from shared.ci_deadline import Budget, BoundedAPI, ClassificationTimeout
+from shared.ci_deadline import Budget, BoundedAPI, ClassificationTimeout, check_budget
 from shared.flaky_tests import digest, identity, now, require_head
 from shared.flaky_actions import collect_snapshot, discover, evidence_file
 from shared import ci_exceptions
@@ -13,6 +13,7 @@ def evaluate(snapshot, evidence, verification, repo, exceptions=None):
     Call decide() for live decisions. A serialized known_flakes label is never a
     reusable completion credential: settings, issue state and attempts must be read again.
     """
+    check_budget()
     raw = snapshot.get('raw_result', snapshot.get('result'))
     exceptions = exceptions or {'entries': [], 'configured': False, 'source': None, 'file': None}
     outcome = {'result': raw, 'raw_result': raw, 'head': snapshot.get('head'),
@@ -54,6 +55,7 @@ def evaluate(snapshot, evidence, verification, repo, exceptions=None):
                and e.get('issue_state') == 'open'
                and e.get('checked_at') == verification['checked_at'] and e.get('proof')]
     for check in failures:
+        check_budget()
         link = check.get('link')
         matching = [item for item in evidence.get('checks', []) if item.get('link') == link]
         if len(matching) != 1 or not link:
@@ -78,6 +80,7 @@ def evaluate(snapshot, evidence, verification, repo, exceptions=None):
         if not failed_steps:
             block('job failure has no failed step', link=link)
         for step in steps:
+            check_budget()
             context = {'link': link, 'step': step.get('number')}
             if step.get('status') != 'completed' or step.get('conclusion') not in {'success', 'failure', 'skipped'}:
                 block('cancelled, incomplete, or unsupported step', **context)
@@ -89,6 +92,7 @@ def evaluate(snapshot, evidence, verification, repo, exceptions=None):
                 block(report.get('reason') or 'failed step lacks complete named-test evidence', **context)
                 continue
             for test in failed:
+                check_budget()
                 test_context = {'workflow': item['workflow'], 'job': item['job'], **test}
                 related = [e for e in entries if identity(e) == identity(test_context)]
                 configured = ci_exceptions.matching(exceptions['entries'], 'test', test_context)
@@ -208,7 +212,10 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, pa
             try:
                 budget.progress('discover_unknown', target_count=len(targets))
                 discovery = discover(api, registry, targets=targets)
-            except ClassificationTimeout:
+            except ClassificationTimeout as exc:
+                if exc.evidence_file:
+                    partial['discovery']['evidence_file'] = exc.evidence_file
+                exc.evidence_file = partial.get('evidence_file')
                 finish_scan(registry, key, 'timed_out', partial)
                 raise
             finish_scan(registry, key, 'completed', partial, evidence_file=discovery['evidence_file'])
@@ -218,6 +225,7 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, pa
             partial['blockers'] = decision['blockers']
     # A rerun changes classification even if the PR SHA is unchanged. Read the
     # attempt after collection/discovery, and compare the entire check snapshot.
+    budget.progress('verify_current')
     for item in evidence.get('checks', []):
         if item.get('error') or not item.get('run_id'):
             continue
@@ -228,7 +236,6 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, pa
                 raise RuntimeError('head or run attempt changed during classification')
         except (RuntimeError, OSError, ValueError) as exc:
             decision['blockers'].append({'reason': str(exc), 'link': item['link']})
-    budget.progress('verify_current')
     latest = refresh_snapshot()
     budget.remaining()
     if fingerprint(latest) != fingerprint(snapshot) or latest.get('result') != snapshot['result']:
