@@ -201,6 +201,8 @@ def bounded_prompt(prompt, checkout):
         if path.is_symlink():
             raise ValueError('retained preparation input must not be a symbolic link')
         if path.exists():
+            if not path.is_file():
+                raise ValueError('retained preparation input must be a regular file')
             if path.read_bytes() != content:
                 raise ValueError('retained preparation input differs from its content address')
         else:

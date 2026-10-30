@@ -1,6 +1,7 @@
 """Large requests preserve evidence and correction slots through file transport."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 from unittest.mock import Mock
@@ -110,7 +111,7 @@ def test_large_correction_resumes_same_spill_and_response_slot(tmp_path, monkeyp
     assert journal['attempts'][1]['input_file'] == journal['attempts'][2]['input_file'] == correction
 
 
-@pytest.mark.parametrize('corruption', ['bytes', 'dangling_symlink'])
+@pytest.mark.parametrize('corruption', ['bytes', 'dangling_symlink', 'fifo'])
 def test_corrupt_retained_input_blocks_unchanged_retry(tmp_path, monkeypatch, corruption):
     prompt = 'governing evidence ' * 80_000
     provider = Mock(side_effect=RuntimeError('provider unavailable'))
@@ -126,15 +127,27 @@ def test_corrupt_retained_input_blocks_unchanged_retry(tmp_path, monkeypatch, co
     if corruption == 'dangling_symlink':
         path.unlink()
         path.symlink_to(missing)
+    elif corruption == 'fifo':
+        path.unlink()
+        os.mkfifo(path)
     else:
         path.write_bytes(b'corrupt retained evidence')
-    with pytest.raises(Diagnostic) as failure:
-        prep.analyze(prompt, tmp_path)
+    read_bytes = Path.read_bytes
+    def guarded_read(candidate):
+        # Fail immediately if a regression would wait indefinitely for a writer.
+        assert candidate != path or not candidate.is_fifo(), 'retained FIFO must not be read'
+        return read_bytes(candidate)
+    with monkeypatch.context() as reads:
+        reads.setattr(Path, 'read_bytes', guarded_read)
+        with pytest.raises(Diagnostic) as failure:
+            prep.analyze(prompt, tmp_path)
     assert failure.value.code == 'preparation_input_failed'
     assert str(path) in failure.value.action['artifacts']
     if corruption == 'dangling_symlink':
         assert path.is_symlink() and path.readlink() == missing
         assert not missing.exists()
+    elif corruption == 'fifo':
+        assert path.is_fifo()
     else:
         assert path.read_bytes() == b'corrupt retained evidence'
     assert provider.call_count == 1
@@ -144,7 +157,7 @@ def test_corrupt_retained_input_blocks_unchanged_retry(tmp_path, monkeypatch, co
     assert 'response' not in blocked['attempts'][-1]
     # A pre-dispatch failure consumes no response; restoring exact evidence
     # resumes that slot without requiring deletion/reset of the private index.
-    if corruption == 'dangling_symlink':
+    if corruption != 'bytes':
         path.unlink()
     path.write_bytes(exact)
     provider.side_effect = None
