@@ -262,7 +262,7 @@ def main():
                     raise ValueError('series assessment reviewed tree is incorrect')
             snapshot = observe(args.pr, args.final_head)
             repo = pr_repository(args.pr)
-            verify = lambda: decide(GitHub(repo), Registry(repo, cwd),
+            verify = lambda: decide(GitHub(repo), Registry(repo, cwd, import_legacy=False),
                                     observe(args.pr, args.final_head),
                                     lambda: observe(args.pr, args.final_head))
             # Red CI needs live verification, never the saved effective label.

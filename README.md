@@ -389,6 +389,6 @@ CI observation reports terminal raw status before issue-backed classification.
 Automatic classification defaults to a shared 60-second deadline (waiter
 `--classification-timeout`), skips history for unsupported current reports, and
 collects only relevant workflows/jobs for unknown named failures. Historical
-attempt evidence can be reused; current head, attempt and issue checks remain
-live. Timeout leaves CI blocked. See [the evidence contract](runtime/dk-flaky-tests/references/evidence.md#bounded-automatic-classification)
+attempt evidence can be reused; failure classification keeps current head,
+attempt and issue checks live. Green checks do not depend on flake issue history. Timeout leaves CI blocked. See [the evidence contract](runtime/dk-flaky-tests/references/evidence.md#bounded-automatic-classification)
 for progress, retained diagnostics and explicit discovery recovery.

@@ -87,11 +87,19 @@ def historical_proof(observations, item):
 
 
 class Registry:
-    def __init__(self, repo, cwd=None):
+    def __init__(self, repo, cwd=None, *, import_legacy=True):
         self.repo = normalize_repo(repo)
         self.path = root(self.repo) / 'flaky-tests.json'
         if cwd and inside_checkout(self.path, cwd):
             raise ValueError('flake tracking must be outside the repository')
+        self._legacy_imported = False
+        if import_legacy:
+            self.import_legacy()
+
+    def import_legacy(self):
+        """Allow live classification to import history inside its shared budget."""
+        if self._legacy_imported:
+            return
         # Preserve pre-normalization legacy history without enabling it.
         folders = [root(self.repo).parents[2]]
         for part in self.repo.split('/'):
@@ -109,6 +117,7 @@ class Registry:
                         if event not in target:
                             target.append(event)
             self.update(merge)
+        self._legacy_imported = True
 
     def load(self):
         return read(self.path, {'tests': {}, 'entries': {}, 'observations': [], 'scans': {}})

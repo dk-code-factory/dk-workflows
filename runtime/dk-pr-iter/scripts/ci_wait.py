@@ -32,7 +32,7 @@ def gh_json(args):
 
 def observe(pr, head, repo=None):
     target = ["--repo", repo] if repo else []
-    meta = gh_json(["pr", "view", pr, *target, "--json", "headRefOid"])
+    meta = gh_json(["pr", "view", pr, *target, "--json", "headRefOid,url"])
     actual = meta.get("headRefOid")
     if actual != head:
         return {"result": "head_changed", "head": head, "actual_head": actual, "checks": []}
@@ -53,7 +53,7 @@ def observe(pr, head, repo=None):
         state = "success"
     else:
         raise RuntimeError("unrecognized check bucket")
-    return {"result": state, "head": head, "checks": checks}
+    return {"result": state, "head": head, "checks": checks, "url": meta.get("url")}
 
 
 def wait(pr, head, repo=None, timeout=1800, interval=30, no_checks_grace=60,
@@ -107,8 +107,8 @@ def main():
         if result["result"] in {"success", "failure"}:
             print(json.dumps(result | {"phase": "terminal", "raw_result": result["result"]},
                              sort_keys=True), file=sys.stderr, flush=True)
-            repo = pr_repository(args.pr, args.repo)
-            result = decide(GitHub(repo), Registry(repo, Path.cwd()), result,
+            repo = pr_repository(result.get("url") or args.pr, args.repo)
+            result = decide(GitHub(repo), Registry(repo, Path.cwd(), import_legacy=False), result,
                             lambda: observe(args.pr, args.head, args.repo),
                             classification_timeout=args.classification_timeout,
                             on_progress=lambda update: print(json.dumps(update, sort_keys=True),

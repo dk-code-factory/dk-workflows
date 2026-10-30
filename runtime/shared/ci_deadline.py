@@ -10,7 +10,7 @@ ACTIVE_BUDGET = ContextVar('ci_classification_budget', default=None)
 
 
 class ClassificationTimeout(Exception):
-    pass
+    evidence_file = None
 
 
 class Budget:
@@ -62,7 +62,8 @@ class BoundedAPI:
                 with self.budget.activate():
                     result = target(*args, **kwargs)
             except subprocess.TimeoutExpired as exc:
-                raise ClassificationTimeout('CI classification request timed out') from exc
+                self.budget.remaining()
+                raise RuntimeError('GitHub request timed out before the classification deadline') from exc
             self.budget.remaining()
             return result
         return call

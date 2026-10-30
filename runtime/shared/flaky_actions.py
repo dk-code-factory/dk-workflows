@@ -31,8 +31,6 @@ class GitHub:
         command = ['gh', 'api', '--hostname', self.host, f'repos/{self.name}/{endpoint}']
         try:
             completed = github_run(command, capture_output=True, timeout=60)
-        except ClassificationTimeout:
-            raise
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise RuntimeError(f'GitHub request unavailable: {endpoint}') from exc
         if completed.returncode:
@@ -137,8 +135,6 @@ def archive_report(archive, job_name, step, job_names):
                                   'step command does not prove exclusive test execution')
                 text = '\n'.join(lines[end + 1:])
             return parse_report(text) | {'archive_member': members[0].filename}
-    except ClassificationTimeout:
-        raise
     except (zipfile.BadZipFile, UnicodeError, KeyError, RuntimeError):
         return result(reason='unavailable or invalid attempt logs')
 
@@ -182,8 +178,6 @@ def collect_attempt(api, registry, run, attempt, pipeline_exceptions=(), *, reus
                 (metadata['path'], job['name']) in job_scope) for job in jobs):
             archive = api.request(f'actions/runs/{run_id}/attempts/{attempt}/logs', binary=True)
             evidence['archive_file'] = evidence_file(registry, archive, '.zip')
-    except ClassificationTimeout:
-        raise
     except RuntimeError as exc:
         archive = b''
         evidence['missing'].append(str(exc))
@@ -239,8 +233,6 @@ def discover(api, registry, days=30, max_runs=100, max_issues=500, *, targets=No
         if len(issues) == max_issues:
             report['limits_reached'].append('open_issues')
         evidence_file(registry, {'open_issues': issues})
-    except ClassificationTimeout:
-        raise
     except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
         issues = []
         report['missing'].append(str(exc))
@@ -272,12 +264,8 @@ def discover(api, registry, days=30, max_runs=100, max_issues=500, *, targets=No
                     report['attempts'] += 1
                     report['missing'].extend(evidence['missing'])
                     evidence_file(registry, evidence)
-                except ClassificationTimeout:
-                    raise
                 except (RuntimeError, ValueError, OSError, KeyError) as exc:
                     report['missing'].append(f'run {run["id"]} attempt {attempt}: {exc}')
-    except ClassificationTimeout:
-        raise
     except (RuntimeError, ValueError, KeyError) as exc:
         report['missing'].append(str(exc))
     # Linked issues are always refreshed, even when the bounded open issue scan fails.
@@ -317,8 +305,12 @@ def collect_snapshot(api, registry, snapshot, pipeline_exceptions=()):
             job = next((j for j in attempt['jobs'] if j['job_id'] == job_id), None)
             if not job:
                 raise ValueError('check job does not belong to latest attempt')
-            item.update(run_id=run_id, attempt=run['run_attempt'], workflow=attempt['workflow'], **job)
-        except ClassificationTimeout:
+            item.update(run_id=run_id, attempt=run['run_attempt'], workflow=attempt['workflow'],
+                        source_file=attempt['source_file'], archive_file=attempt.get('archive_file'), **job)
+        except ClassificationTimeout as exc:
+            item['error'] = str(exc)
+            evidence['checks'].append(item)
+            exc.evidence_file = evidence_file(registry, evidence)
             raise
         except (ValueError, RuntimeError, OSError, KeyError) as exc:
             item['error'] = str(exc)

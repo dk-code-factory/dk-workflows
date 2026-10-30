@@ -177,7 +177,8 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, pa
     evidence = collect_snapshot(api, registry, snapshot, exceptions['entries']) if snapshot['result'] == 'failure' else {}
     partial['evidence_file'] = evidence.get('evidence_file')
     # New observations can prove a pass or match an existing issue.
-    verification = registry.synchronize([], api.issue)
+    verification = (registry.synchronize([], api.issue) if snapshot['result'] == 'failure'
+                    else {})
     decision = evaluate(snapshot, evidence, verification, registry.repo, exceptions)
     partial['blockers'] = decision['blockers']
     discovery = None
@@ -253,16 +254,28 @@ def decide(api, registry, snapshot, refresh_snapshot, auto_discover=True, *,
     try:
         budget.progress('classification', raw_result=snapshot['result'], head=snapshot['head'])
         with budget.activate():
+            if snapshot['result'] == 'failure':
+                budget.progress('initialize_registry')
+                registry.import_legacy()
             decision = _decide(BoundedAPI(api, budget), registry, snapshot, refresh_snapshot,
                                auto_discover, budget, partial)
         budget.remaining()
         timed_out = False
     except (ClassificationTimeout, subprocess.TimeoutExpired) as exc:
-        timed_out = True
+        timed_out = isinstance(exc, ClassificationTimeout)
+        if not timed_out:
+            try:
+                budget.remaining()
+            except ClassificationTimeout:
+                timed_out = True
+        if getattr(exc, 'evidence_file', None):
+            partial['evidence_file'] = exc.evidence_file
+        reason = ('CI classification deadline exceeded: ' if timed_out else
+                  'GitHub request timed out before the classification deadline: ')
         decision = {'result': 'failure', 'raw_result': snapshot['result'], 'head': snapshot['head'],
                     'checks': snapshot.get('checks', []), 'ignored_failures': [],
                     'blockers': list(partial.get('blockers', [])) +
-                        [{'reason': 'CI classification deadline exceeded: ' + str(exc)}]}
+                        [{'reason': reason + str(exc)}]}
         for name in ('evidence_file', 'targets_file', 'discovery'):
             if name in partial:
                 decision[name] = partial[name]

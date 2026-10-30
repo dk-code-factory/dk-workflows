@@ -308,7 +308,7 @@ def test_completion_cli_operational_subprocess_errors_have_diagnostics(tmp_path,
     monkeypatch.setattr(completion.series_assessment, 'load', lambda *a: series_evidence())
     monkeypatch.setattr(ci_policy, 'decide', lambda *a: {'head': SHA, 'result': 'success'})
     monkeypatch.setattr(flaky_actions, 'GitHub', lambda *a: None)
-    monkeypatch.setattr(flaky_tests, 'Registry', lambda *a: None)
+    monkeypatch.setattr(flaky_tests, 'Registry', lambda *a, **k: None)
     reads = []
     if phase == 'initial_scope':
         # Exercise the real initial check_output call with a refusing executable.
@@ -568,7 +568,7 @@ def test_waiter_main_accepts_effective_result_and_preserves_raw(monkeypatch, cap
                       'blockers': []}
     monkeypatch.setattr(sys, 'argv', ['ci_wait.py', '--pr', 'https://github.com/acme/project/pull/1', '--head', SHA])
     monkeypatch.setattr(ci, 'wait', lambda *a, **k: raw)
-    monkeypatch.setattr(ci, 'Registry', lambda *a: object())
+    monkeypatch.setattr(ci, 'Registry', lambda *a, **k: object())
     monkeypatch.setattr(ci, 'decide', lambda *a, **k: accepted)
     ci.main()
     import json
@@ -588,7 +588,7 @@ def test_completion_gate_cli_refreshes_ci_policy(monkeypatch, capsys, effective)
     monkeypatch.setattr(sys, 'argv', ['completion.py', '--pr', 'https://github.com/acme/project/pull/1',
                         'gate', '--stage', 'review', '--start-head', OTHER, '--final-head', SHA, '--review-complete', '--preparation-file', '/private/preparation.json', '--verification-file', '/private/verification.json', '--run-record', '/private/run-record.json'])
     monkeypatch.setattr(ci, 'observe', lambda *a: {'result': 'failure', 'head': SHA, 'checks': []})
-    monkeypatch.setattr(flaky_tests, 'Registry', lambda *a: object())
+    monkeypatch.setattr(flaky_tests, 'Registry', lambda *a, **k: object())
     accepted = {'result': effective, 'raw_result': 'failure', 'head': SHA, 'blockers': [],
                 'ignored_failures': [{'issues': ['https://github.com/acme/project/issues/7']}], 'verified_at': 'now'}
     calls = []
@@ -613,7 +613,7 @@ def test_waiter_reports_terminal_status_before_classification(monkeypatch, capsy
     monkeypatch.setattr(sys, 'argv', ['ci_wait.py', '--pr', 'https://github.com/acme/project/pull/1',
                                     '--head', SHA, '--classification-timeout', '7'])
     monkeypatch.setattr(ci, 'wait', lambda *a, **k: raw)
-    monkeypatch.setattr(ci, 'Registry', lambda *a: object())
+    monkeypatch.setattr(ci, 'Registry', lambda *a, **k: object())
     def classify(*args, **kwargs):
         update = json.loads(capsys.readouterr().err)
         assert update['phase'] == 'terminal' and update['raw_result'] == 'failure'
@@ -627,3 +627,37 @@ def test_waiter_reports_terminal_status_before_classification(monkeypatch, capsy
     assert failed.value.code == 1
     assert json.loads(output.out) == raw
     assert json.loads(output.err)['phase'] == 'discover_unknown'
+
+
+def test_observation_retains_canonical_url_without_extra_reads(monkeypatch):
+    calls = []
+    url = 'https://github.com/acme/project/pull/70'
+    def read(args):
+        calls.append(args)
+        if args[1] == 'checks':
+            return [{'bucket': 'pass'}]
+        return {'headRefOid': SHA, 'url': url}
+    monkeypatch.setattr(ci, 'gh_json', read)
+    observed = ci.observe('70', SHA)
+    assert observed['url'] == url and observed['result'] == 'success'
+    assert len(calls) == 3 and calls[0][-1] == 'headRefOid,url'
+
+
+def test_numbered_waiter_reuses_observed_url_and_defers_legacy_import(monkeypatch, capsys):
+    import sys
+    url = 'https://github.com/acme/project/pull/70'
+    raw = {'result': 'success', 'head': SHA, 'checks': [{'bucket': 'pass'}], 'url': url}
+    monkeypatch.setattr(sys, 'argv', ['ci_wait.py', '--pr', '70', '--head', SHA])
+    monkeypatch.setattr(ci, 'wait', lambda *a, **k: raw)
+    original = ci.pr_repository
+    def repository(pr, repo=None):
+        assert pr == url, 'numbered PR resolution must be completed during polling'
+        return original(pr, repo)
+    def registry(*args, **kwargs):
+        assert kwargs == {'import_legacy': False}
+        return object()
+    monkeypatch.setattr(ci, 'pr_repository', repository)
+    monkeypatch.setattr(ci, 'Registry', registry)
+    monkeypatch.setattr(ci, 'decide', lambda *a, **k: raw)
+    ci.main()
+    assert 'success' in capsys.readouterr().out

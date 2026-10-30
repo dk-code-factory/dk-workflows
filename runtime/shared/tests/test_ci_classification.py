@@ -435,3 +435,95 @@ finally:
     assert scan['status'] == 'running'  # Failure is explicitly retained in the decision.
     assert 'targets' not in scan and scan['target_count'] == 1
     assert json.loads(Path(scan['targets_file']).read_text())['targets'][0]['test'] == TEST
+
+
+def test_green_ci_does_not_refresh_unrelated_flake_issues(registry, monkeypatch):
+    green = snapshot()
+    green['result'] = 'success'
+    green['checks'][0]['bucket'] = 'pass'
+    def unrelated(*args):
+        raise AssertionError('green CI must not depend on flake issue history')
+    monkeypatch.setattr(registry, 'synchronize', unrelated)
+    result = policy.decide(FakeAPI(), registry, green, lambda: copy.deepcopy(green))
+    assert result['result'] == result['raw_result'] == 'success'
+    assert result['verified_at'] is None
+    assert not result['classification']['timed_out']
+
+
+def test_request_timeout_with_remaining_budget_is_missing_evidence(registry):
+    api = FakeAPI(body='unrelated')
+    tick = [0]
+    def timeout(limit):
+        tick[0] = 60
+        raise subprocess.TimeoutExpired('gh issue list', 60)
+    api.open_issues = timeout
+    result = decide(api, registry, classification_timeout=120, clock=lambda: tick[0])
+    assert result['result'] == 'failure' and not result['classification']['timed_out']
+    assert any('request timed out' in detail for detail in result['discovery']['missing'])
+    assert all(scan['status'] != 'timed_out' for scan in registry.load()['scans'].values())
+
+
+def test_final_read_timeout_is_distinct_from_classification_expiry(registry):
+    tick = [0]
+    def refresh():
+        tick[0] = 60
+        raise subprocess.TimeoutExpired('gh pr view', 60)
+    result = policy.decide(FakeAPI(), registry, snapshot(), refresh,
+                          classification_timeout=120, clock=lambda: tick[0])
+    assert result['result'] == 'failure' and not result['classification']['timed_out']
+    assert any('request timed out before' in blocker['reason'] for blocker in result['blockers'])
+
+
+def test_interrupted_snapshot_retains_completed_check_sources(registry):
+    api = FakeAPI()
+    tick = [0]
+    original = api.request
+    def request(endpoint, binary=False):
+        if endpoint == 'actions/runs/20':
+            tick[0] = 10
+            return dict(api.run, id=20)
+        return original(endpoint, binary)
+    api.request = request
+    snap = snapshot()
+    snap['checks'].append(dict(snap['checks'][0],
+        link='https://github.com/acme/project/actions/runs/20/job/201'))
+    result = policy.decide(api, registry, snap, lambda: copy.deepcopy(snap),
+                          classification_timeout=5, clock=lambda: tick[0])
+    assert result['result'] == 'failure' and result['classification']['timed_out']
+    retained = json.loads(Path(result['evidence_file']).read_text())
+    assert retained['checks'][0]['job_id'] == 101
+    assert Path(retained['checks'][0]['source_file']).is_file()
+    assert Path(retained['checks'][0]['archive_file']).is_file()
+    assert 'deadline' in retained['checks'][1]['error']
+
+
+def test_deferred_legacy_import_lock_wait_is_inside_classification_budget(registry):
+    driver = f'''
+import fcntl, json, sys
+from pathlib import Path
+sys.path.insert(0, {str(Path(__file__).parent)!r})
+from test_flaky_tests import FakeAPI, REPO, snapshot
+from shared import ci_policy as policy
+from shared.flaky_tests import Registry
+from shared.private_state import root
+legacy = root('GitHub.com/Acme/Project') / 'flaky-tests.json'
+legacy.parent.mkdir(parents=True, exist_ok=True)
+legacy.write_text(json.dumps({{'tests': {{'legacy': [{{'outcome': 'fail'}}]}}}}))
+registry = Registry(REPO, import_legacy=False)
+lock = registry.path.parent / (registry.path.name + '.lock')
+lock.parent.mkdir(parents=True, exist_ok=True)
+api = FakeAPI()
+with lock.open('w') as held:
+    fcntl.flock(held, fcntl.LOCK_EX)
+    result = policy.decide(api, registry, snapshot(), snapshot, classification_timeout=0.03)
+assert api.calls == []
+assert Registry(REPO).load()['tests']['legacy'] == [{{'outcome': 'fail'}}]
+assert json.loads(legacy.read_text())['tests']['legacy'] == [{{'outcome': 'fail'}}]
+print(json.dumps(result))
+'''
+    child = subprocess.run([sys.executable, '-c', driver], capture_output=True, text=True, timeout=3)
+    assert child.returncode == 0, child.stderr
+    result = json.loads(child.stdout)
+    assert result['result'] == 'failure' and result['classification']['timed_out']
+    assert result['classification']['phase'] == 'initialize_registry'
+    assert Path(result['decision_file']).is_file()

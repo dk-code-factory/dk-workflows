@@ -24,7 +24,7 @@ Automatic proof requires all four exact context fields. A matching issue can dec
 
 ## Shared policy
 
-`evaluate(snapshot, evidence, verification, repo)` is a pure evaluator for trusted pinned evidence. Its result contains effective `result`, `raw_result`, `ignored_failures` with issue URLs, and `blockers`. `decide(api, registry, snapshot, refresh_snapshot)` is the live entry point: it refreshes linked issues, collects current failure evidence, discovers unknown named failures at most once per unchanged head/failure fingerprint, reevaluates saved entries, and rechecks attempts and the live snapshot. Collection never starts or reruns jobs. Only `dk-pr-iter/scripts/ci_wait.py` polls CI; do not run discovery alongside its polling process.
+`evaluate(snapshot, evidence, verification, repo)` is a pure evaluator for trusted pinned evidence. Its result contains effective `result`, `raw_result`, `ignored_failures` with issue URLs, and `blockers`. `decide(api, registry, snapshot, refresh_snapshot)` is the live entry point: for failed snapshots it refreshes linked issues, collects current failure evidence, discovers unknown named failures at most once per unchanged head/failure fingerprint, reevaluates saved entries, and rechecks attempts and the live snapshot. Collection never starts or reruns jobs. Only `dk-pr-iter/scripts/ci_wait.py` polls CI; do not run discovery alongside its polling process.
 
 Every failed test and every failed step needs complete coverage. Without a matching [explicit dk-config exception](../../dk-config/references/ci-exceptions.md), mixed failures, different signatures, build/deploy errors and missing logs block acceptance. Cancellations, pending checks, timeouts, missing checks and invalid head/attempt provenance remain blocking with either path. An automatic-only accepted decision has `result: known_flakes`, `raw_result: failure`, no blockers, and at least one ignored failure with verified open issue links. Report it as **“CI red; accepted known flakes”** with those links, preserving the raw result.
 
@@ -52,8 +52,8 @@ no historical logs. Remaining unknown identities restrict historical collection
 to their workflow paths and exact jobs. Completed attempts retain content-addressed
 metadata, archives and parsed evidence privately, keyed by selected jobs and the
 collector/parser identity; verified retained evidence can
-be reused while current checks, latest attempts, linked issue state and exception
-configuration are still read live for every decision.
+be reused while checks and exception configuration stay live. Failure decisions
+also recheck latest attempts and linked issue state.
 
 Scan inventories live in private evidence files; registry scan entries retain
 only their count and reference. Timeout decisions preserve current evidence links,
@@ -70,3 +70,16 @@ an unchanged failure scan. Use the existing explicit
 `--max-issues` to collect missing historical evidence, then rerun the one-shot
 decision. Fix unsupported report collection or parsing before retrying those
 blockers: historical flakes cannot prove completeness of the current failure.
+
+Green CI validates the pinned current checks and configuration without refreshing
+unrelated flake issues. The waiter and completion entrypoints defer legacy-history
+import until failure classification has activated its budget; ordinary registry
+callers retain automatic import. Polling captures the canonical PR URL so numbered
+PRs need no repository-resolution network call before classification.
+
+A per-request timeout while classification time remains is ordinary unavailable
+evidence, not `classification.timed_out`. Missing evidence keeps red CI blocked.
+Existing scan reservations remain deduplicated even when a scan has missing
+evidence; explicit narrowed discovery is the supported recovery path. If current
+check collection expires after earlier checks completed, its timeout decision
+links the partial snapshot and those checks' retained metadata and archives.
