@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import signal
 import subprocess
 import sys
 
@@ -24,10 +25,22 @@ def positive_seconds(value):
 
 
 def run(command, timeout, env):
-    proc = subprocess.run(command, text=True, capture_output=True, timeout=timeout, env=env)
-    if proc.returncode:
-        raise ValueError(f'exit {proc.returncode}: ' + (proc.stderr.strip() or proc.stdout.strip()))
-    return proc.stdout
+    with subprocess.Popen(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          env=env, start_new_session=True) as proc:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except BaseException:
+            # The refresh helper launches summarizers; killing only it leaves them running.
+            # Signal the group even if its leader exited while a child still holds a pipe.
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait()
+            raise
+        if proc.returncode:
+            raise ValueError(f'exit {proc.returncode}: ' + (stderr.strip() or stdout.strip()))
+        return stdout
 
 
 def installation(registry, plugin_id, env):

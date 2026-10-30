@@ -4,8 +4,10 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -131,17 +133,90 @@ def test_phase_specific_failures_include_command_timeout_and_recovery(startup, c
     assert 'hookSpecificOutput' not in result
 
 
+@pytest.mark.parametrize('leader_exits', [False, True])
+def test_refresh_timeout_stops_real_summarizer_and_its_child(tmp_path, monkeypatch, leader_exits):
+    repository = SOURCE.parents[1]
+    work = tmp_path / 'repository'
+    work.mkdir()
+    (work / 'README.md').write_text('Example repository rules')
+    trace = tmp_path / 'processes.json'
+    heartbeat = tmp_path / 'heartbeat'
+    child = tmp_path / 'child.py'
+    child.write_text('''import pathlib, sys, time
+marker = pathlib.Path(sys.argv[1])
+deadline = time.monotonic() + 10
+count = 0
+while time.monotonic() < deadline:
+    marker.write_text(str(count))
+    count += 1
+    time.sleep(0.02)
+''')
+    summarizer = tmp_path / 'summarizer'
+    summarizer.write_text(f'#!{sys.executable}\n' + '''import json, os, pathlib, subprocess, sys
+child = subprocess.Popen([sys.executable, os.environ['CHILD_SCRIPT'], os.environ['HEARTBEAT']])
+pathlib.Path(os.environ['TRACE']).write_text(json.dumps([os.getpid(), child.pid]))
+child.wait()
+print('NONE')
+''')
+    summarizer.chmod(0o700)
+    env = dict(os.environ, REPO_RULES_SUMMARIZER=str(summarizer), TRACE=str(trace),
+               CHILD_SCRIPT=str(child), HEARTBEAT=str(heartbeat))
+    command = [sys.executable, str(repository / 'runtime/dk-config/scripts/repo_rules.py'),
+               '--cwd', str(work), 'refresh']
+    if leader_exits:
+        command = [sys.executable, '-c', 'import subprocess, sys; subprocess.Popen(sys.argv[1:])',
+                   *command]
+    popen = subprocess.Popen
+
+    def start_when_ready(*args, **kwargs):
+        process = popen(*args, **kwargs)
+        # Measure cleanup after workers start, independently of interpreter/Git startup.
+        deadline = time.monotonic() + 15
+        while not heartbeat.is_file():
+            if (not leader_exits and process.poll() is not None) or time.monotonic() >= deadline:
+                process.kill()
+                process.wait()
+                pytest.fail('refresh did not start its nested summarizer')
+            time.sleep(0.01)
+        return process
+
+    monkeypatch.setattr(hook.subprocess, 'Popen', start_when_ready)
+    started = time.monotonic()
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            hook.run(command, 2, env)
+        assert time.monotonic() - started < 20
+        assert trace.is_file(), 'the real refresh must launch its summarizer before timing out'
+        assert heartbeat.is_file(), 'the summarizer must launch its nested child'
+        last_heartbeat = heartbeat.read_bytes()
+        time.sleep(0.2)
+        assert heartbeat.read_bytes() == last_heartbeat, 'a descendant kept running after timeout'
+    finally:
+        # Also clean up when this regression is run against the unfixed implementation.
+        if trace.is_file():
+            for pid in reversed(json.loads(trace.read_text())):
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+
 def test_refresh_launch_failure_reports_no_refresh_and_refresh_recovery(startup, monkeypatch):
     _, record, marker, root = startup
     calls = []
+    original_run = hook.run
 
-    def run(command, **kwargs):
+    def run(command, timeout, env):
         calls.append(command)
         if command == hook.LOOKUP_COMMAND:
-            return subprocess.CompletedProcess(command, 0, json.dumps({'installed': [record]}), '')
+            return json.dumps({'installed': [record]})
+        return original_run(command, timeout, env)
+
+    def fail_to_launch(*args, **kwargs):
         raise OSError('fixture could not launch Python')
 
-    monkeypatch.setattr(hook.subprocess, 'run', run)
+    monkeypatch.setattr(hook, 'run', run)
+    monkeypatch.setattr(hook.subprocess, 'Popen', fail_to_launch)
     args = argparse.Namespace(plugin_id=record['pluginId'], lookup_timeout=0.8, refresh_timeout=0.8)
     result = hook.hook({}, args, dict(os.environ, CODEX_HOME=str(root.parents[4])))
     message = result['systemMessage']
