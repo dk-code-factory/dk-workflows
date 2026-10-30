@@ -598,3 +598,63 @@ def test_production_issue_timeout_survives_registry_and_decision(registry, monke
     decision = policy.evaluate(snapshot(), evidence, verification, REPO)
     assert decision['result'] == 'failure' and decision['issue_errors'][URL] == error
     assert not decision['ignored_failures']
+
+
+def test_prior_issue_error_survives_later_fetch_expiry_and_serialization(registry):
+    from test_flaky_tests import URL
+    api = FakeAPI()
+    assert decide(api, registry)['result'] == 'known_flakes'
+    other_url = URL.rsplit('/', 1)[0] + '/8'
+    other = dict(api.issue_data, number=8, html_url=other_url)
+    registry.synchronize([api.issue_data, other],
+        lambda number: api.issue_data if number == 7 else other)
+    tick = [0]
+    message = "Command 'gh api repos/acme/project/issues/7' timed out after 0.05 seconds"
+    def issue(number):
+        if number == 7:
+            raise RuntimeError(message)
+        tick[0] = 10
+        return other
+    api.issue = issue
+    result = decide(api, registry, classification_timeout=5, clock=lambda: tick[0])
+    assert result['result'] == 'failure' and result['classification']['timed_out']
+    assert result['issue_errors'][URL] == message
+    assert json.loads(Path(result['decision_file']).read_text())['issue_errors'][URL] == message
+    assert not result['ignored_failures']
+
+
+def test_prior_issue_error_survives_synchronization_lock_expiry(registry):
+    driver = f'''
+import fcntl, json, sys
+from pathlib import Path
+sys.path.insert(0, {str(Path(__file__).parent)!r})
+from test_flaky_tests import FakeAPI, REPO, URL, snapshot
+from shared import ci_policy as policy
+from shared.flaky_tests import Registry
+registry = Registry(REPO)
+api = FakeAPI()
+assert policy.decide(api, registry, snapshot(), snapshot)['result'] == 'known_flakes'
+held = []
+message = "Command 'gh api repos/acme/project/issues/7' timed out after 0.05 seconds"
+def issue(number):
+    lock = registry.path.parent / (registry.path.name + '.lock')
+    stream = lock.open('w')
+    fcntl.flock(stream, fcntl.LOCK_EX)
+    held.append(stream)
+    raise RuntimeError(message)
+api.issue = issue
+try:
+    result = policy.decide(api, registry, snapshot(), snapshot, classification_timeout=0.5)
+    assert held, 'classification expired before the issue-error/lock interaction'
+    stored = json.loads(Path(result['decision_file']).read_text())
+    assert result['issue_errors'][URL] == stored['issue_errors'][URL] == message
+    print(json.dumps(result))
+finally:
+    for stream in held:
+        stream.close()
+'''
+    child = subprocess.run([sys.executable, '-c', driver], capture_output=True, text=True, timeout=3)
+    assert child.returncode == 0, child.stderr
+    result = json.loads(child.stdout)
+    assert result['result'] == 'failure' and result['classification']['timed_out']
+    assert not result['ignored_failures']

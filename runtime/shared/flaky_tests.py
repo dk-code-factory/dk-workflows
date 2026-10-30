@@ -204,7 +204,11 @@ class Registry:
             return {'checked_at': checked, 'entries': list(entries.values()),
                     'unavailable_issues': [url for url, issue in live.items() if issue is None],
                     'issue_errors': errors}
-        return self.update(sync)
+        try:
+            return self.update(sync)
+        except ClassificationTimeout as exc:
+            exc.issue_errors = errors
+            raise
 
 
 def record_flaky(data, test, signature, head, outcome, attempt_id, url):
