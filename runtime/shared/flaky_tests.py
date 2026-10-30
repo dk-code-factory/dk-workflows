@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from shared.repository_scope import inside_checkout
+from shared.ci_deadline import ClassificationTimeout, check_budget
 from shared.private_state import root, read, mutate
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -50,8 +51,10 @@ def issue_match(issue, item):
     Structured declarations or exact backtick-quoted context avoid fuzzy identity
     matches. No issue text is executed or treated as agent instructions.
     """
+    check_budget()
     text = (issue.get('title') or '') + '\n' + (issue.get('body') or '')
     for block in re.findall(r'```dk-flaky\s*\n(.*?)\n```', text, re.S):
+        check_budget()
         try:
             value = json.loads(block)
         except ValueError:
@@ -72,12 +75,18 @@ def issue_match(issue, item):
 
 
 def historical_proof(observations, item):
-    same = [o for o in observations if o.get('complete') is True and
-            all(o.get(k) == item.get(k) for k in ('workflow', 'job', 'test'))]
+    same = []
+    for observation in observations:
+        check_budget()
+        if observation.get('complete') is True and all(
+                observation.get(k) == item.get(k) for k in ('workflow', 'job', 'test')):
+            same.append(observation)
     for fail in same:
+        check_budget()
         if fail.get('outcome') != 'fail' or fail.get('signature') != item['signature']:
             continue
         for passed in same:
+            check_budget()
             if (passed.get('outcome') == 'pass' and passed.get('head') == fail.get('head')
                     and passed.get('completed_at', '') > fail.get('completed_at', '~')
                     and (passed.get('run_id'), passed.get('attempt'), passed.get('job_id')) !=
@@ -87,11 +96,19 @@ def historical_proof(observations, item):
 
 
 class Registry:
-    def __init__(self, repo, cwd=None):
+    def __init__(self, repo, cwd=None, *, import_legacy=True):
         self.repo = normalize_repo(repo)
         self.path = root(self.repo) / 'flaky-tests.json'
         if cwd and inside_checkout(self.path, cwd):
             raise ValueError('flake tracking must be outside the repository')
+        self._legacy_imported = False
+        if import_legacy:
+            self.import_legacy()
+
+    def import_legacy(self):
+        """Allow live classification to import history inside its shared budget."""
+        if self._legacy_imported:
+            return
         # Preserve pre-normalization legacy history without enabling it.
         folders = [root(self.repo).parents[2]]
         for part in self.repo.split('/'):
@@ -109,6 +126,7 @@ class Registry:
                         if event not in target:
                             target.append(event)
             self.update(merge)
+        self._legacy_imported = True
 
     def load(self):
         return read(self.path, {'tests': {}, 'entries': {}, 'observations': [], 'scans': {}})
@@ -121,6 +139,7 @@ class Registry:
             stored = data.setdefault('observations', [])
             seen = {digest(o) for o in stored}
             for item in items:
+                check_budget()
                 require_head(item['head'])
                 if item.get('repo') != self.repo or not all(item.get(k) for k in
                         ('workflow', 'job', 'test', 'run_id', 'attempt', 'job_id', 'url', 'completed_at')):
@@ -133,12 +152,14 @@ class Registry:
 
     def synchronize(self, issues, fetch_issue):
         """Refresh every linked issue directly, then verify against current evidence."""
+        check_budget()
         saved = self.load()
         urls = {e['issue_url'] for e in saved.get('entries', {}).values()}
         failures = [o for o in saved.get('observations', []) if o.get('outcome') == 'fail']
         urls.update(i['html_url'] for i in issues if i.get('html_url') and not i.get('pull_request')
                     and any(issue_match(i, o) for o in failures))
         live = {}
+        errors = {}
         for url in sorted(urls):
             try:
                 number = issue_number(self.repo, url)
@@ -146,13 +167,22 @@ class Registry:
                 if issue.get('html_url', '').lower() != url.lower() or issue.get('pull_request'):
                     raise ValueError('issue identity mismatch')
                 live[url] = issue
-            except (RuntimeError, OSError, ValueError):
+            except ClassificationTimeout as exc:
+                exc.issue_errors = errors | {url: str(exc)}
+                raise
+            except (RuntimeError, OSError, ValueError) as exc:
                 live[url] = None
+                errors[url] = str(exc)
         checked = now()
 
         def sync(data):
+            check_budget()
             entries = data.setdefault('entries', {})
             sources = data.setdefault('issue_snapshots', {})
+            for url, error in errors.items():
+                history = data.setdefault('issue_failures', {}).setdefault(url, [])
+                if not history or history[-1]['error'] != error:
+                    history.append({'checked_at': checked, 'error': error})
             for issue in live.values():
                 if issue:
                     sources.setdefault(digest(issue), issue)
@@ -169,6 +199,7 @@ class Registry:
                     entries.setdefault(key, dict(zip(('workflow', 'job', 'test', 'signature'), identity(item))))
                     entries[key].update(issue_url=url)
             for entry in entries.values():
+                check_budget()
                 issue = live.get(entry['issue_url'])
                 state = issue.get('state') if issue else 'unavailable'
                 match = issue_match(issue, entry) if issue else None
@@ -183,8 +214,13 @@ class Registry:
                     history.append(event | {'at': checked})
                 entry.update(event, active=active, checked_at=checked)
             return {'checked_at': checked, 'entries': list(entries.values()),
-                    'unavailable_issues': [url for url, issue in live.items() if issue is None]}
-        return self.update(sync)
+                    'unavailable_issues': [url for url, issue in live.items() if issue is None],
+                    'issue_errors': errors}
+        try:
+            return self.update(sync)
+        except ClassificationTimeout as exc:
+            exc.issue_errors = errors
+            raise
 
 
 def record_flaky(data, test, signature, head, outcome, attempt_id, url):

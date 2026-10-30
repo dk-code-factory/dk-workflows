@@ -224,6 +224,8 @@ def main():
     gate.add_argument('--start-head', required=True)
     gate.add_argument('--final-head', required=True)
     gate.add_argument('--review-complete', action='store_true')
+    gate.add_argument('--classification-timeout', type=int, default=60,
+                      help='CI classification budget in seconds (positive; default 60)')
     gate.add_argument('--actionable', action='store_true')
     gate.add_argument('--stage', choices=('review', 'complete'), default='complete')
     gate.add_argument('--cleanup-precheck', help='Prepublication review readiness only; allowed with --stage review')
@@ -240,6 +242,8 @@ def main():
     try:
         cwd = Path(args.cwd).resolve()
         if args.command == 'gate':
+            if args.classification_timeout <= 0:
+                raise ValueError('classification timeout must be positive')
             if args.cleanup_precheck and args.stage != 'review':
                 raise ValueError('cleanup prechecks cannot authorize completion')
             if not args.pr:
@@ -262,9 +266,17 @@ def main():
                     raise ValueError('series assessment reviewed tree is incorrect')
             snapshot = observe(args.pr, args.final_head)
             repo = pr_repository(args.pr)
-            verify = lambda: decide(GitHub(repo), Registry(repo, cwd),
-                                    observe(args.pr, args.final_head),
-                                    lambda: observe(args.pr, args.final_head))
+            def progress(update):
+                print(json.dumps(update, sort_keys=True), file=sys.stderr, flush=True)
+            def verify():
+                current = observe(args.pr, args.final_head)
+                if current['result'] in {'success', 'failure'}:
+                    progress({'phase': 'terminal', 'raw_result': current['result'],
+                              'head': current['head'], 'check_count': len(current.get('checks', []))})
+                return decide(GitHub(repo), Registry(repo, cwd, import_legacy=False), current,
+                              lambda: observe(args.pr, args.final_head),
+                              classification_timeout=args.classification_timeout,
+                              on_progress=progress)
             # Red CI needs live verification, never the saved effective label.
             ci_result = {'result': 'known_flakes'} if snapshot['result'] == 'failure' else snapshot
             decision = {}

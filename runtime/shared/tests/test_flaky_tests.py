@@ -78,7 +78,7 @@ class FakeAPI:
 
     def request(self, endpoint, binary=False):
         self.calls.append(('request', endpoint))
-        if endpoint.startswith('actions/runs?'):
+        if endpoint.startswith(('actions/runs?', 'actions/workflows/ci.yml/runs?')):
             return {'total_count': 1, 'workflow_runs': [copy.deepcopy(self.run)]}
         if endpoint == 'actions/runs/10':
             return copy.deepcopy(self.run)

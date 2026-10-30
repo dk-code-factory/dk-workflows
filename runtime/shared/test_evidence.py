@@ -3,6 +3,8 @@ import json
 import re
 import xml.etree.ElementTree as ET
 
+from shared.ci_deadline import check_budget
+
 
 def clean(text):
     text = text.removeprefix('\ufeff')
@@ -26,17 +28,34 @@ def junit(text):
         if tree.tag not in {'testsuite', 'testsuites'}:
             return result(reason='not JUnit')
         tests = []
-        for suite in list(tree.iter('testsuite')) + ([tree] if tree.tag == 'testsuites' else []):
-            cases = list(suite.iter('testcase'))
-            if suite.tag == 'testsuite' and 'tests' not in suite.attrib:
-                return result(reason='JUnit suite lacks completion count')
-            if int(suite.get('tests', str(len(cases)))) != len(cases):
-                return result(reason='incomplete JUnit test count')
-            for tag, attribute in (('failure', 'failures'), ('error', 'errors'), ('skipped', 'skipped')):
-                count = sum(c.find(tag) is not None for c in cases)
-                if int(suite.get(attribute, str(count))) != count:
-                    return result(reason='incomplete JUnit result count')
+        # Aggregate descendant counts once. Repeated suite.iter('testcase')
+        # scans grow quadratically for nested suites and hide work from the budget.
+        stack = [(tree, iter(tree), [0, 0, 0, 0])]
+        while stack:
+            check_budget()
+            node, children, counts = stack[-1]
+            child = next(children, None)
+            if child is not None:
+                stack.append((child, iter(child), [0, 0, 0, 0]))
+                continue
+            if node.tag == 'testcase':
+                counts[0] += 1
+                for index, tag in enumerate(('failure', 'error', 'skipped'), 1):
+                    counts[index] += node.find(tag) is not None
+            if node.tag == 'testsuite' or node is tree and tree.tag == 'testsuites':
+                if node.tag == 'testsuite' and 'tests' not in node.attrib:
+                    return result(reason='JUnit suite lacks completion count')
+                if int(node.get('tests', str(counts[0]))) != counts[0]:
+                    return result(reason='incomplete JUnit test count')
+                for attribute, count in zip(('failures', 'errors', 'skipped'), counts[1:]):
+                    if int(node.get(attribute, str(count))) != count:
+                        return result(reason='incomplete JUnit result count')
+            stack.pop()
+            if stack:
+                for index, count in enumerate(counts):
+                    stack[-1][2][index] += count
         for c in tree.iter('testcase'):
+            check_budget()
             if sum(c.find(tag) is not None for tag in ('failure', 'error', 'skipped')) > 1:
                 return result(reason='ambiguous JUnit case result')
             name = c.attrib['name']
@@ -85,18 +104,33 @@ def pytest_output(text):
 
 
 def go_output(text):
+    packages, terminal, named = set(), {}, {}
     try:
-        events = [json.loads(line) for line in text.splitlines() if line.strip()]
+        for line in text.splitlines():
+            check_budget()
+            if not line.strip():
+                continue
+            event = json.loads(line)
+            if (not isinstance(event, dict)
+                    or not isinstance(event.get('Action'), str) or not event['Action']
+                    or not isinstance(event.get('Package'), str) or not event['Package']
+                    or not isinstance(event.get('Test', ''), str)
+                    or not isinstance(event.get('Output', ''), str)):
+                return result(reason='invalid Go events')
+            package = event['Package']
+            packages.add(package)
+            if event.get('Test'):
+                named.setdefault((package, event['Test']), []).append(event)
+            elif event['Action'] in {'pass', 'fail', 'skip'}:
+                terminal[package] = event['Action']
     except ValueError:
         return result(reason='Go output is not a complete JSON stream')
-    if not events or any(not isinstance(e, dict) or 'Action' not in e or 'Package' not in e for e in events):
+    if not packages:
         return result(reason='invalid Go events')
-    packages = {e['Package'] for e in events}
     tests, package_failures = [], set()
-    terminal = {e['Package']: e['Action'] for e in events if not e.get('Test') and e['Action'] in {'pass', 'fail', 'skip'}}
-    named = {(e['Package'], e['Test']) for e in events if e.get('Test')}
     for package, name in sorted(named):
-        relevant = [e for e in events if (e['Package'], e.get('Test')) == (package, name)]
+        check_budget()
+        relevant = named[(package, name)]
         if relevant[-1]['Action'] not in {'pass', 'fail', 'skip'}:
             return result(reason='incomplete Go test events')
         outcome = relevant[-1]['Action']
@@ -118,10 +152,12 @@ def jest_output(text):
         suites = report['testResults']
         tests = []
         for suite in suites:
+            check_budget()
             assertions = suite['assertionResults']
             if not assertions or suite.get('testExecError'):
                 return result(reason='Jest suite execution error')
             for assertion in assertions:
+                check_budget()
                 status = assertion['status']
                 outcome = {'passed': 'pass', 'failed': 'fail', 'pending': 'skip', 'todo': 'skip'}.get(status)
                 if not outcome:
@@ -157,10 +193,12 @@ def jest_text(text):
     sections = list(re.finditer(r'(?m)^(FAIL|PASS)\s+(\S+)(?:\s+\([^\n]*\))?\s*$', text[:suite_summary.start()]))
     tests = []
     for index, section in enumerate(sections):
+        check_budget()
         section_end = sections[index + 1].start() if index + 1 < len(sections) else suite_summary.start()
         content = text[section.end():section_end]
         failures = list(re.finditer(r'(?m)^\s*● (.+)$', content))
         for i, failure in enumerate(failures):
+            check_budget()
             stop = failures[i + 1].start() if i + 1 < len(failures) else len(content)
             message = content[failure.end():stop].strip()
             if not message or failure.group(1) == 'Test suite failed to run':
@@ -176,6 +214,7 @@ def jest_text(text):
 
 
 def parse_report(text):
+    check_budget()
     text = clean(text)
     text = re.sub(r'(?:^|\n)##\[error\]Process completed with exit code [01]\.\s*$', '', text).strip()
     if not text:

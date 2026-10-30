@@ -275,7 +275,7 @@ def test_gate_cli_defaults_to_complete_and_observes_series_after_ci(monkeypatch,
     assert exc.value.code == 2 and '--series-assessment' in capsys.readouterr().err
     order = []
     monkeypatch.setattr(ci, 'observe', lambda *args: {'head': SHA, 'result': 'success'})
-    monkeypatch.setattr(shared.ci_policy, 'decide', lambda *a: (
+    monkeypatch.setattr(shared.ci_policy, 'decide', lambda *a, **k: (
         order.append('ci') or {'head': SHA, 'result': 'success', 'blockers': []}))
     monkeypatch.setattr(completion.series_assessment, 'load', lambda *a: series_evidence())
     monkeypatch.setattr(completion.series_assessment, 'command', lambda *a: TREE)
@@ -306,9 +306,9 @@ def test_completion_cli_operational_subprocess_errors_have_diagnostics(tmp_path,
     from shared import ci_policy, github_reads, flaky_actions, flaky_tests
     monkeypatch.setitem(sys.modules, 'ci_wait', ci)
     monkeypatch.setattr(completion.series_assessment, 'load', lambda *a: series_evidence())
-    monkeypatch.setattr(ci_policy, 'decide', lambda *a: {'head': SHA, 'result': 'success'})
+    monkeypatch.setattr(ci_policy, 'decide', lambda *a, **k: {'head': SHA, 'result': 'success'})
     monkeypatch.setattr(flaky_actions, 'GitHub', lambda *a: None)
-    monkeypatch.setattr(flaky_tests, 'Registry', lambda *a: None)
+    monkeypatch.setattr(flaky_tests, 'Registry', lambda *a, **k: None)
     reads = []
     if phase == 'initial_scope':
         # Exercise the real initial check_output call with a refusing executable.
@@ -337,7 +337,7 @@ def test_completion_cli_operational_subprocess_errors_have_diagnostics(tmp_path,
         completion.main()
     assert stopped.value.code == 2
     captured = capsys.readouterr()
-    assert captured.out == '' and captured.err.startswith('completion: ')
+    assert captured.out == '' and captured.err.splitlines()[-1].startswith('completion: ')
     assert 'Traceback' not in captured.err
     if phase != 'initial_scope':
         assert len(reads) == 1 and reads[0][1:] == (60, True)
@@ -359,7 +359,7 @@ def test_review_precheck_cli_reports_live_errors(monkeypatch, capsys, failure_st
     from shared import cleanup_precheck, ci_policy
     monkeypatch.setitem(sys.modules, 'ci_wait', ci)
     monkeypatch.setattr(ci, 'observe', lambda *a: {'head': SHA, 'result': 'success'})
-    monkeypatch.setattr(ci_policy, 'decide', lambda *a: {'head': SHA, 'result': 'success', 'blockers': []})
+    monkeypatch.setattr(ci_policy, 'decide', lambda *a, **k: {'head': SHA, 'result': 'success', 'blockers': []})
     calls = []
     def review(*args):
         calls.append(args)
@@ -379,7 +379,11 @@ def test_review_precheck_cli_reports_live_errors(monkeypatch, capsys, failure_st
     assert output['gate'] == 'review_coverage_invalid'
     assert output['review_limitation'] == 'Live repository identity changed'
     assert not any(output[key] for key in ('review_ready', 'cleanup_ready', 'completion_ready'))
-    assert len(calls) == 2 and captured.err == ''
+    assert len(calls) == 2
+    if failure_stage == 'gate':
+        assert captured.err == ''
+    else:
+        assert json.loads(captured.err)['phase'] == 'terminal'
 
 
 def test_completion_prompt_precedence_and_reset(tmp_path, monkeypatch):
@@ -568,19 +572,20 @@ def test_waiter_main_accepts_effective_result_and_preserves_raw(monkeypatch, cap
                       'blockers': []}
     monkeypatch.setattr(sys, 'argv', ['ci_wait.py', '--pr', 'https://github.com/acme/project/pull/1', '--head', SHA])
     monkeypatch.setattr(ci, 'wait', lambda *a, **k: raw)
-    monkeypatch.setattr(ci, 'Registry', lambda *a: object())
-    monkeypatch.setattr(ci, 'decide', lambda *a: accepted)
+    monkeypatch.setattr(ci, 'Registry', lambda *a, **k: object())
+    monkeypatch.setattr(ci, 'decide', lambda *a, **k: accepted)
     ci.main()
     import json
     assert json.loads(capsys.readouterr().out) == accepted
-    monkeypatch.setattr(ci, 'decide', lambda *a: raw)
+    monkeypatch.setattr(ci, 'decide', lambda *a, **k: raw)
     with pytest.raises(SystemExit) as failed:
         ci.main()
     assert failed.value.code == 1
 
 
 @pytest.mark.parametrize('effective', ['known_flakes', 'accepted_exceptions'])
-def test_completion_gate_cli_refreshes_ci_policy(monkeypatch, capsys, effective):
+@pytest.mark.parametrize('classification_timeout', [None, 120])
+def test_completion_gate_cli_refreshes_ci_policy(monkeypatch, capsys, effective, classification_timeout):
     import json
     import sys
     from shared import ci_policy, flaky_actions, flaky_tests
@@ -588,11 +593,14 @@ def test_completion_gate_cli_refreshes_ci_policy(monkeypatch, capsys, effective)
     monkeypatch.setattr(sys, 'argv', ['completion.py', '--pr', 'https://github.com/acme/project/pull/1',
                         'gate', '--stage', 'review', '--start-head', OTHER, '--final-head', SHA, '--review-complete', '--preparation-file', '/private/preparation.json', '--verification-file', '/private/verification.json', '--run-record', '/private/run-record.json'])
     monkeypatch.setattr(ci, 'observe', lambda *a: {'result': 'failure', 'head': SHA, 'checks': []})
-    monkeypatch.setattr(flaky_tests, 'Registry', lambda *a: object())
+    monkeypatch.setattr(flaky_tests, 'Registry', lambda *a, **k: object())
     accepted = {'result': effective, 'raw_result': 'failure', 'head': SHA, 'blockers': [],
                 'ignored_failures': [{'issues': ['https://github.com/acme/project/issues/7']}], 'verified_at': 'now'}
     calls = []
-    def decide(*a):
+    if classification_timeout is not None:
+        sys.argv += ['--classification-timeout', str(classification_timeout)]
+    def decide(*a, **kwargs):
+        assert kwargs['classification_timeout'] == (classification_timeout or 60)
         calls.append('live')
         return accepted
     monkeypatch.setattr(ci_policy, 'decide', decide)
@@ -604,3 +612,120 @@ def test_completion_gate_cli_refreshes_ci_policy(monkeypatch, capsys, effective)
         completion.main()
     assert closed.value.code == 1
     assert json.loads(capsys.readouterr().out)['gate'] == 'ci_not_green'
+
+
+def test_waiter_reports_terminal_status_before_classification(monkeypatch, capsys):
+    import json
+    import sys
+    raw = {"result": "failure", "head": SHA, "checks": [{"bucket": "fail"}]}
+    monkeypatch.setattr(sys, 'argv', ['ci_wait.py', '--pr', 'https://github.com/acme/project/pull/1',
+                                    '--head', SHA, '--classification-timeout', '7'])
+    monkeypatch.setattr(ci, 'wait', lambda *a, **k: raw)
+    monkeypatch.setattr(ci, 'Registry', lambda *a, **k: object())
+    def classify(*args, **kwargs):
+        update = json.loads(capsys.readouterr().err)
+        assert update['phase'] == 'terminal' and update['raw_result'] == 'failure'
+        assert update['check_count'] == 1 and 'checks' not in update
+        assert kwargs['classification_timeout'] == 7
+        kwargs['on_progress']({'phase': 'discover_unknown'})
+        return raw
+    monkeypatch.setattr(ci, 'decide', classify)
+    with pytest.raises(SystemExit) as failed:
+        ci.main()
+    output = capsys.readouterr()
+    assert failed.value.code == 1
+    assert json.loads(output.out) == raw
+    assert json.loads(output.err)['phase'] == 'discover_unknown'
+
+
+def test_observation_retains_canonical_url_without_extra_reads(monkeypatch):
+    calls = []
+    url = 'https://github.com/acme/project/pull/70'
+    def read(args):
+        calls.append(args)
+        if args[1] == 'checks':
+            return [{'bucket': 'pass'}]
+        return {'headRefOid': SHA, 'url': url}
+    monkeypatch.setattr(ci, 'gh_json', read)
+    observed = ci.observe('70', SHA)
+    assert observed['url'] == url and observed['result'] == 'success'
+    assert len(calls) == 3 and calls[0][-1] == 'headRefOid,url'
+
+
+def test_numbered_waiter_reuses_observed_url_and_defers_legacy_import(monkeypatch, capsys):
+    import sys
+    url = 'https://github.com/acme/project/pull/70'
+    raw = {'result': 'success', 'head': SHA, 'checks': [{'bucket': 'pass'}], 'url': url}
+    monkeypatch.setattr(sys, 'argv', ['ci_wait.py', '--pr', '70', '--head', SHA])
+    monkeypatch.setattr(ci, 'wait', lambda *a, **k: raw)
+    original = ci.pr_repository
+    def repository(pr, repo=None):
+        assert pr == url, 'numbered PR resolution must be completed during polling'
+        return original(pr, repo)
+    def registry(*args, **kwargs):
+        assert kwargs == {'import_legacy': False}
+        return object()
+    monkeypatch.setattr(ci, 'pr_repository', repository)
+    monkeypatch.setattr(ci, 'Registry', registry)
+    monkeypatch.setattr(ci, 'decide', lambda *a, **k: raw)
+    ci.main()
+    assert 'success' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('timeout', ['0', '-1'])
+def test_completion_rejects_invalid_budget_before_live_queries(monkeypatch, capsys, timeout):
+    import sys
+    monkeypatch.setattr(sys, 'argv', ['completion.py', '--pr', 'https://github.com/acme/project/pull/1',
+        'gate', '--start-head', OTHER, '--final-head', SHA, '--preparation-file', '/private/preparation.json',
+        '--verification-file', '/private/verification.json', '--run-record', '/private/run-record.json',
+        '--classification-timeout', timeout])
+    def unexpected(*args):
+        raise AssertionError('invalid budget must not query live preparation or CI')
+    monkeypatch.setattr(completion, 'live_preparation_scope', unexpected)
+    with pytest.raises(SystemExit) as invalid:
+        completion.main()
+    assert invalid.value.code == 2
+    assert 'classification timeout must be positive' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('raw_result', ['success', 'failure'])
+def test_completion_reports_terminal_and_phase_progress_before_blocking_timeout(
+        monkeypatch, capsys, raw_result):
+    import json
+    import sys
+    from shared import ci_policy, flaky_tests
+    monkeypatch.setitem(sys.modules, 'ci_wait', ci)
+    monkeypatch.setattr(sys, 'argv', ['completion.py', '--pr', PR, 'gate', '--stage', 'review',
+        '--start-head', OTHER, '--final-head', SHA, '--review-complete',
+        '--preparation-file', 'fixture', '--verification-file', 'fixture', '--run-record', 'fixture',
+        '--classification-timeout', '7'])
+    raw = {'result': raw_result, 'head': SHA,
+           'checks': [{'bucket': 'pass' if raw_result == 'success' else 'fail'}]}
+    observations = []
+    def observe(*args):
+        observations.append(raw_result)
+        return raw
+    monkeypatch.setattr(ci, 'observe', observe)
+    monkeypatch.setattr(flaky_tests, 'Registry', lambda *a, **k: object())
+    def classify(*args, **kwargs):
+        # A user must already know the terminal raw state when classification begins.
+        diagnostic = capsys.readouterr().err
+        assert diagnostic, 'completion must report terminal CI before classification'
+        terminal = json.loads(diagnostic)
+        assert terminal == {'phase': 'terminal', 'raw_result': raw_result,
+                            'head': SHA, 'check_count': 1}
+        assert kwargs['classification_timeout'] == 7
+        kwargs['on_progress']({'phase': 'verify_current', 'elapsed_seconds': 7})
+        return raw | {'result': 'failure', 'raw_result': raw_result,
+                      'classification': {'timed_out': True},
+                      'blockers': [{'reason': 'CI classification deadline exceeded during verify_current'}]}
+    monkeypatch.setattr(ci_policy, 'decide', classify)
+    with pytest.raises(SystemExit) as blocked:
+        completion.main()
+    assert blocked.value.code == 1
+    captured = capsys.readouterr()
+    assert json.loads(captured.err) == {'phase': 'verify_current', 'elapsed_seconds': 7}
+    output = json.loads(captured.out)
+    assert output['gate'] == 'ci_not_green' and output['ci']['classification']['timed_out']
+    assert not any(output[key] for key in ('review_ready', 'cleanup_ready', 'completion_ready'))
+    assert observations == [raw_result, raw_result]

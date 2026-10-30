@@ -5,17 +5,21 @@ import json
 import re
 import subprocess
 import zipfile
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode, urlparse
+from urllib.parse import quote, urlencode, urlparse
 
-from shared.flaky_tests import digest, normalize_repo, now, require_head
-from shared.private_state import write
+from shared.flaky_tests import digest, identity, normalize_repo, now, require_head
+from shared.private_state import write, read
+from shared.ci_deadline import ClassificationTimeout, check_budget
 from shared.test_evidence import parse_report, result
 from shared.ci_exceptions import matching
 from shared.github_reads import run as github_run
 
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 MAX_REPORT_BYTES = 10 * 1024 * 1024
+ATTEMPT_READER = hashlib.sha256(Path(__file__).read_bytes() +
+    Path(__file__).with_name('test_evidence.py').read_bytes()).hexdigest()
 
 
 class GitHub:
@@ -27,7 +31,9 @@ class GitHub:
         command = ['gh', 'api', '--hostname', self.host, f'repos/{self.name}/{endpoint}']
         try:
             completed = github_run(command, capture_output=True, timeout=60)
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(str(exc)) from exc
+        except OSError as exc:
             raise RuntimeError(f'GitHub request unavailable: {endpoint}') from exc
         if completed.returncode:
             raise RuntimeError(f'GitHub request failed: {endpoint}: ' + completed.stderr.decode(errors='replace').strip())
@@ -78,7 +84,7 @@ def evidence_file(registry, value, suffix='.json'):
     path = folder / (key + suffix)
     if suffix == '.json':
         write(path, value)
-    elif not path.exists():
+    elif not path.exists() or hashlib.sha256(path.read_bytes()).hexdigest() != key:
         # Unique content-addressed archive. Atomic publication avoids partial reads.
         import os
         import tempfile
@@ -130,18 +136,40 @@ def archive_report(archive, job_name, step, job_names):
                     return result(reason='unsupported step command (wrapper or aggregate gate): '
                                   'step command does not prove exclusive test execution')
                 text = '\n'.join(lines[end + 1:])
-            return parse_report(text) | {'archive_member': members[0].filename}
+            report = parse_report(text) | {'archive_member': members[0].filename}
+            check_budget()
+            return report
     except (zipfile.BadZipFile, UnicodeError, KeyError, RuntimeError):
         return result(reason='unavailable or invalid attempt logs')
 
 
-def collect_attempt(api, registry, run, attempt, pipeline_exceptions=()):
+def collect_attempt(api, registry, run, attempt, pipeline_exceptions=(), *, reuse=False, targets=None, job_scope=None):
     run_id = run['id']
     metadata = api.request(f'actions/runs/{run_id}/attempts/{attempt}')
     if (metadata.get('id') != run_id or metadata.get('run_attempt') != attempt
             or metadata.get('head_sha') != run['head_sha'] or metadata.get('path') != run.get('path')):
         raise RuntimeError('run attempt provenance mismatch')
     require_head(metadata['head_sha'])
+    if job_scope is None and targets:
+        job_scope = {(t['workflow'], t['job']) for t in targets}
+    jobs_scope = sorted(job for workflow, job in job_scope if workflow == run.get('path')) if job_scope is not None else None
+    cache_key = digest({'repo': registry.repo, 'head': run['head_sha'], 'run_id': run_id,
+                        'attempt': attempt, 'workflow': run.get('path'),
+                        'jobs': jobs_scope, 'reader': ATTEMPT_READER})
+    cached = registry.load().get('attempt_evidence', {}).get(cache_key) if reuse else None
+    if cached and metadata.get('status') == 'completed' and not pipeline_exceptions:
+        try:
+            value = read(Path(cached), None)
+            if (value and digest(value) == Path(cached).stem and not value.get('missing')
+                    and all(value.get(k) == v for k, v in {'repo': registry.repo,
+                        'head': run['head_sha'], 'run_id': run_id, 'attempt': attempt,
+                        'workflow': run.get('path')}.items())
+                    and digest(read(Path(value['source_file']), None)) == Path(value['source_file']).stem
+                    and hashlib.sha256(Path(value['archive_file']).read_bytes()).hexdigest()
+                        == Path(value['archive_file']).stem):
+                return value | {'cached': True}
+        except (ValueError, OSError, KeyError, TypeError):
+            pass  # Missing or corrupt retained evidence requires fresh collection.
     jobs = api.jobs(run_id, attempt)
     evidence = {'repo': registry.repo, 'head': metadata['head_sha'], 'run_id': run_id,
                 'attempt': attempt, 'workflow': metadata['path'], 'jobs': [], 'missing': []}
@@ -150,51 +178,70 @@ def collect_attempt(api, registry, run, attempt, pipeline_exceptions=()):
                                                   {'workflow': metadata['path'], 'job': job['name']})}
     try:
         archive = b''
-        if any(job['id'] not in exempt for job in jobs):
+        if any(job['id'] not in exempt and (job_scope is None or
+                (metadata['path'], job['name']) in job_scope) for job in jobs):
             archive = api.request(f'actions/runs/{run_id}/attempts/{attempt}/logs', binary=True)
             evidence['archive_file'] = evidence_file(registry, archive, '.zip')
+    except ClassificationTimeout as exc:
+        evidence['missing'].append(str(exc))
+        exc.evidence_file = evidence_file(registry, evidence)
+        raise
     except RuntimeError as exc:
         archive = b''
         evidence['missing'].append(str(exc))
     observations = []
-    for job in jobs:
-        if (job.get('run_id') != run_id or job.get('head_sha') != metadata['head_sha']
-                or job.get('run_attempt', attempt) != attempt):
-            raise RuntimeError('job attempt provenance mismatch')
-        item = {'job_id': job['id'], 'job': job['name'], 'conclusion': job.get('conclusion'),
-                'status': job.get('status'), 'url': job['html_url'], 'steps': []}
-        if job['id'] in exempt:
+    try:
+        for job in jobs:
+            check_budget()
+            if job_scope is not None and (metadata['path'], job['name']) not in job_scope:
+                continue
+            if (job.get('run_id') != run_id or job.get('head_sha') != metadata['head_sha']
+                    or job.get('run_attempt', attempt) != attempt):
+                raise RuntimeError('job attempt provenance mismatch')
+            item = {'job_id': job['id'], 'job': job['name'], 'conclusion': job.get('conclusion'),
+                    'status': job.get('status'), 'url': job['html_url'], 'steps': []}
             evidence['jobs'].append(item)
-            continue
-        for step in job.get('steps', []):
-            if step.get('conclusion') not in {'failure', 'success'}:
-                item['steps'].append(step | {'report': result(reason='step is not success/failure')})
+            if job['id'] in exempt:
                 continue
-            report = archive_report(archive, job['name'], step, [j['name'] for j in jobs])
-            item['steps'].append(step | {'report': report})
-            if not report['complete']:
-                if step.get('conclusion') == 'failure':
-                    evidence['missing'].append(f'{job["id"]}/{step["number"]}: {report["reason"]}')
-                continue
-            for test in report['tests']:
-                observations.append(test | {'repo': registry.repo, 'head': metadata['head_sha'],
-                    'workflow': metadata['path'], 'job': job['name'], 'run_id': run_id, 'attempt': attempt,
-                    'job_id': job['id'], 'step': step['number'], 'url': job['html_url'], 'complete': True,
-                    'completed_at': step.get('completed_at') or job.get('completed_at'),
-                    'archive_file': evidence.get('archive_file'), 'archive_member': report.get('archive_member'),
-                    'source_file': evidence['source_file']})
-        evidence['jobs'].append(item)
-    registry.save_observations(observations)
+            for step in job.get('steps', []):
+                check_budget()
+                if step.get('conclusion') not in {'failure', 'success'}:
+                    item['steps'].append(step | {'report': result(reason='step is not success/failure')})
+                    continue
+                report = archive_report(archive, job['name'], step, [j['name'] for j in jobs])
+                item['steps'].append(step | {'report': report})
+                if not report['complete']:
+                    if step.get('conclusion') == 'failure':
+                        evidence['missing'].append(f'{job["id"]}/{step["number"]}: {report["reason"]}')
+                    continue
+                for test in report['tests']:
+                    check_budget()
+                    observations.append(test | {'repo': registry.repo, 'head': metadata['head_sha'],
+                        'workflow': metadata['path'], 'job': job['name'], 'run_id': run_id, 'attempt': attempt,
+                        'job_id': job['id'], 'step': step['number'], 'url': job['html_url'], 'complete': True,
+                        'completed_at': step.get('completed_at') or job.get('completed_at'),
+                        'archive_file': evidence.get('archive_file'), 'archive_member': report.get('archive_member'),
+                        'source_file': evidence['source_file']})
+        registry.save_observations(observations)
+        if (not pipeline_exceptions and not evidence['missing'] and metadata.get('status') == 'completed'
+                and all(job.get('status') == 'completed' for job in jobs) and evidence.get('archive_file')):
+            path = evidence_file(registry, evidence)
+            registry.update(lambda data: data.setdefault('attempt_evidence', {}).__setitem__(cache_key, path))
+    except ClassificationTimeout as exc:
+        evidence['missing'].append(str(exc))
+        exc.evidence_file = evidence_file(registry, evidence)
+        raise
     return evidence
 
 
-def discover(api, registry, days=30, max_runs=100, max_issues=500):
+def discover(api, registry, days=30, max_runs=100, max_issues=500, *, targets=None):
     if not (1 <= days <= 365 and 1 <= max_runs <= 100 and 1 <= max_issues <= 500):
         raise ValueError('discovery limits: days 1..365, runs 1..100, issues 1..500')
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%dT%H:%M:%SZ')
     report = {'scanned_at': now(), 'limits': {'days': days, 'runs': max_runs, 'open_issues': max_issues,
               'archive_bytes': MAX_ARCHIVE_BYTES, 'report_bytes': MAX_REPORT_BYTES},
-              'runs': 0, 'attempts': 0, 'open_issues': 0, 'missing': [], 'limits_reached': []}
+              'runs': 0, 'attempts': 0, 'cached_attempts': 0, 'open_issues': 0,
+              'targets': targets, 'missing': [], 'limits_reached': []}
     try:
         issues = api.open_issues(max_issues)
         report['open_issues'] = len(issues)
@@ -204,25 +251,46 @@ def discover(api, registry, days=30, max_runs=100, max_issues=500):
     except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
         issues = []
         report['missing'].append(str(exc))
-    try:
-        query = urlencode({'status': 'completed', 'created': '>=' + since, 'per_page': max_runs})
-        response = api.request('actions/runs?' + query)
-        runs = response['workflow_runs'][:max_runs]
-        if response.get('total_count', len(runs)) > len(runs) or len(runs) == max_runs:
-            report['limits_reached'].append('runs')
-        report['runs'] = len(runs)
-        evidence_file(registry, response)
-        for run in runs:
-            for attempt in range(1, run['run_attempt'] + 1):
-                try:
-                    evidence = collect_attempt(api, registry, run, attempt)
-                    report['attempts'] += 1
-                    report['missing'].extend(evidence['missing'])
-                    evidence_file(registry, evidence)
-                except (RuntimeError, ValueError, OSError, KeyError) as exc:
-                    report['missing'].append(f'run {run["id"]} attempt {attempt}: {exc}')
-    except (RuntimeError, ValueError, KeyError) as exc:
-        report['missing'].append(str(exc))
+    if targets:
+        verification = registry.synchronize(issues, api.issue)
+        active = {tuple(identity(entry)) for entry in verification['entries'] if entry.get('active')}
+        targets = [target for target in targets if tuple(identity(target)) not in active]
+        if not targets:
+            report['verification'] = verification
+            report['evidence_file'] = evidence_file(registry, report)
+            return report
+    job_scope = {(t['workflow'], t['job']) for t in targets} if targets else None
+    workflows = {workflow for workflow, job in job_scope} if job_scope is not None else None
+    for workflow in sorted(workflows) if workflows is not None else [None]:
+        remaining = max_runs - report['runs']
+        if remaining <= 0:
+            if 'runs' not in report['limits_reached']:
+                report['limits_reached'].append('runs')
+            break
+        try:
+            query = urlencode({'status': 'completed', 'created': '>=' + since, 'per_page': remaining})
+            endpoint = ('actions/workflows/' + quote(workflow.split('@', 1)[0].rsplit('/', 1)[-1], safe='')
+                        + '/runs' if workflow is not None else 'actions/runs')
+            response = api.request(endpoint + '?' + query)
+            runs = [run for run in response['workflow_runs']
+                    if workflow is None or run.get('path') == workflow][:remaining]
+            if (response.get('total_count', len(runs)) > len(runs) or len(runs) == remaining):
+                if 'runs' not in report['limits_reached']:
+                    report['limits_reached'].append('runs')
+            report['runs'] += len(runs)
+            evidence_file(registry, response)
+            for run in runs:
+                for attempt in range(1, run['run_attempt'] + 1):
+                    try:
+                        evidence = collect_attempt(api, registry, run, attempt, reuse=True, job_scope=job_scope)
+                        report['cached_attempts'] += int(evidence.get('cached', False))
+                        report['attempts'] += 1
+                        report['missing'].extend(evidence['missing'])
+                        evidence_file(registry, evidence)
+                    except (RuntimeError, ValueError, OSError, KeyError) as exc:
+                        report['missing'].append(f'run {run["id"]} attempt {attempt}: {exc}')
+        except (RuntimeError, ValueError, KeyError) as exc:
+            report['missing'].append(str(exc))
     # Linked issues are always refreshed, even when the bounded open issue scan fails.
     report['verification'] = registry.synchronize(issues, api.issue)
     report['evidence_file'] = evidence_file(registry, report)
@@ -260,7 +328,15 @@ def collect_snapshot(api, registry, snapshot, pipeline_exceptions=()):
             job = next((j for j in attempt['jobs'] if j['job_id'] == job_id), None)
             if not job:
                 raise ValueError('check job does not belong to latest attempt')
-            item.update(run_id=run_id, attempt=run['run_attempt'], workflow=attempt['workflow'], **job)
+            item.update(run_id=run_id, attempt=run['run_attempt'], workflow=attempt['workflow'],
+                        source_file=attempt['source_file'], archive_file=attempt.get('archive_file'), **job)
+        except ClassificationTimeout as exc:
+            item['error'] = str(exc)
+            if exc.evidence_file:
+                item['attempt_evidence_file'] = exc.evidence_file
+            evidence['checks'].append(item)
+            exc.evidence_file = evidence_file(registry, evidence)
+            raise
         except (ValueError, RuntimeError, OSError, KeyError) as exc:
             item['error'] = str(exc)
         evidence['checks'].append(item)

@@ -32,7 +32,7 @@ def gh_json(args):
 
 def observe(pr, head, repo=None):
     target = ["--repo", repo] if repo else []
-    meta = gh_json(["pr", "view", pr, *target, "--json", "headRefOid"])
+    meta = gh_json(["pr", "view", pr, *target, "--json", "headRefOid,url"])
     actual = meta.get("headRefOid")
     if actual != head:
         return {"result": "head_changed", "head": head, "actual_head": actual, "checks": []}
@@ -53,7 +53,7 @@ def observe(pr, head, repo=None):
         state = "success"
     else:
         raise RuntimeError("unrecognized check bucket")
-    return {"result": state, "head": head, "checks": checks}
+    return {"result": state, "head": head, "checks": checks, "url": meta.get("url")}
 
 
 def wait(pr, head, repo=None, timeout=1800, interval=30, no_checks_grace=60,
@@ -94,17 +94,27 @@ def main():
     parser.add_argument("--repo")
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--interval", type=int, default=30)
+    parser.add_argument("--classification-timeout", type=int, default=60)
     parser.add_argument("--no-checks-grace", type=int, default=60)
     args = parser.parse_args()
+    if args.classification_timeout <= 0:
+        parser.error("classification timeout must be positive")
     try:
         result = wait(args.pr, args.head, args.repo, args.timeout, args.interval,
                       args.no_checks_grace,
                       on_progress=lambda update: print(json.dumps(update, sort_keys=True),
                                                        file=sys.stderr, flush=True))
         if result["result"] in {"success", "failure"}:
-            repo = pr_repository(args.pr, args.repo)
-            result = decide(GitHub(repo), Registry(repo, Path.cwd()), result,
-                            lambda: observe(args.pr, args.head, args.repo))
+            print(json.dumps({"phase": "terminal", "raw_result": result["result"],
+                              "head": result["head"], "elapsed_seconds": result.get("elapsed_seconds"),
+                              "check_count": len(result["checks"])},
+                             sort_keys=True), file=sys.stderr, flush=True)
+            repo = pr_repository(result.get("url") or args.pr, args.repo)
+            result = decide(GitHub(repo), Registry(repo, Path.cwd(), import_legacy=False), result,
+                            lambda: observe(args.pr, args.head, args.repo),
+                            classification_timeout=args.classification_timeout,
+                            on_progress=lambda update: print(json.dumps(update, sort_keys=True),
+                                                             file=sys.stderr, flush=True))
     except (RuntimeError, ValueError, OSError, KeyError, subprocess.TimeoutExpired) as exc:
         parser.exit(2, json.dumps({"result": "error", "message": str(exc)}) + "\n")
     print(json.dumps(result, sort_keys=True))
