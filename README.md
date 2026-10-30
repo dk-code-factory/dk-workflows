@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.6.4.
+Independent MIT plugin for Claude Code and Codex. Version 1.6.5.
 
 ## Install
 
@@ -384,3 +384,11 @@ across nested handoffs. Material changes are reported promptly; host-required
 updates during unchanged waits use one brief pending-stage sentence. User-update
 timing never drives extra worker polling, evidence queries, provider calls or CI
 observations. The reference includes behavioral acceptance examples.
+
+CI observation reports terminal raw status before issue-backed classification.
+Automatic classification defaults to a shared 60-second deadline (waiter
+`--classification-timeout`), skips history for unsupported current reports, and
+collects only relevant workflows/jobs for unknown named failures. Historical
+attempt evidence can be reused; current head, attempt and issue checks remain
+live. Timeout leaves CI blocked. See [the evidence contract](runtime/dk-flaky-tests/references/evidence.md#bounded-automatic-classification)
+for progress, retained diagnostics and explicit discovery recovery.

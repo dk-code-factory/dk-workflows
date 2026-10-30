@@ -5,11 +5,13 @@ import json
 import re
 import subprocess
 import zipfile
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, urlparse
 
-from shared.flaky_tests import digest, normalize_repo, now, require_head
-from shared.private_state import write
+from shared.flaky_tests import digest, identity, normalize_repo, now, require_head
+from shared.private_state import write, read
+from shared.ci_deadline import ClassificationTimeout
 from shared.test_evidence import parse_report, result
 from shared.ci_exceptions import matching
 from shared.github_reads import run as github_run
@@ -27,6 +29,8 @@ class GitHub:
         command = ['gh', 'api', '--hostname', self.host, f'repos/{self.name}/{endpoint}']
         try:
             completed = github_run(command, capture_output=True, timeout=60)
+        except ClassificationTimeout:
+            raise
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise RuntimeError(f'GitHub request unavailable: {endpoint}') from exc
         if completed.returncode:
@@ -78,7 +82,7 @@ def evidence_file(registry, value, suffix='.json'):
     path = folder / (key + suffix)
     if suffix == '.json':
         write(path, value)
-    elif not path.exists():
+    elif not path.exists() or hashlib.sha256(path.read_bytes()).hexdigest() != key:
         # Unique content-addressed archive. Atomic publication avoids partial reads.
         import os
         import tempfile
@@ -131,17 +135,35 @@ def archive_report(archive, job_name, step, job_names):
                                   'step command does not prove exclusive test execution')
                 text = '\n'.join(lines[end + 1:])
             return parse_report(text) | {'archive_member': members[0].filename}
+    except ClassificationTimeout:
+        raise
     except (zipfile.BadZipFile, UnicodeError, KeyError, RuntimeError):
         return result(reason='unavailable or invalid attempt logs')
 
 
-def collect_attempt(api, registry, run, attempt, pipeline_exceptions=()):
+def collect_attempt(api, registry, run, attempt, pipeline_exceptions=(), *, reuse=False, targets=None):
     run_id = run['id']
     metadata = api.request(f'actions/runs/{run_id}/attempts/{attempt}')
     if (metadata.get('id') != run_id or metadata.get('run_attempt') != attempt
             or metadata.get('head_sha') != run['head_sha'] or metadata.get('path') != run.get('path')):
         raise RuntimeError('run attempt provenance mismatch')
     require_head(metadata['head_sha'])
+    cache_key = digest({'head': run['head_sha'], 'run_id': run_id, 'attempt': attempt,
+                        'workflow': run.get('path'), 'targets': targets or []})
+    cached = registry.load().get('attempt_evidence', {}).get(cache_key) if reuse else None
+    if cached and metadata.get('status') == 'completed' and not pipeline_exceptions:
+        try:
+            value = read(Path(cached), None)
+            if (value and digest(value) == Path(cached).stem and not value.get('missing')
+                    and all(value.get(k) == v for k, v in {'repo': registry.repo,
+                        'head': run['head_sha'], 'run_id': run_id, 'attempt': attempt,
+                        'workflow': run.get('path')}.items())
+                    and digest(read(Path(value['source_file']), None)) == Path(value['source_file']).stem
+                    and hashlib.sha256(Path(value['archive_file']).read_bytes()).hexdigest()
+                        == Path(value['archive_file']).stem):
+                return value | {'cached': True}
+        except (ValueError, OSError, KeyError, TypeError):
+            pass  # Missing or corrupt retained evidence requires fresh collection.
     jobs = api.jobs(run_id, attempt)
     evidence = {'repo': registry.repo, 'head': metadata['head_sha'], 'run_id': run_id,
                 'attempt': attempt, 'workflow': metadata['path'], 'jobs': [], 'missing': []}
@@ -150,14 +172,19 @@ def collect_attempt(api, registry, run, attempt, pipeline_exceptions=()):
                                                   {'workflow': metadata['path'], 'job': job['name']})}
     try:
         archive = b''
-        if any(job['id'] not in exempt for job in jobs):
+        if any(job['id'] not in exempt and (not targets or any(
+                t['workflow'] == metadata['path'] and t['job'] == job['name'] for t in targets)) for job in jobs):
             archive = api.request(f'actions/runs/{run_id}/attempts/{attempt}/logs', binary=True)
             evidence['archive_file'] = evidence_file(registry, archive, '.zip')
+    except ClassificationTimeout:
+        raise
     except RuntimeError as exc:
         archive = b''
         evidence['missing'].append(str(exc))
     observations = []
     for job in jobs:
+        if targets and not any(t['workflow'] == metadata['path'] and t['job'] == job['name'] for t in targets):
+            continue
         if (job.get('run_id') != run_id or job.get('head_sha') != metadata['head_sha']
                 or job.get('run_attempt', attempt) != attempt):
             raise RuntimeError('job attempt provenance mismatch')
@@ -185,25 +212,40 @@ def collect_attempt(api, registry, run, attempt, pipeline_exceptions=()):
                     'source_file': evidence['source_file']})
         evidence['jobs'].append(item)
     registry.save_observations(observations)
+    if (not pipeline_exceptions and not evidence['missing'] and metadata.get('status') == 'completed'
+            and all(job.get('status') == 'completed' for job in jobs) and evidence.get('archive_file')):
+        path = evidence_file(registry, evidence)
+        registry.update(lambda data: data.setdefault('attempt_evidence', {}).__setitem__(cache_key, path))
     return evidence
 
 
-def discover(api, registry, days=30, max_runs=100, max_issues=500):
+def discover(api, registry, days=30, max_runs=100, max_issues=500, *, targets=None):
     if not (1 <= days <= 365 and 1 <= max_runs <= 100 and 1 <= max_issues <= 500):
         raise ValueError('discovery limits: days 1..365, runs 1..100, issues 1..500')
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%dT%H:%M:%SZ')
     report = {'scanned_at': now(), 'limits': {'days': days, 'runs': max_runs, 'open_issues': max_issues,
               'archive_bytes': MAX_ARCHIVE_BYTES, 'report_bytes': MAX_REPORT_BYTES},
-              'runs': 0, 'attempts': 0, 'open_issues': 0, 'missing': [], 'limits_reached': []}
+              'runs': 0, 'attempts': 0, 'cached_attempts': 0, 'open_issues': 0,
+              'targets': targets, 'missing': [], 'limits_reached': []}
     try:
         issues = api.open_issues(max_issues)
         report['open_issues'] = len(issues)
         if len(issues) == max_issues:
             report['limits_reached'].append('open_issues')
         evidence_file(registry, {'open_issues': issues})
+    except ClassificationTimeout:
+        raise
     except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
         issues = []
         report['missing'].append(str(exc))
+    if targets:
+        verification = registry.synchronize(issues, api.issue)
+        active = {tuple(identity(entry)) for entry in verification['entries'] if entry.get('active')}
+        targets = [target for target in targets if tuple(identity(target)) not in active]
+        if not targets:
+            report['verification'] = verification
+            report['evidence_file'] = evidence_file(registry, report)
+            return report
     try:
         query = urlencode({'status': 'completed', 'created': '>=' + since, 'per_page': max_runs})
         response = api.request('actions/runs?' + query)
@@ -213,14 +255,21 @@ def discover(api, registry, days=30, max_runs=100, max_issues=500):
         report['runs'] = len(runs)
         evidence_file(registry, response)
         for run in runs:
+            if targets and not any(target['workflow'] == run.get('path') for target in targets):
+                continue
             for attempt in range(1, run['run_attempt'] + 1):
                 try:
-                    evidence = collect_attempt(api, registry, run, attempt)
+                    evidence = collect_attempt(api, registry, run, attempt, reuse=True, targets=targets)
+                    report['cached_attempts'] += int(evidence.get('cached', False))
                     report['attempts'] += 1
                     report['missing'].extend(evidence['missing'])
                     evidence_file(registry, evidence)
+                except ClassificationTimeout:
+                    raise
                 except (RuntimeError, ValueError, OSError, KeyError) as exc:
                     report['missing'].append(f'run {run["id"]} attempt {attempt}: {exc}')
+    except ClassificationTimeout:
+        raise
     except (RuntimeError, ValueError, KeyError) as exc:
         report['missing'].append(str(exc))
     # Linked issues are always refreshed, even when the bounded open issue scan fails.
@@ -261,6 +310,8 @@ def collect_snapshot(api, registry, snapshot, pipeline_exceptions=()):
             if not job:
                 raise ValueError('check job does not belong to latest attempt')
             item.update(run_id=run_id, attempt=run['run_attempt'], workflow=attempt['workflow'], **job)
+        except ClassificationTimeout:
+            raise
         except (ValueError, RuntimeError, OSError, KeyError) as exc:
             item['error'] = str(exc)
         evidence['checks'].append(item)

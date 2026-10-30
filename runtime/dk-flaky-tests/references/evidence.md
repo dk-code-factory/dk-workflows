@@ -24,8 +24,37 @@ Automatic proof requires all four exact context fields. A matching issue can dec
 
 ## Shared policy
 
-`evaluate(snapshot, evidence, verification, repo)` is a pure evaluator for trusted pinned evidence. Its result contains effective `result`, `raw_result`, `ignored_failures` with issue URLs, and `blockers`. `decide(api, registry, snapshot, refresh_snapshot)` is the live entry point: it refreshes linked issues, collects current failure evidence, discovers unknown failures at most once per unchanged head/failure fingerprint, reevaluates saved entries, and rechecks attempts and the live snapshot. Collection never starts or reruns jobs. Only `dk-pr-iter/scripts/ci_wait.py` polls CI; do not run discovery alongside its polling process.
+`evaluate(snapshot, evidence, verification, repo)` is a pure evaluator for trusted pinned evidence. Its result contains effective `result`, `raw_result`, `ignored_failures` with issue URLs, and `blockers`. `decide(api, registry, snapshot, refresh_snapshot)` is the live entry point: it refreshes linked issues, collects current failure evidence, discovers unknown named failures at most once per unchanged head/failure fingerprint, reevaluates saved entries, and rechecks attempts and the live snapshot. Collection never starts or reruns jobs. Only `dk-pr-iter/scripts/ci_wait.py` polls CI; do not run discovery alongside its polling process.
 
 Every failed test and every failed step needs complete coverage. Without a matching [explicit dk-config exception](../../dk-config/references/ci-exceptions.md), mixed failures, different signatures, build/deploy errors and missing logs block acceptance. Cancellations, pending checks, timeouts, missing checks and invalid head/attempt provenance remain blocking with either path. An automatic-only accepted decision has `result: known_flakes`, `raw_result: failure`, no blockers, and at least one ignored failure with verified open issue links. Report it as **“CI red; accepted known flakes”** with those links, preserving the raw result.
 
 At completion, run `dk-pr-iter/scripts/completion.py --cwd REPO --pr PR_URL gate --start-head START_SHA --final-head FINAL_SHA --preparation-file PREPARATION.json --verification-file VERIFICATION.json --run-record RUN_RECORD.json --series-assessment ASSESSMENT.json --review-complete` after the waiter exits. Add `--actionable` when work remains. Require `gate: clean`. This performs a fresh one-shot shared CI decision for red CI; a stored label, old issue state, changed head, or changed run attempt cannot authorize completion. Python callers of `completion_gate` must supply the live `ci_verifier` callback for `known_flakes` or `accepted_exceptions`. Explicit exceptions are reloaded and fingerprinted at each decision, including completion; removed or changed configuration cannot authorize acceptance through a saved result. Repeat the live gate before completion mutations when the evidence may have changed.
+
+## Bounded automatic classification
+
+The waiter emits terminal raw CI status on stderr before starting classification;
+stdout remains the final JSON decision. Phase/progress updates identify current
+evidence collection, unknown-test discovery and final live verification. A shared
+60-second classification budget is separate from polling `--timeout`; change it
+with `--classification-timeout SECONDS`. Read-only GitHub subprocesses and their
+transient retries, including final head/check reads, share the remaining budget.
+Local evidence work is checked at phase and API boundaries. Expiry retains a
+failure decision with `classification.timed_out: true`, the phase and elapsed time;
+it never authorizes accepting red CI.
+
+Automatic discovery runs only when every blocker is a complete named-test failure
+lacking verified issue proof. Unsupported or malformed current reports, missing
+provenance, build errors and mixed parser/test failures return blockers without
+a historical scan. Discovery refreshes issues first; explicit issue proof needs
+no historical logs. Remaining unknown identities restrict historical collection
+to their workflow paths and exact jobs. Completed attempts retain content-addressed
+metadata, archives and parsed evidence privately; verified retained evidence can
+be reused while current checks, latest attempts, linked issue state and exception
+configuration are still read live for every decision.
+
+Timed-out scans retain their allocation and status. Automatic observation does
+not silently repeat an unchanged failure scan. Use the existing explicit
+`dk-flaky-tests discover` command with narrowed `--days`, `--max-runs` and
+`--max-issues` to collect missing historical evidence, then rerun the one-shot
+decision. Fix unsupported report collection or parsing before retrying those
+blockers: historical flakes cannot prove completeness of the current failure.

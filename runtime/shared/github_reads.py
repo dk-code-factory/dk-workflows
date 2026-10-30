@@ -6,6 +6,8 @@ import re
 import subprocess
 import time
 
+from shared.ci_deadline import ACTIVE_BUDGET
+
 
 def read_only(argv, input_text=None):
     if len(argv) < 3 or Path(argv[0]).name != 'gh':
@@ -69,11 +71,17 @@ def run(argv, **kwargs):
     """Keep original result/exception semantics; never retry publication or schema errors."""
     if not read_only(argv, kwargs.get('input')):
         return subprocess.run(argv, **kwargs)
+    classification = ACTIVE_BUDGET.get()
+    if classification is not None:
+        kwargs['timeout'] = min(kwargs.get('timeout') or 60, classification.remaining())
     budget = kwargs.get('timeout')
     budget = 60 if budget is None else min(60, budget)
     deadline = time.monotonic() + budget
     for attempt in range(3):
-        options = dict(kwargs, timeout=max(0, deadline - time.monotonic()))
+        remaining = max(0, deadline - time.monotonic())
+        if classification is not None:
+            remaining = min(remaining, classification.remaining())
+        options = dict(kwargs, timeout=remaining)
         failure = None
         try:
             result = subprocess.run(argv, **options)
@@ -83,6 +91,8 @@ def run(argv, **kwargs):
             if not result.returncode or not transient(result):
                 return result
         remaining = deadline - time.monotonic()
+        if classification is not None:
+            remaining = min(remaining, classification.remaining())
         delay = 0.25 * (2 ** attempt) + random.uniform(0, 0.25)
         if attempt == 2 or remaining <= delay:
             if failure is not None:

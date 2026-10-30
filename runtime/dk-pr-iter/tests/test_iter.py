@@ -569,11 +569,11 @@ def test_waiter_main_accepts_effective_result_and_preserves_raw(monkeypatch, cap
     monkeypatch.setattr(sys, 'argv', ['ci_wait.py', '--pr', 'https://github.com/acme/project/pull/1', '--head', SHA])
     monkeypatch.setattr(ci, 'wait', lambda *a, **k: raw)
     monkeypatch.setattr(ci, 'Registry', lambda *a: object())
-    monkeypatch.setattr(ci, 'decide', lambda *a: accepted)
+    monkeypatch.setattr(ci, 'decide', lambda *a, **k: accepted)
     ci.main()
     import json
     assert json.loads(capsys.readouterr().out) == accepted
-    monkeypatch.setattr(ci, 'decide', lambda *a: raw)
+    monkeypatch.setattr(ci, 'decide', lambda *a, **k: raw)
     with pytest.raises(SystemExit) as failed:
         ci.main()
     assert failed.value.code == 1
@@ -604,3 +604,26 @@ def test_completion_gate_cli_refreshes_ci_policy(monkeypatch, capsys, effective)
         completion.main()
     assert closed.value.code == 1
     assert json.loads(capsys.readouterr().out)['gate'] == 'ci_not_green'
+
+
+def test_waiter_reports_terminal_status_before_classification(monkeypatch, capsys):
+    import json
+    import sys
+    raw = {"result": "failure", "head": SHA, "checks": [{"bucket": "fail"}]}
+    monkeypatch.setattr(sys, 'argv', ['ci_wait.py', '--pr', 'https://github.com/acme/project/pull/1',
+                                    '--head', SHA, '--classification-timeout', '7'])
+    monkeypatch.setattr(ci, 'wait', lambda *a, **k: raw)
+    monkeypatch.setattr(ci, 'Registry', lambda *a: object())
+    def classify(*args, **kwargs):
+        update = json.loads(capsys.readouterr().err)
+        assert update['phase'] == 'terminal' and update['raw_result'] == 'failure'
+        assert kwargs['classification_timeout'] == 7
+        kwargs['on_progress']({'phase': 'discover_unknown'})
+        return raw
+    monkeypatch.setattr(ci, 'decide', classify)
+    with pytest.raises(SystemExit) as failed:
+        ci.main()
+    output = capsys.readouterr()
+    assert failed.value.code == 1
+    assert json.loads(output.out) == raw
+    assert json.loads(output.err)['phase'] == 'discover_unknown'
