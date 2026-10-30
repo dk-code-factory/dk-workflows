@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from preparation_fixtures import Package, prep, response, retain
-from shared import executors
+from shared import executors, private_state
 from shared.diagnostics import Diagnostic
 
 
@@ -134,6 +134,81 @@ def test_corrupt_retained_input_blocks_unchanged_retry(tmp_path, monkeypatch):
     assert prep.analyze(prompt, tmp_path) == {}
     assert provider.call_count == 2
     assert provider.call_args_list[0] == provider.call_args_list[1]
+
+
+@pytest.mark.parametrize('slot', [0, 1])
+@pytest.mark.parametrize('failure_point', ['before_write', 'directory_sync'])
+def test_spill_storage_failure_preserves_history_and_retry_slot(tmp_path, monkeypatch, slot, failure_point):
+    prompt = 'Inspect "雪"\r\n' * 30_000 if slot == 0 else 'Small original request\r\n'
+    rejected = 'invalid "☃"\r\n' * 30_000
+    requests = []
+    spills = []
+    on_call = Mock()
+    atomic_bytes = private_state.atomic_bytes
+
+    def unavailable(*args):
+        raise OSError('injected spill storage failure')
+
+    def failing_spill(path, content):
+        spills.append((path, content))
+        if failure_point == 'before_write':
+            unavailable()
+        # Fail only the spill's directory synchronization, allowing the exchange
+        # journal to retain the failure and the already consumed response.
+        with monkeypatch.context() as storage:
+            storage.setattr(private_state, 'sync_directory', unavailable)
+            atomic_bytes(path, content)
+
+    def provider(request, checkout, **kwargs):
+        requests.append(kwargs['attempt'])
+        if kwargs['attempt'] == 0 and slot == 1:
+            assert request == prompt
+            return rejected
+        expected = spills[0][1].decode('utf-8')
+        assert original(request) == expected
+        return '{}'
+
+    monkeypatch.setattr(private_state, 'atomic_bytes', failing_spill)
+    monkeypatch.setattr(executors, 'execute', provider)
+    with pytest.raises(Diagnostic) as failure:
+        prep.analyze(prompt, tmp_path, on_call=on_call)
+    diagnostic = failure.value
+    assert diagnostic.code == 'preparation_input_failed'
+    assert 'injected spill storage failure' in str(diagnostic)
+    assert not diagnostic.dispatched and diagnostic.outcome == 'error'
+    assert diagnostic.action['kind'] == 'agent_task'
+    assert 'repair private storage' in diagnostic.action['task']
+    assert 'existing correction budget' in diagnostic.action['task']
+    path, journal = map(Path, diagnostic.action['artifacts'])
+    assert path == spills[0][0]
+    assert path.exists() == (failure_point == 'directory_sync')
+    if path.exists():
+        assert path.read_bytes() == spills[0][1]
+    assert requests == ([0] if slot else [])
+    assert on_call.call_count == slot
+    retained = json.loads(journal.read_text())
+    history = retained['attempts']
+    assert retained['status'] == 'provider_failed'
+    assert retained['request']['prompt'] == prompt
+    assert [item['attempt'] for item in history] == list(range(slot + 1))
+    assert 'response' not in history[-1] and 'input_file' not in history[-1]
+    assert history[-1]['provider_error']['type'] == 'Diagnostic'
+    if slot:
+        assert history[0]['response'] == rejected
+        assert history[0]['validation']['type'] == 'JSONDecodeError'
+
+    monkeypatch.setattr(private_state, 'atomic_bytes', atomic_bytes)
+    assert prep.analyze(prompt, tmp_path, on_call=on_call) == {}
+    recovered = json.loads(journal.read_text())
+    assert requests == ([0, 1] if slot else [0])
+    assert on_call.call_count == slot + 1
+    assert recovered['status'] == 'accepted'
+    assert recovered['request'] == retained['request']
+    assert recovered['attempts'][:-1] == history
+    retry = recovered['attempts'][-1]
+    assert retry['attempt'] == slot and retry['prompt'] == history[-1]['prompt']
+    assert retry['input_file']['path'] == str(path)
+    assert path.read_bytes() == spills[0][1]
 
 
 def test_small_initial_with_oversized_rejected_response_spills_only_correction(tmp_path, monkeypatch):
