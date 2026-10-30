@@ -2,7 +2,9 @@
 
 Before saving or handing off new or revised decision text, follow [the decision language review](../dk-pr-decisions/references/language.md), including its scripted three-pass limit.
 
-Handle actionable PR feedback in unresolved inline threads, top-level review bodies, and general comments with minimal noise. Preserve repository rules and unrelated user changes.
+Handle actionable PR feedback in unresolved inline threads, top-level review bodies,
+and general comments. Do not post plans, progress summaries, or duplicate replies
+on the PR. Preserve repository rules and unrelated user changes.
 
 Identify the PR URL and run `$dk-config --pr PR_URL refresh`. Read applicable plain English coding rules under `## Private rules`, relevant conflict resolutions, and guidance summaries before planning. Save `dk-pr-decisions/scripts/decisions.py --pr PR_URL context` JSON outside the repository. Require `schema_version: 2`, `status: ok`, and `data.verified: true`. Read active entries in `data.decisions` (superseded entries are history) and pass its path plus a concise decision summary to every code fixing agent. Missing, unreadable, malformed, stale, or conflicting context blocks dependent work. If a review requires a new material architecture, behavior, compatibility, or scope choice, ask the human and record the answer with brief rationale and a source link when available in a local Decisions draft outside the repository. Store draft entries as JSON objects with `text` and `source`; pass the draft with `context --local-decisions-file DRAFT.json` and refresh context before dependent implementation. Refresh context after a PR body edit or head change. Publish that draft only when the user asks to edit the PR description. Do not record routine API choices. Preserve existing decisions during any description edit.
 

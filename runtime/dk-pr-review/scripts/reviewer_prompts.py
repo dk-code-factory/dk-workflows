@@ -10,13 +10,15 @@ import re
 def preparation_instructions():
     return (
         ' Read preparation.analysis and reviewer_addendum in the handoff. Apply identical shared '
-        'boundaries and Decisions to your assigned role; forward both fields and these instructions '
+        'boundaries and Decisions to your assigned role. Forward both fields and these instructions '
         'unchanged to every nested reviewer, including correction retries. Check actionable correctness '
-        'cases, performance workloads/limits, supported compatibility, settled/open placement, and '
-        'required test evidence against preparation. Existing coverage may already prove the boundary; '
-        'a missing integration test qualifies only when a concrete required interaction remains unproved. '
-        'Distinguish defect validity from excluded or decision-blocked remediation. Flag remedies beyond '
-        'permitted depth/complexity without inventing architectural obligations. Keep your original role, '
+        'cases, performance workloads and limits, supported interfaces and environments, agreed code and test '
+        'locations, unresolved placement choices, and required test evidence against preparation. '
+        'Existing coverage may already verify the requirement. Report a missing integration test '
+        'only when a concrete required interaction remains unverified. Assess whether a defect is valid '
+        'separately from whether its fix is excluded or requires a decision. Flag fixes that exceed '
+        'the remediation_depth or complexity boundaries recorded in preparation. Do not invent '
+        'architecture requirements. Keep your original role, '
         'finding threshold, read-only restriction and JSON output contract. The fix field states the '
         'required outcome. If material instructions or evidence are unavailable, report incomplete.')
 
