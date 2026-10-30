@@ -32,54 +32,14 @@ At completion, run `dk-pr-iter/scripts/completion.py --cwd REPO --pr PR_URL gate
 
 ## Bounded automatic classification
 
-The waiter emits terminal raw CI status on stderr before starting classification;
-stdout remains the final JSON decision. Phase/progress updates identify current
-evidence collection, unknown-test discovery and final live verification. A shared
-60-second classification budget is separate from polling `--timeout`; change it
-with `--classification-timeout SECONDS`. Read-only GitHub subprocesses and their
-transient retries, including final head/check reads, share the remaining budget.
-Contended registry locks also share that budget; expiry propagates as a terminal
-classification timeout rather than ordinary unavailable issue evidence.
-Local evidence work is checked at phase and API boundaries. Expiry retains a
-failure decision with `classification.timed_out: true`, the phase and elapsed time;
-it never authorizes accepting red CI.
+The waiter emits terminal raw CI status on stderr before starting classification; stdout remains the final JSON decision. Phase/progress updates identify current evidence collection, unknown-test discovery and final live verification. A shared 60-second classification budget is separate from polling `--timeout`; change it with `--classification-timeout SECONDS` on either the waiter or completion gate. Read-only GitHub subprocesses and their transient retries, including final head/check reads, share the remaining budget. Contended registry locks also share that budget; expiry propagates as a terminal classification timeout rather than ordinary unavailable issue evidence. Local evidence work is checked at phase and API boundaries. Expiry retains a failure decision with `classification.timed_out: true`, the phase and elapsed time; it never authorizes accepting red CI.
 
-Automatic discovery runs only when every blocker is a complete named-test failure
-lacking verified issue proof. Unsupported or malformed current reports, missing
-provenance, build errors and mixed parser/test failures return blockers without
-a historical scan. Discovery refreshes issues first; explicit issue proof needs
-no historical logs. Remaining unknown identities restrict historical collection
-to their workflow paths and exact jobs. Completed attempts retain content-addressed
-metadata, archives and parsed evidence privately, keyed by selected jobs and the
-collector/parser identity; verified retained evidence can
-be reused while checks and exception configuration stay live. Failure decisions
-also recheck latest attempts and linked issue state.
+Automatic discovery runs only when every blocker is a complete named-test failure lacking verified issue proof. Unsupported or malformed current reports, missing provenance, build errors and mixed parser/test failures return blockers without a historical scan. Discovery refreshes issues first; explicit issue proof needs no historical logs. Remaining unknown identities restrict historical collection to their workflow paths and exact jobs. Completed attempts retain content-addressed metadata, archives and parsed evidence privately, keyed by selected jobs and the collector/parser identity; verified retained evidence can be reused while checks and exception configuration stay live. Failure decisions also recheck latest attempts and linked issue state.
 
-Scan inventories live in private evidence files; registry scan entries retain
-only their count and reference. Timeout decisions preserve current evidence links,
-known blockers and target references alongside the deadline diagnostic.
+Scan inventories live in private evidence files; registry scan entries retain only their count and reference. Timeout decisions preserve current evidence links, known blockers and target references alongside the deadline diagnostic.
 
-Scan finalization gets a separate bounded 100 ms lock-wait grace period, including
-after the classification budget expires. If contention prevents recording the
-terminal status, the decision retains the scan fingerprint, intended terminal
-status, `registry_status: pending` and `finalization_error`. The registry allocation
-remains reserved; a pending finalization is not proof of a live or completed scan
-and never permits automatic replay. Automatic observation does not silently repeat
-an unchanged failure scan. Use the existing explicit
-`dk-flaky-tests discover` command with narrowed `--days`, `--max-runs` and
-`--max-issues` to collect missing historical evidence, then rerun the one-shot
-decision. Fix unsupported report collection or parsing before retrying those
-blockers: historical flakes cannot prove completeness of the current failure.
+Scan finalization gets a separate bounded 100 ms lock-wait grace period, including after the classification budget expires. If contention prevents recording the terminal status, the decision retains the scan fingerprint, intended terminal status, `registry_status: pending` and `finalization_error`. The registry allocation remains reserved; a pending finalization is not proof of a live or completed scan and never permits automatic replay. Automatic observation does not silently repeat an unchanged failure scan. Use the existing explicit `dk-flaky-tests discover` command with narrowed `--days`, `--max-runs` and `--max-issues` to collect missing historical evidence, then rerun the one-shot decision. Fix unsupported report collection or parsing before retrying those blockers: historical flakes cannot prove completeness of the current failure.
 
-Green CI validates the pinned current checks and configuration without refreshing
-unrelated flake issues. The waiter and completion entrypoints defer legacy-history
-import until failure classification has activated its budget; ordinary registry
-callers retain automatic import. Polling captures the canonical PR URL so numbered
-PRs need no repository-resolution network call before classification.
+Green CI validates the pinned current checks and configuration without refreshing unrelated flake issues. The waiter and completion entrypoints defer legacy-history import until failure classification has activated its budget; ordinary registry callers retain automatic import. Polling captures the canonical PR URL so numbered PRs need no repository-resolution network call before classification.
 
-A per-request timeout while classification time remains is ordinary unavailable
-evidence, not `classification.timed_out`. Missing evidence keeps red CI blocked.
-Existing scan reservations remain deduplicated even when a scan has missing
-evidence; explicit narrowed discovery is the supported recovery path. If current
-check collection expires after earlier checks completed, its timeout decision
-links the partial snapshot and those checks' retained metadata and archives.
+A per-request timeout while classification time remains is ordinary unavailable evidence, not `classification.timed_out`. Missing evidence keeps red CI blocked. Existing scan reservations remain deduplicated even when a scan has missing evidence; explicit narrowed discovery is the supported recovery path. If current check collection expires after earlier checks completed, its timeout decision links the partial snapshot and those checks' retained metadata and archives.

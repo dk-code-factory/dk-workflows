@@ -224,6 +224,8 @@ def main():
     gate.add_argument('--start-head', required=True)
     gate.add_argument('--final-head', required=True)
     gate.add_argument('--review-complete', action='store_true')
+    gate.add_argument('--classification-timeout', type=int, default=60,
+                      help='CI classification budget in seconds (positive; default 60)')
     gate.add_argument('--actionable', action='store_true')
     gate.add_argument('--stage', choices=('review', 'complete'), default='complete')
     gate.add_argument('--cleanup-precheck', help='Prepublication review readiness only; allowed with --stage review')
@@ -240,6 +242,8 @@ def main():
     try:
         cwd = Path(args.cwd).resolve()
         if args.command == 'gate':
+            if args.classification_timeout <= 0:
+                raise ValueError('classification timeout must be positive')
             if args.cleanup_precheck and args.stage != 'review':
                 raise ValueError('cleanup prechecks cannot authorize completion')
             if not args.pr:
@@ -264,7 +268,8 @@ def main():
             repo = pr_repository(args.pr)
             verify = lambda: decide(GitHub(repo), Registry(repo, cwd, import_legacy=False),
                                     observe(args.pr, args.final_head),
-                                    lambda: observe(args.pr, args.final_head))
+                                    lambda: observe(args.pr, args.final_head),
+                                    classification_timeout=args.classification_timeout)
             # Red CI needs live verification, never the saved effective label.
             ci_result = {'result': 'known_flakes'} if snapshot['result'] == 'failure' else snapshot
             decision = {}

@@ -275,7 +275,7 @@ def test_gate_cli_defaults_to_complete_and_observes_series_after_ci(monkeypatch,
     assert exc.value.code == 2 and '--series-assessment' in capsys.readouterr().err
     order = []
     monkeypatch.setattr(ci, 'observe', lambda *args: {'head': SHA, 'result': 'success'})
-    monkeypatch.setattr(shared.ci_policy, 'decide', lambda *a: (
+    monkeypatch.setattr(shared.ci_policy, 'decide', lambda *a, **k: (
         order.append('ci') or {'head': SHA, 'result': 'success', 'blockers': []}))
     monkeypatch.setattr(completion.series_assessment, 'load', lambda *a: series_evidence())
     monkeypatch.setattr(completion.series_assessment, 'command', lambda *a: TREE)
@@ -306,7 +306,7 @@ def test_completion_cli_operational_subprocess_errors_have_diagnostics(tmp_path,
     from shared import ci_policy, github_reads, flaky_actions, flaky_tests
     monkeypatch.setitem(sys.modules, 'ci_wait', ci)
     monkeypatch.setattr(completion.series_assessment, 'load', lambda *a: series_evidence())
-    monkeypatch.setattr(ci_policy, 'decide', lambda *a: {'head': SHA, 'result': 'success'})
+    monkeypatch.setattr(ci_policy, 'decide', lambda *a, **k: {'head': SHA, 'result': 'success'})
     monkeypatch.setattr(flaky_actions, 'GitHub', lambda *a: None)
     monkeypatch.setattr(flaky_tests, 'Registry', lambda *a, **k: None)
     reads = []
@@ -359,7 +359,7 @@ def test_review_precheck_cli_reports_live_errors(monkeypatch, capsys, failure_st
     from shared import cleanup_precheck, ci_policy
     monkeypatch.setitem(sys.modules, 'ci_wait', ci)
     monkeypatch.setattr(ci, 'observe', lambda *a: {'head': SHA, 'result': 'success'})
-    monkeypatch.setattr(ci_policy, 'decide', lambda *a: {'head': SHA, 'result': 'success', 'blockers': []})
+    monkeypatch.setattr(ci_policy, 'decide', lambda *a, **k: {'head': SHA, 'result': 'success', 'blockers': []})
     calls = []
     def review(*args):
         calls.append(args)
@@ -580,7 +580,8 @@ def test_waiter_main_accepts_effective_result_and_preserves_raw(monkeypatch, cap
 
 
 @pytest.mark.parametrize('effective', ['known_flakes', 'accepted_exceptions'])
-def test_completion_gate_cli_refreshes_ci_policy(monkeypatch, capsys, effective):
+@pytest.mark.parametrize('classification_timeout', [None, 120])
+def test_completion_gate_cli_refreshes_ci_policy(monkeypatch, capsys, effective, classification_timeout):
     import json
     import sys
     from shared import ci_policy, flaky_actions, flaky_tests
@@ -592,7 +593,10 @@ def test_completion_gate_cli_refreshes_ci_policy(monkeypatch, capsys, effective)
     accepted = {'result': effective, 'raw_result': 'failure', 'head': SHA, 'blockers': [],
                 'ignored_failures': [{'issues': ['https://github.com/acme/project/issues/7']}], 'verified_at': 'now'}
     calls = []
-    def decide(*a):
+    if classification_timeout is not None:
+        sys.argv += ['--classification-timeout', str(classification_timeout)]
+    def decide(*a, **kwargs):
+        assert kwargs['classification_timeout'] == (classification_timeout or 60)
         calls.append('live')
         return accepted
     monkeypatch.setattr(ci_policy, 'decide', decide)
@@ -661,3 +665,19 @@ def test_numbered_waiter_reuses_observed_url_and_defers_legacy_import(monkeypatc
     monkeypatch.setattr(ci, 'decide', lambda *a, **k: raw)
     ci.main()
     assert 'success' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('timeout', ['0', '-1'])
+def test_completion_rejects_invalid_budget_before_live_queries(monkeypatch, capsys, timeout):
+    import sys
+    monkeypatch.setattr(sys, 'argv', ['completion.py', '--pr', 'https://github.com/acme/project/pull/1',
+        'gate', '--start-head', OTHER, '--final-head', SHA, '--preparation-file', '/private/preparation.json',
+        '--verification-file', '/private/verification.json', '--run-record', '/private/run-record.json',
+        '--classification-timeout', timeout])
+    def unexpected(*args):
+        raise AssertionError('invalid budget must not query live preparation or CI')
+    monkeypatch.setattr(completion, 'live_preparation_scope', unexpected)
+    with pytest.raises(SystemExit) as invalid:
+        completion.main()
+    assert invalid.value.code == 2
+    assert 'classification timeout must be positive' in capsys.readouterr().err

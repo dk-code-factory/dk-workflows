@@ -57,13 +57,13 @@ class BoundedAPI:
         if not callable(target):
             return target
         def call(*args, **kwargs):
-            self.budget.progress(self.budget.phase, operation=name)
+            self.budget.remaining()
             try:
                 with self.budget.activate():
                     result = target(*args, **kwargs)
             except subprocess.TimeoutExpired as exc:
                 self.budget.remaining()
-                raise RuntimeError('GitHub request timed out before the classification deadline') from exc
+                raise RuntimeError(f'GitHub {name} request timed out before the classification deadline') from exc
             self.budget.remaining()
             return result
         return call

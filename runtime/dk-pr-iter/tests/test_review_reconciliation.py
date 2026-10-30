@@ -1429,7 +1429,7 @@ def test_malformed_precheck_containers_fail_through_real_gate_and_cli(scenario, 
     ci = module('ci_wait')
     monkeypatch.setitem(sys.modules, 'ci_wait', ci)
     monkeypatch.setattr(ci, 'observe', lambda *a: {'head': s.reviewed_head, 'result': 'success'})
-    monkeypatch.setattr(ci_policy, 'decide', lambda *a: {'head': s.reviewed_head, 'result': 'success'})
+    monkeypatch.setattr(ci_policy, 'decide', lambda *a, **k: {'head': s.reviewed_head, 'result': 'success'})
     monkeypatch.setattr(completion, 'live_preparation_scope', lambda *a: {'body': '', 'headRefOid': s.reviewed_head})
     monkeypatch.setattr(sys, 'argv', ['completion.py', '--cwd', str(s.package.repo), '--pr', s.package.context['url'],
         'gate', '--stage', 'review', '--start-head', s.reviewed_head, '--final-head', s.reviewed_head,

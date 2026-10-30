@@ -527,3 +527,18 @@ print(json.dumps(result))
     assert result['result'] == 'failure' and result['classification']['timed_out']
     assert result['classification']['phase'] == 'initialize_registry'
     assert Path(result['decision_file']).is_file()
+
+
+def test_per_call_deadline_checks_do_not_flood_phase_progress():
+    tick = [0]
+    updates = []
+    budget = Budget(5, clock=lambda: tick[0], on_progress=updates.append)
+    budget.progress('discover_unknown', target_count=1)
+    api = BoundedAPI(FakeAPI(), budget)
+    for _ in range(100):
+        api.request('actions/runs/10')
+    assert len(updates) == 1 and updates[0]['phase'] == 'discover_unknown'
+    tick[0] = 5
+    with pytest.raises(ClassificationTimeout):
+        api.request('actions/runs/10')
+    assert len(api.api.calls) == 100 and len(updates) == 1
