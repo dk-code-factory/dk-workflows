@@ -198,6 +198,32 @@ new manifest when current evidence changes. Required live inputs still block if 
 
 ## Rejected model output and recovery
 
+Preparation requests above 128,000 JSON-serialized characters are transported by
+reference to a private, durable UTF-8 file. This retains the complete assembled
+request, including the input inventory, selected parent, governing evidence and
+any correction with its rejected response. The small dispatch envelope records
+the absolute path, SHA-256, exact byte length and serialized character count. Read
+and verify the entire request using bounded byte or character-offset reads before
+following its original source paths; large JSON can occupy a single line. This
+changes transport only: evidence files, parent snapshots, preparation identities,
+validation and correction budgets retain their existing meaning.
+
+The private exchange's attempt `input_file` identifies each retained request even
+when review telemetry is disabled. An unchanged provider-failure retry verifies
+and reuses the same file and response slot; a large correction receives its own
+content-addressed file. `preparation_input_failed` blocks if storage cannot retain
+the request or an existing file differs from the original bytes. Preserve the
+exchange and repair storage or restore the exact original file before retrying;
+never overwrite corrupt evidence or reset the correction budget.
+
+Codex dispatch independently checks the final request after architecture, procedure
+and lifecycle instructions are added. `provider_input_too_large` reports measured
+JSON-serialized characters, the 1,048,576-character limit, raw characters and JSON
+escaping/framing overhead before creating temporary output or starting Codex.
+Use complete private file references and bounded offset reading for oversized
+instructions while preserving all governing inputs. Automatic preparation
+spilling supports growing historical evidence without manual manifest surgery.
+
 `model_validation_failed` leaves preparation blocked. The error receipt identifies
 the exact invalid placement field, such as `placement.dependencies.locations`, and
 its `action.artifacts` points to a private exchange JSON file. Read that file to

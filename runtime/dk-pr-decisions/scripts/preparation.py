@@ -179,12 +179,59 @@ def analysis_prompt(manifest, context, decisions, sources, descriptors):
             'sources': sources, 'reviewers': descriptors}, ensure_ascii=True))
 
 
+PREPARATION_INLINE_LIMIT = 128_000
+
+
+def bounded_prompt(prompt, checkout):
+    """Move oversized transport input to an exact, inspectable private source."""
+    from shared.model_diagnostics import CURRENT
+    from shared.private_state import atomic_bytes
+    from shared.diagnostics import Diagnostic, task
+    size = len(json.dumps(prompt, ensure_ascii=True))
+    if size <= PREPARATION_INLINE_LIMIT:
+        return prompt
+    journal = CURRENT.get()
+    directory = journal.path.parent if journal else allocate(repository=checkout)
+    content = prompt.encode('utf-8')
+    fingerprint = hashlib.sha256(content).hexdigest()
+    path = directory / ('preparation-input-' + fingerprint + '.txt')
+    source = {'path': str(path), 'sha256': fingerprint,
+              'bytes': len(content), 'serialized_characters': size}
+    try:
+        if path.exists():
+            if path.read_bytes() != content:
+                raise ValueError('retained preparation input differs from its content address')
+        else:
+            atomic_bytes(path, content)
+    except (OSError, ValueError) as exc:
+        raise Diagnostic('preparation_input_failed',
+            'Private preparation input could not be retained or verified: ' + str(exc),
+            task('Restore the exact retained input or repair private storage before retrying. '
+                 'Preserve original evidence and the existing correction budget.', path,
+                 *([journal.path] if journal else [])), outcome='error') from exc
+    if journal:
+        journal.value['attempts'][-1]['input_file'] = source
+        journal.save()
+    return ('Perform read-only Decisions engineering preparation using the complete original request '
+            'retained below. The file is the full authoritative request, including any correction, '
+            'validation error and prior response; apply every instruction and governing constraint. '
+            'Read it completely before answering, then read its original evidence and governing sources. '
+            'Use bounded byte or character-offset reads (for example Python seek/read with incremental '
+            'UTF-8 decoding, or slicing decoded text into at most 16000 characters per read). '
+            'Large JSON may occupy a single line; line limits alone are insufficient. '
+            'Continue across offsets until all required content is inspected. Never truncate, summarize '
+            'away constraints, or treat the reference as permission to skip evidence or preparation checks. '
+            'Verify the file SHA-256 before using it. Return exactly the JSON required by the original '
+            'request and response contract.\nORIGINAL REQUEST FILE: ' + json.dumps(source, ensure_ascii=True))
+
+
 def analyze(prompt, checkout, *, validate=None, on_call=None, diagnostic_scope='engineering-preparation'):
     from shared.executors import execute_json, execute
-    def counted(*args, **kwargs):
+    def counted(request, directory, **kwargs):
+        request = bounded_prompt(request, directory)
         if on_call:
             on_call()
-        return execute(*args, inherit_architecture=False, **kwargs)
+        return execute(request, directory, inherit_architecture=False, **kwargs)
     return execute_json(prompt, checkout, validate=validate, executor=counted,
                         diagnostic_scope=diagnostic_scope,
                         retain_accepted=(lambda value: isinstance(value, dict) and value.get('full_reassessment') is True)
