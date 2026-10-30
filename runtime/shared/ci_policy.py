@@ -94,7 +94,8 @@ def evaluate(snapshot, evidence, verification, repo, exceptions=None):
                 if report.get('complete') is not True or not (related or configured):
                     inactive = [{'url': e['issue_url'], 'status': e.get('status')}
                                 for e in verification.get('entries', []) if identity(e) == identity(test_context)]
-                    block('test failure has no verified open issue', **context, test=test.get('test'),
+                    block('test failure has no verified open issue', code='unverified_named_test',
+                          **context, test=test.get('test'),
                           signature=test.get('signature'), related_issues=inactive)
                 else:
                     outcome['ignored_failures'].append(test_context | context |
@@ -128,6 +129,25 @@ def failure_fingerprint(snapshot, evidence):
     return digest({'head': snapshot.get('head'), 'failures': sorted(failures, key=digest)})
 
 
+def discovery_targets(evidence, blockers, budget):
+    """Map unknown failures in linear time, checking long reports in batches."""
+    missing = {(b.get('link'), b.get('step'), b.get('test'), b.get('signature')) for b in blockers}
+    targets = {}
+    count = 0
+    for item in evidence.get('checks', []):
+        for step in item.get('steps', []):
+            for test in step.get('report', {}).get('tests', []):
+                if count % 128 == 0:
+                    budget.remaining()
+                count += 1
+                if (test.get('outcome') == 'fail' and
+                        (item['link'], step['number'], test['test'], test['signature']) in missing):
+                    target = {'workflow': item['workflow'], 'job': item['job'], **test}
+                    targets[tuple(identity(target))] = target
+    budget.remaining()
+    return list(targets.values())
+
+
 def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget):
     """One-shot decision after the sole waiter settles checks; never poll/rerun."""
     try:
@@ -146,20 +166,12 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget):
     # History cannot repair malformed reports, missing provenance or unsettled CI.
     # Only wholly classifiable named failures with missing issue proof can benefit.
     unknown = decision['blockers']
-    targets = []
-    if unknown and all(b['reason'] == 'test failure has no verified open issue' for b in unknown):
-        for item in evidence.get('checks', []):
-            for step in item.get('steps', []):
-                for test in step.get('report', {}).get('tests', []):
-                    if test.get('outcome') == 'fail' and any(
-                            b.get('link') == item['link'] and b.get('step') == step['number']
-                            and b.get('test') == test['test'] and b.get('signature') == test['signature']
-                            for b in unknown):
-                        target = {'workflow': item['workflow'], 'job': item['job'], **test}
-                        if target not in targets:
-                            targets.append(target)
-    if auto_discover and snapshot['result'] == 'failure' and targets:
-        key = failure_fingerprint(snapshot, evidence)
+    eligible = (auto_discover and snapshot['result'] == 'failure' and unknown
+                and all(b.get('code') == 'unverified_named_test' for b in unknown))
+    key = failure_fingerprint(snapshot, evidence) if eligible else None
+    targets = (discovery_targets(evidence, unknown, budget) if eligible
+               and key not in registry.load().get('scans', {}) else [])
+    if targets:
         def claim(data):
             scans = data.setdefault('scans', {})
             if key in scans:
@@ -167,8 +179,8 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget):
             scans[key] = {'head': snapshot['head'], 'started_at': now(), 'status': 'running', 'targets': targets}
             return True
         if registry.update(claim):
-            budget.progress('discover_unknown', targets=targets)
             try:
+                budget.progress('discover_unknown', target_count=len(targets))
                 discovery = discover(api, registry, targets=targets)
             except ClassificationTimeout:
                 registry.update(lambda data: data['scans'][key].update(finished_at=now(), status='timed_out'))
@@ -213,8 +225,8 @@ def decide(api, registry, snapshot, refresh_snapshot, auto_discover=True, *,
            classification_timeout=60, clock=time.monotonic, on_progress=None):
     """Bound live classification; timeout always leaves terminal CI unaccepted."""
     budget = Budget(classification_timeout, clock, on_progress)
-    budget.progress('classification', raw_result=snapshot['result'], head=snapshot['head'])
     try:
+        budget.progress('classification', raw_result=snapshot['result'], head=snapshot['head'])
         with budget.activate():
             decision = _decide(BoundedAPI(api, budget), registry, snapshot, refresh_snapshot,
                                auto_discover, budget)

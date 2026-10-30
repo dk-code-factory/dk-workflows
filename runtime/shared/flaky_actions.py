@@ -18,6 +18,8 @@ from shared.github_reads import run as github_run
 
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 MAX_REPORT_BYTES = 10 * 1024 * 1024
+ATTEMPT_READER = hashlib.sha256(Path(__file__).read_bytes() +
+    Path(__file__).with_name('test_evidence.py').read_bytes()).hexdigest()
 
 
 class GitHub:
@@ -148,8 +150,10 @@ def collect_attempt(api, registry, run, attempt, pipeline_exceptions=(), *, reus
             or metadata.get('head_sha') != run['head_sha'] or metadata.get('path') != run.get('path')):
         raise RuntimeError('run attempt provenance mismatch')
     require_head(metadata['head_sha'])
-    cache_key = digest({'head': run['head_sha'], 'run_id': run_id, 'attempt': attempt,
-                        'workflow': run.get('path'), 'targets': targets or []})
+    jobs_scope = sorted({t['job'] for t in targets if t['workflow'] == run.get('path')}) if targets else None
+    cache_key = digest({'repo': registry.repo, 'head': run['head_sha'], 'run_id': run_id,
+                        'attempt': attempt, 'workflow': run.get('path'),
+                        'jobs': jobs_scope, 'reader': ATTEMPT_READER})
     cached = registry.load().get('attempt_evidence', {}).get(cache_key) if reuse else None
     if cached and metadata.get('status') == 'completed' and not pipeline_exceptions:
         try:

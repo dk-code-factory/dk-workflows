@@ -9,7 +9,7 @@ import time
 ACTIVE_BUDGET = ContextVar('ci_classification_budget', default=None)
 
 
-class ClassificationTimeout(RuntimeError):
+class ClassificationTimeout(Exception):
     pass
 
 

@@ -5,7 +5,10 @@ import os
 import re
 import tempfile
 import sys
+import time
 from pathlib import Path
+
+from shared.ci_deadline import ACTIVE_BUDGET
 
 def root(repo):
     parts = repo.split("/")
@@ -68,7 +71,18 @@ def atomic_text(path, content, *, prefix='.state-', sync=None):
 def mutate(path, default, operation):
     path.parent.mkdir(parents=True, exist_ok=True)
     with (path.parent / (path.name + ".lock")).open("w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        budget = ACTIVE_BUDGET.get()
+        if budget is None:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        else:
+            # Try once without waiting even after expiry, so an uncontended
+            # timeout-status write can finish. Contended locks share the budget.
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    time.sleep(min(0.05, budget.remaining()))
         value = read(path, default)
         result = operation(value)
         write(path, value)

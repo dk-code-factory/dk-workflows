@@ -38,6 +38,8 @@ evidence collection, unknown-test discovery and final live verification. A share
 60-second classification budget is separate from polling `--timeout`; change it
 with `--classification-timeout SECONDS`. Read-only GitHub subprocesses and their
 transient retries, including final head/check reads, share the remaining budget.
+Contended registry locks also share that budget; expiry propagates as a terminal
+classification timeout rather than ordinary unavailable issue evidence.
 Local evidence work is checked at phase and API boundaries. Expiry retains a
 failure decision with `classification.timed_out: true`, the phase and elapsed time;
 it never authorizes accepting red CI.
@@ -48,7 +50,8 @@ provenance, build errors and mixed parser/test failures return blockers without
 a historical scan. Discovery refreshes issues first; explicit issue proof needs
 no historical logs. Remaining unknown identities restrict historical collection
 to their workflow paths and exact jobs. Completed attempts retain content-addressed
-metadata, archives and parsed evidence privately; verified retained evidence can
+metadata, archives and parsed evidence privately, keyed by selected jobs and the
+collector/parser identity; verified retained evidence can
 be reused while current checks, latest attempts, linked issue state and exception
 configuration are still read live for every decision.
 
