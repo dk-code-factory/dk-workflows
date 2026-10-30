@@ -248,6 +248,7 @@ def _execute_json(prompt, checkout, validate, executor, correction_instructions,
 
 
 MAX_PROVIDER_ERROR_CHARS = 8192
+CODEX_INPUT_LIMIT = 1_048_576
 
 
 def check_prompt_size(prompt, limit):
@@ -461,6 +462,18 @@ def output_failure(output, proc, checkout, argv, attempt, timeout, reason):
 
 
 def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
+    if host == 'codex':
+        size = len(json.dumps(prompt, ensure_ascii=True))
+        if size > CODEX_INPUT_LIMIT:
+            raise Diagnostic('provider_input_too_large',
+                f'Codex request too large: {size} serialized characters; limit {CODEX_INPUT_LIMIT}. '
+                f'Contributors: {len(prompt)} raw characters and {size - len(prompt)} JSON escaping/framing '
+                'characters, including all architecture, procedure and lifecycle prefixes.',
+                task('Retain complete evidence in private files and supply paths with bounded offset '
+                     'reading instructions. Engineering preparation does this automatically; inspect '
+                     'its retained exchange and input file. Reduce oversized dispatch instructions '
+                     'without dropping governing inputs, then retry manually with the existing budget.'),
+                outcome='error')
     temp = tempfile.mkdtemp(prefix='dk-provider-')
     retain_temp = False
     proc, started, original, received = None, False, None, None

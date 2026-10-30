@@ -68,6 +68,22 @@ def atomic_text(path, content, *, prefix='.state-', sync=None):
                 raise
 
 
+def atomic_bytes(path, content):
+    """Persist exact bytes privately and durably, without newline translation."""
+    path = Path(path)
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix='.state-')
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(name, path)
+        sync_directory(path.parent)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
 def mutate(path, default, operation):
     path.parent.mkdir(parents=True, exist_ok=True)
     with (path.parent / (path.name + ".lock")).open("w") as lock:

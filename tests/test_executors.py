@@ -916,6 +916,61 @@ def test_explicit_size_check_uses_serialized_characters_and_inclusive_boundary()
         executors.check_prompt_size(prompt, serialized_size - 1)
 
 
+def test_codex_final_limit_rejects_before_temporary_storage_or_spawn(tmp_path, monkeypatch):
+    prompt = '"雪\r\n' * 100_000
+    size = len(json.dumps(prompt))
+    assert len(prompt) < executors.CODEX_INPUT_LIMIT < size
+    temporary, process = Mock(), Mock()
+    monkeypatch.setattr(executors.tempfile, 'mkdtemp', temporary)
+    monkeypatch.setattr(executors, 'run_provider', process)
+    with pytest.raises(Diagnostic) as failure:
+        executors.execute_process(prompt, tmp_path, 'codex', {}, None, 0, 5)
+    assert failure.value.code == 'provider_input_too_large'
+    assert str(size) in str(failure.value) and str(executors.CODEX_INPUT_LIMIT) in str(failure.value)
+    assert str(len(prompt)) in str(failure.value)
+    assert str(size - len(prompt)) in str(failure.value)
+    assert prompt[:100] not in str(failure.value)
+    assert 'bounded offset' in failure.value.action['task']
+    temporary.assert_not_called()
+    process.assert_not_called()
+
+
+def test_codex_final_guard_counts_architecture_procedure_and_lifecycle_prefixes(
+    tmp_path, monkeypatch, ambient_architecture_packet
+):
+    from shared import runtime_bundles
+    checkout, packet = ambient_architecture_packet
+    monkeypatch.setenv('DK_HOST', 'codex')
+    monkeypatch.setenv('DK_ARCHITECTURE_AGENT', 'worker')
+    resolved = {'executor': 'codex', 'binding': {'skill': 'worker'}, 'identity': 'worker',
+                'procedure': '/private/procedure.md', 'root': '/private/plugin'}
+    monkeypatch.setattr(runtime_bundles, 'retained_binding', lambda value: value)
+    updates = Mock(side_effect=[{'token': 'lifecycle'}, None])
+    monkeypatch.setattr(executors, 'managed_update', updates)
+    prompt = 'x' * (executors.CODEX_INPUT_LIMIT - 100)
+    assert len(json.dumps(prompt)) < executors.CODEX_INPUT_LIMIT
+    temporary, process = Mock(), Mock()
+    monkeypatch.setattr(executors.tempfile, 'mkdtemp', temporary)
+    monkeypatch.setattr(executors, 'run_provider', process)
+    with pytest.raises(Diagnostic) as failure:
+        executors.execute(prompt, checkout, resolved=resolved, architecture_packet=packet)
+    assert failure.value.code == 'provider_input_too_large'
+    assert 'architecture, procedure and lifecycle prefixes' in str(failure.value)
+    assert [call.args[2] for call in updates.call_args_list] == ['entry', 'complete']
+    temporary.assert_not_called()
+    process.assert_not_called()
+
+
+def test_codex_final_limit_accepts_inclusive_boundary(tmp_path, monkeypatch):
+    prompt = 'x' * (executors.CODEX_INPUT_LIMIT - 2)
+    def run(argv, **kwargs):
+        assert len(json.dumps(kwargs['input'])) == executors.CODEX_INPUT_LIMIT
+        Path(argv[argv.index('-o') + 1]).write_text('accepted')
+        return subprocess.CompletedProcess(argv, 0, '', '')
+    monkeypatch.setattr(executors, 'run_provider', run)
+    assert executors.execute_process(prompt, tmp_path, 'codex', {}, None, 0, 5) == 'accepted'
+
+
 @pytest.mark.parametrize('apostrophe', ["'", '’'])
 def test_codex_usage_limit_preserves_diagnostic_without_retry(tmp_path, monkeypatch, apostrophe):
     monkeypatch.setenv('DK_HOST', 'codex')

@@ -210,12 +210,20 @@ def retained(path, identity):
         previous = None
         for item in attempts:
             if (not isinstance(item, dict)
-                    or set(item) - {'attempt', 'prompt', 'response', 'provider', 'validation', 'provider_error'}
+                    or set(item) - {'attempt', 'prompt', 'response', 'provider', 'validation', 'provider_error', 'input_file'}
                     or type(item.get('attempt')) is not int or item['attempt'] not in {0, 1}
                     or not isinstance(item.get('prompt'), str)
                     or ('response' in item and not isinstance(item['response'], str))
                     or ('provider' in item and not isinstance(item['provider'], dict))):
                 raise ValueError('invalid attempt schema')
+            if 'input_file' in item:
+                source = item['input_file']
+                if (not isinstance(source, dict) or set(source) != {'path', 'sha256', 'bytes', 'serialized_characters'}
+                        or not isinstance(source['path'], str) or not Path(source['path']).is_absolute()
+                        or not isinstance(source['sha256'], str) or len(source['sha256']) != 64
+                        or any(type(source[key]) is not int or source[key] <= 0
+                               for key in ('bytes', 'serialized_characters'))):
+                    raise ValueError('invalid retained input file')
             for key in ('validation', 'provider_error'):
                 if key in item and (not isinstance(item[key], dict)
                                     or not all(isinstance(item[key].get(field), str) for field in ('type', 'detail'))):
