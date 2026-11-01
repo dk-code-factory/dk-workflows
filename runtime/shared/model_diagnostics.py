@@ -164,6 +164,58 @@ def retained_failure(detail, *artifacts):
              *artifacts), outcome='error')
 
 
+@contextmanager
+def reservation(lock):
+    """Own a fresh key before exposing it to another reservation reader."""
+    directory = os.open(lock.parent, os.O_RDONLY | os.O_DIRECTORY)
+    fd = None
+    try:
+        try:
+            fcntl.flock(directory, fcntl.LOCK_EX)
+            try:
+                fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+                created = True
+            except FileExistsError:
+                fd = os.open(lock, os.O_RDWR)
+                created = False
+            if created:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+        finally:
+            os.close(directory)
+        with os.fdopen(fd, 'w') as stream:
+            fd = None  # The stream owns the descriptor, including error cleanup.
+            if not created:
+                # Never hold the directory guard while waiting for an existing
+                # owner: it may need another key before releasing this one.
+                fcntl.flock(stream, fcntl.LOCK_EX)
+            yield created
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+@contextmanager
+def analysis_workspace(scope, *, repository=None):
+    """Pin a private caller workspace across manual recovery of one source snapshot."""
+    identity = {'scope': scope, 'runtime': str(Path(__file__).resolve().parent),
+                'repository': str(Path(repository).resolve()) if repository is not None else None}
+    key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    reserved = allocate(repository=repository)
+    directory = reserved.parent / 'model-workspaces'
+    directory.mkdir(mode=0o700, exist_ok=True)
+    reserved.rmdir()
+    if directory.is_symlink():
+        raise retained_failure('pinned workspace storage must not use a symlink', directory)
+    path = directory / key
+    lock = directory / (key + '.lock')
+    with reservation(lock) as created:
+        if created:
+            path.mkdir(mode=0o700)
+        if not path.is_dir() or path.is_symlink():
+            raise retained_failure('pinned analysis workspace is unavailable', path, lock)
+        yield path
+
+
 def retained(path, identity):
     """Validate stored authority before it can permit any further response."""
     missing = object()
@@ -267,14 +319,7 @@ def exchange(prompt, checkout, scope, *, retain_accepted=None):
     reserved.rmdir()
     path = directory / (key + '.json')
     lock = directory / (key + '.lock')
-    try:
-        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
-        created = True
-    except FileExistsError:
-        fd = os.open(lock, os.O_RDWR)
-        created = False
-    with os.fdopen(fd, 'w') as stream:
-        fcntl.flock(stream, fcntl.LOCK_EX)
+    with reservation(lock) as created:
         index, prior = retained(path, identity)
         if index is None and not created:
             # The lock records a prior reservation even if setup never wrote an

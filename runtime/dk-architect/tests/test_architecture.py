@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
+from threading import Barrier, Event, local
 
 import pytest
 
@@ -62,6 +62,174 @@ def empty_repo(repo):
     run(repo, 'rm', '-rf', '.')
     run(repo, 'commit', '--allow-empty', '-qm', 'empty committed baseline')
     return repo
+
+
+@pytest.mark.parametrize('valid', [False, True])
+def test_catalog_manual_provider_recovery_retains_budget(repo, monkeypatch, valid):
+    from shared import executors, model_diagnostics
+    monkeypatch.setenv('DK_HOST', 'codex')
+    monkeypatch.delenv('DK_ANALYSIS_HOST', raising=False)
+    calls = []
+    def transport(argv, **kwargs):
+        calls.append((argv[0], kwargs['input']))
+        assert kwargs['env']['DK_HOST'] == 'codex'
+        if len(calls) == 1:
+            Path(argv[argv.index('-o') + 1]).write_text('invalid JSON')
+            return subprocess.CompletedProcess(argv, 0, '', '')
+        if argv[0] == 'codex':
+            return subprocess.CompletedProcess(argv, 1, '', "You've hit your usage limit.")
+        return subprocess.CompletedProcess(argv, 0, json.dumps({'subtype': 'success',
+            'result': json.dumps(model_result()) if valid else 'invalid correction'}), '')
+    monkeypatch.setattr(executors, 'run_provider', transport)
+    with pytest.raises(executors.ProviderExhausted):
+        a.ensure(repo)
+    evidence, = Path(os.environ['XDG_STATE_HOME']).rglob('model-exchange.json')
+    before = json.loads(evidence.read_text())
+    checkout = Path(before['request']['checkout'])
+    assert checkout.is_dir() and checkout != repo
+    monkeypatch.setenv('DK_ANALYSIS_HOST', 'claude')
+    if valid:
+        assert a.ensure(repo)['knowledge']
+    else:
+        with pytest.raises(model_diagnostics.ValidationFailure):
+            a.ensure(repo)
+        with pytest.raises(model_diagnostics.ValidationFailure):
+            a.ensure(repo)
+        assert len(calls) == 3
+    after = json.loads(evidence.read_text())
+    assert after['request'] == before['request'] and after['identity'] == before['identity']
+    assert after['attempts'][:2] == before['attempts']
+    assert [item['attempt'] for item in after['attempts']] == [0, 1, 1]
+    assert calls[1][1] == calls[2][1]
+
+
+@pytest.mark.parametrize('change', ['dirty', 'removed'])
+def test_catalog_recovery_blocks_changed_pinned_sources(repo, monkeypatch, change):
+    from shared import executors
+    monkeypatch.setenv('DK_HOST', 'codex')
+    def transport(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 1, '', "You've hit your usage limit.")
+    monkeypatch.setattr(executors, 'run_provider', transport)
+    with pytest.raises(executors.ProviderExhausted):
+        a.ensure(repo)
+    evidence, = Path(os.environ['XDG_STATE_HOME']).rglob('model-exchange.json')
+    checkout = Path(json.loads(evidence.read_text())['request']['checkout'])
+    if change == 'dirty':
+        (checkout / 'src/core.py').write_text('changed pinned source\n')
+    else:
+        import shutil
+        shutil.rmtree(checkout)
+    monkeypatch.setenv('DK_ANALYSIS_HOST', 'claude')
+    monkeypatch.setattr(executors, 'run_provider', lambda *_a, **_k: pytest.fail('changed source dispatched'))
+    with pytest.raises(ValueError, match='checkout'):
+        a.ensure(repo)
+    assert json.loads(evidence.read_text())['status'] == 'provider_failed'
+
+
+def test_catalog_recovery_retains_exact_request_across_processes(repo, tmp_path, monkeypatch):
+    monkeypatch.setenv('DK_HOST', 'codex')
+    monkeypatch.delenv('DK_ANALYSIS_HOST', raising=False)
+    program = '''
+import json, subprocess, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from shared import architecture, executors
+root, trace, phase = Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4]
+def transport(argv, **kwargs):
+    calls = json.loads(trace.read_text()) if trace.exists() else []
+    calls.append({'host': argv[0], 'prompt': kwargs['input']})
+    trace.write_text(json.dumps(calls))
+    if len(calls) == 1:
+        Path(argv[argv.index('-o') + 1]).write_text('invalid JSON')
+        return subprocess.CompletedProcess(argv, 0, '', '')
+    if argv[0] == 'codex':
+        return subprocess.CompletedProcess(argv, 1, '', "You've hit your usage limit.")
+    return subprocess.CompletedProcess(argv, 0,
+        '{"subtype":"success","result":"invalid correction"}', '')
+executors.run_provider = transport
+try:
+    architecture.ensure(root)
+except (RuntimeError, ValueError) as exc:
+    assert ('usage limit' if phase == '0' else 'after one correction') in str(exc), str(exc)
+else:
+    raise AssertionError('invalid exchange unexpectedly accepted')
+'''
+    trace = tmp_path / 'trace.json'
+    for phase in range(3):
+        if phase:
+            monkeypatch.setenv('DK_ANALYSIS_HOST', 'claude')
+        completed = subprocess.run([sys.executable, '-c', program, str(ROOT / 'runtime'),
+                                    str(repo), str(trace), str(phase)], capture_output=True, text=True,
+                                   timeout=30)
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+    calls = json.loads(trace.read_text())
+    assert [call['host'] for call in calls] == ['codex', 'codex', 'claude']
+    assert calls[1]['prompt'] == calls[2]['prompt']
+    evidence, = Path(os.environ['XDG_STATE_HOME']).rglob('model-exchange.json')
+    saved = json.loads(evidence.read_text())
+    assert [item['attempt'] for item in saved['attempts']] == [0, 1, 1]
+    assert Path(saved['request']['checkout']).is_dir()
+
+
+@pytest.mark.parametrize('storage', ['model-workspaces', 'model-exchanges'])
+def test_default_catalog_concurrent_first_reservation_cannot_overtake_owner(repo, storage):
+    program = '''
+import runpy, sys
+from pathlib import Path
+import pytest
+fixture = runpy.run_path(sys.argv[1])
+with pytest.MonkeyPatch.context() as monkeypatch:
+    fixture['_assert_catalog_concurrent_first_reservation'](Path(sys.argv[2]), monkeypatch, sys.argv[3])
+'''
+    completed = subprocess.run([sys.executable, '-c', program, str(Path(__file__).resolve()),
+                                str(repo), storage], capture_output=True, text=True, timeout=30)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def _assert_catalog_concurrent_first_reservation(repo, monkeypatch, storage):
+    from shared import executors, model_diagnostics
+    import stat
+    created, second_ready = Event(), Event()
+    caller = local()
+    descriptors = {}
+    original_open, original_flock = model_diagnostics.os.open, model_diagnostics.fcntl.flock
+    def open_file(path, flags, *args, **kwargs):
+        fd = original_open(path, flags, *args, **kwargs)
+        descriptors[fd] = Path(path)
+        if (getattr(caller, 'name', None) == 'first' and flags & os.O_EXCL
+                and Path(path).parent.name == storage):
+            # Pause A after its new lock is visible but before it can flock it.
+            # Old code lets B finish with a false missing-reservation failure;
+            # repaired code makes B wait at the directory reservation guard.
+            created.set()
+            assert second_ready.wait(timeout=10)
+        return fd
+    def flock(stream, operation):
+        fd = stream if isinstance(stream, int) else stream.fileno()
+        if (getattr(caller, 'name', None) == 'second' and created.is_set()
+                and descriptors.get(fd, Path()).name == storage
+                and stat.S_ISDIR(os.fstat(fd).st_mode)):
+            second_ready.set()
+        return original_flock(stream, operation)
+    monkeypatch.setattr(model_diagnostics.os, 'open', open_file)
+    monkeypatch.setattr(model_diagnostics.fcntl, 'flock', flock)
+    monkeypatch.setattr(executors, 'execute', lambda *_a, **_k: json.dumps(model_result()))
+    def initialize(name):
+        caller.name = name
+        try:
+            return a.ensure(repo)
+        finally:
+            if name == 'second':
+                second_ready.set()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(initialize, 'first')
+        assert created.wait(timeout=10)
+        second = pool.submit(initialize, 'second')
+        results = [future.result(timeout=20) for future in (first, second)]
+    assert results[0] == results[1]
+    journals = list(Path(os.environ['XDG_STATE_HOME']).rglob('model-exchange.json'))
+    assert len(journals) == 2
+    assert all(json.loads(path.read_text())['status'] == 'accepted' for path in journals)
 
 
 def deliver(root, agent='worker', paths=None, **kwargs):
@@ -1017,13 +1185,16 @@ def test_native_execution_preserves_role_packet_and_redelivers_nested_scope(repo
     with pytest.raises(ValueError, match='scope became known'):
         a.validate_packet(captured[-1][2], repo, paths=['tests/test.py'])
     monkeypatch.delenv('DK_ARCHITECTURE_AGENT')
+    alternate = 'claude' if host == 'codex' else 'codex'
+    monkeypatch.setenv('DK_ANALYSIS_HOST', alternate)
     a.analyze('Inspect architecture semantics.', repo, lambda value: value)
-    assert captured[-1][2] is None
+    assert captured[-1][2] is None and captured[-1][1] == alternate
     assert json.loads(os.environ['DK_ARCHITECTURE_PACKET']) == worker
     for recipient in ('dk-architecture-review', 'dk-architecture-enforcer'):
         explicit = a.provider_packet(worker, repo, recipient, ['src/core.py'])
         a.role_analysis(a.analyze, 'Inspect explicit role evidence.', repo, lambda value: value, explicit)
         assert captured[-1][2] == explicit
+        assert captured[-1][1] == host
         assert a.load(captured[-1][2])['agent'] == recipient
 
 

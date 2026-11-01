@@ -19,6 +19,19 @@ from shared import executors, model_diagnostics
 from shared.diagnostics import Diagnostic
 
 
+def test_removed_pinned_analysis_workspace_cannot_be_recreated(tmp_path):
+    scope = {'operation': 'workspace-recovery-fixture', 'evidence': 'unchanged'}
+    with model_diagnostics.analysis_workspace(scope, repository=tmp_path) as workspace:
+        assert workspace.is_dir()
+    lock = workspace.with_suffix('.lock')
+    reservation = lock.read_bytes()
+    workspace.rmdir()
+    with pytest.raises(model_diagnostics.StorageFailure, match='workspace is unavailable'):
+        with model_diagnostics.analysis_workspace(scope, repository=tmp_path):
+            pytest.fail('removed retained workspace became fresh')
+    assert not workspace.exists() and lock.read_bytes() == reservation
+
+
 @pytest.fixture
 def ambient_architecture_packet(tmp_path, monkeypatch):
     from shared import architecture
@@ -79,9 +92,11 @@ def test_explicit_architecture_packet_survives_semantic_transport_opt_out(
     from shared import architecture
     repository, packet = ambient_architecture_packet
     monkeypatch.setenv('DK_HOST', host)
+    monkeypatch.setenv('DK_ANALYSIS_HOST', 'invalid-for-role-execution')
     monkeypatch.setenv('DK_ARCHITECTURE_AGENT', 'unrelated-ambient-agent')
     seen = []
     def process(prompt, checkout, selected_host, env, *args):
+        assert 'DK_ANALYSIS_HOST' not in env
         delivered = architecture.load(json.loads(env['DK_ARCHITECTURE_PACKET']))
         assert delivered['agent'] == 'worker' and delivered['paths'] == ['core.py']
         assert 'DK_ARCHITECTURE_AGENT' not in env
@@ -107,13 +122,19 @@ def test_json_semantic_opt_out_preserves_custom_executor_signature(tmp_path, mon
 
 
 @pytest.mark.parametrize('host', ['codex', 'claude'])
+@pytest.mark.parametrize('alternate', [False, True])
 @pytest.mark.parametrize('helper', ['rule_indexer', 'discussion', 'description', 'code', 'preparation', 'architecture'])
 def test_known_semantic_helpers_execute_under_ambient_parent_packet(
-    tmp_path, monkeypatch, ambient_architecture_packet, host, helper
+    tmp_path, monkeypatch, ambient_architecture_packet, host, alternate, helper
 ):
     from shared import architecture
     repository, _ = ambient_architecture_packet
     monkeypatch.setenv('DK_HOST', host)
+    selected = ('claude' if host == 'codex' else 'codex') if alternate else host
+    if alternate:
+        monkeypatch.setenv('DK_ANALYSIS_HOST', selected)
+    else:
+        monkeypatch.delenv('DK_ANALYSIS_HOST', raising=False)
     monkeypatch.setenv('DK_ARCHITECTURE_AGENT', 'ambient-parent')
     monkeypatch.delenv('REPO_RULES_SUMMARIZER', raising=False)
     parent = {name: os.environ[name] for name in ('DK_ARCHITECTURE_PACKET', 'DK_ARCHITECTURE_AGENT')}
@@ -130,7 +151,8 @@ def test_known_semantic_helpers_execute_under_ambient_parent_packet(
         value = {'complete': True}
     calls = []
     def process(prompt, checkout, selected_host, env, resolved, attempt, timeout):
-        assert selected_host == host and resolved is None
+        assert selected_host == selected and resolved is None
+        assert env['DK_HOST'] == host
         assert 'DK_ARCHITECTURE_PACKET' not in env and 'DK_ARCHITECTURE_AGENT' not in env
         assert 'Read your architecture packet' not in prompt
         assert all(os.environ[name] == content for name, content in parent.items())
@@ -168,6 +190,155 @@ def test_known_semantic_helpers_execute_under_ambient_parent_packet(
         assert len(counted) == 2
     assert calls == ([0] if helper in ('rule_indexer', 'code') else [0, 1])
     assert all(os.environ[name] == content for name, content in parent.items())
+
+
+@pytest.mark.parametrize('selector', ['', 'unknown', 'claude'])
+def test_analysis_selector_does_not_change_bound_or_role_execution(tmp_path, monkeypatch, selector):
+    monkeypatch.setenv('DK_HOST', 'codex')
+    monkeypatch.setenv('DK_ANALYSIS_HOST', selector)
+    process = Mock(return_value='{}')
+    monkeypatch.setattr(executors, 'execute_process', process)
+    assert executors.execute('Review.', tmp_path) == '{}'
+    assert process.call_args.args[2] == 'codex'
+    assert 'DK_ANALYSIS_HOST' not in process.call_args.args[3]
+    # A selected binding continues to use its own executor and lifecycle.
+    resolved = {'executor': 'claude', 'identity': 'fixture', 'procedure': '/fixture/SKILL.md',
+                'root': '/fixture', 'binding': {'skill': 'fixture:review'}}
+    monkeypatch.setattr('shared.runtime_bundles.retained_binding', lambda value: value)
+    monkeypatch.setattr(executors, 'managed_update', Mock(return_value=None))
+    assert executors.execute('Bound review.', tmp_path, resolved=resolved,
+                             inherit_architecture=False) == '{}'
+    assert process.call_args.args[2] == 'claude'
+    assert process.call_args.args[3]['DK_HOST'] == 'claude'
+    assert 'DK_ANALYSIS_HOST' not in process.call_args.args[3]
+
+
+@pytest.mark.parametrize('selector', ['', 'unknown'])
+def test_invalid_analysis_selector_blocks_before_dispatch(tmp_path, monkeypatch, selector):
+    monkeypatch.setenv('DK_HOST', 'codex')
+    monkeypatch.setenv('DK_ANALYSIS_HOST', selector)
+    process = Mock()
+    monkeypatch.setattr(executors, 'execute_process', process)
+    with pytest.raises(ValueError, match='DK_ANALYSIS_HOST must be'):
+        executors.execute('Analyze.', tmp_path, inherit_architecture=False)
+    process.assert_not_called()
+
+
+@pytest.mark.parametrize('valid', [False, True])
+def test_analysis_quota_retry_preserves_exchange_and_correction_budget(tmp_path, monkeypatch, valid):
+    monkeypatch.setenv('DK_HOST', 'codex')
+    monkeypatch.setenv('DK_UPDATE_PARENT', 'original-parent')
+    monkeypatch.setenv('DK_CLI_REFERENCE', '/original-reference')
+    monkeypatch.delenv('DK_ANALYSIS_HOST', raising=False)
+    calls = []
+    def run(argv, **kwargs):
+        env = kwargs['env']
+        assert env['DK_HOST'] == 'codex' and env['DK_UPDATE_PARENT'] == 'original-parent'
+        assert env['DK_CLI_REFERENCE'] == '/original-reference'
+        calls.append((argv[0], kwargs['input']))
+        if len(calls) == 1:
+            Path(argv[argv.index('-o') + 1]).write_text('invalid JSON')
+            return subprocess.CompletedProcess(argv, 0, '', '')
+        if argv[0] == 'codex':
+            return subprocess.CompletedProcess(argv, 1, '', "You've hit your usage limit.")
+        return subprocess.CompletedProcess(argv, 0,
+            json.dumps({'subtype': 'success', 'result': '{"ok": true}' if valid else 'invalid'}), '')
+    monkeypatch.setattr(executors, 'run_provider', run)
+    def analyze():
+        return executors.execute_json('Analyze retained sources.', tmp_path,
+            diagnostic_scope='analysis-fallback-fixture', inherit_architecture=False)
+    with pytest.raises(executors.ProviderExhausted) as caught:
+        analyze()
+    assert 'DK_ANALYSIS_HOST=claude' in str(caught.value)
+    assert 'No automatic fallback' in str(caught.value) and len(calls) == 2
+    path = Path(caught.value.action['artifacts'][-1])
+    before = json.loads(path.read_text())
+    assert [a['attempt'] for a in before['attempts']] == [0, 1]
+    monkeypatch.setenv('DK_ANALYSIS_HOST', 'claude')
+    if valid:
+        assert analyze() == {'ok': True}
+    else:
+        with pytest.raises(model_diagnostics.ValidationFailure):
+            analyze()
+        with pytest.raises(model_diagnostics.ValidationFailure):
+            analyze()
+        assert len(calls) == 3
+    after = json.loads(path.read_text())
+    assert after['identity'] == before['identity'] and after['request'] == before['request']
+    assert after['attempts'][:2] == before['attempts']
+    assert [a['attempt'] for a in after['attempts']] == [0, 1, 1]
+    assert after['attempts'][-1]['provider']['host'] == 'claude'
+    assert after['attempts'][-1]['provider']['calling_host'] == 'codex'
+    assert calls[-1][1] == calls[-2][1]
+
+
+@pytest.mark.parametrize('failure', [None, 'unavailable', 'quota'])
+def test_unjournaled_analysis_selection_retains_provenance(tmp_path, monkeypatch, capsys, failure):
+    monkeypatch.setenv('DK_HOST', 'codex')
+    monkeypatch.setenv('DK_ANALYSIS_HOST', 'claude')
+    def run(argv, **kwargs):
+        assert argv[0] == 'claude' and kwargs['env']['DK_HOST'] == 'codex'
+        if failure == 'unavailable':
+            raise FileNotFoundError('claude')
+        return subprocess.CompletedProcess(argv, 1 if failure else 0,
+            '' if failure else '{"subtype":"success","result":"private analysis"}',
+            'usage limit reached' if failure else '')
+    process = Mock(side_effect=run)
+    monkeypatch.setattr(executors, 'run_provider', process)
+    if failure:
+        with pytest.raises((Diagnostic, executors.ProviderExhausted)) as caught:
+            executors.execute('Read retained sources.', tmp_path, inherit_architecture=False)
+        assert 'DK_ANALYSIS_HOST' in caught.value.action['task']
+    else:
+        assert executors.execute('Read retained sources.', tmp_path,
+                                 inherit_architecture=False) == 'private analysis'
+    process.assert_called_once()
+    detail = capsys.readouterr().err
+    path = Path(detail.strip().split('evidence: ')[-1])
+    saved = json.loads(path.read_text())
+    assert saved['provider'] == 'claude' and saved['calling_host'] == 'codex'
+    assert saved['runtime'] == str(Path(executors.__file__).resolve().parent)
+    assert saved['prompt'] == 'Read retained sources.' and saved['attempt'] == 0
+    assert saved['status'] == ('failed' if failure else 'received')
+    assert saved['response'] == (None if failure else 'private analysis')
+    assert path.stat().st_mode & 0o777 == 0o600 and path.parent.stat().st_mode & 0o777 == 0o700
+    assert not path.is_relative_to(tmp_path / 'repository')
+
+
+@pytest.mark.parametrize('stage', ['initial', 'success', 'quota'])
+def test_unjournaled_analysis_receipt_storage_failures_preserve_dispatch_and_error(
+    tmp_path, monkeypatch, stage
+):
+    monkeypatch.setenv('DK_HOST', 'codex')
+    monkeypatch.setenv('DK_ANALYSIS_HOST', 'claude')
+    original_write = executors.write
+    receipts = []
+    def write(path, value):
+        receipts.append(path)
+        if stage == 'initial' or value['status'] != 'running':
+            raise OSError('receipt storage full')
+        return original_write(path, value)
+    monkeypatch.setattr(executors, 'write', write)
+    def transport(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 1 if stage == 'quota' else 0,
+            '' if stage == 'quota' else '{"subtype":"success","result":"private result"}',
+            'usage limit reached' if stage == 'quota' else '')
+    process = Mock(side_effect=transport)
+    monkeypatch.setattr(executors, 'run_provider', process)
+    expected = (OSError if stage == 'initial' else executors.ProviderExhausted
+                if stage == 'quota' else model_diagnostics.StorageFailure)
+    with pytest.raises(expected) as caught:
+        executors.execute('Suggest a rule.', tmp_path, inherit_architecture=False)
+    if stage == 'initial':
+        process.assert_not_called()
+    else:
+        process.assert_called_once()
+        path = receipts[-1]
+        assert str(path) in caught.value.action['artifacts']
+        assert json.loads(path.read_text())['status'] == 'running'
+        if stage == 'quota':
+            assert 'DK_ANALYSIS_HOST=codex' in str(caught.value)
+            assert 'Diagnostic persistence also failed' in str(caught.value)
 
 
 def test_legacy_rule_summarizer_isolates_ambient_architecture(

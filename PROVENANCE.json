@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.6.12",
+      "description": "Explicit provider selection for internal read-only analysis, preserving calling-host identity, correction budgets and configured reviewers with private provider provenance and quota recovery guidance."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.6.11",
       "description": "Recorded agreement bindings and local freshness checks across preparation, review, work and completion gates, with bounded private discussion evidence and actionable extraction recovery."
     },

@@ -84,8 +84,9 @@ def test_repeated_analysis_reuses_current_private_evidence_per_pr_and_store(tmp_
     context = {'pr': {'url': url, 'headRefOid': 'a' * 40, 'body': ''}, 'linked_issues': [], 'diff': ''}
     comment = {'id': 'a', 'kind': 'general', 'url': url + '#issuecomment-1',
                'createdAt': 'first', 'body': 'Keep the transform'}
-    manifests = []
+    manifests, checkouts = [], []
     def execute(prompt, *_args, **_kwargs):
+        checkouts.append(Path(_args[0]))
         manifest = json.loads(prompt.split('EVIDENCE JSON:\n')[1])['discussion_evidence']
         evidence = Path(manifest['path'])
         manifests.append(manifest)
@@ -116,7 +117,31 @@ def test_repeated_analysis_reuses_current_private_evidence_per_pr_and_store(tmp_
         assert len(list(api.storage.root().rglob('*.json'))) == 1
     assert len({item['path'] for item in manifests}) == 3
     assert all(Path(item['path']).is_file() for item in manifests)
-    assert set(workflows.glob('workflow-*')) == allocations
+    # Current discussion bodies still have one file per PR/store. Each actual
+    # accepted response instead needs immutable budget evidence; repeated inputs
+    # reuse their pinned workspace and current index, never a prior assessment.
+    retained = set(workflows.glob('workflow-*')) - allocations
+    assert len(retained) == len(checkouts) == 5
+    journals = {directory / 'model-exchange.json' for directory in retained}
+    for journal in journals:
+        assert set(journal.parent.iterdir()) == {journal}
+        assert journal.stat().st_mode & 0o777 == 0o600
+        assert journal.parent.stat().st_mode & 0o777 == 0o700
+        assert not journal.is_relative_to(tmp_path)
+        value = json.loads(journal.read_text())
+        assert value['status'] == 'accepted'
+        assert len(value['attempts']) == 1 and value['attempts'][0]['attempt'] == 0
+        assert Path(value['request']['checkout']) in checkouts
+    assert checkouts[0] == checkouts[1]
+    assert len(set(checkouts)) == 4
+    workspace_root = workflows / 'model-workspaces'
+    assert {path for path in workspace_root.iterdir() if path.is_dir()} == {
+        checkout.parent for checkout in checkouts}
+    assert all(checkout.parent.stat().st_mode & 0o777 == 0o700 for checkout in checkouts)
+    indexes = [json.loads(path.read_text()) for path in (workflows / 'model-exchanges').glob('*.json')]
+    assert len(indexes) == 4 and all(index['status'] == 'accepted' for index in indexes)
+    assert len({index['evidence'] for index in indexes}) == 4
+    assert {Path(index['evidence']) for index in indexes} < journals
 
 
 @pytest.mark.parametrize('failure', ['missing', 'unreadable', 'changed', 'concurrent_before', 'concurrent_during'])
