@@ -479,9 +479,17 @@ def analyze(repo_dir, context, prior, comments, threads, changed_ids, invalid_th
         "local_repository_path.\n\n"
         + language_review_instructions() + "\n\nEVIDENCE JSON:\n" + json.dumps(payload, ensure_ascii=False)
     )
+    def check_evidence():
+        try:
+            current_hash = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise RuntimeError(f'Required discussion evidence unavailable at {evidence_path}; '
+                               f'retry scan: {exc}') from exc
+        if current_hash != evidence_hash:
+            raise RuntimeError(f'Required discussion evidence changed at {evidence_path}; retry scan')
+
     def validate_discussion(result):
-        if hashlib.sha256(evidence_path.read_bytes()).hexdigest() != evidence_hash:
-            raise RuntimeError('Required discussion evidence changed; retry scan')
+        check_evidence()
         if not isinstance(result, dict) or set(result) != {"decisions", "thread_summaries"}:
             raise RuntimeError("Model returned an invalid analysis shape")
         allowed_comments = {c["url"] for c in comments.values()}
@@ -518,8 +526,7 @@ def analyze(repo_dir, context, prior, comments, threads, changed_ids, invalid_th
         workspace.mkdir()
         try:
             def with_evidence(*args, **kwargs):
-                if hashlib.sha256(evidence_path.read_bytes()).hexdigest() != evidence_hash:
-                    raise RuntimeError('Required discussion evidence changed; retry scan')
+                check_evidence()
                 return execute(*args, inherit_architecture=False, **kwargs)
             result = execute_json("Required JSON schema: " + json.dumps(SCHEMA) + "\n" + instructions,
                                   workspace, validate=validate_discussion, executor=with_evidence)

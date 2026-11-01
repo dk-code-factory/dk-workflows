@@ -143,8 +143,10 @@ def test_required_evidence_failure_blocks_without_replacing_prior_agreements(tmp
                         changed, {}, {'a'}, set(), set(), force=True)
     atomic_write = api.storage.atomic_write
     competing = False
+    evidence_paths = []
     def write_evidence(destination, content):
         nonlocal competing
+        evidence_paths.append(destination)
         atomic_write(destination, content)
         if failure == 'concurrent_before' and not competing:
             competing = True
@@ -173,8 +175,10 @@ def test_required_evidence_failure_blocks_without_replacing_prior_agreements(tmp
             patch.object(api, 'pr_diff', return_value=''), \
             patch.object(api, 'linked_issues', return_value=[]), \
             patch.object(api, 'resolve_pr_identity', return_value=(None, 'o/r', 'o/r')), \
-            pytest.raises((RuntimeError, OSError), match='evidence|No such file|directory'):
+            pytest.raises(RuntimeError, match='Required discussion evidence .*; retry scan') as blocked:
         api._scan(url)
+    assert evidence_paths[0].is_absolute()
+    assert str(evidence_paths[0]) in str(blocked.value)
     assert len(calls) == (0 if failure == 'concurrent_before' else 1)
     assert path.read_bytes() == original
     assert api.storage.read(path, url)['saved_decisions'] == saved
