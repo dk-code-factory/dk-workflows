@@ -346,10 +346,15 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, archite
     if _CANCELLATION.get() is not None:
         _CANCELLATION.get().check()
     timeout = provider_timeout() if timeout is None else timeout
-    host = resolved['executor'] if resolved else current_host()
+    calling_host = current_host() if resolved is None else resolved['executor']
+    internal_analysis = resolved is None and not inherit_architecture and architecture_packet is None
+    host = os.environ.get('DK_ANALYSIS_HOST', calling_host) if internal_analysis else calling_host
     if host not in ('codex', 'claude'):
-        raise ValueError('Model execution requires a native host')
-    env = dict(os.environ, DK_HOST=host)
+        raise ValueError('DK_ANALYSIS_HOST must be codex or claude' if internal_analysis else
+                         'Model execution requires a native host')
+    env = dict(os.environ, DK_HOST=calling_host)
+    if not internal_analysis:
+        env.pop('DK_ANALYSIS_HOST', None)
     if not inherit_architecture:
         # Internal semantic helpers have no agent role in the caller's scope.
         env.pop('DK_ARCHITECTURE_PACKET', None)
@@ -419,6 +424,8 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, archite
                 'entry or complete. Pass --invocation INVOCATION_FILE before routed helpers. '
                 'A nested native skill uses this invocation\'s token as its parent and retains its '
                 'own returned or executor-managed invocation.\n')
+        if internal_analysis:
+            return execute_analysis(prompt, checkout, host, env, attempt, timeout)
         return execute_process(managed_context + prompt, checkout, host, env, resolved, attempt, timeout)
     finally:
         if token:
@@ -429,6 +436,63 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, archite
                 if not isinstance(original, Diagnostic) or original.code != 'provider_output_failed':
                     raise
                 original.args = (str(original) + '; lifecycle completion also failed: ' + str(exc),)
+
+
+def execute_analysis(prompt, checkout, host, env, attempt, timeout):
+    """Select one internal provider without changing lifecycle or retry authority."""
+    from shared.model_diagnostics import CURRENT, StorageFailure, preserve_failure
+    journal = CURRENT.get()
+    evidence = None
+    if 'DK_ANALYSIS_HOST' in env:
+        # Several read-only helpers do not use a durable JSON exchange. Retain
+        # selection and request provenance for them without granting acceptance.
+        if journal is None:
+            evidence = allocate(repository=checkout) / 'analysis-provider.json'
+            value = {'schema_version': 1, 'status': 'running', 'calling_host': env['DK_HOST'],
+                     'provider': host, 'runtime': str(Path(__file__).resolve().parent),
+                     'invocation': env.get('DK_MANAGED_INVOCATION'),
+                     'parent': env.get('DK_UPDATE_PARENT'), 'reference': env.get('DK_CLI_REFERENCE'),
+                     'checkout': str(Path(checkout).resolve()), 'prompt': prompt,
+                     'attempt': attempt, 'timeout_seconds': timeout}
+            write(evidence, value)
+        print(f'Internal analysis provider: {host}; calling host: {env["DK_HOST"]}; '
+              f'evidence: {evidence or journal.path}', file=sys.stderr)
+    result = None
+    try:
+        try:
+            result = execute_process(prompt, checkout, host, env, None, attempt, timeout)
+            return result
+        except ProviderExhausted as exc:
+            alternate = 'claude' if host == 'codex' else 'codex'
+            recovery = (
+                f'Internal read-only analysis used {host}. No automatic fallback was attempted. '
+                f'Retry the original helper with DK_ANALYSIS_HOST={alternate} if that provider is '
+                'installed and authenticated, or wait for the current provider to recover. '
+                'This selection is permitted under the existing task authorization. Keep the same '
+                'invocation, runtime, evidence and correction budget; keep DK_HOST unchanged. '
+                'Configured reviewers and all review, CI and completion gates still apply.')
+            exc.args = (str(exc) + '\n' + recovery,)
+            exc.action = task(recovery, *([evidence] if evidence else []))
+            raise
+        except FileNotFoundError as exc:
+            raise Diagnostic('analysis_provider_unavailable',
+                f'Internal analysis provider {host} is unavailable: {exc}',
+                task('Install/authenticate the selected provider or select an available '
+                     'DK_ANALYSIS_HOST, then retry the original helper with the same invocation, '
+                     'evidence and correction budget. Keep DK_HOST unchanged.'), outcome='error') from exc
+    finally:
+        if evidence is not None:
+            original = sys.exception()
+            value.update(status='failed' if original else 'received', response=result,
+                         error={'type': type(original).__name__, 'detail': str(original)} if original else None)
+            try:
+                write(evidence, value)
+            except OSError as exc:
+                failure = StorageFailure('model_diagnostics_failed', str(exc),
+                    task('Repair private analysis provenance storage before retrying.', evidence), outcome='error')
+                if original is None:
+                    raise failure from exc
+                preserve_failure(original, failure)
 
 
 def codex_write_failed(stderr, output, prompt):
@@ -533,7 +597,8 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
                 from shared.reviewer_telemetry import output_text
                 result = proc if proc is not None else original
                 try:
-                    transport(host=host, argv=argv, returncode=getattr(result, 'returncode', None),
+                    transport(host=host, calling_host=env.get('DK_HOST', host),
+                              argv=argv, returncode=getattr(result, 'returncode', None),
                               stdout=output_text(getattr(result, 'stdout', None)),
                               stderr=output_text(getattr(result, 'stderr', None)),
                               timeout_seconds=timeout, output=output, failure=original, response=received)

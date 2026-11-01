@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.6.11.
+Independent MIT plugin for Claude Code and Codex. Version 1.6.12.
 
 ## Install
 
@@ -142,6 +142,17 @@ export DK_PROVIDER_TIMEOUT_SECONDS=1800  # 30 minutes
 The value must be a positive integer number of seconds; invalid values fail before
 starting the provider. This applies to Claude, Codex, and command providers used for
 reviews, preparation, Decisions, and drafting. It is not a deadline for the entire workflow.
+
+Internal read-only analysis uses the calling host by default. After quota
+exhaustion, a coordinator may select an installed, authenticated alternate under
+the current task authorization by prefixing the original helper command with
+`DK_ANALYSIS_HOST=claude` or `DK_ANALYSIS_HOST=codex`. Keep `DK_HOST` and the retained
+invocation unchanged. Selection is explicit; there is no automatic failover.
+Configured reviewers, drafting bindings and architecture roles with explicit
+packets retain their providers. Internal catalog analysis is eligible. The
+selected provider and calling host are retained privately, and selection never
+resets a correction budget or relaxes evidence, review, CI or completion gates.
+See [the provider policy](common/lifecycle.md) for recovery and provenance details.
 
 Interruption aborts this invocation's in-flight provider transport and prevents later provider or correction launches, then waits for reviewer cleanup and checkpoint work before releasing session ownership. Completed checkpoints remain available for exact-evidence resume. Unfinished reviewers remain unknown rather than provider failures; a resume reruns them. Genuine failures observed before interruption retain their classification.
 

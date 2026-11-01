@@ -27,6 +27,7 @@ from urllib.parse import quote, urlparse
 from shared.github_reads import run as github_run
 from shared.private_state import mutate, write
 from shared.workflow_storage import allocate
+from shared.model_diagnostics import analysis_workspace
 from shared.agreement_binding import binding as agreement_binding
 from shared.diagnostics import command as recovery_command, task as recovery_task
 
@@ -519,19 +520,25 @@ def analyze(repo_dir, context, prior, comments, threads, changed_ids, invalid_th
         if seen != changed_threads:
             raise RuntimeError("Model omitted a changed thread summary")
         return decisions, summaries
-    with tempfile.TemporaryDirectory(prefix="pr-read-comments-") as td:
+    scope = {'operation': 'decisions-discussion', 'repository': str(Path(repo_dir).resolve()),
+             'evidence': hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()}
+    with analysis_workspace(scope, repository=repo_dir) as td:
         schema_path = Path(td) / "schema.json"
         schema_path.write_text(json.dumps(SCHEMA), encoding="utf-8")
         workspace = Path(td) / "workspace"
-        workspace.mkdir()
+        workspace.mkdir(exist_ok=True)
         try:
             def with_evidence(*args, **kwargs):
                 check_evidence()
                 return execute(*args, inherit_architecture=False, **kwargs)
             result = execute_json("Required JSON schema: " + json.dumps(SCHEMA) + "\n" + instructions,
-                                  workspace, validate=validate_discussion, executor=with_evidence)
+                                  workspace, validate=validate_discussion, executor=with_evidence,
+                                  diagnostic_scope=scope)
         except ValueError as exc:
-            raise RuntimeError("Model analysis invalid after one correction: " + str(exc)) from exc
+            detail = str(exc)
+            if exc.__cause__ is not None:
+                detail += ' Last validation: ' + str(exc.__cause__)
+            raise RuntimeError("Model analysis invalid after one correction: " + detail) from exc
     return validate_discussion(result)
 
 
@@ -1233,12 +1240,15 @@ def suggest_from_description(state, path):
             validate_item(item)
             if item['references'] != [state['pr']['url']]:
                 raise ValueError('Description suggestion must cite the exact PR URL')
-    with tempfile.TemporaryDirectory(prefix='pr-description-suggestions-') as td:
+    scope = {'operation': 'decisions-description', 'record': str(Path(path).resolve()),
+             'pr_url': state['pr']['url'], 'body_hash': digest}
+    with analysis_workspace(scope) as td:
         schema_path = Path(td) / 'schema.json'
         schema_path.write_text(json.dumps(schema))
         result = execute_json("Required JSON schema: " + json.dumps(schema) + "\n" + prompt, td,
                               validate=validate_description,
-                              executor=partial(execute, inherit_architecture=False))
+                              executor=partial(execute, inherit_architecture=False),
+                              diagnostic_scope=scope)
     state['description_suggestions'] = {'body_hash': digest, 'items': result['decisions']}
     save_state(state, path)
     return result['decisions']

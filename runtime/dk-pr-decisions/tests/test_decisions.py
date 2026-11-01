@@ -18,6 +18,117 @@ spec.loader.exec_module(mod)
 from shared import executors
 
 
+@pytest.mark.parametrize('source', ['discussion', 'description'])
+@pytest.mark.parametrize('valid', [False, True])
+def test_manual_provider_recovery_retains_actual_decisions_budget(tmp_path, monkeypatch, source, valid):
+    from shared import model_diagnostics
+    monkeypatch.setenv('DK_HOST', 'codex')
+    monkeypatch.delenv('DK_ANALYSIS_HOST', raising=False)
+    repository = tmp_path / 'repository'
+    repository.mkdir()
+    state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'title': 'Fixture',
+                    'headRefOid': 'a' * 40, 'body': 'Preserve the existing API.'},
+             'linked_issues': [], 'diff': ''}
+    result = {'decisions': [], **({'thread_summaries': []} if source == 'discussion' else {})}
+    calls = []
+    def run(argv, **kwargs):
+        calls.append((argv[0], kwargs['input']))
+        assert kwargs['env']['DK_HOST'] == 'codex'
+        if len(calls) == 1:
+            Path(argv[argv.index('-o') + 1]).write_text('invalid JSON')
+            return subprocess.CompletedProcess(argv, 0, '', '')
+        if argv[0] == 'codex':
+            return subprocess.CompletedProcess(argv, 1, '', "You've hit your usage limit.")
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            'subtype': 'success', 'result': json.dumps(result) if valid else 'invalid correction'}), '')
+    monkeypatch.setattr(executors, 'run_provider', run)
+    def analyze():
+        # Reconstruct inputs as a fresh command would, without accepted-answer reuse.
+        current = json.loads(json.dumps(state))
+        if source == 'discussion':
+            return mod.analyze(repository, current, {}, {}, {}, set(), set(), set())
+        return mod.suggest_from_description(current, tmp_path / 'private-record.json')
+    with pytest.raises(executors.ProviderExhausted):
+        analyze()
+    evidence, = Path(os.environ['XDG_STATE_HOME']).rglob('model-exchange.json')
+    before = json.loads(evidence.read_text())
+    assert before['status'] == 'provider_failed'
+    assert [item['attempt'] for item in before['attempts']] == [0, 1]
+    assert Path(before['request']['checkout']).is_dir()
+    monkeypatch.setenv('DK_ANALYSIS_HOST', 'claude')
+    if valid:
+        assert analyze() == (([], {}) if source == 'discussion' else [])
+    else:
+        # Discussion's public interface wraps ValueError but preserves its cause.
+        with pytest.raises((RuntimeError, model_diagnostics.ValidationFailure)):
+            analyze()
+        with pytest.raises((RuntimeError, model_diagnostics.ValidationFailure)):
+            analyze()
+        assert len(calls) == 3
+    after = json.loads(evidence.read_text())
+    assert after['identity'] == before['identity'] and after['request'] == before['request']
+    assert after['attempts'][:2] == before['attempts']
+    assert [item['attempt'] for item in after['attempts']] == [0, 1, 1]
+    assert calls[1][1] == calls[2][1]
+    assert after['attempts'][-1]['provider']['host'] == 'claude'
+    assert after['attempts'][-1]['provider']['calling_host'] == 'codex'
+
+
+@pytest.mark.parametrize('source', ['discussion', 'description'])
+def test_decisions_rejected_correction_stays_consumed_across_processes(tmp_path, monkeypatch, source):
+    monkeypatch.setenv('DK_HOST', 'codex')
+    monkeypatch.delenv('DK_ANALYSIS_HOST', raising=False)
+    repository = tmp_path / 'repository'
+    repository.mkdir()
+    trace = tmp_path / 'trace.json'
+    program = '''
+import importlib.util, json, os, subprocess, sys
+from pathlib import Path
+script, source, directory, phase = sys.argv[1:]
+root = Path(directory)
+spec = importlib.util.spec_from_file_location('decisions', script)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+from shared import executors
+trace = root / 'trace.json'
+def transport(argv, **kwargs):
+    calls = json.loads(trace.read_text()) if trace.exists() else []
+    calls.append({'host': argv[0], 'prompt': kwargs['input']})
+    trace.write_text(json.dumps(calls))
+    if len(calls) == 1:
+        Path(argv[argv.index('-o') + 1]).write_text('invalid JSON')
+        return subprocess.CompletedProcess(argv, 0, '', '')
+    if argv[0] == 'codex':
+        return subprocess.CompletedProcess(argv, 1, '', "You've hit your usage limit.")
+    return subprocess.CompletedProcess(argv, 0,
+        '{"subtype":"success","result":"invalid correction"}', '')
+executors.run_provider = transport
+state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'headRefOid': 'a' * 40,
+                'body': 'Preserve the API.'}, 'linked_issues': [], 'diff': ''}
+try:
+    if source == 'discussion':
+        mod.analyze(root / 'repository', state, {}, {}, {}, set(), set(), set())
+    else:
+        mod.suggest_from_description(state, root / 'private-record.json')
+except (RuntimeError, ValueError) as exc:
+    assert ('usage limit' if phase == '0' else 'after one correction') in str(exc), str(exc)
+else:
+    raise AssertionError('invalid exchange unexpectedly accepted')
+'''
+    for phase in range(3):
+        if phase:
+            monkeypatch.setenv('DK_ANALYSIS_HOST', 'claude')
+        completed = subprocess.run([sys.executable, '-c', program, str(SCRIPT), source,
+                                    str(tmp_path), str(phase)], capture_output=True, text=True,
+                                   timeout=30)
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+    calls = json.loads(trace.read_text())
+    assert [call['host'] for call in calls] == ['codex', 'codex', 'claude']
+    assert calls[1]['prompt'] == calls[2]['prompt']
+    evidence, = Path(os.environ['XDG_STATE_HOME']).rglob('model-exchange.json')
+    assert [item['attempt'] for item in json.loads(evidence.read_text())['attempts']] == [0, 1, 1]
+
+
 class DecisionTests(unittest.TestCase):
     def test_discussion_corrects_fenced_model_json_without_changing_evidence(self):
         context = {'pr': {'url': 'https://github.com/o/r/pull/2', 'title': 'Fixture', 'headRefOid': 'a' * 40}, 'linked_issues': [], 'diff': ''}
@@ -33,10 +144,21 @@ class DecisionTests(unittest.TestCase):
         context = {'pr': {'url': 'https://github.com/o/r/pull/2', 'title': 'Fixture', 'headRefOid': 'a' * 40}, 'linked_issues': [], 'diff': ''}
         invalid = {'decisions': [{'text': 'Unestablished choice', 'references': ['https://example.test/invented']}], 'thread_summaries': []}
         with tempfile.TemporaryDirectory() as td, patch.object(mod, 'execute', return_value=json.dumps(invalid)) as model:
-            with self.assertRaisesRegex(RuntimeError, 'after one correction'):
+            with self.assertRaisesRegex(RuntimeError, 'after one correction') as rejected:
                 mod.analyze(Path(td), context, {}, {}, {}, set(), set(), set())
         self.assertEqual(model.call_count, 2)
         self.assertIn('exact evidence references', model.call_args_list[1].args[0])
+        self.assertIn('exact evidence references', str(rejected.exception))
+        diagnostic = rejected.exception.__cause__
+        self.assertEqual(diagnostic.code, 'model_validation_failed')
+        self.assertIn(str(diagnostic), str(rejected.exception))
+        evidence = Path(diagnostic.action['artifacts'][0])
+        self.assertIn(str(evidence), str(rejected.exception))
+        history = json.loads(evidence.read_text())
+        self.assertEqual(history['status'], 'rejected')
+        self.assertEqual([item['attempt'] for item in history['attempts']], [0, 1])
+        self.assertTrue(all('exact evidence references' in item['validation']['detail']
+                            for item in history['attempts']))
 
     def test_discussion_provider_failure_does_not_spend_a_correction(self):
         context = {'pr': {'url': 'https://github.com/o/r/pull/2', 'title': 'Fixture', 'headRefOid': 'a' * 40}, 'linked_issues': [], 'diff': ''}

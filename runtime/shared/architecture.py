@@ -14,7 +14,7 @@ from pathlib import Path
 import re
 import subprocess
 
-from shared import repository_scope, workflow_storage
+from shared import repository_scope
 from shared.private_state import read, write
 
 MANDATORY = {'coordinator', 'dk-architecture-review', 'dk-workflows:dk-architecture-review'}
@@ -24,6 +24,7 @@ KNOWLEDGE = ('module_map', 'dependencies', 'entrypoints', 'tests', 'decisions')
 SCOPE_SOURCES = {'issues', 'feedback', 'choices', 'user_instructions', 'questions', 'rules'}
 PROCEDURE = Path(__file__).resolve().parents[1] / 'dk-architect/procedure.md'
 _PACKET = ContextVar('architecture_packet', default=None)
+_CATALOG_SCOPE = ContextVar('architecture_catalog_scope', default=None)
 
 
 def digest(value):
@@ -169,12 +170,17 @@ def analyze(prompt, checkout, validate, *, on_call=None):
     from shared.executors import execute_json, execute
     packet = _PACKET.get()
     def counted(prompt, checkout, **kwargs):
+        scope = _CATALOG_SCOPE.get()
+        if packet is None and scope is not None and (git(checkout, 'status', '--porcelain=v1').strip()
+                or git(checkout, 'rev-parse', 'HEAD').strip() != scope['baseline']):
+            raise ValueError('Architect changed its baseline checkout')
         if on_call:
             on_call()
         if packet is not None:
             kwargs['architecture_packet'] = packet
         return execute(prompt, checkout, inherit_architecture=False, **kwargs)
-    return execute_json(prompt, checkout, validate=validate, executor=counted)
+    return execute_json(prompt, checkout, validate=validate, executor=counted,
+                        diagnostic_scope=_CATALOG_SCOPE.get() if packet is None else None)
 
 
 def role_analysis(analyzer, prompt, checkout, validate, packet):
@@ -314,10 +320,6 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
         expected = old['fingerprint'] if old else None
     deleted, resolved = refresh_choices(directory, old)
     # Analyze an isolated baseline, never PR-derived head guidance or local edits.
-    workspace = workflow_storage.allocate(repository=root)
-    checkout = workspace / 'baseline'
-    git(root, 'clone', '--quiet', '--shared', '--no-checkout', str(root), str(checkout))
-    git(checkout, 'checkout', '--quiet', '--detach', baseline)
     prompt = (PROCEDURE.read_text() + '\nAnalyze this clean target baseline read-only. '
               'Inspect code, tests and guidance before producing rules. Do not change files. '
               'Return JSON with exactly knowledge, rules, proposals, conflicts. Knowledge keys: ' +
@@ -328,6 +330,22 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
               'Only adopt established evidence-backed rules; uncertain conventions are proposals. '
               'Report conflicting obligations in conflicts and propose resolutions, never silently weaken old rules. '
               'Existing catalog: ' + json.dumps(old) + '\nBaseline: ' + baseline)
+    from shared.model_diagnostics import analysis_workspace
+    scope = {'operation': 'architecture-catalog', 'repository': key,
+             'source_checkout': str(root), 'baseline': baseline, 'tree': tree, 'catalog': expected}
+    with analysis_workspace(scope, repository=root) as workspace:
+        checkout = workspace / 'baseline'
+        if not checkout.exists():
+            # Only the first preparation may create sources. A removed retained
+            # checkout must not silently become a fresh response budget.
+            if (workspace / 'prepared.json').exists():
+                raise ValueError('Pinned architecture checkout is unavailable')
+            git(root, 'clone', '--quiet', '--shared', '--no-checkout', str(root), str(checkout))
+            git(checkout, 'checkout', '--quiet', '--detach', baseline)
+            write(workspace / 'prepared.json', scope)
+        if (git(checkout, 'status', '--porcelain=v1').strip()
+                or git(checkout, 'rev-parse', 'HEAD').strip() != baseline):
+            raise ValueError('Architect changed its baseline checkout')
     if not git(root, 'ls-tree', tree):
         # The pinned commit/tree sealed in the catalog witnesses these absences.
         value = {'knowledge': {category: [{
@@ -336,8 +354,12 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
             'origin': 'inferred', 'sources': []}] for category in KNOWLEDGE},
             'rules': [], 'proposals': [], 'conflicts': []}
     else:
-        value = (analyzer or analyze)(prompt, checkout,
-                                      lambda v: validate_analysis(v, root, baseline))
+        token = _CATALOG_SCOPE.set(scope)
+        try:
+            value = (analyzer or analyze)(prompt, checkout,
+                                         lambda v: validate_analysis(v, root, baseline))
+        finally:
+            _CATALOG_SCOPE.reset(token)
     validate_analysis(value, root, baseline)
     if git(checkout, 'status', '--porcelain=v1').strip() or git(checkout, 'rev-parse', 'HEAD').strip() != baseline:
         raise ValueError('Architect changed its baseline checkout')

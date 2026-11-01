@@ -1,5 +1,12 @@
 # Metadata readiness
 
+For internal read-only provider exhaustion, follow the explicit
+[analysis provider selection policy](../../../common/lifecycle.md). An installed,
+authenticated alternate may be selected with `DK_ANALYSIS_HOST` under the current
+task authorization. Keep calling-host/lifecycle identity, the retained runtime,
+sources and correction budget; do not change configured reviewers or waive gates.
+No automatic fallback is attempted. Missing or exhausted alternates remain blockers.
+
 Run these checks before committing local work, rebasing, pushing, editing the PR body, replying, or starting a review cycle. Missing derived metadata is a setup step; missing required configuration or unverifiable evidence blocks dependent work.
 
 1. Run `python3 PLUGIN_ROOT/runtime/dk-pr-iter/scripts/preflight.py --cwd REPO --pr PR_URL` and save its JSON outside the repository. Require exit zero and `ready: true`. This checks `git`, `gh`, and only the hosts needed by selected bindings on the actual process PATH, installed configured reviewers, and completion prompt selection. Read and retain the returned completion prompt. Check the selected reviewers' own runtime prerequisites before starting work; the helper checks skill installation, not every adapter dependency. On SSH, the noninteractive PATH can differ from the login shell; use the verified installed tool directory for this run. Do not assume copying skills also copied tools, authentication, reviewer preferences, or private rules. Ask for a reviewer choice if none is configured; do not silently select one. A missing completion override uses the built-in default; an invalid override must be repaired or explicitly reset. This check validates tools and configuration only, not PR evidence, authentication, or push access.
