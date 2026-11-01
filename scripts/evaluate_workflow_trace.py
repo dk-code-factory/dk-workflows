@@ -31,6 +31,7 @@ SCHEMAS = {
     'interrupt': ('reuse', {}),
     'resume': ('reuse', {'checkpoint': str, 'preparation': str, 'head': str, 'action': str}),
 }
+OPTIONAL_FIELDS = {'ci_start': {'deadline_ms': int}}
 ROLES = {'reviewer': {'review'}, 'architecture-reviewer': {'review'},
          'fixer': {'feedback', 'fix'}, 'reply': {'feedback', 'review', 'completion'},
          'preparation': {'preparation'}, 'decisions': {'decisions'}, 'completion': {'completion'}}
@@ -53,10 +54,25 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def identity(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def identity_collection(value):
+    if isinstance(value, str):
+        return identity(value)
+    if isinstance(value, list):
+        return all(identity(item) for item in value)
+    return isinstance(value, dict) and all(identity(k) and identity(v) for k, v in value.items())
+
+
 def load_trace(path):
     """Validate shape and retained source bytes; never authenticate host semantics."""
     path = Path(path)
-    trace = json.loads(path.read_text())
+    try:
+        trace = json.loads(path.read_text())
+    except RecursionError as exc:
+        raise InvalidTrace('excessive JSON nesting') from exc
     require(isinstance(trace, dict), 'trace must be an object')
     require(set(trace) == {'schema_version', 'provenance', 'entrypoint', 'coverage', 'sources', 'events'},
             'unexpected or missing trace fields')
@@ -87,6 +103,7 @@ def load_trace(path):
         require(isinstance(event, dict) and event.get('kind') in SCHEMAS, 'unknown event kind')
         kind = event['kind']
         fields = {'id': str, 'kind': str, 'at_ms': int, 'evidence': dict, **SCHEMAS[kind][1]}
+        fields.update({k: t for k, t in OPTIONAL_FIELDS.get(kind, {}).items() if k in event})
         require(set(event) == set(fields), f'unexpected or missing {kind} fields')
         require(all(type(event[k]) is t for k, t in fields.items()), f'invalid {kind} field type')
         require(event['id'] and event['id'] not in ids, 'duplicate/empty event ID')
@@ -155,7 +172,8 @@ def evaluate(path):
             if event['signal'] in ('failure', 'decision'):
                 # The normalized next communication/action must report the material change.
                 following = [e for e in events[events.index(event) + 1:] if e['kind'] not in ('notification',)]
-                if not following or following[0]['kind'] != 'update' or following[0]['cause'] != event['id']:
+                if (not following or following[0]['kind'] != 'update' or following[0]['cause'] != event['id']
+                        or not following[0]['text'].strip()):
                     problem(family, event, 'material_report_delayed')
         elif kind == 'update':
             trigger = cause(event)
@@ -179,6 +197,7 @@ def evaluate(path):
                 completions.add(key)
         elif kind == 'ci_start':
             require(event['interval_ms'] > 0, 'invalid CI interval')
+            require('deadline_ms' not in event or event['deadline_ms'] >= event['at_ms'], 'invalid CI deadline')
             if event['interval_ms'] != CI_INTERVAL_MS:
                 unknown[family] = True
             if event['head'] in active_ci or event['waiter'] in (e['waiter'] for e in active_ci.values()):
@@ -191,10 +210,18 @@ def evaluate(path):
             elif kind == 'ci_observe':
                 key = (event['head'], event['waiter'])
                 if key in last_ci and event['at_ms'] - last_ci[key] < start['interval_ms']:
-                    problem(family, event, 'ci_cadence_accelerated')
+                    deadline = start.get('deadline_ms')
+                    following = next((e for e in events[events.index(event) + 1:]
+                                      if e['kind'].startswith('ci_') and e['head'] == event['head']
+                                      and e['waiter'] == event['waiter']), None)
+                    terminal = (deadline is not None and last_ci[key] < deadline <= event['at_ms']
+                                and following is not None and following['kind'] == 'ci_end')
+                    if not terminal:
+                        problem(family, event, 'ci_cadence_accelerated')
                 last_ci[key] = event['at_ms']
             else:
                 del active_ci[event['head']]
+                last_ci.pop((event['head'], event['waiter']), None)
         elif kind == 'spawn':
             require(event['role'] in ROLES, 'unknown worker role')
             handoff = event['handoff']
@@ -235,8 +262,12 @@ def evaluate(path):
             if event['mode'] == 'help':
                 help_reads.add(event['helper'])
         elif kind == 'preparation':
-            require(set(event['governing']) == GOVERNING and all(isinstance(v, (str, list, dict))
-                    for v in event['governing'].values()), 'invalid governing evidence')
+            governing = event['governing']
+            require(set(governing) == GOVERNING, 'invalid governing evidence')
+            require(all(identity(governing[k]) for k in ('tree', 'base', 'scope', 'runtime'))
+                    and all(identity_collection(governing[k]) for k in ('decisions', 'rules'))
+                    and isinstance(governing['reviewers'], list)
+                    and all(identity(v) for v in governing['reviewers']), 'invalid governing identities')
             require(event['preparation_id'] not in preparations, 'duplicate preparation ID')
             preparations[event['preparation_id']] = event
         elif kind == 'refresh':
@@ -296,7 +327,7 @@ def main(argv=None):
             raise InvalidTrace('report must be an absolute private path outside the repository')
         try:
             report = evaluate(args.trace)
-        except (InvalidTrace, ValueError, OSError, TypeError, KeyError) as exc:
+        except (InvalidTrace, ValueError, OSError, TypeError, KeyError, RecursionError) as exc:
             report = {'schema_version': 1, 'status': 'invalid', 'error': str(exc), 'authority': 'diagnostic-only'}
         fd = os.open(report_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, 'w') as output:

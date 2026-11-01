@@ -34,8 +34,8 @@ authority. All normal workflow gates, coverage requirements and budgets still ap
 | Family | Positive example and rejection controls |
 | --- | --- |
 | Waiting | Three unchanged timeouts; required updates without new evidence; transitions caused by notifications. Timeout/update-driven agent status, file, Git, GitHub, provider and CI queries are rejected. |
-| Communication | Stable brief host-required updates by their recorded deadlines; failure/decision reporting before the next action; automatic completion once. Heartbeats, duplicate completion, missed updates and delayed material reports are rejected. |
-| CI | One waiter for a head with three observations at the existing 30-second cadence. Concurrent waiters, extra check queries and accelerated observations are rejected. Nondefault cadence remains unknown in this evaluator. |
+| Communication | Stable brief host-required updates by their recorded deadlines; nonblank failure/decision reporting before the next action; automatic completion once. Heartbeats, duplicate completion, missed updates and delayed or blank material reports are rejected. |
+| CI | One waiter for a head with three observations at the existing 30-second cadence. Each new session may observe immediately. An explicitly captured timeout deadline permits its terminal shortened interval. Concurrent waiters, extra check queries and premature observations are rejected. Nondefault cadence remains unknown in this evaluator. |
 | Handoffs | New agents with `fork_turns: none`, task/actions, artifact pins and no inline conversation dump; fresh reviewer identities; permitted reply/fixer reuse. Inherited context, broad inline context, reviewer reuse and wrong roles/stages are rejected. |
 | Output | Bounded receipts/pages with a retained hashed complete artifact; help discovery once. Full conversation/diff/log output and repeated help require a written concrete diagnostic need and an earlier notification reference. Missing retained output is rejected. |
 | Reuse | Operational preparation refresh with identical governing inputs uses zero model calls; changed scope is reassessed. Completed checkpoints survive compatible interruption/resume; unfinished checkpoints rerun. Changed heads/governing inputs or missing evidence cannot authorize reuse. |
@@ -91,6 +91,14 @@ copying a synthetic event or asserting that a policy passed.
    must identify the original observed notification rather than imply causality.
    Normalize genuine external instructions/status requests
    as result notifications with the original source locator; do not invent them.
+   For a CI waiter whose timeout shortens its final sleep, include the optional
+   integer `deadline_ms` on `ci_start`, in the same time coordinates as `at_ms`.
+   Capture the actual invocation timeout and session start in retained evidence;
+   derive the deadline from them, never from an observation you want to excuse.
+   A shortened interval is accepted only when the previous observation precedes
+   that deadline, the new observation reaches it, and the next CI event for that
+   head/waiter pair is `ci_end`. Without a deadline, every interval within the
+   session must meet its cadence. Ending a session resets its observation history.
 5. For handoffs, copy the actual task/actions and relevant inline broad context;
    list the runtime, head/base revisions, Decisions, preparation and engineering IDs,
    architecture packet, invocation, CLI reference, waiting policy and role-specific
@@ -102,8 +110,14 @@ copying a synthetic event or asserting that a policy passed.
    `base`, `scope`, `decisions`, `rules`, ordered `reviewers`, `runtime`). Use hashes
    of complete canonical inputs from retained artifacts, rather than an arbitrary
    `compatible` label. Include any otherwise unknown governing fields in the
-   corresponding complete evidence hash. Preparation IDs retain exact provenance;
-   equality of normalized governing inputs determines this diagnostic's reuse
+   corresponding complete evidence hash. Preparation IDs retain exact provenance.
+   `tree`, `base`, `scope` and `runtime` must be nonblank identity strings.
+   `reviewers` is an ordered list of nonblank identities. `decisions` and `rules`
+   may be nonblank canonical hashes/identities, lists of nonblank identities, or
+   objects mapping nonblank identities to nonblank hashes/identities. Empty lists
+   or objects represent genuinely empty Decisions or rules collections; blank
+   strings and malformed collection members are invalid.
+   Equality of normalized governing inputs determines this diagnostic's reuse
    comparison. Normalize actual helper-reported call counts and checkpoints.
    Production preparation/engineering-ID gates remain authoritative.
 7. Mark each `coverage` family `complete` only if its observations are fully
@@ -113,7 +127,7 @@ copying a synthetic event or asserting that a policy passed.
    for retained-output or checkpoint/preparation reuse also produces a violation.
    Mismatched hashes and malformed/unsupported events are invalid, never passing.
 
-`SCHEMAS` in the evaluator declares the exact event fields; extra fields, including
+`SCHEMAS` and `OPTIONAL_FIELDS` in the evaluator declare the event fields; extra fields, including
 self-reported `passed` labels, are rejected. `ROLES`, `PINS` and `GOVERNING` declare
 the supported handoff and reuse model. Event timestamps measure recorded ordering;
 material-report checks require the next action to report the notification. They

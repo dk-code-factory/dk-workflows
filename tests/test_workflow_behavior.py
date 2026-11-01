@@ -132,6 +132,65 @@ def test_commentary_cannot_add_ci_queries(tmp_path):
     assert 'extra_ci_query' in codes(evaluator.evaluate(save_trace(tmp_path, trace)))
 
 
+@pytest.mark.parametrize('signal', ['failure', 'decision'])
+@pytest.mark.parametrize('text', ['', ' \t\n '])
+def test_material_notification_requires_nonblank_report(tmp_path, signal, text):
+    trace = fixture_trace()
+    notification = next(e for e in trace['events'] if e['kind'] == 'notification' and e['signal'] == signal)
+    next(e for e in trace['events'] if e['kind'] == 'update' and e['cause'] == notification['id'])['text'] = text
+    report = evaluator.evaluate(save_trace(tmp_path, trace))
+    assert report['checks']['communication']['status'] == 'failed'
+    assert 'material_report_delayed' in codes(report)
+
+
+@pytest.mark.parametrize('premature', [False, True])
+def test_ci_cadence_restarts_with_each_waiter_session(tmp_path, premature):
+    trace = fixture_trace()
+    start = copy.deepcopy(next(e for e in trace['events'] if e['kind'] == 'ci_start'))
+    at = trace['events'][-1]['at_ms']
+    start.update(id='restart', at_ms=at)
+    trace['events'].extend([start,
+        {'id': 'restart-initial', 'kind': 'ci_observe', 'at_ms': at, 'head': start['head'], 'waiter': start['waiter']}])
+    if premature:
+        trace['events'].append({'id': 'restart-extra', 'kind': 'ci_observe', 'at_ms': at + 1,
+                                'head': start['head'], 'waiter': start['waiter']})
+    trace['events'].append({'id': 'restart-end', 'kind': 'ci_end', 'at_ms': at + 2,
+                            'head': start['head'], 'waiter': start['waiter']})
+    report = evaluator.evaluate(save_trace(tmp_path, trace))
+    assert report['status'] == ('failed' if premature else 'passed')
+    assert ('ci_cadence_accelerated' in codes(report)) is premature
+
+
+@pytest.mark.parametrize('mutation', ['terminal', 'no-deadline', 'early', 'no-end', 'later-observation'])
+def test_only_terminal_deadline_observation_may_shorten_ci_interval(tmp_path, mutation):
+    trace = fixture_trace()
+    start = next(e for e in trace['events'] if e['kind'] == 'ci_start')
+    observations = [e for e in trace['events'] if e['kind'] == 'ci_observe']
+    start['deadline_ms'] = start['at_ms'] + 35000
+    observations[-1]['at_ms'] = start['deadline_ms']
+    if mutation == 'no-deadline':
+        del start['deadline_ms']
+    elif mutation == 'early':
+        observations[-1]['at_ms'] -= 1
+    elif mutation == 'no-end':
+        trace['events'] = [e for e in trace['events'] if e['kind'] != 'ci_end']
+    elif mutation == 'later-observation':
+        extra = copy.deepcopy(observations[-1])
+        extra.update(id='post-deadline', at_ms=extra['at_ms'] + 1)
+        trace['events'].insert(trace['events'].index(observations[-1]) + 1, extra)
+    report = evaluator.evaluate(save_trace(tmp_path, trace))
+    assert report['status'] == ('passed' if mutation == 'terminal' else 'failed')
+    assert ('ci_cadence_accelerated' in codes(report)) is (mutation != 'terminal')
+
+
+@pytest.mark.parametrize('deadline', [-1, True, '35000', None])
+def test_malformed_ci_deadline_is_invalid(tmp_path, deadline):
+    trace = fixture_trace()
+    next(e for e in trace['events'] if e['kind'] == 'ci_start')['deadline_ms'] = deadline
+    with pytest.raises(evaluator.InvalidTrace, match='CI deadline|ci_start field type'):
+        evaluator.evaluate(save_trace(tmp_path, trace))
+
+
 def test_concrete_diagnostic_need_allows_full_output_and_second_help(tmp_path):
     trace = fixture_trace()
     for event in trace['events']:
@@ -142,7 +201,53 @@ def test_concrete_diagnostic_need_allows_full_output_and_second_help(tmp_path):
     page = next(e for e in fixture_trace()['events'] if e['kind'] == 'output' and e['mode'] == 'page')
     page.update(id='bounded-page', at_ms=trace['events'][-1]['at_ms'])
     trace['events'].append(page)
+    help_event = copy.deepcopy(next(e for e in trace['events'] if e['kind'] == 'output' and e['mode'] == 'help'))
+    help_event.update(id='second-help', at_ms=page['at_ms'],
+                      need='Inspect help options to diagnose the reported failure.',
+                      need_event=next(e['id'] for e in trace['events'] if e['kind'] == 'notification' and e['signal'] == 'failure'))
+    trace['events'].append(help_event)
     assert evaluator.evaluate(save_trace(tmp_path, trace))['status'] == 'passed'
+    help_event['need'] = ' '
+    assert 'unjustified_full_or_repeated_output' in codes(evaluator.evaluate(save_trace(tmp_path, trace)))
+
+
+@pytest.mark.parametrize('key', ['tree', 'base', 'scope', 'runtime'])
+@pytest.mark.parametrize('value', ['', ' \t ', [], {}, None, 12, True])
+def test_incomplete_governing_identity_cannot_authorize_reuse(tmp_path, key, value):
+    trace = fixture_trace()
+    for event in trace['events']:
+        if event['kind'] == 'preparation':
+            event['governing'][key] = value
+    with pytest.raises(evaluator.InvalidTrace, match='governing identities'):
+        evaluator.evaluate(save_trace(tmp_path, trace))
+
+
+@pytest.mark.parametrize('key', sorted(evaluator.GOVERNING))
+def test_missing_governing_field_is_invalid(tmp_path, key):
+    trace = fixture_trace()
+    for event in trace['events']:
+        if event['kind'] == 'preparation':
+            del event['governing'][key]
+    with pytest.raises(evaluator.InvalidTrace, match='governing evidence'):
+        evaluator.evaluate(save_trace(tmp_path, trace))
+
+
+@pytest.mark.parametrize('value', [[], {}, ['identity-a'], {'identity-a': 'hash-a'}])
+def test_empty_or_identified_decisions_and_rules_allow_compatible_reuse(tmp_path, value):
+    trace = fixture_trace()
+    for event in trace['events']:
+        if event['kind'] == 'preparation':
+            event['governing'].update(decisions=copy.deepcopy(value), rules=copy.deepcopy(value))
+    assert evaluator.evaluate(save_trace(tmp_path, trace))['status'] == 'passed'
+
+
+@pytest.mark.parametrize('key,value', [('reviewers', ''), ('reviewers', [' ']), ('reviewers', [{}]),
+                                     ('decisions', ['']), ('rules', {'rule': ''}), ('rules', False)])
+def test_malformed_governing_collections_are_invalid(tmp_path, key, value):
+    trace = fixture_trace()
+    next(e for e in trace['events'] if e['kind'] == 'preparation')['governing'][key] = value
+    with pytest.raises(evaluator.InvalidTrace, match='governing identities'):
+        evaluator.evaluate(save_trace(tmp_path, trace))
 
 
 @pytest.mark.parametrize('mutation', ['unavailable', 'missing', 'empty', 'partial'])
@@ -208,3 +313,20 @@ def test_cli_bounded_private_report_and_no_overwrite(tmp_path):
     inside_repo = subprocess.run([*command[:-1], str(ROOT / 'never-create-behavior-report.json')], capture_output=True)
     assert inside_repo.returncode == 2
     assert not (ROOT / 'never-create-behavior-report.json').exists()
+
+
+def test_excessive_json_nesting_retains_invalid_report(tmp_path):
+    path = tmp_path / 'deep.json'
+    # Python 3.14's C parser can exceed the Python recursion limit.
+    depth = 100000
+    path.write_text('[' * depth + '0' + ']' * depth)
+    with pytest.raises(evaluator.InvalidTrace, match='excessive JSON nesting'):
+        evaluator.evaluate(path)
+    report_file = tmp_path / 'deep-report.json'
+    result = subprocess.run([sys.executable, str(SCRIPT), str(path), '--report', str(report_file)],
+                            capture_output=True, text=True)
+    assert result.returncode == 2 and not result.stderr
+    assert json.loads(result.stdout)['status'] == 'invalid'
+    report = json.loads(report_file.read_text())
+    assert report['status'] == 'invalid' and report['error'] == 'excessive JSON nesting'
+    assert os.stat(report_file).st_mode & 0o777 == 0o600
