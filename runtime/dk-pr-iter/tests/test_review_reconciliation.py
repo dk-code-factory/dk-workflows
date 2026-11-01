@@ -7,10 +7,11 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from unittest.mock import patch
 
 import pytest
 
-from shared import architecture, executors, model_diagnostics, review_coverage as coverage, review_reconciliation as reconcile, review_sessions
+from shared import agreement_binding, architecture, executors, model_diagnostics, review_coverage as coverage, review_reconciliation as reconcile, review_sessions
 from shared.command_results import classification
 from shared.private_state import read, write
 
@@ -1070,15 +1071,21 @@ def test_native_reconciliation_command_exposes_blocked_contract(scenario, monkey
     assert classification('run-state', 0, receipt)[:2] == ('blocked', 'review_reconciliation_blocked')
 
 
-def add_discussion(s):
+def add_discussion(s, url=None):
     p = s.package
-    url = p.context['url'] + '#discussion_r123'
-    p.decisions['discussion_decisions'] = [{'text': 'Keep the supported local transform', 'references': [url]}]
-    p.decisions['decisions'] = [{'id': hashlib.sha256(b'Keep the supported local transform').hexdigest()[:20], 'text': 'Keep the supported local transform',
-        'references': [url], 'source_type': 'discussion', 'status': 'active',
-        'publication_status': 'unpublished', 'superseded_by': None, 'source': None}]
+    url = url or p.context['url'] + '#discussion_r123'
     body = 'Agreed: preserve the supported local transform.'
     comment = {'reference': url, 'text': body, 'url': url}
+    api = agreement_binding.decisions_api()
+    path = api.storage.cache_path(p.context['url'])
+    stored = api.storage.read(path, p.context['url'])
+    stored['decisions'] = [{'text': 'Keep the supported local transform', 'references': [url]}]
+    stored['comments'] = {'restatement': {**comment, 'body': body}}
+    api.retain_agreements(stored)
+    api.save_state(stored, path)
+    with patch.object(api, 'gh_json', return_value=stored['pr']):
+        p.decisions = api.decision_context(stored)
+    p.decisions['decisions'] = api.decision_records(stored, p.decisions['local_decisions'])
     return [{**comment, 'conversation': [comment]}]
 
 
@@ -1091,6 +1098,7 @@ def restatement_refresh(s, *, published=True, missing_source=False):
 def test_discussion_restatements_retain_fifth_cycle_coverage(scenario):
     s = scenario
     restatement_refresh(s)
+    assert s.package.decisions['agreement_binding'] != prep.read(prep.source_path(s.original, 'decisions'))['agreement_binding']
     receipt = s.run()
     assert receipt['status'] == 'reconciled' and receipt['executed_reviewers'] == []
     saved = read(Path(receipt['reconciliation']['path']), {})
@@ -1105,11 +1113,9 @@ def test_official_exporters_supply_restatement_sources(scenario, monkeypatch, ki
     import copy
     s = scenario
     p = s.package
-    add_discussion(s)
     url = p.context['url'] + {'inline': '#discussion_r123', 'review': '#pullrequestreview-123',
                               'comment': '#issuecomment-123'}[kind]
-    p.decisions['discussion_decisions'][0]['references'] = [url]
-    p.decisions['decisions'][0]['references'] = [url]
+    add_discussion(s, url)
     body = 'Agreed: preserve the supported local transform.'
     metadata = dict(number=1, url=p.context['url'], title='Transform', body='',
                     headRefOid=s.reviewed_head)

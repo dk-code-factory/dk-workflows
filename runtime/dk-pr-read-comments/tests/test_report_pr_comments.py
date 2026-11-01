@@ -126,7 +126,7 @@ class AnalysisTests(unittest.TestCase):
                 {"text": "Use the new approach", "references": ["https://example.com/fake"]}],
                 "thread_summaries": []})):
             with self.assertRaisesRegex(RuntimeError, "exact evidence"):
-                mod.analyze(Path("."), {"pr": {}, "diff": "", "linked_issues": []}, {},
+                mod.analyze(Path("."), {"pr": {"url": "https://github.com/acme/project/pull/3"}, "diff": "", "linked_issues": []}, {},
                             comments, {}, {"x"}, set(), set())
 
     def test_discussion_analysis_rejects_code_permalink(self):
@@ -134,7 +134,7 @@ class AnalysisTests(unittest.TestCase):
         with patch.object(mod, "execute", return_value=json.dumps({"decisions": [
                 {"text": "Use a cache", "references": [link]}], "thread_summaries": []})):
             with self.assertRaisesRegex(RuntimeError, "exact evidence"):
-                mod.analyze(Path("."), {"pr": {}, "diff": "", "linked_issues": []}, {},
+                mod.analyze(Path("."), {"pr": {"url": "https://github.com/acme/project/pull/3"}, "diff": "", "linked_issues": []}, {},
                             {}, {}, set(), set(), {link}, force=True)
 
 

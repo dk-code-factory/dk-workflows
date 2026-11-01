@@ -152,6 +152,11 @@ class Session:
 
     def finish(self, result):
         self.validate_storage()
+        if self.prepared.get('preparation_version', 1) >= 3:
+            # A drained guard failure remains useful diagnostic evidence even if
+            # the checkout changed. Preparation and agreements must still be live.
+            coverage.validate_current(self.prepared,
+                check_checkout=not (result.get('guard_failure') and not result['complete']))
         item = coverage.retain(self.path, self.context, self.prepared, result, self.id)
         def save(data):
             data['results'].append(item)

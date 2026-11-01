@@ -40,13 +40,13 @@ def preparation_api():
     return api
 
 
-def validate_current(prepared):
+def validate_current(prepared, *, check_checkout=True):
     api = preparation_api()
     context = api.context_for(prepared)
     raw = api.read(api.source_path(prepared, 'decisions'))
     api.validate(prepared, context, raw.get('data', raw))
-    if (git(context['checkout'], 'rev-parse', 'HEAD') != context['head_sha']
-            or git(context['checkout'], 'status', '--porcelain=v1')):
+    if check_checkout and (git(context['checkout'], 'rev-parse', 'HEAD') != context['head_sha']
+                          or git(context['checkout'], 'status', '--porcelain=v1')):
         raise ValueError('prepared isolated checkout changed')
     return context
 

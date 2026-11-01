@@ -20,7 +20,7 @@ from shared import executors
 
 class DecisionTests(unittest.TestCase):
     def test_discussion_corrects_fenced_model_json_without_changing_evidence(self):
-        context = {'pr': {'title': 'Fixture', 'headRefOid': 'a' * 40}, 'linked_issues': [], 'diff': ''}
+        context = {'pr': {'url': 'https://github.com/o/r/pull/2', 'title': 'Fixture', 'headRefOid': 'a' * 40}, 'linked_issues': [], 'diff': ''}
         valid = {'decisions': [], 'thread_summaries': []}
         invalid = '```json\n' + json.dumps(valid) + '\n```'
         with tempfile.TemporaryDirectory() as td, patch.object(mod, 'execute', side_effect=[invalid, json.dumps(valid)]) as model:
@@ -30,7 +30,7 @@ class DecisionTests(unittest.TestCase):
         self.assertIn('without Markdown fences', model.call_args_list[1].args[0])
 
     def test_discussion_rejects_unsupported_references_after_one_correction(self):
-        context = {'pr': {'title': 'Fixture', 'headRefOid': 'a' * 40}, 'linked_issues': [], 'diff': ''}
+        context = {'pr': {'url': 'https://github.com/o/r/pull/2', 'title': 'Fixture', 'headRefOid': 'a' * 40}, 'linked_issues': [], 'diff': ''}
         invalid = {'decisions': [{'text': 'Unestablished choice', 'references': ['https://example.test/invented']}], 'thread_summaries': []}
         with tempfile.TemporaryDirectory() as td, patch.object(mod, 'execute', return_value=json.dumps(invalid)) as model:
             with self.assertRaisesRegex(RuntimeError, 'after one correction'):
@@ -39,7 +39,7 @@ class DecisionTests(unittest.TestCase):
         self.assertIn('exact evidence references', model.call_args_list[1].args[0])
 
     def test_discussion_provider_failure_does_not_spend_a_correction(self):
-        context = {'pr': {'title': 'Fixture', 'headRefOid': 'a' * 40}, 'linked_issues': [], 'diff': ''}
+        context = {'pr': {'url': 'https://github.com/o/r/pull/2', 'title': 'Fixture', 'headRefOid': 'a' * 40}, 'linked_issues': [], 'diff': ''}
         with tempfile.TemporaryDirectory() as td, patch.object(mod, 'execute', side_effect=RuntimeError('authentication failed')) as model:
             with self.assertRaisesRegex(RuntimeError, 'authentication failed'):
                 mod.analyze(Path(td), context, {}, {}, {}, set(), set(), set())
@@ -235,7 +235,7 @@ class DecisionTests(unittest.TestCase):
                           'comment_ids': ['c1']}}
         patch_text = ('diff --git a/parser.py b/parser.py\n+++ b/parser.py\n'
                       '@@ -0,0 +1 @@\n+' + 'x' * (mod.MAX_DISCUSSION_DIFF_CHARS + 10) + '\n')
-        context = {'pr': {'title': 'Parser fix', 'headRefOid': 'a'*40},
+        context = {'pr': {'url': 'https://github.com/o/r/pull/2', 'title': 'Parser fix', 'headRefOid': 'a'*40},
                    'linked_issues': [], 'diff': patch_text}
         response = {'decisions': [{'text': 'Keep the parser behavior', 'references': [url]}],
                     'thread_summaries': [{'thread_id': 't1', 'summary': 'Parser behavior retained'}]}

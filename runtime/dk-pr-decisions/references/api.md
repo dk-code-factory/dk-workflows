@@ -32,7 +32,7 @@ All commands return one JSON object:
 
 Existing Decisions entries are read as Markdown blocks, including multiline bullets and standalone paragraphs. Their text is preserved rather than rewritten by analysis. Entries from discussions that have identical normalized text share an ID with the corresponding description entry. Different wording remains distinct; reconcile a changed agreement explicitly with `replace`. Saved agreements survive source edits and deletion; repeated recording preserves the first evidence. Missing evidence in an older cache cannot be reconstructed retroactively.
 
-`context` includes `pr_url`, `head_sha`, `body_hash`, and `verified` in `data`, plus the unified records. It retains `live_decisions`, `discussion_decisions`, and `local_decisions` as compatibility evidence. Use active unified records for current constraints; the raw live section can contain superseded history. `list` describes a cached snapshot and makes no freshness claim. `suggest` returns candidates only; use `add` or `replace` to select one before publication.
+`context` includes `pr_url`, `head_sha`, `body_hash`, and `verified` in `data`, plus the unified records and an additive `agreement_binding` (version 1, resolved `store_root`, sorted persisted `decision_ids`, and governing-record `fingerprint`). Live gates check this binding against the configured private store without fetching or writing; reconcile changes or pending publication, then refresh context and preparation. Imported local choices are excluded from this store binding and keep their existing evidence checks. It retains `live_decisions`, `discussion_decisions`, and `local_decisions` as compatibility evidence. Use active unified records for current constraints; the raw live section can contain superseded history. `list` describes a cached snapshot and makes no freshness claim. `suggest` returns candidates only; use `add` or `replace` to select one before publication.
 
 ## Refresh and publication
 
@@ -112,3 +112,5 @@ or unapplied state without replaying the mutation. Pending legacy intents remain
 blockers after import. Import validates the selected legacy snapshot and leaves its
 original file untouched. Existing interrupted workflows use their retained runtime;
 there is no bulk migration of active runs or immutable evidence.
+
+Discussion extraction retains complete current general comments and review bodies in a private evidence file, ordered by creation time and stable ID. The model receives its absolute path, SHA-256 and bounded-reading instructions; the same file is required throughout correction. Missing, unreadable or changed evidence blocks extraction without replacing saved agreements. Inline summaries and incremental body fetching remain in use.
