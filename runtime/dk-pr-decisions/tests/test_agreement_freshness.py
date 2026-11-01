@@ -1,10 +1,12 @@
 """Same-snapshot agreement changes must stop every live preparation consumer."""
 import copy
+from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import json
 from pathlib import Path
 import subprocess
 import sys
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -41,6 +43,30 @@ def export(package):
         package.decisions = api.decision_context(state)
     package.decisions['decisions'] = api.decision_records(state, package.decisions['local_decisions'])
     package.write('decisions.json', package.decisions)
+
+
+def test_concurrent_freshness_checks_load_api_once_but_recheck_live_store(package, monkeypatch):
+    monkeypatch.setattr(agreement_binding, '_decisions_api', None, raising=False)
+    start = threading.Barrier(8)
+    def check(_):
+        start.wait(timeout=5)
+        agreement_binding.check(package.decisions)
+    with patch.object(agreement_binding.importlib.util, 'spec_from_file_location',
+                      wraps=importlib.util.spec_from_file_location) as load:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(check, range(8)))
+        assert load.call_count == 1
+        paths = sys.path[:]
+        for _ in range(20):
+            agreement_binding.check(package.decisions)
+        assert sys.path == paths
+        add(package)
+        with pytest.raises(ValueError, match='recorded agreements changed'):
+            agreement_binding.check(package.decisions)
+        monkeypatch.setenv('DK_PR_DECISIONS_HOME', str(package.root / 'another-store'))
+        with pytest.raises(ValueError, match='selected Decisions store changed'):
+            agreement_binding.check(package.decisions)
+        assert load.call_count == 1
 
 
 @pytest.mark.parametrize('replacement', [False, True])
@@ -284,6 +310,8 @@ def test_work_result_acceptance_and_both_completion_stages_recheck_store(package
         state.register_review(record, {'review_artifact': item}, package.head)
     with pytest.raises(ValueError, match='recorded agreements changed'):
         session.finish(result)
+    with pytest.raises(ValueError, match='recorded agreements changed'):
+        session.finish({**result, 'complete': False, 'guard_failure': True})
     for stage in ('review', 'complete'):
         assert completion.completion_gate(*args, stage=stage, **kwargs) == 'preparation_invalid'
 

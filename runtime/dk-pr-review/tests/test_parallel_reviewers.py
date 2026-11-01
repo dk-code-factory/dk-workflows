@@ -14,7 +14,7 @@ import pytest
 
 from test_stats_capture import pinned, runner, finding, Capture, for_iteration, api, prepare_current
 from shared import bindings, executors
-from shared.review_sessions import Session
+from shared.review_sessions import Session, result_artifact
 from shared.reviewer_telemetry import ENV
 
 
@@ -146,6 +146,43 @@ def test_every_reusable_checkpoint_and_descriptor_is_checked_before_launch(pinne
     if invalid == 'findings':
         reviews = api.ledger(stats.repo)['runs'][stats.run_id]['reviews']
         assert all(review['status'] == 'not_run' for review in reviews.values())
+
+
+def test_worker_prelaunch_guard_retains_incomplete_session_without_provider_stats(pinned):
+    context, decisions, prep, names, git = pinned
+    session = Session(context, prep, names)
+    stats = for_iteration(context, prep, names, cycle=1, attempt='prelaunch-guard')
+    class Pool(runner.ThreadPoolExecutor):
+        def __init__(self, *args, **kwargs):
+            # Cohort validation and every handoff/checkpoint write have finished;
+            # no worker exists yet. Only the per-worker launch guard can catch this.
+            assert [item['status'] for item in json.loads(session.path.read_text())['reviews'].values()] == ['running'] * 2
+            handoffs = list(Path(context['patch']).parent.glob('review-handoffs-*/*.json'))
+            assert len(handoffs) == 2
+            (Path(context['checkout']) / 'provider-cache').write_text('changed before launch')
+            super().__init__(*args, **kwargs)
+    with session.execution(), patch.object(runner, 'ThreadPoolExecutor', Pool), \
+            patch.object(runner, 'run_skill_reviewer') as provider, \
+            patch.object(Capture, 'finish', wraps=Capture.finish) as finish:
+        result = runner.review(context, names, '', decisions, '', prep, stats=stats, session=session)
+        item = session.finish(result)
+    provider.assert_not_called()
+    finish.assert_not_called()
+    assert result['guard_failure'] and result['outcome'] == 'guard_failed'
+    assert not result['complete'] and 'failed_reviewer' not in result
+    assert 'reviewer changed isolated checkout' in result['reason']
+    assert result['findings'] == result['executed_reviewers'] == result['reused_reviewers'] == []
+    assert result['skipped_reviewers'] == [] and 'failed_reviewers' not in result
+    retained = json.loads(session.path.read_text())
+    assert retained['status'] == 'incomplete' and retained['results'] == [item]
+    assert [entry['status'] for entry in retained['review_history']] == ['running'] * 2
+    assert all(session.cached(name) is None for name in names)
+    assert result_artifact(session.path, item)['result'] == result
+    reviews = api.ledger(stats.repo)['runs'][stats.run_id]['reviews']
+    assert all(review['status'] == 'not_run' for review in reviews.values())
+    # A caller cannot use the diagnostic exception to accept completed coverage.
+    with pytest.raises(ValueError, match='prepared isolated checkout changed'):
+        session.finish({**result, 'complete': True})
 
 
 @pytest.mark.parametrize('failure', ['interrupt', 'storage', 'provider'])
@@ -517,10 +554,13 @@ def test_shared_guard_retains_original_provider_or_storage_diagnostic(pinned, ca
     with session.execution(), patch.object(session, 'record', side_effect=store), \
             patch.object(runner, 'run_skill_reviewer', side_effect=provider):
         result = runner.review(context, names, '', decisions, '', prep, session=session)
+        item = session.finish(result)
     assert result['guard_failure'] and 'failed_reviewer' not in result
     assert original in result['reason'] and original in capsys.readouterr().err
     assert 'failed_reviewers' not in result and result['findings'] == []
     assert all(session.cached(name) is None for name in names)
+    assert result_artifact(session.path, item)['result'] == result
+    assert json.loads(session.path.read_text())['status'] == 'incomplete'
 
 
 @pytest.mark.parametrize('terminal', ['completed', 'incomplete', 'exhausted', 'storage'])

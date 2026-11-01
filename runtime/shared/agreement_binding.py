@@ -3,6 +3,23 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+from threading import Lock
+
+
+_decisions_api = None
+_decisions_api_lock = Lock()
+
+
+def decisions_api():
+    global _decisions_api
+    with _decisions_api_lock:
+        if _decisions_api is None:
+            path = Path(__file__).resolve().parents[1] / 'dk-pr-decisions/scripts/decisions.py'
+            spec = importlib.util.spec_from_file_location('freshness_decisions', path)
+            api = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(api)
+            _decisions_api = api
+        return _decisions_api
 
 
 def binding(records, store_root):
@@ -22,10 +39,7 @@ def check(context):
         if (not isinstance(exported, dict) or type(exported.get('version')) is not int
                 or exported['version'] != 1):
             raise ValueError('bound Decisions context required')
-        path = Path(__file__).resolve().parents[1] / 'dk-pr-decisions/scripts/decisions.py'
-        spec = importlib.util.spec_from_file_location('freshness_decisions', path)
-        api = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(api)
+        api = decisions_api()
         root = api.storage.root()
         if exported.get('store_root') != str(root):
             raise ValueError('selected Decisions store changed')
