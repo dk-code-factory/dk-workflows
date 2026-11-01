@@ -149,7 +149,8 @@ def test_known_semantic_helpers_execute_under_ambient_parent_packet(
         source.write_text('Document public functions.')
         assert module.summarize(source, repository) == '- Keep public functions documented.'
     elif helper == 'discussion':
-        context = {'pr': {'title': 'Fixture', 'headRefOid': 'a' * 40}, 'linked_issues': [], 'diff': ''}
+        context = {'pr': {'url': 'https://github.com/o/r/pull/2', 'title': 'Fixture', 'headRefOid': 'a' * 40},
+                   'linked_issues': [], 'diff': ''}
         assert module.analyze(tmp_path, context, {}, {}, {}, set(), set(), set()) == ([], {})
     elif helper == 'description':
         state = {'pr': {'url': 'https://github.com/o/r/pull/2', 'body': 'Keep public APIs.'}}

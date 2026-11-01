@@ -447,10 +447,13 @@ def analyze(repo_dir, context, prior, comments, threads, changed_ids, invalid_th
     if any(not isinstance(comment.get('body'), str) for comment in discussion):
         raise RuntimeError('Required discussion evidence body is missing; retry scan')
     discussion.sort(key=lambda comment: (comment['createdAt'], comment['id']))
-    directory = allocate()
-    evidence_path = directory / 'discussion-evidence.json'
-    write(evidence_path, discussion)
-    evidence_hash = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    evidence_path = storage.cache_path(context['pr']['url']).with_suffix('.discussion-evidence.json')
+    if storage.validate_location(evidence_path) != evidence_path:
+        raise ValueError('Decisions discussion evidence must not use a symlink')
+    content = json.dumps(discussion, indent=2, sort_keys=True, ensure_ascii=False) + '\n'
+    # Hash our own snapshot, even if another extraction replaces it after writing.
+    evidence_hash = hashlib.sha256(content.encode('utf-8', 'backslashreplace')).hexdigest()
+    storage.atomic_write(evidence_path, content)
     payload['discussion_evidence'] = {'path': str(evidence_path.resolve()), 'sha256': evidence_hash,
                                       'records': len(discussion)}
     instructions = (

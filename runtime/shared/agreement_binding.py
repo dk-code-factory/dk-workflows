@@ -33,7 +33,7 @@ def binding(records, store_root):
 
 
 def check(context):
-    """No scan, migration, locking, model invocation or store mutation is allowed here."""
+    """No scan, migration, store locking, model invocation or store mutation is allowed here."""
     try:
         exported = context.get('agreement_binding')
         if (not isinstance(exported, dict) or type(exported.get('version')) is not int
