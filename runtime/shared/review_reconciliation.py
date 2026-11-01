@@ -192,16 +192,25 @@ def validate_comparison(value, binding):
             or type(value['equivalent']) is not bool
             or not isinstance(value['rationale'], str) or not value['rationale'].strip()):
         raise ValueError('comparison requires equivalent, rationale, ' + ', '.join(key for key, _ in categories))
-    verdicts = []
+    # Enumerate every category before inspecting verdicts so the sole correction
+    # can repair all missing/extra identities, even if an earlier entry is invalid.
+    errors = []
     for category, expected in categories:
         entries = value[category]
         if not isinstance(entries, dict):
-            raise FieldError(category, 'expected an object keyed by indexed identities; got ' + type(entries).__name__)
+            errors.append((category, 'expected an object keyed by indexed identities; got ' + type(entries).__name__))
+            continue
         missing, unexpected = set(expected) - entries.keys(), entries.keys() - set(expected)
         if missing or unexpected:
-            raise FieldError(category, 'indexed keys differ; missing: ' + json.dumps(sorted(missing)) +
-                             '; unexpected: ' + json.dumps(sorted(unexpected)))
-        for key, entry in entries.items():
+            errors.append((category, 'indexed keys differ; missing: ' + json.dumps(sorted(missing)) +
+                           '; unexpected: ' + json.dumps(sorted(unexpected))))
+    if len(errors) == 1:
+        raise FieldError(*errors[0])
+    if errors:
+        raise FieldError('comparison', '; '.join(category + ': ' + detail for category, detail in errors))
+    verdicts = []
+    for category, _ in categories:
+        for key, entry in value[category].items():
             if (not isinstance(entry, dict) or set(entry) != ({'verdict', 'rationale', 'evidence', 'maps_to', 'discussion_sources'}
                                                       if category == 'decisions' else {'verdict', 'rationale', 'evidence'})
                     or not isinstance(entry['verdict'], str)

@@ -8,7 +8,9 @@ Both comparison commands retain private `model-exchange.json` diagnostics,
 independently of telemetry: the complete request and `required_keys`, initial and
 correction responses, validation details and available provider transport metadata.
 `model_validation_failed` identifies incorrect container types or missing/unexpected
-indexed keys and returns the evidence path. Read that file with bounded reads.
+indexed keys and returns the evidence path. All category key mismatches are
+reported together before verdict validation, so the single correction can repair
+the complete field/source/decision enumeration. Read that file with bounded reads.
 Rejected responses grant no receipt or coverage. One correction is allowed; an
 unchanged retry after rejection or an uncertain interrupted exchange is blocked
 without another provider call. Provenance-only preparation refreshes preserve
