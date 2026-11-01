@@ -67,6 +67,8 @@ Codex manual refresh uses `codex plugin marketplace upgrade MARKETPLACE` then `c
 
 Run `python3 scripts/check.py` and `python3 scripts/test.py` (development dependencies: pytest and pytest-subtests). Runtime is standard-library Python; the AD inventory helper also uses Node.js. Host manifests must share a semantic version. Use `python3 scripts/version.py X.Y.Z` before changing skill/runtime behavior on main. CI enforces version bumps on pull requests; a `vX.Y.Z` tag validates main ancestry, runs checks, and creates the GitHub release. Catalogs consume released main; keep unpublished work on branches.
 
+The offline [workflow behavior evaluation](docs/workflow-behavior-evaluation.md) checks synthetic trace controls and documents real-trace normalization and isolated version comparisons.
+
 Owned source provenance is recorded in `PROVENANCE.json`. No installed system skills, external plugins, credentials, private rules/state, caches, or benchmark results are distributed.
 
 ## Plugin configuration and guards
