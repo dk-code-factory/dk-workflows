@@ -12,6 +12,7 @@ import sys
 import importlib.util
 import copy
 import uuid
+import hashlib
 from types import SimpleNamespace
 
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
@@ -20,18 +21,86 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 CLASSIFICATIONS = {"valid", "already_fixed", "unsupported", "pre_existing"}
 
 
-from shared.private_state import root, read, write, mutate
+from shared.private_state import root, read, write, mutate, atomic_bytes
 from shared.flaky_tests import Registry, record_flaky
 from shared import review_coverage, review_sessions, review_reconciliation
 from shared.engineering_identity import engineering_id, compatible_reference
 from shared import bindings
-from shared.workflow_storage import allocate
+from shared import preparation_graph
+from shared.workflow_storage import allocate, owned
 from shared.diagnostics import Diagnostic, emit, command as recovery_command, task, human
 
 _spec = importlib.util.spec_from_file_location('iteration_preparation',
     next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir()) / 'dk-pr-decisions/scripts/preparation.py')
 preparation_api = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(preparation_api)
+
+
+def preparation_history(record):
+    """Export dedicated typed bookkeeping; arbitrary event text still governs."""
+    history = copy.deepcopy(record.get('preparation_history', {
+        'preparation_history_version': 1, 'governing': {}, 'operational': {}}))
+    if (not isinstance(history, dict) or type(history.get('preparation_history_version')) is not int
+            or history['preparation_history_version'] != 1
+            or not isinstance(history.get('governing'), dict)
+            or not isinstance(history.get('operational'), dict)):
+        raise ValueError('invalid typed preparation history')
+    history.setdefault('source_id', 'iteration-history')
+    if not isinstance(history['source_id'], str) or not history['source_id']:
+        raise ValueError('invalid preparation history source identity')
+    # Never infer that a free-form event, choice or unfamiliar history field is
+    # bookkeeping. Preserve exact event records, including unknown fields.
+    history['governing']['local_decisions'] = copy.deepcopy(record.get('local_decisions', []))
+    history['governing']['events'] = copy.deepcopy(record.get('events', []))
+    for field in ('cycles', 'cycle_retries', 'repairs', 'reruns'):
+        if (not isinstance(record.get(field, []), list) or
+                field in preparation_graph.operational_unknown(history['operational'])):
+            raise ValueError('invalid operational counter history: ' + field)
+        history['operational'][field] = len(record.get(field, []))
+    if 'run_id' in preparation_graph.operational_unknown(history['operational']):
+        raise ValueError('invalid operational run identity')
+    history['operational']['run_id'] = record.get('iteration_run', {}).get('id', '')
+    return history
+
+
+def record_operational(record, field, path):
+    """Retain one strict operational record and its exact original bytes."""
+    if field not in {'readiness_transitions', 'scheduling', 'publication_receipts'}:
+        raise ValueError('unsupported operational record kind')
+    raw = Path(path).read_bytes()
+    value = json.loads(raw)
+    if not isinstance(value, dict) or preparation_graph.operational_unknown({field: [value]}):
+        raise ValueError('unknown or malformed operational record; keep it as governing evidence')
+    if not isinstance(value.get('head_sha'), str) or not SHA.fullmatch(value['head_sha']):
+        raise ValueError('operational record requires a pinned head_sha')
+    if 'artifact' in value or 'sha256' in value:
+        raise ValueError('artifact and sha256 are assigned to the retained original record')
+    if field == 'publication_receipts' and (
+            value.get('kind') not in {'ready', 'push', 'reply', 'ci-rerun', 'review-request'}
+            or value.get('outcome') not in {'pending', 'verified', 'not_applied', 'uncertain', 'failed'}):
+        raise ValueError('publication receipt requires a supported kind and typed outcome')
+    active = record.get('iteration_run', {})
+    if active.get('status') != 'active' or active.get('contract_version') != 2:
+        raise ValueError('operational record requires an active current-contract run')
+    history = preparation_history(record)
+    fingerprint = hashlib.sha256(raw).hexdigest()
+    directory = owned(active['workflow_dir']) / 'operational-evidence'
+    directory.mkdir(mode=0o700, exist_ok=True)
+    target = directory / (fingerprint + '.json')
+    if target.exists():
+        if target.is_symlink() or target.read_bytes() != raw:
+            raise ValueError('retained operational evidence changed')
+    else:
+        atomic_bytes(target, raw)
+        target.chmod(0o400)
+    value.update(artifact=str(target), sha256=fingerprint)
+    records = history['operational'].setdefault(field, [])
+    if not isinstance(records, list):
+        raise ValueError('invalid operational history collection')
+    if value not in records:
+        records.append(value)
+    record['preparation_history'] = history
+    return value
 
 
 def start_run(record, *, resume=False):
@@ -659,6 +728,10 @@ def main():
     p.add_argument("--pr", type=int)
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("show")
+    sub.add_parser('preparation-history', help='Export typed preparation evidence; retain the full run separately')
+    operational = sub.add_parser('operational', help='Retain typed readiness, scheduling or publication bookkeeping')
+    operational.add_argument('--field', choices=('readiness_transitions', 'scheduling', 'publication_receipts'), required=True)
+    operational.add_argument('--file', required=True)
     nxt = sub.add_parser('next', help='Describe the current stage and recovery action without consuming budgets')
     nxt.add_argument('--head', required=True)
     nxt.add_argument('--verification-file')
@@ -731,6 +804,9 @@ def main():
             path = base / f"pr-{a.pr}.json"
             default = {"pr": a.pr, "threads": {}, "events": [], "cycles": [], "cycle_retries": [], "repairs": [], "reruns": [], "local_decisions": []}
             if a.command == "show": result = read(path, default)
+            elif a.command == 'preparation-history': result = preparation_history(read(path, default))
+            elif a.command == 'operational':
+                result = mutate(path, default, lambda d: record_operational(d, a.field, a.file))
             elif a.command == 'next':
                 result = next_stage({**read(path, default), '_repo': a.repo}, a.head, path,
                                     verification=a.verification_file, assessment=a.series_assessment)

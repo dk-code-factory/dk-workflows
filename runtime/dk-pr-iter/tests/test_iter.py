@@ -1,6 +1,9 @@
 import importlib.util
 from pathlib import Path
 import subprocess
+import copy
+import json
+import sys
 import pytest
 
 SCRIPTS = Path(__file__).parents[1] / "scripts"
@@ -121,6 +124,50 @@ def test_local_choices_survive_record_reload(tmp_path):
     assert restored["local_decisions"] == [{"text": "Keep API", "source": "user instruction"}]
     with pytest.raises(ValueError, match="conflicting sources"):
         state.record_local_decision(restored, "Keep API", "different source")
+
+
+def test_operational_history_cli_preserves_raw_evidence_and_governing_events(tmp_path, monkeypatch):
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
+    monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
+    import os
+    argv = [sys.executable, str(SCRIPTS / 'run_state.py'), '--repo', 'github.com/o/r', '--pr', '1']
+    def call(*args):
+        return subprocess.run([*argv, *args], env=os.environ, capture_output=True, text=True)
+    assert call('start-run').returncode == 0
+    source = tmp_path / 'slot.json'
+    source.write_text(json.dumps({'kind': 'review_slot', 'status': 'granted', 'head_sha': SHA}, indent=3))
+    raw = source.read_bytes()
+    result = call('operational', '--field', 'scheduling', '--file', str(source))
+    assert result.returncode == 0, result.stderr
+    receipt = json.loads(result.stdout)
+    source.unlink()
+    assert Path(receipt['artifact']).read_bytes() == raw
+    assert Path(receipt['artifact']).stat().st_mode & 0o777 == 0o400
+    assert call('event', '--key', 'scope', '--kind', 'instruction', '--head', SHA,
+                '--detail', 'Preserve a compatibility guarantee').returncode == 0
+    exported = call('preparation-history')
+    assert exported.returncode == 0, exported.stderr
+    history = json.loads(exported.stdout)
+    assert history['operational']['scheduling'] == [receipt]
+    assert history['governing']['events'][0]['detail'] == 'Preserve a compatibility guarantee'
+    source.write_text(json.dumps({'kind': 'review_slot', 'status': 'granted', 'head_sha': SHA,
+                                 'instruction': 'Weaken compatibility'}))
+    before = call('show').stdout
+    assert call('operational', '--field', 'scheduling', '--file', str(source)).returncode != 0
+    assert call('show').stdout == before
+
+
+def test_history_export_keeps_unknown_envelope_and_event_fields():
+    record = {'preparation_history': {'preparation_history_version': 1,
+        'governing': {'constraints': ['Keep API']}, 'operational': {'future': {'instruction': 'Inspect'}},
+        'future': {'scope': 'Preserve'}}, 'events': [{'kind': 'unrecognized', 'new_choice': 'Exact choice'}]}
+    before = copy.deepcopy(record)
+    result = state.preparation_history(record)
+    assert result['future'] == record['preparation_history']['future']
+    assert result['operational']['future'] == record['preparation_history']['operational']['future']
+    assert result['governing']['events'] == record['events']
+    assert result['governing']['constraints'] == ['Keep API']
+    assert record == before
 
 
 def test_flaky_requires_same_head_and_later_pass():

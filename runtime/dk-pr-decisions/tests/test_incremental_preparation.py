@@ -153,6 +153,26 @@ class IncrementalPreparationTests(unittest.TestCase):
                                                        self.package.repo, raw) for name in ('first.json', 'moved.json')]
                     self.assertNotEqual(*identities)
 
+    def test_typed_operational_records_and_metadata_preserve_unknowns(self):
+        records = {
+            'readiness_transitions': {'head_sha': self.package.head, 'phase': 'result',
+                'before': 'draft', 'after': 'ready', 'outcome': 'verified'},
+            'scheduling': {'head_sha': self.package.head, 'kind': 'review_slot', 'status': 'granted'}}
+        for field, record in records.items():
+            with self.subTest(field=field):
+                self.assertEqual(graph.operational_unknown({field: [record]}), {})
+                for extended in ({**record, 'instruction': 'Weaken compatibility'},
+                                 {**record, 'head_sha': False}, {**record, next(iter(record)): None}):
+                    self.assertEqual(graph.operational_unknown({field: [extended]}), {field: [extended]})
+        initial = {'body': 'Scope', 'isDraft': True}
+        self.assertEqual(graph.semantic('metadata', json.dumps(initial).encode()),
+                         graph.semantic('metadata', json.dumps({**initial, 'isDraft': False}).encode()))
+        for value in ('false', 0, None, {'choice': 'ready'}):
+            self.assertNotEqual(graph.semantic('metadata', json.dumps(initial).encode()),
+                                graph.semantic('metadata', json.dumps({**initial, 'isDraft': value}).encode()))
+        self.assertNotEqual(graph.semantic('metadata', json.dumps(initial).encode()),
+                            graph.semantic('metadata', json.dumps({**initial, 'unknown': 'constraint'}).encode()))
+
     def test_only_integer_typed_markers_allow_zero_call_operational_refresh(self):
         package = self.package
         package.manifest['evidence']['run_history'] = ['history.json']

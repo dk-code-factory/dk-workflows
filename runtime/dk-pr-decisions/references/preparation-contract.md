@@ -98,7 +98,7 @@ Unknown fields, source additions/removals, authorship, text, nested order and pr
 remain significant. Exact supported exceptions:
 
 - Context transport paths, head and local-checkout status are operational; metadata
-  ignores `headRefOid`, Decisions ignore only record `head_sha` (`data.head_sha` in
+  ignores `headRefOid` and boolean `isDraft`, Decisions ignore only record `head_sha` (`data.head_sha` in
   an envelope), patches derive from Git. All other Decisions envelope fields govern.
   Manifest locations are transport, with each source compared separately. Reviewer
   descriptors compare structurally; verified prior preparation supplies lineage.
@@ -109,8 +109,8 @@ remain significant. Exact supported exceptions:
   retain content/order, including other schemas' collection/hash names. All original
   text records remain required; new, edited, removed, bot or self-authored text governs.
 - Integer `preparation_history_version:1` requires `governing` and `operational`
-  objects. Integer `evidence_version:1` requires `governing`, permits `operational`
-  and supports stable `source_id` across relocation. Other marker types stay opaque.
+  objects. Integer `evidence_version:1` requires `governing`, permits `operational`.
+  Both support stable string `source_id` across relocation. Other marker types stay opaque.
   Keep choices, questions, constraints, unanswered requests and supersession under
   `governing`; unknown fields govern. Excluded operational fields are nonnegative
   integer `cycles`/`cycle_retries`/`repairs`/`reruns`, string `head_sha`/`run_id`/
@@ -119,6 +119,27 @@ remain significant. Exact supported exceptions:
   Unknown receipt fields keep the collection governing. Known statuses: `pending`,
   `queued`, `in_progress`, `success`, `failure`, `neutral`, `cancelled`, `skipped`,
   `timed_out`. Operational state never changes Decisions or review-session identity.
+- Typed operational `readiness_transitions` arrays require string `head_sha`,
+  `phase` (`before`, `intent`, `result`, `after`), `before`/`after` (`draft`, `ready`)
+  and `outcome` (`pending`, `verified`, `not_applied`, `uncertain`, `failed`).
+  Typed `scheduling` arrays require string `head_sha`, `kind` (`review_slot`,
+  `worker`, `ci_wait`) and `status` (`requested`, `queued`, `granted`, `started`,
+  `waiting`, `released`, `finished`). Both permit only extra nonempty string
+  `run_id`, `timestamp`, `artifact`, `sha256`. Unknown fields, invalid enums,
+  missing required fields or invalid types keep the entire collection governing.
+  Malformed or unknown metadata fields also govern. Readiness flags and scheduling
+  records never supply scope, publication permission, reviewer coverage or Decisions.
+
+Use the iteration `operational` command for these records and supported publication
+receipts, then export `preparation-history` for `run_history` evidence. It preserves
+original operational JSON bytes in private storage and returns their path/hash.
+The export retains generic events and local choices as governing, including unknown
+event and envelope fields. Keep full original run history and all original user
+instructions, rules, scope and choices separately; the export is not a projection
+that can replace those sources. Never put arbitrary prose or a new constraint into
+an excluded string or artifact reference. Recollect live PR metadata through
+`review_context.py` before refresh; it checks head/base/title/body/readiness again
+before retaining the current snapshot. A concurrent change blocks that snapshot.
 
 ## Stored artifact and verification
 
