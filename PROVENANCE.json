@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.6.15",
+      "description": "Offline evaluation of normalized workflow traces with synthetic policy controls and a real-trace normalization and adoption guide. Reports are diagnostic-only and establish no real-agent compliance or resource savings."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.6.14",
       "description": "Report every cleanup comparison category key mismatch before validating verdicts so the single correction can repair complete source, field and decision enumeration; retain rejected diagnostics and unchanged retry budgets."
     },
