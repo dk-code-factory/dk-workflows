@@ -69,42 +69,9 @@ Run `python3 scripts/check.py` and `python3 scripts/test.py` (development depend
 
 Owned source provenance is recorded in `PROVENANCE.json`. No installed system skills, external plugins, credentials, private rules/state, caches, or benchmark results are distributed.
 
-## Configuration and guards
+## Plugin configuration and guards
 
-Architecture knowledge is maintained privately by three bundled roles on both
-hosts: `dk-architect`, `dk-architecture-review` and `dk-architecture-enforcer`.
-The shared `architecture` CLI route (also `dk-config architecture`) inspects,
-initializes and refreshes versioned catalogs, edits scoped rules, exports agent
-packets and evaluates exception requests. Local initialization uses clean pre-edit
-HEAD; PR preparation automatically uses the pinned target baseline. Each baseline
-owns its catalog, user-created rules and exception settings independently.
-Inspection and export require `--baseline SHA` or a current `--catalog HASH`; edit
-and delete select their baseline with the required `--expected HASH`. Configure
-user rules/settings separately for each baseline. Initializing or editing one
-baseline preserves other baselines' evidence. Former shared live catalogs require
-fresh initialization; fingerprinted historical files remain readable. Evidence-backed
-rules may be adopted automatically; uncertain conventions remain proposals.
-Conflicts and changes to existing obligations require explicit user resolution.
-
-Rules carry IDs/revisions, origin, source locations/fingerprints, POSIX file globs,
-recipient IDs and user-owned autoapproval policy. Empty recipients target only
-mandatory recipients: the coordinator, architecture reviewer, `dk-pr-iter`,
-`dk-pr-review`, `dk-pr-address-reviews` and `dk-pr-split-commits`. Skill identities
-also accept the `dk-workflows:` prefix and host suffixes. `all` targets everyone.
-Empty patterns remove file filtering; ** spans directories. Mandatory recipients
-always see the full catalog. Workers declare paths before editing and receive a
-refreshed packet when scope expands, including rename/deletion paths and nested
-handoffs. Export packets explicitly for agents outside DK execution. Exceptions
-cover one task/PR, revision, deviation, paths, code evidence and scope/Decisions;
-only the user can
-enable automatic approval or broaden its conditions. An independent enforcer
-retains approvals/rejections; reviewers cannot grant exceptions.
-
-Architecture review is mandatory alongside configured reviewers, whose settings
-and completion requirements are unchanged. Preparation and immutable review
-results pin catalogs, packets and approvals. Completion rejects missing coverage,
-violations and stale rule/code/scope evidence. See the
-[architecture contract](runtime/dk-architect/procedure.md) for commands and delivery.
+These settings describe the installed plugin's behavior in repositories where it is used.
 
 Use `dk-config` in plain English to inspect or change settings. There is no default reviewer. Commit messages, PR descriptions, and issue descriptions use bundled DK drafting by default. Unrelated DK workflows work without configured reviewers.
 
@@ -176,26 +143,12 @@ The value must be a positive integer number of seconds; invalid values fail befo
 starting the provider. This applies to Claude, Codex, and command providers used for
 reviews, preparation, Decisions, and drafting. It is not a deadline for the entire workflow.
 
-Iteration requests use distinct bounded runs. Interrupted work resumes its existing budget; a new request after a terminal run retains history and receives a new budget. Completion requires configured-reviewer evidence for the final tree and current scope/Decisions. Explicit human acceptance can cover recorded provider failures for that exact run and result; incomplete reviews remain incomplete in reports. Missing/unrun reviewers, changed evidence and actionable findings cannot be waived. Passing CI alone cannot substitute for review coverage; reports distinguish completed, reused, skipped and explicitly accepted failed reviewers. Authorized fully answered threads are resolved during reply processing, independently of final review/CI completion.
-
-Standalone reviews and iteration cycles share durable review sessions and immutable results. Fresh requests start fresh sessions; explicit interruption resumes can reuse completed reviewers with identical evidence. Configured reviewers run concurrently against the same pinned evidence, with separate immutable handoffs, correction attempts and telemetry. Findings are sorted by severity, path and line. Attribution, failures, skips and executed/reused reviewer lists follow configured reviewer order. The runner validates all descriptors and reusable checkpoints before launch. Iteration review-and-fix cycles remain sequential and retain their budgets. Optional statistics never supply cached review evidence.
-
 Interruption aborts this invocation's in-flight provider transport and prevents later provider or correction launches, then waits for reviewer cleanup and checkpoint work before releasing session ownership. Completed checkpoints remain available for exact-evidence resume. Unfinished reviewers remain unknown rather than provider failures; a resume reruns them. Genuine failures observed before interruption retain their classification.
 
 Reviewer description, execution and configuration diagnostics reuse one Codex
 plugin inventory within each command invocation. A later invocation reads the
 registry again; selected manifests and skill files are still checked on each
 resolution. This inventory reuse never supplies cached review findings.
-
-Tree-preserving iteration cleanup requires `run-state precheck-cleanup` before a
-regroup push or no-op assessment. Its immutable receipt binds the candidate and
-remote lease to the original review and current preparation; it cannot authorize
-completion. After publication, refresh final-head preparation, reconcile directly
-against the original review, and verify engineering criteria and exact-head CI.
-Version-2 attestations can retain coverage for source-verified discussion
-restatements and operational wording with unchanged engineering meaning. They
-preserve raw fingerprints, immutable results, reviewer packages and cycle budgets.
-Material or ambiguous changes remain blocking, including after cycle five.
 
 Known GitHub read operations retry transient connection and HTTP 5xx failures
 at most three times, with jitter and one shared deadline per read (60 seconds
