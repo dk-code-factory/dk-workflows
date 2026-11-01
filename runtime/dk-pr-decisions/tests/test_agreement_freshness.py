@@ -37,10 +37,10 @@ def add(package, text='Keep the transform local', replaces=None):
     return item
 
 
-def export(package):
+def export(package, local_decisions=None):
     state, _ = stored(package)
     with patch.object(api, 'gh_json', return_value=state['pr']):
-        package.decisions = api.decision_context(state)
+        package.decisions = api.decision_context(state, local_decisions)
     package.decisions['decisions'] = api.decision_records(state, package.decisions['local_decisions'])
     package.write('decisions.json', package.decisions)
 
@@ -115,7 +115,8 @@ def test_unusable_store_blocks_without_model_network_or_writes(package, monkeypa
         package.decisions.pop('agreement_binding')
         package.write('decisions.json', package.decisions)
     before = {str(p): p.read_bytes() for p in path.parent.rglob('*') if p.is_file()}
-    with patch.object(api, 'gh_json', side_effect=AssertionError('network')), patch.object(prep, 'analyze') as model:
+    with patch.object(agreement_binding.decisions_api(), 'gh_json', side_effect=AssertionError('network')), \
+            patch.object(prep, 'analyze') as model:
         with pytest.raises(ValueError, match='freshness check failed'):
             prep.collect(package.manifest_path)
         if failure != 'unbound':
@@ -233,6 +234,25 @@ def test_exact_evidence_and_supersession_govern_binding(package):
     state, _ = stored(package)
     records = api.decision_records(state)
     assert next(r for r in records if r['id'] == first['id'])['superseded_by'] == second['id']
+
+
+@pytest.mark.parametrize('field,value', [('fingerprint', '0' * 64), ('decision_ids', []),
+                                        ('version', True), ('store_root', '/another-store')])
+def test_restatement_binding_changes_must_follow_exported_records(package, field, value):
+    from shared.decision_restatements import additions
+    local = [{'text': 'Preserve the temporary imported choice', 'source': 'Exact user instruction'}]
+    export(package, local)
+    original = copy.deepcopy(package.decisions)
+    state, path = stored(package)
+    state['decisions'] = [{'text': 'Keep the supported transform',
+                           'references': [package.context['url'] + '#issuecomment-1']}]
+    api.retain_agreements(state)
+    api.save_state(state, path)
+    export(package, local)
+    assert additions(original, package.decisions)
+    package.decisions['agreement_binding'][field] = value
+    with pytest.raises(ValueError, match='agreement binding changed inconsistently'):
+        additions(original, package.decisions)
 
 
 def test_imported_choices_stay_temporary_and_recover_persisted_choice_and_history_in_another_process(package):

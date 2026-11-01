@@ -79,11 +79,21 @@ def test_edited_proposal_replaces_old_body_in_complete_current_evidence(tmp_path
 
 
 @pytest.mark.parametrize('failure', ['missing', 'unreadable', 'changed'])
-def test_required_evidence_failure_blocks_without_replacing_prior_agreements(tmp_path, failure):
+def test_required_evidence_failure_blocks_without_replacing_prior_agreements(tmp_path, monkeypatch, failure):
+    monkeypatch.chdir(tmp_path)
+    url = 'https://github.com/o/r/pull/2'
     comments = {'a': {'id': 'a', 'kind': 'general', 'url': 'https://github.com/o/r/pull/2#issuecomment-1',
-                      'createdAt': 'first', 'body': 'Use option 2'}}
-    prior = {'decisions': [{'text': 'Keep existing API', 'references': [comments['a']['url']]}]}
-    original = copy.deepcopy(prior)
+                      'createdAt': 'first', 'updatedAt': 'second', 'body': 'Use option 2'}}
+    prior = {'version': 2, 'pr': {'url': url, 'number': 2, 'body': '', 'headRefOid': 'a' * 40},
+             'decisions': [{'text': 'Keep existing API', 'references': [url + '#issuecomment-old']}],
+             'comments': {'old': {'url': url + '#issuecomment-old', 'body': 'Keep existing API'}},
+             'threads': {}, 'summaries': {}}
+    api.retain_agreements(prior)
+    path = api.storage.cache_path(url)
+    api.save_state(prior, path)
+    original = path.read_bytes()
+    saved = json.loads(original)['saved_decisions']
+    assert saved
     calls = []
     def execute(prompt, *_args, **_kwargs):
         calls.append(prompt)
@@ -96,11 +106,19 @@ def test_required_evidence_failure_blocks_without_replacing_prior_agreements(tmp
             if failure == 'unreadable':
                 evidence.mkdir()
         return '{}'
-    with patch.object(api, 'execute', side_effect=execute), pytest.raises((RuntimeError, OSError), match='evidence|No such file|directory'):
-        api.analyze(tmp_path, {'pr': {}, 'linked_issues': [], 'diff': ''}, prior,
-                    comments, {}, {'a'}, set(), set())
+    with patch.object(api, 'execute', side_effect=execute), \
+            patch.object(api, 'gh_json', return_value=prior['pr']), \
+            patch.object(api, 'run', return_value='viewer'), \
+            patch.object(api, 'collect_metadata', return_value=(comments, {})), \
+            patch.object(api, 'fetch_bodies', return_value={'a': comments['a']['body']}), \
+            patch.object(api, 'pr_diff', return_value=''), \
+            patch.object(api, 'linked_issues', return_value=[]), \
+            patch.object(api, 'resolve_pr_identity', return_value=(None, 'o/r', 'o/r')), \
+            pytest.raises((RuntimeError, OSError), match='evidence|No such file|directory'):
+        api._scan(url)
     assert len(calls) == 1
-    assert prior == original
+    assert path.read_bytes() == original
+    assert api.storage.read(path, url)['saved_decisions'] == saved
 
 
 def test_missing_cached_general_body_blocks_before_extraction(tmp_path):
