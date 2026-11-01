@@ -15,6 +15,8 @@ run_state.py --repo HOST/OWNER/REPO --pr NUMBER finish-run --status completed|li
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER thread --ref ID --head SHA --classification CLASS --evidence URL --reason TEXT [--production-lines N]
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER event --key UNIQUE_KEY --kind KIND --head SHA --detail TEXT
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER cycle --head SHA
+run_state.py --repo HOST/OWNER/REPO --pr NUMBER cycle-status
+run_state.py --repo HOST/OWNER/REPO --pr NUMBER cycle-recover --head SHA [--scope-file FILE] [--rules-file FILE] [--reconcile]
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER cycle-retry --head SHA
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER review-session --head SHA
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER review-result --head SHA --file RESULT.json
@@ -157,7 +159,8 @@ cycle. Save its JSON and register it through `review-result --head SHA --file FI
 Registration checks the allocated session, pinned head and current preparation.
 `review_results` links immutable artifacts to the active run, cycle and attempt.
 Each cycle/attempt keeps its allocated session. Changed preparation, scope or rules
-requires the next allowed cycle and a fresh session; an exhausted cap remains a
+requires the next allowed cycle and a fresh session, except for the proved-zero-launch
+recovery below; an exhausted cap remains a
 visible coverage limitation. If execution finished before result registration,
 save a JSON object whose `review_artifact` is that session's `results[-1]` and pass
 it to `review-result`. This registers the already completed evidence without
@@ -170,6 +173,57 @@ active run/cycle and its typed `usage_exhausted` outcome. Existing results witho
 that additive outcome use typed reviewer states through their original validated
 session. Event prose and earlier-run events cannot authorize a retry; do not
 rewrite immutable results or reset counters to supply retry evidence.
+
+Current-contract `cycle` allocation reserves its session in the same run-record
+mutation. `cycle-status` reports the allocation cap separately from cycles with
+mandatory dispatch intent and the two-per-run infrastructure recovery budget.
+Dispatch intent is recorded before invocation; it conservatively consumes a
+substantive cycle even if the transport never actually starts. An unknown launch
+state never refunds an allocation. Session states distinguish allocation,
+interruption, dispatch, provider failure and completion where retained evidence
+supports that classification.
+Known legacy completion or provider-failure state remains visible independently
+of launch certainty. It never supplies a missing dispatch journal or recovery proof.
+Untouched sessions receive initial-launch guidance without recovery, including
+an already allocated fifth session. Explicit abandoned-reservation recovery remains
+available; `next` does not infer abandonment from zero invocations. Drained failures
+receive eligible recovery or an explicit allowance/prior-dispatch limitation, with
+the next permitted cycle or exhausted-cap action.
+
+`cycle-recover` permits one prelaunch recovery of the latest cycle, at most two
+per active run. It requires ready current preparation, valid pinned bindings and
+mandatory proof of zero dispatch across the cycle's session history. It holds the
+same ownership lock as initialization/execution, retains a hashed original session
+snapshot, verifies the exact original run/cycle/attempt allocation under that lock,
+and fences stale workers before updating the attempt binding. Exact
+initialized session identity resumes the original session; changed head/base/tree,
+engineering scope, reviewer order or scope/rules text requires a fresh session.
+An unused reservation also gets a fresh session and leaves a tombstone at the old
+path. Pass the intended scope/rules files and follow the returned `resume` flag.
+An operational preparation refresh with the same engineering identity can resume.
+
+Missing/unreserved/legacy evidence, undrained executions, contradictory completed
+checkpoints/results and any configured or architecture dispatch intent deny this
+gate. A drained zero-dispatch failure cannot be silently resumed repeatedly:
+iteration session execution requires this bounded recovery grant. A subsequent
+prelaunch failure exhausts that cycle's infrastructure allowance. An interrupted
+multi-file recovery that retires/authorizes the session but fails to retain the
+run binding stays blocked for reconciliation. One immutable activation receipt is
+published only after the matching charge and replacement binding are durable;
+both resumed and replacement sessions require it for execution, finishing and
+result acceptance. `cycle-recover --reconcile --head SHA` with exact scope/rules
+validates the pending plan, current preparation, original proof and binding. It may
+restore that exact missing charge once before activation; an existing charge is
+preserved without another recovery or generation change. A failed receipt write
+after charging remains blocked until this explicit reconciliation succeeds.
+Missing, corrupt or conflicting proof/receipt and changed identity deny activation;
+never delete evidence or replay recovery to reset the budget. The original
+allocation, sessions, results and failures remain available. Usage retries have
+their existing independent bound; every usage-retried cycle is ineligible for
+prelaunch recovery because the earlier exhausted attempt dispatched. A later
+undispatched failure needs the next allowed allocation or a visible cap limitation.
+Ordinary exact-evidence
+interruption resume remains available. All existing completion checks still apply.
 
 Both completion stages validate the latest registered result against the active
 run and current tree, base, scope/Decisions and reviewer instructions, and require

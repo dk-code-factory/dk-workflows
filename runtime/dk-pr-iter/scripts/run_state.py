@@ -119,7 +119,7 @@ def start_run(record, *, resume=False):
     if active:
         snapshot = copy.deepcopy({k: v for k, v in record.items() if k != 'run_history'})
         record.setdefault('run_history', []).append(snapshot)
-    for field in ('cycles', 'cycle_retries', 'repairs', 'review_results', 'review_sessions', 'review_reconciliations', 'cleanup_prechecks'):
+    for field in ('cycles', 'cycle_retries', 'infrastructure_recoveries', 'repairs', 'review_results', 'review_sessions', 'review_reconciliations', 'cleanup_prechecks'):
         record[field] = []
     record.pop('preparation', None)
     record['iteration_run'] = {'id': uuid.uuid4().hex, 'status': 'active',
@@ -286,7 +286,13 @@ def next_cycle(record, head):
     number = len(record.setdefault("cycles", [])) + 1
     if number > 5:
         raise ValueError("five review cycles exhausted")
-    return append_unique(record, "cycles", {"number": number, "head": head}, "number")
+    item = append_unique(record, "cycles", {"number": number, "head": head}, "number")
+    run = record.get('iteration_run', {})
+    if run.get('contract_version') == 2:
+        # Reserve before returning the allocation: a later preparation failure
+        # must not leave an unprovable gap before session delegation.
+        review_session(record, head, Path(run['workflow_dir']) / 'iteration-record.json')
+    return item
 
 
 def review_attempt(record, head):
@@ -297,25 +303,230 @@ def review_attempt(record, head):
     if not cycles:
         raise ValueError('record a review cycle before launching reviewers')
     last = cycles[-1]
-    retries = [r for r in record.get('cycle_retries', []) if r['number'] == last['number']]
-    if head != (retries[-1]['head'] if retries else last['head']):
+    retries = [r for field in ('cycle_retries', 'infrastructure_recoveries')
+               for r in record.get(field, []) if r['number'] == last['number']]
+    latest = max(retries, key=lambda r: r.get('attempt', 2), default=last)
+    if head != latest['head']:
         raise ValueError('review head differs from recorded cycle')
     return {'iteration_run_id': run['id'], 'cycle': last['number'], 'attempt': 1 + len(retries)}
 
 
 def review_session(record, head, record_path):
-    work_gate(record, head)
+    prepared = work_gate(record, head)
     identity = review_attempt(record, head)
     entries = record.setdefault('review_sessions', [])
     item = next((v for v in entries if all(v[k] == value for k, value in identity.items())), None)
     if item is None:
         directory = record.get('iteration_run', {}).get('workflow_dir', str(Path(record_path).resolve().parent))
         item = {**identity, 'head': head, 'session_file': str(
-            Path(directory) / 'review-sessions' / (uuid.uuid4().hex + '.json'))}
+            (Path(directory) / 'review-sessions' / (uuid.uuid4().hex + '.json')).resolve())}
+        review_sessions.reserve(Path(item['session_file']), preparation_api.context_for(prepared), identity)
         entries.append(item)
     if item['head'] != head:
         raise ValueError('iteration review session head changed')
     return item
+
+
+def recover_cycle(record, head, record_path, *, scope='', rules=''):
+    """One proved-prelaunch retry per cycle, at most two per iteration run."""
+    require_head(head)
+    prepared = work_gate(record, head)
+    run = record.get('iteration_run', {})
+    if run.get('contract_version') != 2 or run.get('status') != 'active':
+        raise ValueError('prelaunch recovery requires an active current-contract run')
+    cycles = record.get('cycles', [])
+    if not cycles:
+        raise ValueError('no review cycle to recover')
+    last = cycles[-1]
+    number = last['number']
+    recoveries = record.setdefault('infrastructure_recoveries', [])
+    if any(item['number'] == number for item in recoveries):
+        raise ValueError('prelaunch recovery already recorded for this cycle')
+    if len(recoveries) >= 2:
+        raise ValueError('two infrastructure recoveries exhausted')
+    if any(item['number'] == number for item in record.get('cycle_retries', [])):
+        raise ValueError('usage-retried cycles cannot receive prelaunch recovery')
+    prior = review_attempt(record, last['head'])
+    candidates = [item for item in record.get('review_sessions', [])
+                  if item.get('iteration_run_id') == run['id'] and item.get('cycle') == number]
+    if len(candidates) != 1 or any(candidates[0].get(key) != value for key, value in prior.items()):
+        raise ValueError('review launch state is uncertain; no reserved session')
+    binding = candidates[0]
+    # Check the pinned bindings before consuming the recovery budget.
+    with bindings.pinned_bindings(prepared['reviewers']):
+        pass
+    context = preparation_api.context_for(prepared)
+    current = review_sessions.identity(context, prepared, prepared['reviewer_order'], scope, rules)
+    replacement = {**prior, 'attempt': prior['attempt'] + 1, 'head': head,
+        'session_file': str((Path(binding['session_file']).parent / (uuid.uuid4().hex + '.json')).resolve())}
+    evidence = review_sessions.recover_unlaunched(Path(binding['session_file']), context, current,
+                                                 binding, replacement)
+    replacement = evidence['activation']['payload']['binding']
+    item = {'number': number, 'attempt': prior['attempt'] + 1,
+            'prior_head': binding['head'], 'head': head, 'prior_session_file': binding['session_file'],
+            **evidence}
+    recoveries.append(item)
+    if not evidence['resume']:
+        review_sessions.reserve(Path(replacement['session_file']), context,
+            evidence['activation']['payload']['allocation'], activation=evidence['activation'])
+    record['review_sessions'].append(replacement)
+    item['session_file'] = replacement['session_file']
+    return item
+
+
+def reconcile_recovery(record, head, *, scope='', rules=''):
+    """Restore only the exact pending charge; never repeat session recovery."""
+    prepared = work_gate(record, head)
+    run = record.get('iteration_run', {})
+    if run.get('contract_version') != 2 or run.get('status') != 'active' or not record.get('cycles'):
+        raise ValueError('recovery reconciliation requires an active current-contract cycle')
+    number = record['cycles'][-1]['number']
+    bindings_for_cycle = [item for item in record.get('review_sessions', [])
+        if item.get('iteration_run_id') == run['id'] and item.get('cycle') == number]
+    if not bindings_for_cycle:
+        raise ValueError('no pending recovery session')
+    original = bindings_for_cycle[0]
+    saved = read(Path(original['session_file']), {})
+    plan = review_sessions.activation_plan(saved)
+    context = preparation_api.context_for(prepared)
+    current = review_sessions.identity(context, prepared, prepared['reviewer_order'], scope, rules)
+    if (plan['prior_binding'] != original or plan['identity'] != current
+            or plan['binding']['head'] != head or plan['prior_allocation'] != {
+                'iteration_run_id': run['id'], 'cycle': number, 'attempt': 1}
+            or plan['allocation'] != {'iteration_run_id': run['id'], 'cycle': number, 'attempt': 2}
+            or any(item['number'] == number for item in record.get('cycle_retries', []))):
+        raise ValueError('pending recovery identity changed')
+    proof = read(Path(plan['proof']['path']), {})
+    if (review_coverage.digest(proof) != plan['proof']['sha256']
+            or proof.get('iteration_allocation') != plan['prior_allocation']):
+        raise ValueError('pending recovery proof changed')
+    review_sessions.unlaunched(proof)
+    activation = saved['recovery_activation']
+    target = Path(plan['binding']['session_file'])
+    review_sessions.validate_storage(target, context)
+    item = {'number': number, 'attempt': 2, 'prior_head': original['head'], 'head': head,
+        'prior_session_file': original['session_file'], 'session_file': str(target),
+        'proof': plan['proof'], 'resume': plan['resume'], 'activation': activation}
+    recoveries = record.setdefault('infrastructure_recoveries', [])
+    existing = [entry for entry in recoveries if entry['number'] == number]
+    if existing and existing != [item]:
+        raise ValueError('recorded recovery differs from pending plan')
+    if not existing and (len(recoveries) >= 2 or bindings_for_cycle != [original]):
+        raise ValueError('pending recovery allowance or binding changed')
+    if existing and bindings_for_cycle != [original, plan['binding']]:
+        raise ValueError('recorded recovery binding changed')
+    # A lost final run write leaves either the reserved target or just the
+    # original fenced plan. Recreate only that exact unused target if needed.
+    if not target.exists() and not plan['resume']:
+        review_sessions.reserve(target, context, plan['allocation'], activation=activation)
+    target_data = read(target, {})
+    if (target_data.get('recovery_activation') != activation
+            or target_data.get('generation', 0) != plan['generation']
+            or ('identity' in target_data and target_data['identity'] != current)
+            or target_data.get('iteration_allocation') != plan['allocation']):
+        raise ValueError('pending recovery target changed')
+    if not Path(activation['path']).exists():
+        review_sessions.unlaunched(target_data)
+    if not existing:
+        recoveries.append(item)
+        record['review_sessions'].append(plan['binding'])
+    return item
+
+
+def recover_cycle_file(record_path, head, *, scope='', rules='', reconcile=False):
+    """Commit the run charge before making the recovery receipt available."""
+    if reconcile:
+        item = mutate(Path(record_path), {}, lambda record: reconcile_recovery(record, head, scope=scope, rules=rules))
+    else:
+        item = mutate(Path(record_path), {}, lambda record: recover_cycle(record, head, record_path, scope=scope, rules=rules))
+    def activate(record):
+        # Re-read under the run lock after the first mutation durably returned.
+        verified = reconcile_recovery(record, head, scope=scope, rules=rules)
+        if verified != item:
+            raise ValueError('recovery charge changed before activation')
+        prepared = work_gate(record, head)
+        review_sessions.activate(Path(item['session_file']), preparation_api.context_for(prepared), item['activation'])
+    mutate(Path(record_path), {}, activate)
+    return item
+
+
+def cycle_status(record):
+    """Report conservative launch accounting independently of allocation count."""
+    cycles = []
+    run_id = record.get('iteration_run', {}).get('id')
+    for cycle in record.get('cycles', []):
+        sessions = []
+        for binding in record.get('review_sessions', []):
+            if binding.get('cycle') != cycle['number'] or binding.get('iteration_run_id') != run_id:
+                continue
+            try:
+                if (type(binding.get('attempt')) is not int or binding['attempt'] < 1
+                        or not isinstance(binding.get('session_file'), str) or not binding['session_file']):
+                    raise ValueError('incomplete review session binding')
+                recovery = next((item for item in record.get('infrastructure_recoveries', [])
+                    if item['number'] == cycle['number'] and item['attempt'] == binding['attempt'] + 1
+                    and item['prior_session_file'] == binding['session_file']), None)
+                # Resumed attempts share a mutable path. Attribute the original
+                # attempt only from the snapshot retained when it was recovered.
+                if recovery:
+                    reference = recovery['proof']
+                    saved = read(Path(reference['path']), {})
+                    allocation = {key: binding[key] for key in ('iteration_run_id', 'cycle', 'attempt')}
+                    if (review_coverage.digest(saved) != reference['sha256']
+                            or saved.get('iteration_allocation') != allocation):
+                        raise ValueError('historical recovery proof changed')
+                    review_sessions.unlaunched(saved)
+                else:
+                    saved = read(Path(binding['session_file']), {})
+                if (not isinstance(saved, dict)
+                        or not isinstance(saved.get('execution_history', []), list)
+                        or any(not isinstance(item, dict) for item in saved.get('execution_history', []))
+                        or not isinstance(saved.get('reviews', {}), dict)
+                        or any(not isinstance(item, dict) for item in saved.get('reviews', {}).values())):
+                    raise ValueError('malformed session evidence')
+                history = saved.get('execution_history', [])
+                if history and (saved.get('launch_tracking_version') != 1
+                        or saved.get('invocations') != len(history)
+                        or any(item.get('number') != number or item.get('status') not in {'active', 'drained'}
+                               or not isinstance(item.get('launch_intents'), list)
+                               for number, item in enumerate(history, 1))):
+                    raise ValueError('malformed execution journal')
+                launched = any(item.get('launch_intents') for item in history)
+                status = ('completed' if saved.get('status') == 'completed' else
+                          'provider_failed' if (launched or saved.get('launch_tracking_version') != 1)
+                              and any(item.get('status') in {'failed', 'incomplete', 'exhausted'}
+                              for item in saved.get('reviews', {}).values()) else
+                          'interrupted' if saved.get('status') in {'active', 'incomplete'} and history
+                              and saved.get('session_version') in {1, 2} and isinstance(saved.get('identity'), dict)
+                              and any(item.get('status') == 'active' for item in history) else
+                          'launched' if launched else 'allocated')
+                try:
+                    review_sessions.unlaunched(saved)
+                    zero = True
+                except ValueError:
+                    zero = False
+                if recovery:
+                    status = 'recovered_unlaunched'
+                if saved.get('status') == 'superseded' and saved.get('prelaunch_recovery'):
+                    reference = saved['prelaunch_recovery']
+                    proof = read(Path(reference['path']), {})
+                    if review_coverage.digest(proof) == reference['sha256']:
+                        review_sessions.unlaunched(proof)
+                        zero, status = True, 'recovered_unlaunched'
+                if not launched and not zero and status not in {'completed', 'provider_failed', 'interrupted'}:
+                    status = 'unknown'
+                sessions.append({'attempt': binding['attempt'], 'session_file': binding['session_file'],
+                                 'state': status, 'launch_intent': bool(launched),
+                                 'proved_unlaunched': zero})
+            except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                sessions.append({'attempt': binding.get('attempt'), 'session_file': binding.get('session_file'),
+                                 'state': 'unknown', 'launch_intent': False, 'proved_unlaunched': False})
+        cycles.append({'number': cycle['number'], 'head': cycle['head'], 'sessions': sessions})
+    substantive = sum(any(s['launch_intent'] for s in c['sessions']) for c in cycles)
+    return {'allocated': len(cycles), 'substantive': substantive,
+            'remaining_allocations': max(0, 5 - len(cycles)), 'cap': 5,
+            'infrastructure_attempts': len(record.get('infrastructure_recoveries', [])),
+            'infrastructure_cap': 2, 'cycles': cycles}
 
 
 def register_review(record, output, head):
@@ -333,6 +544,9 @@ def register_review(record, output, head):
                    for key in ('path', 'sha256'))):
         raise ValueError('review_artifact requires nonempty string path and sha256')
     artifact = review_sessions.result_artifact(binding['session_file'], item)
+    session = read(Path(binding['session_file']), {})
+    if session.get('recovery_activation') and session.get('iteration_allocation') != identity:
+        raise ValueError('recovered result differs from the charged attempt')
     if (artifact['head'] != head or not compatible_reference(artifact, prepared)
             or artifact['pr_url'] != prepared['identity']['pr_url']):
         raise ValueError('review result differs from the active preparation')
@@ -359,7 +573,8 @@ def current_review(record, prepared):
                 or artifact['cycle'] != cycles[-1]['number']):
             raise ValueError('legacy result lacks coverage for this iteration run/cycle')
         return reference, artifact
-    attempt = 1 + sum(r['number'] == item['cycle'] for r in record.get('cycle_retries', []))
+    attempt = 1 + sum(r['number'] == item['cycle'] for field in ('cycle_retries', 'infrastructure_recoveries')
+                      for r in record.get(field, []))
     if (item['iteration_run_id'] != run['id'] or not cycles
             or item['cycle'] != cycles[-1]['number'] or item['attempt'] != attempt
             or not any(s['session_file'] == item['session_file'] and all(s[k] == item[k]
@@ -460,9 +675,10 @@ def legacy_review_options(record_path, context, prepared, reviewers, scope, rule
         return item
     binding = mutate(review_coverage.storage_path(record_path, context), {}, allocate)
     path = Path(binding['session_file'])
-    options = {'session_file': str(path), 'resume': path.exists(), 'cycle': binding['cycle']}
-    if path.exists():
-        session = read(path, {})
+    session = read(path, {})
+    initialized = path.exists() and session.get('reservation_version') != 1
+    options = {'session_file': str(path), 'resume': initialized, 'cycle': binding['cycle']}
+    if initialized:
         if session.get('identity') != review_sessions.identity(context, prepared, reviewers, scope, rules):
             raise ValueError('legacy review session evidence changed')
         if session.get('status') == 'completed':
@@ -500,9 +716,11 @@ def retry_exhausted_cycle(record, head):
     results = [r for r in record.get('review_results', []) if r.get('cycle') == number
                and r.get('iteration_run_id') == record.get('iteration_run', {}).get('id')]
     exhausted = False
+    prior_head = last['head']
     if results:
         reference = {k: results[-1][k] for k in ('path', 'sha256')}
         artifact = review_coverage.load(reference)
+        prior_head = artifact.get('head', prior_head)
         result = artifact['result']
         usage_exhausted = result.get('outcome') == 'usage_exhausted'
         if 'outcome' not in result:
@@ -525,7 +743,9 @@ def retry_exhausted_cycle(record, head):
     retries = record.setdefault("cycle_retries", [])
     if any(item["number"] == number for item in retries):
         raise ValueError("usage-limited review retry already recorded")
-    item = {"number": number, "prior_head": last["head"], "head": head}
+    item = {"number": number, "prior_head": prior_head, "head": head}
+    if record.get('iteration_run'):
+        item['attempt'] = 2 + sum(r['number'] == number for r in record.get('infrastructure_recoveries', []))
     retries.append(item)
     return item
 
@@ -599,7 +819,84 @@ def next_stage(record, head, record_path, *, verification=None, assessment=None)
         return stage('preparation', [record_path], task('Refresh Decisions and engineering preparation, then register it.', record_path), str(exc))
     try:
         _, reviewed = current_review(record, prepared)
+        if reviewed['result'].get('guard_failure'):
+            raise ValueError('registered review has an evidence guard failure')
     except (ValueError, OSError, KeyError) as exc:
+        budget = cycle_status(record)
+        last = budget['cycles'][-1] if budget['cycles'] else None
+        if last and last['sessions']:
+            latest = last['sessions'][-1]
+            latest_artifacts = [record_path] + ([latest['session_file']] if latest.get('session_file') else [])
+            try:
+                if latest['state'] == 'unknown':
+                    raise ValueError('session launch evidence is unknown')
+                saved = read(Path(latest['session_file']), {})
+                if not isinstance(saved, dict) or not saved:
+                    raise ValueError('session evidence is missing or malformed')
+            except (OSError, ValueError, TypeError):
+                return stage('review_evidence', latest_artifacts,
+                    task('Restore and verify the original session evidence before choosing execution or recovery; '
+                         'do not infer zero dispatch or reset counters.', record_path),
+                    'Session evidence is unavailable or uncertain.')
+            if saved.get('recovery_activation') or saved.get('prelaunch_recovery'):
+                try:
+                    review_sessions.require_activation(saved, Path(latest['session_file']))
+                except (ValueError, OSError, KeyError, TypeError):
+                    return stage('recovery_reconciliation', [record_path, latest['session_file']],
+                        task('Run cycle-recover --reconcile with the current head and exact scope/rules; '
+                             'verify the pending proof and durable charge before activation.', record_path),
+                        'Recovery activation is pending or damaged.')
+            if latest['proved_unlaunched'] or latest['state'] == 'interrupted':
+                history = saved.get('execution_history', [])
+                binding = next(item for item in record['review_sessions']
+                    if item['cycle'] == last['number'] and item['attempt'] == latest['attempt']
+                    and item['iteration_run_id'] == active['id'])
+                retained_identity = saved.get('identity') or (saved.get('recovery_activation') or {}).get('payload', {}).get('identity')
+                compatible = binding['head'] == head
+                if retained_identity:
+                    try:
+                        current = review_sessions.identity(preparation_api.context_for(prepared), prepared,
+                            prepared['reviewer_order'])
+                        # next has no new caller scope/rules text. Preserve their
+                        # retained hashes while comparing current governing evidence.
+                        current.update({key: retained_identity[key] for key in ('scope_text', 'rules_text')})
+                        compatible = compatible and current == retained_identity
+                    except (OSError, ValueError, TypeError, KeyError):
+                        return stage('review_evidence', [record_path, latest['session_file']],
+                            task('Restore and verify the retained session identity before execution or recovery.', record_path),
+                            'Session identity is unavailable or malformed.')
+                unused_grant = (bool(saved.get('recovery_activation'))
+                    and saved.get('prelaunch_resume_authorized') == saved.get('invocations', 0) + 1)
+                if compatible and (not history or unused_grant or latest['state'] == 'interrupted'):
+                    resume = 'session_version' in saved
+                    return {**stage('review', [record_path, latest['session_file']],
+                        recovery_command([*base, 'review-session', '--head', head], record_path),
+                        'Launch the existing initialized session with --resume; no recovery allowance is needed.' if resume else
+                        'Launch the existing unused reservation; no recovery allowance is needed.'),
+                        'session_file': latest['session_file'], 'resume': resume}
+                if latest['state'] == 'interrupted':
+                    return stage('review_evidence', latest_artifacts,
+                        task('Restore the exact interrupted session evidence and preparation before ordinary resume; '
+                             'undrained execution cannot authorize recovery.', record_path),
+                        'Interrupted session evidence differs from current preparation.')
+                reason = ('this cycle already used its infrastructure recovery'
+                    if any(item['number'] == last['number'] for item in record.get('infrastructure_recoveries', [])) else
+                    'the run used both infrastructure recoveries'
+                    if budget['infrastructure_attempts'] >= budget['infrastructure_cap'] else
+                    'a usage-retried cycle already dispatched a reviewer'
+                    if any(item['number'] == last['number'] for item in record.get('cycle_retries', [])) else
+                    'cycle-wide zero dispatch is unproved'
+                    if not all(item['proved_unlaunched'] for item in last['sessions']) else '')
+                if reason:
+                    remaining = budget['remaining_allocations']
+                    return stage('prelaunch_limitation', [record_path, latest['session_file']],
+                        task('Preserve the failed attempt and allocate the next allowed cycle.', record_path) if remaining else
+                        human('Report exhausted allocations and the unreviewed-tree limitation; do not start a sixth cycle.', record_path),
+                        f'Prelaunch recovery is unavailable: {reason}; {remaining} allocations remain.')
+                return stage('prelaunch_recovery', [record_path],
+                    task('Run cycle-recover with the current head and the exact intended scope/rules files; '
+                         'use its session_file and resume flag. The gate verifies zero launch under ownership.', record_path),
+                    str(exc))
         action = (human('The five-cycle budget is exhausted; report coverage and required human decisions.', record_path)
                   if len(record.get('cycles', [])) >= 5 else
                   recovery_command([*base, 'review-session', '--head', head], record_path))
@@ -728,6 +1025,7 @@ def main():
     p.add_argument("--pr", type=int)
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("show")
+    sub.add_parser('cycle-status', help='Report allocations, launch evidence and infrastructure recovery budget')
     sub.add_parser('preparation-history', help='Export typed preparation evidence; retain the full run separately')
     operational = sub.add_parser('operational', help='Retain typed readiness, scheduling or publication bookkeeping')
     operational.add_argument('--field', choices=('readiness_transitions', 'scheduling', 'publication_receipts'), required=True)
@@ -769,6 +1067,11 @@ def main():
         e.add_argument("--" + arg, required=True)
     c = sub.add_parser("cycle"); c.add_argument("--head", required=True)
     cr = sub.add_parser("cycle-retry"); cr.add_argument("--head", required=True)
+    recovery = sub.add_parser('cycle-recover', help='Recover the last cycle only with mandatory proof of zero reviewer launch')
+    recovery.add_argument('--reconcile', action='store_true', help='Reconcile the exact pending recovery charge and activation')
+    recovery.add_argument('--head', required=True)
+    recovery.add_argument('--scope-file')
+    recovery.add_argument('--rules-file')
     session = sub.add_parser('review-session'); session.add_argument('--head', required=True)
     result = sub.add_parser('review-result')
     result.add_argument('--head', required=True); result.add_argument('--file', required=True)
@@ -804,6 +1107,7 @@ def main():
             path = base / f"pr-{a.pr}.json"
             default = {"pr": a.pr, "threads": {}, "events": [], "cycles": [], "cycle_retries": [], "repairs": [], "reruns": [], "local_decisions": []}
             if a.command == "show": result = read(path, default)
+            elif a.command == 'cycle-status': result = cycle_status(read(path, default))
             elif a.command == 'preparation-history': result = preparation_history(read(path, default))
             elif a.command == 'operational':
                 result = mutate(path, default, lambda d: record_operational(d, a.field, a.file))
@@ -837,6 +1141,10 @@ def main():
                     "head": a.head, 'iteration_run_id': d.get('iteration_run', {}).get('id')}, "key"))
             elif a.command == "cycle": result = mutate(path, default, lambda d: next_cycle(d, a.head))
             elif a.command == "cycle-retry": result = mutate(path, default, lambda d: retry_exhausted_cycle(d, a.head))
+            elif a.command == 'cycle-recover':
+                result = recover_cycle_file(path, a.head, reconcile=a.reconcile,
+                    scope=Path(a.scope_file).read_text() if a.scope_file else '',
+                    rules=Path(a.rules_file).read_text() if a.rules_file else '')
             elif a.command == 'review-session': result = mutate(path, default, lambda d: review_session(d, a.head, path))
             elif a.command == 'review-result':
                 result = mutate(path, default, lambda d: register_review(d, json.loads(Path(a.file).read_text()), a.head))

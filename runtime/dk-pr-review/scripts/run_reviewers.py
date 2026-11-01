@@ -434,6 +434,10 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             checking = shared_guard = False
             with worker_stats.invocation(name, job['handoff'], preparation['reviewers'][name]) if worker_stats else nullcontext():
                 try:
+                    if session:
+                        checking = True
+                        session.launch(name)
+                        checking = False
                     result = run_skill_reviewer(provider_map[name], job['skill'], job['path'], checkout)
                 finally:
                     if worker_stats:
@@ -581,6 +585,8 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
     preparation_api.validate(preparation, context, decisions)
     if preparation.get('preparation_version', 1) >= 3 and not guard_failures:
         try:
+            if session:
+                session.launch('architecture-review')
             architecture_result = architecture.review(preparation['architecture'], context, decisions)
             architecture_data = architecture.load(architecture_result)['result']
             if not architecture_data['complete']:

@@ -25,6 +25,50 @@ After initial fixes, perform at most **five** sequential review-and-fix cycles. 
 
 A final-cycle code or test fix without subsequent review leaves the final tree unreviewed. Report that limitation and the exhausted cap; passing CI or coordinator verification cannot supply configured-reviewer coverage. Do not start a sixth cycle or reset the run to bypass this limit. A tree-equivalent regroup may retain coverage when scope, Decisions, base and reviewer instructions match. After mandatory cleanup, equivalent preparation wording can instead use the independent reconciliation gate described in [series cleanup](iteration-series-cleanup.md); substantive scope changes still require review within the existing budget.
 
+For a failure before reviewer dispatch, inspect `run_state.py cycle-status` and
+use `cycle-recover --head CURRENT_HEAD [--scope-file FILE] [--rules-file FILE]`
+after restoring ready preparation. Supply the intended complete scope/rules text,
+including the original files for an unchanged-evidence resume. Allocation reserves
+the session before delegation. Mandatory session evidence records dispatch intent
+before configured or architecture reviewer invocation and marks execution drained
+only after worker cleanup. Missing/legacy evidence, an undrained invocation,
+contradictory checkpoints/results, an active owner or any dispatch intent denies
+this recovery. Intent is conservative: a crash after intent cannot prove whether
+the provider actually started.
+
+An untouched reservation or initialized session with no execution receives normal
+initial-launch guidance, including the fifth allocated cycle. Reading `next` never
+consumes recovery. If delegation was interrupted before initialization and its
+abandonment is established, explicitly use `cycle-recover` to fence that unused
+reservation. A drained zero-dispatch failure receives recovery guidance only when
+the entire cycle and both allowances are eligible. Exhausted or ineligible recovery
+reports a limitation and the next permitted allocation, or the five-cycle stop.
+
+Allow at most **one prelaunch recovery per cycle and two per run**. The command
+retains the original allocation, failure results and an immutable session snapshot;
+it consumes a separate infrastructure recovery allowance and keeps the same cycle
+number. Follow its returned `session_file` and `resume`: an initialized session with
+identical head/base/tree, engineering scope, reviewer order and scope/rules text
+resumes with `--resume`; changed evidence or an unused reservation gets a fresh
+session while the old path is fenced. A repeated prelaunch failure requires a
+visible limitation when that allowance is exhausted; do not silently resume it or
+reset counters. Exact-evidence interruption after dispatch still follows ordinary
+session resume. Usage retries remain separately bounded. A usage-retried cycle is
+ineligible for prelaunch recovery because its earlier exhausted attempt dispatched,
+even if the replacement attempt did not. Preserve that failure and use the next
+allowed cycle, or report the exhausted allocation cap. Neither path supplies final-tree
+coverage or permits a sixth cycle. Report allocated cycles, cycles with dispatch
+intent, uncertain launch states and infrastructure recoveries separately.
+
+Recovered sessions and replacement reservations require an immutable activation
+receipt written only after the recovery charge and replacement binding are durable.
+Pending or damaged evidence blocks execution, finishing and result acceptance.
+Use `cycle-recover --reconcile --head CURRENT_HEAD` with the original scope/rules
+files to validate the exact pending plan, proof, preparation and charge, restore a
+missing charge once, and activate it without replaying recovery or moving its
+generation. Changed or contradictory evidence stays blocked; never delete evidence
+or reset counters to make reconciliation succeed.
+
 An exhausted reviewer does not block a cycle when another configured reviewer completes; report the skip. Other incomplete reviews remain blockers unless explicitly accepted by the human. Always attempt the remaining configured reviewers after a provider failure; do not disable them or stop at the first failed reviewer.
 
 ### Explicit acceptance of reviewer failures

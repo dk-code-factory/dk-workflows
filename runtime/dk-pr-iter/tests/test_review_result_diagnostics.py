@@ -30,6 +30,8 @@ def test_malformed_review_result_cli_has_diagnostic_without_mutating_record(
     head = 'a' * 40
     # Preparation gating is independent of parsing external runner output.
     monkeypatch.setattr(state, 'work_gate', lambda *args: {'preparation_id': 'ready', 'reviewers': {}})
+    monkeypatch.setattr(state.preparation_api, 'context_for', lambda *_: {
+        'repository': str(tmp_path / 'repository'), 'checkout': str(tmp_path / 'checkout')})
     record = {}
     state.start_run(record)
     state.next_cycle(record, head)

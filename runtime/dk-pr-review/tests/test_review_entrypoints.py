@@ -77,8 +77,9 @@ def test_legacy_main_allocates_registers_and_returns_completed_session(main_call
     record = read(path, {})
     assert record['iteration_run'] == original['iteration_run']
     assert record['cycles'] == original['cycles']
-    assert len(record['review_sessions']) == len(record['review_results']) == 1
-    binding, registered = record['review_sessions'][0], record['review_results'][0]
+    assert len(record['review_sessions']) == 2 and len(record['review_results']) == 1
+    assert record['review_sessions'] == original['review_sessions']
+    binding, registered = record['review_sessions'][-1], record['review_results'][0]
     assert binding['cycle'] == registered['cycle'] == 2
     assert binding['attempt'] == registered['attempt'] == 1
     assert binding['iteration_run_id'] == registered['iteration_run_id'] == record['iteration_run']['id']
@@ -126,8 +127,9 @@ def test_main_resumes_checkpoint_after_interrupt_before_aggregate_finish(
     if route == 'legacy':
         record = read(run_path, {})
         assert record['review_results'] == []
-        assert len(record['review_sessions']) == 1
-        session_path = Path(record['review_sessions'][0]['session_file'])
+        assert record['review_sessions'] == original_record['review_sessions']
+        assert len(record['review_sessions']) == 2
+        session_path = Path(record['review_sessions'][-1]['session_file'])
     interrupted = read(session_path, {})
     assert interrupted['status'] == 'active' and interrupted['invocations'] == 1
     assert interrupted['results'] == []
@@ -161,7 +163,9 @@ def test_main_resumes_checkpoint_after_interrupt_before_aggregate_finish(
         record = read(run_path, {})
         assert record['iteration_run'] == original_record['iteration_run']
         assert record['cycles'] == original_record['cycles']
-        assert len(record['review_sessions']) == len(record['review_results']) == 1
+        assert record['review_sessions'] == original_record['review_sessions']
+        assert len(record['review_sessions']) == 2 and len(record['review_results']) == 1
+        assert record['review_results'][0]['session_file'] == record['review_sessions'][-1]['session_file']
 
 
 @pytest.mark.parametrize(('mode', 'extra'), [
