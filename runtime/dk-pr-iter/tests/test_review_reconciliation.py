@@ -511,11 +511,10 @@ def test_comparison_index_diagnostics(category, kind):
                'decision_additions': {'decision': {}}, 'evidence': {}}
     value = {'equivalent': True, 'rationale': 'Inspect all required identities.',
              'fields': {}, 'sources': {}, 'decisions': {}}
-    # Empty preceding categories let this test reach the selected index check.
-    for preceding in ['fields', 'sources', 'decisions']:
-        if preceding == category:
-            break
-        binding[{'fields': 'fields', 'sources': 'changed_sources', 'decisions': 'decision_additions'}[preceding]] = []
+    # Only the selected category has required identities.
+    for other in ['fields', 'sources', 'decisions']:
+        if other != category:
+            binding[{'fields': 'fields', 'sources': 'changed_sources', 'decisions': 'decision_additions'}[other]] = []
     required = {'fields': 'field', 'sources': 'source', 'decisions': 'decision'}[category]
     value[category] = {'missing': {}, 'unexpected': {required: {}, 'extra': {}},
                        'both': {'extra': {}}, 'list': [], 'null': None}[kind]
@@ -528,6 +527,66 @@ def test_comparison_index_diagnostics(category, kind):
     else:
         assert ('missing: ' + json.dumps([] if kind == 'unexpected' else [required])) in detail
         assert ('unexpected: ' + json.dumps([] if kind == 'missing' else ['extra'])) in detail
+
+
+@pytest.mark.parametrize('malformed', [False, True])
+def test_comparison_reports_all_index_errors_before_verdicts(malformed):
+    binding = {'fields': ['/boundary'], 'changed_sources': ['feedback/0'],
+               'comparison_version': 2, 'decision_additions': {'agreement': {}}, 'evidence': {}}
+    value = {'equivalent': True, 'rationale': 'Compare both preparations.',
+             'fields': {'extra-field': {}}, 'sources': {'extra-source': {}},
+             'decisions': [] if malformed else {'extra-decision': {}}}
+    with pytest.raises(model_diagnostics.FieldError) as caught:
+        reconcile.validate_comparison(value, binding)
+    detail = str(caught.value)
+    for category, required, extra in [('fields', '/boundary', 'extra-field'),
+                                      ('sources', 'feedback/0', 'extra-source'),
+                                      ('decisions', 'agreement', 'extra-decision')]:
+        if malformed and category == 'decisions':
+            assert 'decisions: expected an object' in detail
+        else:
+            assert category + ': indexed keys differ' in detail
+            assert 'missing: ' + json.dumps([required]) in detail
+            assert 'unexpected: ' + json.dumps([extra]) in detail
+
+
+@pytest.mark.parametrize('repair', [False, True])
+def test_multiple_index_errors_share_one_correction(scenario, monkeypatch, repair):
+    s = scenario
+    s.refresh()
+    prompts = []
+    def provider(prompt, checkout, *, attempt=0, inherit_architecture=True):
+        s.calls.append(attempt)
+        prompts.append(prompt)
+        binding = json.JSONDecoder().raw_decode(prompt[prompt.index('{"binding":'):])[0]['binding']
+        value = s.comparison(binding)
+        if not attempt or not repair:
+            value['fields'].pop(next(iter(value['fields'])))
+            value['sources'] = {'unexpected/source': {}}
+        if attempt:
+            hint = prompt.split('Correction: ', 1)[1].split('\nReturn ', 1)[0]
+            assert 'fields: indexed keys differ' in hint
+            assert 'sources: indexed keys differ' in hint
+            assert 'unexpected/source' in hint
+            assert all(key in hint for key in binding['changed_sources'])
+        return json.dumps(value)
+    monkeypatch.setattr(executors, 'execute', provider)
+    if repair:
+        assert s.run()['status'] == 'reconciled'
+    else:
+        before = s.path.read_bytes()
+        with pytest.raises(model_diagnostics.ValidationFailure) as caught:
+            s.run()
+        path = Path(caught.value.action['artifacts'][0])
+        saved = read(path, {})
+        assert saved['status'] == 'rejected'
+        assert all('sources: indexed keys differ' in item['validation']['detail'] for item in saved['attempts'])
+        retained = path.read_bytes()
+        with pytest.raises(model_diagnostics.ValidationFailure):
+            s.run()
+        assert path.read_bytes() == retained and s.path.read_bytes() == before
+        assert Path(s.reference['path']).read_bytes() == s.original_bytes
+    assert s.calls == [0, 1]
 
 
 @pytest.mark.parametrize('kind', ['missing', 'unexpected', 'list'])
