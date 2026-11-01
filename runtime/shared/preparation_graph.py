@@ -66,20 +66,45 @@ def source_identity(key, source, checkout, content):
             shape = 'threads' if inline else 'conversation'
             return category + ':github:' + pr['url'] + ':' + shape
     # Explicit stable identities permit relocation without conflating opaque files.
-    if (isinstance(value, dict) and type(value.get('evidence_version')) is int
-            and value['evidence_version'] == 1 and isinstance(value.get('source_id'), str)):
+    if (isinstance(value, dict) and any(type(value.get(marker)) is int and value[marker] == 1
+            for marker in ('evidence_version', 'preparation_history_version'))
+            and isinstance(value.get('source_id'), str)):
         return category + ':id:' + value['source_id']
     return category + ':path:' + str(Path(source['path']).absolute())
 
 
+def operational_records(key, records):
+    """Recognize exact operational shapes, without interpreting prose."""
+    common = {'head_sha', 'run_id', 'timestamp', 'artifact', 'sha256'}
+    schemas = {
+        'readiness_transitions': ({'phase', 'before', 'after', 'outcome'}, {
+            'phase': {'before', 'intent', 'result', 'after'},
+            'before': {'draft', 'ready'}, 'after': {'draft', 'ready'},
+            'outcome': {'pending', 'verified', 'not_applied', 'uncertain', 'failed'}}),
+        'scheduling': ({'kind', 'status'}, {
+            'kind': {'review_slot', 'worker', 'ci_wait'},
+            'status': {'requested', 'queued', 'granted', 'started', 'waiting', 'released', 'finished'}}),
+    }
+    if key not in schemas or not isinstance(records, list):
+        return False
+    required, enums = schemas[key]
+    return all(isinstance(record, dict) and required | {'head_sha'} <= record.keys()
+               and record.keys() <= common | required
+               and all(isinstance(v, str) and bool(v) for v in record.values())
+               and all(record[field] in choices for field, choices in enums.items())
+               for record in records)
+
+
 def operational_unknown(value):
-    """Only declared counters/status/receipts are operational; new fields govern."""
+    """Only declared typed bookkeeping is operational; new fields govern."""
     result = {}
     counters = {'cycles', 'cycle_retries', 'repairs', 'reruns'}
     statuses = {'pending', 'queued', 'in_progress', 'success', 'failure', 'neutral',
                 'cancelled', 'skipped', 'timed_out'}
     receipt_fields = {'url', 'head_sha', 'sha256', 'outcome', 'timestamp', 'artifact', 'kind'}
     for key, item in value.items():
+        if operational_records(key, item):
+            continue
         if key in counters and type(item) is int and item >= 0:
             continue
         if key == 'publication_receipts' and isinstance(item, list) and all(
@@ -117,7 +142,8 @@ def semantic(key, content):
             return {**value, 'data': {k: v for k, v in value['data'].items() if k != 'head_sha'}}
         return {k: v for k, v in value.items() if k != 'head_sha'}
     if key == 'metadata' and isinstance(value, dict):
-        return {k: v for k, v in value.items() if k != 'headRefOid'}
+        return {k: v for k, v in value.items() if k != 'headRefOid'
+                and not (k == 'isDraft' and type(v) is bool)}
     if key == 'patch':
         # Full Git entries are compared independently, including modes and objects.
         return {'derived_from_git': True}

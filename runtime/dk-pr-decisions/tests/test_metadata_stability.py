@@ -22,6 +22,7 @@ api = module('metadata_decisions', 'dk-pr-decisions/scripts/decisions.py')
 state_api = module('metadata_run', 'dk-pr-iter/scripts/run_state.py')
 runner = module('metadata_runner', 'dk-pr-review/scripts/run_reviewers.py')
 completion = module('metadata_completion', 'dk-pr-iter/scripts/completion.py')
+context_api = module('metadata_context', 'dk-pr-review/scripts/review_context.py')
 
 
 def state(url='https://github.com/o/r/pull/1'):
@@ -294,6 +295,88 @@ def test_full_workflow_operational_refresh_resume_and_completion(tmp_path, monke
     assert state_api.next_stage(record, package.head, record_path)['stage'] == 'engineering_verification'
     assert state_api.next_stage(record, package.head, record_path, verification=verification)['stage'] == 'cleanup'
     assert record == before_stage
+
+
+def test_live_readiness_and_scheduling_refresh_without_engineering_model_calls(tmp_path):
+    package = Package(tmp_path)
+    record = {}
+    state_api.start_run(record)
+    live = {'number': 1, 'url': package.context['url'], 'title': 'Transform fix', 'body': '',
+            'isDraft': True, 'headRefOid': package.head, 'baseRefOid': package.head,
+            'headRefName': 'topic', 'baseRefName': 'main',
+            'headRepository': {'nameWithOwner': 'example/fixture'}, 'files': [{'path': 'transform.py'}]}
+    reads = []
+    captures = []
+    original_command = context_api.command
+    def github(args, cwd):
+        if args[0] != 'gh':
+            return original_command(args, cwd)
+        reads.append(args)
+        if args[1:3] == ['pr', 'view']:
+            return json.dumps(live)
+        if args[1:3] == ['pr', 'diff']:
+            return Path(package.context['patch']).read_text()
+        return json.dumps([[{'filename': 'transform.py', 'status': 'modified', 'additions': 1, 'deletions': 1}]])
+    def collect():
+        with patch.object(context_api, 'command', side_effect=github):
+            context = context_api.fetch(package.repo, live['url'])
+        package.write('context.json', context)
+        capture = package.write('history-' + str(len(captures)) + '.json', state_api.preparation_history(record))
+        captures.append(capture)
+        package.manifest['evidence']['run_history'] = [str(capture)]
+        package.write('manifest.json', package.manifest)
+        return context
+    package.manifest['mode'] = 'iteration'
+    package.manifest['evidence']['run_history'] = ['history.json']
+    package.manifest['source_modes'] = {'run_history/0': 'capture'}
+    package.write('manifest.json', package.manifest)
+    context = collect()
+    first = package.prepare()
+    state_api.attach_preparation(record, first['artifact'], live['url'], package.head)
+    raw_sources = []
+    for phase in ('before', 'intent', 'result', 'after'):
+        raw = package.write('readiness-' + phase + '.json', {
+            'head_sha': package.head, 'phase': phase, 'before': 'draft', 'after': 'ready',
+            'outcome': 'verified' if phase in {'result', 'after'} else 'pending'})
+        raw_sources.append((raw, raw.read_bytes()))
+        state_api.record_operational(record, 'readiness_transitions', raw)
+    live['isDraft'] = False
+    context = collect()
+    old = prep.read(first['artifact'])
+    with patch.object(prep, 'analyze') as model:
+        ready = prep.prepare(package.manifest_path, package.versions, previous_preparation=first['artifact'])
+    model.assert_not_called()
+    assert ready['refresh']['model_call_count'] == 0
+    assert ready['refresh']['changed_paths'] == ready['refresh']['changed_sources'] == []
+    assert ready['engineering_id'] == first['engineering_id']
+    state_api.attach_preparation(record, ready['artifact'], live['url'], package.head)
+    for field, payload in (
+            ('scheduling', {'kind': 'review_slot', 'status': 'granted'}),
+            ('publication_receipts', {'kind': 'ready', 'outcome': 'verified'})):
+        raw = package.write(field + '.json', {'head_sha': package.head, **payload})
+        state_api.record_operational(record, field, raw)
+    collect()
+    with patch.object(prep, 'analyze') as model:
+        scheduled = prep.prepare(package.manifest_path, package.versions, previous_preparation=ready['artifact'])
+    model.assert_not_called()
+    assert scheduled['refresh']['model_call_count'] == 0
+    assert scheduled['engineering_id'] == first['engineering_id']
+    current = prep.read(scheduled['artifact'])
+    assert current['analysis'] == old['analysis'] and current['graph'] == old['graph']
+    assert len(set(captures)) == 3 and all(path.exists() for path in captures)
+    assert len([args for args in reads if args[1:3] == ['pr', 'view']]) == 9
+    assert prep.read(prep.source_path(current, 'metadata'))['isDraft'] is False
+    assert prep.read(prep.source_path(old, 'metadata'))['isDraft'] is True
+    retained = state_api.preparation_history(record)['operational']['readiness_transitions']
+    for receipt, (source, raw) in zip(retained, raw_sources):
+        assert Path(receipt['artifact']).read_bytes() == source.read_bytes() == raw
+        assert prep.file_hash(receipt['artifact']) == receipt['sha256']
+    # A newly appended actual instruction still needs an impact decision.
+    package.write('user.json', {'instruction': 'Preserve transform and add a new compatibility guarantee.'})
+    with patch.object(prep, 'analyze', return_value=retain(current)) as model:
+        changed = prep.prepare(package.manifest_path, package.versions, previous_preparation=scheduled['artifact'])
+    model.assert_called_once()
+    assert 'user_instructions/0' in changed['refresh']['changed_sources']
 
 
 def test_durable_captures_survive_export_and_checkout_removal_live_rules_still_block(tmp_path):

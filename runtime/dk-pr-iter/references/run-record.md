@@ -6,6 +6,8 @@ Commands:
 
 ```text
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER show
+run_state.py --repo HOST/OWNER/REPO --pr NUMBER preparation-history
+run_state.py --repo HOST/OWNER/REPO --pr NUMBER operational --field readiness_transitions|scheduling|publication_receipts --file RECORD.json
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER start-run
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER resume-run
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER adopt-run
@@ -57,9 +59,31 @@ On restart or a changed head, run the controller's `reconcile` after refreshing 
 
 Before initial changes/rebase/fixes, assemble preparation using
 [the Decisions procedure](../../dk-pr-decisions/references/preparation.md). Retain
-old run counters and operational history. Save immutable run-history snapshots as
-preparation evidence so recording a cycle or event does not invalidate its own input.
+old run counters and operational history. Export `preparation-history` to immutable
+private JSON and use it as a captured `run_history` source, at the same manifest
+slot on refresh. Preserve the complete run record separately. The export includes
+generic events and local choices as governing; arbitrary event text is never
+classified as operational. Keep additional constraints, unanswered requests and
+supersession in original governing evidence sources.
 The active run record remains mutable; `work-gate` separately detects new local choices.
+
+Record readiness and scheduling with `operational`, using only the exact fields
+in [the preparation contract](../../dk-pr-decisions/references/preparation-contract.md).
+For example, a readiness result is `{"head_sha":"SHA","phase":"result",
+"before":"draft","after":"ready","outcome":"verified"}`; a granted review
+slot is `{"head_sha":"SHA","kind":"review_slot","status":"granted"}`.
+The command retains the exact input bytes privately, assigns their `artifact` and
+`sha256`, and appends the typed record without spending a review cycle. Publication
+receipts require `head_sha`, `kind` (`ready`, `push`, `reply`, `ci-rerun`,
+`review-request`) and `outcome` (`pending`, `verified`, `not_applied`, `uncertain`,
+`failed`); optional `url` and `timestamp` are strings. Caller-supplied artifact/hash
+fields, unknown fields and malformed records are rejected. Keep non-operational
+content in governing evidence; never convert arbitrary user text into a receipt.
+The records do not authorize publication or verify remote success. Use the existing
+publication helper and live checks, then record their observed operational result.
+Save a new `preparation-history` capture after these updates and recollect current
+PR metadata through `review_context.py` before refreshing preparation. Readiness,
+scheduling and receipt changes alone preserve the engineering ID with zero model calls.
 
 ```text
 run_state.py --repo HOST/OWNER/REPO --pr NUMBER preparation --file PREPARATION.json --pr-url PR_URL --head SHA [--expected-parent PARENT_ID]

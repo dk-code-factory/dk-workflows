@@ -34,6 +34,15 @@ defines response fields, evidence normalization and stored artifacts.
    python3 dk-pr-decisions/scripts/decisions.py prepare --input-manifest MANIFEST.json --output-dir PRIVATE_DIR [--previous-preparation FILE] [--full-analysis]
    ```
 
+For iteration history, use `run_state.py preparation-history` and save its JSON as
+an immutable `run_history` capture. Use `run_state.py operational --field FIELD
+--file RECORD.json` for typed readiness transitions, scheduling and publication
+receipts under [the data contract](preparation-contract.md). Keep each exact original
+human instruction, constraint and choice in governing sources. Record generated
+operational status in the typed history instead of appending status prose to those
+instruction files. Generic events and unfamiliar history fields remain governing.
+The full run record remains available for recovery and gate validation.
+
 The API v2 envelope returns `data.artifact`, `preparation_id`, `engineering_id`, `readiness` and
 `refresh`. Consumers validate readiness and all current fingerprints, including
 choices, rules and reviewer sources. Never substitute local analysis to pass a gate.
@@ -72,6 +81,9 @@ or unverifiable selected parents block; old source paths use verified retained c
 
 - Identical bindings reuse the artifact with zero model calls. Supported operational
   changes refresh evidence bindings while preserving analysis exactly, also with zero.
+  Recollect live PR metadata first, including draft/ready state, through
+  `review_context.py`; its deterministic scope/head/readiness checks require no model.
+  Reuse never substitutes for the live checks before work or publication.
 - Changed watches select conclusions and their transitive dependents. New files,
   sources and unmapped changes always need impact decisions. Graph mappings are AI
   evidence, not proof of complete dependency coverage; inspect all changed inputs.

@@ -632,7 +632,7 @@ def test_collected_deleted_head_context_retains_verified_base_identity(repo, mon
     run(repo, 'commit', '-qm', 'reachable deleted-fork head')
     head = run(repo, 'rev-parse', 'HEAD')
     url = 'https://github.com/base/repo/pull/1'
-    metadata = {'number': 1, 'url': url, 'title': 'Core task', 'body': 'Core change',
+    metadata = {'number': 1, 'url': url, 'title': 'Core task', 'body': 'Core change', 'isDraft': False,
         'baseRefName': 'main', 'baseRefOid': base, 'headRefName': 'topic', 'headRefOid': head,
         'headRepository': head_repository, 'isCrossRepository': True, 'files': [{'path': 'src/core.py'}]}
     rest = {'number': 1, 'html_url': url, 'head': {'sha': head, 'ref': 'topic', 'repo': None},

@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.6.10",
+      "description": "Typed readiness, scheduling and publication preparation evidence with conservative governing-field handling and deterministic live PR metadata revalidation."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.6.9",
       "description": "Reduce preparation prompts and model-facing metadata while preserving governing analysis and evidence; add opt-in compact reviewer handoffs with active Decisions, assigned guidance, fingerprinted originals and unchanged validation gates."
     },

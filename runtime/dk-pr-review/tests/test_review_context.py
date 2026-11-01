@@ -47,11 +47,22 @@ elif sys.argv[1]=='api':
 elif sys.argv[1:3]==['pr','view']:
  sha=os.environ.get('GH_FIXTURE_SHA','a'*40)
  base=os.environ.get('GH_FIXTURE_BASE_SHA',sha)
- if mode=='moving' and sys.argv[-1]=='headRefOid,baseRefOid': sha='b'*40
+ if mode=='moving' and sys.argv[-1]=='headRefOid,baseRefOid,title,body,isDraft': sha='b'*40
  files=[{'path':'a b.py'}] if mode=='spaces' else [{'path':'a.py'},{'path':'b.py'}]
  if mode=='unusual': files=[{'path':os.environ['GH_FIXTURE_FILENAME']}]
  if mode in ('large_missing','large_truncated'): files=[{'path':'a.py'}]
  result={'number':7,'url':'https://github.com/o/r/pull/7','title':'fixture','body':'test','baseRefName':'main','baseRefOid':base,'headRefName':'topic','headRefOid':sha,'headRepository':(None if mode=='deleted' else {'name':'r','id':'R_fixture','nameWithOwner':''} if mode=='modern' else {'nameWithOwner':'o/r'}),'files':files}
+ result['isDraft']=mode=='draft'
+ if mode=='invalid_readiness': result['isDraft']='false'
+ if mode=='final_readiness_moving':
+  counter=os.environ['GH_FIXTURE_READ_COUNT']
+  count=int(open(counter).read())+1 if os.path.exists(counter) else 1
+  with open(counter,'w') as output: output.write(str(count))
+  result['isDraft']=count==3
+ if sys.argv[-1]=='headRefOid,baseRefOid,title,body,isDraft':
+  if mode=='body_moving': result['body']='changed scope'
+  if mode=='title_moving': result['title']='changed title'
+  if mode=='readiness_moving': result['isDraft']=True
  if mode=='deleted' and os.environ.get('GH_FIXTURE_FORK')!='missing': result['isCrossRepository']=os.environ.get('GH_FIXTURE_FORK')!='false'
  print(json.dumps(result))
 elif sys.argv[1:3]==['pr','diff']:
@@ -87,6 +98,26 @@ else: sys.exit(2)
         self.assertFalse(result['local_matches_pr'])
         self.assertEqual(json.loads(Path(result['metadata']).read_text())['number'],7)
         self.assertIn('diff --git a/b.py',Path(result['patch']).read_text())
+
+    def test_readiness_is_retained_and_live_metadata_changes_block(self):
+        result = self.call('draft')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIs(json.loads(Path(json.loads(result.stdout)['metadata']).read_text())['isDraft'], True)
+        for mode in ('body_moving', 'title_moving', 'readiness_moving', 'invalid_readiness'):
+            with self.subTest(mode=mode):
+                result = self.call(mode)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(result.stdout)
+                self.assertIn('readiness', result.stderr)
+
+    def test_readiness_change_during_checkout_blocks_context_retention(self):
+        counter = self.root/'metadata-read-count'
+        self.env['GH_FIXTURE_READ_COUNT'] = str(counter)
+        result = self.call('final_readiness_moving')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, '')
+        self.assertIn('scope/readiness changed during checkout', result.stderr)
+        self.assertEqual(counter.read_text(), '3')
 
     def test_deleted_fork_with_reachable_commit_can_be_reviewed(self):
         result = self.call('deleted')

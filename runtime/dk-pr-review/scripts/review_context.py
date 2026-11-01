@@ -16,7 +16,8 @@ from shared.github_reads import run as github_run
 from shared.pr_identity import resolve
 from shared.workflow_storage import allocate
 
-FIELDS = 'number,url,title,body,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,isCrossRepository,files'
+FIELDS = 'number,url,title,body,isDraft,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,isCrossRepository,files'
+LIVE_FIELDS = 'headRefOid,baseRefOid,title,body,isDraft'
 LARGE_DIFF_ERROR = re.compile(r'diff exceeded the maximum number of lines|20,?000\s+lines|PullRequest\.diff too_large', re.I)
 
 
@@ -120,11 +121,14 @@ def fetch(cwd, pr=None):
     root = Path(command(['git', 'rev-parse', '--show-toplevel'], cwd).strip()).resolve()
     target = [pr] if pr else []
     metadata = json.loads(command(['gh', 'pr', 'view', *target, '--json', FIELDS], cwd))
-    required = ('number', 'url', 'title', 'body', 'baseRefName', 'baseRefOid', 'headRefName', 'headRefOid', 'files')
+    required = ('number', 'url', 'title', 'body', 'isDraft', 'baseRefName', 'baseRefOid', 'headRefName', 'headRefOid', 'files')
     if any(k not in metadata for k in required):
         raise RuntimeError('PR metadata is incomplete')
     if not isinstance(metadata['files'], list) or not isinstance(metadata['number'], int):
         raise RuntimeError('PR metadata has invalid fields')
+    if (type(metadata['isDraft']) is not bool or not isinstance(metadata['title'], str)
+            or not isinstance(metadata['body'], str)):
+        raise RuntimeError('PR scope or readiness metadata is invalid')
     if not re.fullmatch(r'[0-9a-fA-F]{40,64}', metadata['headRefOid']):
         raise RuntimeError('PR head SHA is invalid')
     if not re.fullmatch(r'[0-9a-fA-F]{40,64}', metadata['baseRefOid']):
@@ -149,10 +153,14 @@ def fetch(cwd, pr=None):
             raise RuntimeError('PR patch is empty or incomplete')
         if not expected.issubset(patch_paths(patch, expected)):
             raise RuntimeError('PR patch does not cover every changed file')
-    latest = json.loads(command(['gh', 'pr', 'view', *target, '--json', 'headRefOid,baseRefOid'], cwd))
-    if (latest.get('headRefOid') != metadata['headRefOid'] or
-            latest.get('baseRefOid') != metadata['baseRefOid']):
-        raise RuntimeError('PR head or base changed during fetch; retry from a new snapshot')
+    def validate_live(stage):
+        latest = json.loads(command(['gh', 'pr', 'view', *target, '--json', LIVE_FIELDS], cwd))
+        if not isinstance(latest, dict) or type(latest.get('isDraft')) is not bool:
+            raise RuntimeError('PR live readiness metadata is invalid')
+        if any(latest.get(field) != metadata[field] for field in LIVE_FIELDS.split(',')):
+            raise RuntimeError('PR head or base changed, or scope/readiness changed during ' + stage +
+                               '; retry from a new snapshot')
+    validate_live('fetch')
     local = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=cwd, text=True, capture_output=True)
     local_head = local.stdout.strip() if local.returncode == 0 else None
     status = subprocess.run(['git', 'status', '--porcelain=v1'], cwd=cwd, text=True, capture_output=True)
@@ -184,9 +192,7 @@ def fetch(cwd, pr=None):
     command(['git', 'checkout', '--quiet', '--detach', head], checkout)
     if command(['git', 'rev-parse', 'HEAD'], checkout).strip() != head:
         raise RuntimeError('isolated checkout does not match PR head')
-    final = json.loads(command(['gh', 'pr', 'view', *target, '--json', 'headRefOid,baseRefOid'], cwd))
-    if (final.get('headRefOid') != head or final.get('baseRefOid') != metadata['baseRefOid']):
-        raise RuntimeError('PR head or base changed during checkout; retry from a new snapshot')
+    validate_live('checkout')
     (folder/'metadata.json').write_text(json.dumps(metadata, indent=2, ensure_ascii=False)+'\n')
     (folder/'diff.patch').write_text(patch)
     context = {'url': metadata['url'], 'repository': str(root), 'base_sha': metadata['baseRefOid'], 'head_sha': head,
