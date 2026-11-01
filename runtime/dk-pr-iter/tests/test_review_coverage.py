@@ -31,7 +31,7 @@ def retain_review(path, context, prepared, result, number):
     assert binding['cycle'] == number
     write(path, record)
     session_path = Path(binding['session_file'])
-    if not session_path.exists():
+    if not session_path.exists() or read(session_path, {}).get('reservation_version') == 1:
         session = review_sessions.Session(context, prepared, list(prepared['reviewers']), path=session_path)
         item = session.finish(result)
     else:

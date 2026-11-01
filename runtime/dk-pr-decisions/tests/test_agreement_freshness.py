@@ -362,7 +362,7 @@ def test_agreement_change_during_reviewer_execution_blocks_checkpoint_and_result
     with patch.object(runner, 'describe_reviewer', return_value=prepared['reviewers']['example']), \
             patch.object(runner, 'skill_path', return_value=package.root), \
             patch.object(runner, 'run_skill_reviewer', side_effect=review) as model:
-        with pytest.raises(ValueError, match='recorded agreements changed'):
+        with session.execution(), pytest.raises(ValueError, match='recorded agreements changed'):
             runner.review(package.context, ['example'], '', package.decisions, '', prepared, session=session)
     model.assert_called_once()
     retained = json.loads(session.path.read_text())

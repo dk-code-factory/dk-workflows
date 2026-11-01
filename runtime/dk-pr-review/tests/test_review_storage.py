@@ -238,8 +238,9 @@ def test_legacy_main_rechecks_record_lock_before_registration(
     assert calls.call_count == len(names)
     assert path.read_bytes() == allocated_record
     record = read(path, {})
-    assert record['review_results'] == [] and len(record['review_sessions']) == 1
-    session_path = record['review_sessions'][0]['session_file']
+    assert record['review_results'] == [] and len(record['review_sessions']) == 2
+    assert [item['cycle'] for item in record['review_sessions']] == [1, 2]
+    session_path = record['review_sessions'][-1]['session_file']
     session = read(Path(session_path), {})
     assert session['status'] == 'completed'
     assert result_artifact(session_path, session['results'][-1])['result']['complete']

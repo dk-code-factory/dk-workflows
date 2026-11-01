@@ -7,14 +7,19 @@ Session storage is mandatory and independent of optional reviewer statistics.
 
 Run `run_reviewers.py` with its normal context, Decisions, preparation, scope and
 rules files. Omitting `--session-file` creates a fresh external session. Supplying
-a new external path creates the session there. Existing paths require explicit
-`--resume`, which is valid only for interrupted or incomplete sessions with the
+a new external path creates the session there. Iteration allocation may already
+have created a reserved but uninitialized file at that path: initialize that
+reservation without `--resume`; `--resume` is invalid until it is initialized.
+Existing initialized sessions require explicit `--resume`, which is valid only
+for interrupted or incomplete sessions with the
 same PR/base/head, preparation, scope, rules and ordered reviewers. Preserve those
 input artifacts on interruption. New requests and iteration cycles start fresh;
 finished sessions cannot be resumed. Changed evidence requires a fresh session,
 within the caller's existing budget. Never reset iteration counters to obtain one.
-Iteration uses its next allowed cycle for changed evidence; it does not replace a
-bound session under the same cycle/attempt to bypass the cap.
+Iteration uses its next allowed cycle for changed evidence, except for
+[bounded proved-zero-launch recovery](../../dk-pr-iter/references/run-record.md).
+That recovery retains the original attempt and allocates a separate infrastructure
+attempt within the same cycle; it never replaces history or resets the cycle cap.
 
 Session filenames ending in `.lock` are reserved for locks. An existing nonempty
 file at either derived lock destination blocks the session before writes, preserving
@@ -53,7 +58,10 @@ identities, and never serve as the source of cached results.
 
 Earlier iteration callers may still pass `--run-record`; this compatibility entry
 point delegates state/cycle checks and automatic registration to the iteration
-adapter. It cannot be combined with explicit session options. Completed bound
+adapter. It cannot be combined with explicit session options. Initialized sessions
+and reservations are distinguished by their retained state: the adapter
+initializes reservations without resume and explicitly resumes initialized
+interrupted or incomplete sessions. Completed bound
 sessions may return explicitly reported reused coverage through this legacy path.
 Mandatory session and result storage remain independent of iteration records.
 Optional statistics may read those records to discover an omitted cycle.

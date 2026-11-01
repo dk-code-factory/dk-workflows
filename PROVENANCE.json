@@ -70,6 +70,11 @@
     },
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.6.13",
+      "description": "Bounded recovery for allocated review cycles with durable evidence of no reviewer dispatch, preserving failed sessions, substantive review budgets and final-tree coverage guards."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.6.11",
       "description": "Recorded agreement bindings and local freshness checks across preparation, review, work and completion gates, with bounded private discussion evidence and actionable extraction recovery."
     },
