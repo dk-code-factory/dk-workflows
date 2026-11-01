@@ -83,7 +83,7 @@ def refresh_prepared(path, context, prepared):
     def reassess(prompt, checkout):
         batch = json.JSONDecoder().raw_decode(prompt.split(
             'REASSESSMENT (one batch, read original changed and governing sources):\n', 1)[1])[0]
-        return retain(old, ids=batch['affected'], unmapped=batch['unmapped_changes'])
+        return retain(old, ids=batch['affected_ids'], unmapped=batch['unmapped_changes'])
     saved = prep.prepare(old['sources']['manifest']['path'], old['workflow_dir'],
         previous_preparation=previous, full_analysis=True,
         analyzer=reassess)

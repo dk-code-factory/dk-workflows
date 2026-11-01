@@ -28,6 +28,7 @@ from shared.reviewer_telemetry import capture, transport
 from shared import bindings, architecture
 from shared.runtime_bundles import retained_binding, retain
 from shared.review_sessions import Session
+from shared.preparation_views import reviewer_view
 from shared.executors import invoke, ProviderExhausted, ProviderCancelled, provider_cancellation
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())
@@ -44,10 +45,12 @@ def skill_path(name):
     return Path(resolved['procedure']) if 'procedure' in resolved else None
 
 
-def build_skill_prompt(skill, handoff_path):
+def build_skill_prompt(skill, handoff_path, contract='git-diff-v1'):
+    if contract not in ('git-diff-v1', 'git-diff-v2'):
+        raise ValueError('Unsupported reviewer handoff contract')
     procedure = skill if skill.suffix == '.md' else skill/'SKILL.md'
     prompt = (f'Apply the installed skill at {procedure} to the pinned PR diff. '
-              f'Read the git-diff-v1 handoff at {handoff_path}, including its patch, scope, '
+              f'Read the {contract} handoff at {handoff_path}, including its patch, scope, '
               'decisions, rules, and architecture_packet reference/fingerprint when supplied. '
               'Pass architecture delivery requirements to any nested agents. '
               'Follow decision_instructions: use active entries in the '
@@ -66,6 +69,15 @@ def build_skill_prompt(skill, handoff_path):
               'Do not wrap findings in provider metadata or Markdown fences. '
               'If the review cannot be completed, return {"status":"incomplete",'
               '"findings":[],"message":"reason"}. Do not claim a clean review from missing evidence.')
+    if contract == 'git-diff-v2':
+        prompt += (' The preparation field is a compact guidance view, not a gate artifact. '
+                   'All shared analysis and active Decisions remain governing. Only your reviewer '
+                   'addendum is inline. full_preparation and full_decisions reference complete '
+                   'original records; load them when history or omitted metadata is needed, '
+                   'and verify the referenced SHA-256 before using them. Keep these references '
+                   'with guidance in nested handoffs and correction retries. In preparation.sources '
+                   'read source.snapshot when present, otherwise source.path. Missing or changed '
+                   'required evidence makes the review incomplete.')
     return prompt + preparation_instructions()
 
 
@@ -73,7 +85,8 @@ def run_skill_reviewer(name, skill, handoff_path, checkout):
     """One read-only agent applies the skill and adopts its own findings."""
     with tempfile.TemporaryDirectory(prefix='pr-review-result-') as temp:
         output = Path(temp)/'result.json'
-        prompt = build_skill_prompt(skill, handoff_path)
+        contract = bindings.normalize(name).get('handoff_contract', 'git-diff-v1')
+        prompt = build_skill_prompt(skill, handoff_path, contract)
         original_prompt = prompt
         changed = added_lines(Path(json.loads(Path(handoff_path).read_text())['patch']).read_text())
         for attempt in range(2):
@@ -214,6 +227,12 @@ def validate_descriptor(value):
             or any(not isinstance(item, str) or not item for item in value['aspects'])
             or not isinstance(value.get('sources'), list) or not value['sources']):
         raise ValueError('reviewer adaptation incomplete: missing effective prompts, procedures or aspects')
+    contract = value.get('handoff_contract', 'git-diff-v1')
+    if contract not in ('git-diff-v1', 'git-diff-v2'):
+        raise ValueError('unsupported reviewer handoff contract')
+    if (value.get('execution') and contract !=
+            value['execution']['binding'].get('handoff_contract', 'git-diff-v1')):
+        raise ValueError('reviewer descriptor handoff contract disagrees with its binding')
     for source in value['sources']:
         if (not isinstance(source, dict) or not Path(source.get('path', '')).is_file()
                 or hashlib.sha256(Path(source['path']).read_bytes()).hexdigest() != source.get('sha256')):
@@ -222,12 +241,14 @@ def validate_descriptor(value):
 
 
 def describe_reviewer(name):
+    contract = bindings.normalize(name).get('handoff_contract', 'git-diff-v1')
     resolved = retained_binding(bindings.resolve(name))
     own_root = retain(ROOT.parent)
     initial = [Path(__file__), Path(__file__).with_name('reviewer_prompts.py'),
                Path(__file__).with_name('validate_result.py'),
                Path(__file__).with_name('review-result.schema.json'),
-               ROOT/'shared/bindings.py', ROOT/'shared/executors.py']
+               ROOT/'shared/bindings.py', ROOT/'shared/executors.py', ROOT/'shared/preparation_views.py',
+               Path(__file__).parents[1] / 'references/handoff-contracts.md']
     if 'procedure' in resolved:
         initial += [Path(resolved['procedure'])]
         manifest = Path(resolved['root']) / ('.' + resolved['executor'] + '-plugin/plugin.json')
@@ -258,12 +279,28 @@ def describe_reviewer(name):
                 sources.append({'path': str(path.resolve()), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
         sources.sort(key=lambda source: source['path'])
     skill = Path(resolved['procedure']) if 'procedure' in resolved else Path('command')
-    prompt = build_skill_prompt(skill, '{handoff}')
+    prompt = build_skill_prompt(skill, '{handoff}', contract)
     return validate_descriptor({'descriptor_version': 1, 'reviewer': bindings.key(name),
         'complete': not missing, 'missing': missing, 'sources': sources,
         'execution': resolved if 'bundle_digest' in resolved or resolved.get('bundles') else None,
         'effective_prompt': json.dumps(resolved, sort_keys=True) + '\n' + prompt,
-        'aspects': ['selected provider procedures']})
+        'aspects': ['selected provider procedures'],
+        **({'handoff_contract': contract} if contract != 'git-diff-v1' else {})})
+
+
+def compact_handoff(handoff, reviewer):
+    prepared = handoff['preparation']
+    if prepared.get('preparation_version', 1) < 3 or 'decisions' not in handoff['decisions']:
+        raise ValueError('git-diff-v2 requires fresh preparation and unified Decisions')
+    decisions = {key: value for key, value in handoff['decisions'].items()
+                 if key not in {'live_decisions', 'discussion_decisions', 'local_decisions'}}
+    decisions['decisions'] = [value for value in decisions['decisions'] if value['status'] == 'active']
+    return {**handoff, 'contract': 'git-diff-v2', 'preparation_view_version': 1,
+            'preparation': reviewer_view(prepared, reviewer), 'decisions': decisions,
+            'decision_instructions': ('Every active record in decisions.decisions governs this review. '
+                                      'Preserve its exact choice, conditions, rationale and sources. '
+                                      'full_decisions retains superseded history and the source envelope; '
+                                      'history is not a current constraint.')}
 
 
 def review(context, reviewers, scope, decisions, rules, preparation, stats=None, session=None):
@@ -309,6 +346,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
     executed, reused = [], []
     architecture_result = None
     architecture_findings = []
+    handoff_references = []
     def outcome(value):
         typed = ('completed' if value.get('complete') else 'guard_failed' if value.get('guard_failure')
                  else 'provider_failed' if failed_reviewers else 'usage_exhausted')
@@ -319,6 +357,9 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
 
     def unchanged():
         preparation_api.validate(preparation, context, decisions)
+        for reference in handoff_references:
+            if preparation_api.file_hash(reference['path']) != reference['sha256']:
+                raise ValueError('compact handoff evidence changed: ' + reference['path'])
         if (run(['git', 'rev-parse', 'HEAD'], checkout).strip() != context['head_sha']
                 or run(['git', 'status', '--porcelain=v1'], checkout).strip()):
             raise RuntimeError('reviewer changed isolated checkout')
@@ -330,6 +371,9 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
         cached = None
         try:
             preparation_api.validate(preparation, context, decisions)
+            contract = bindings.normalize(provider_map[name]).get('handoff_contract', 'git-diff-v1')
+            if contract != preparation['reviewers'][name].get('handoff_contract', 'git-diff-v1'):
+                raise ValueError('reviewer handoff contract changed; refresh preparation')
             if describe_reviewer(provider_map[name]) != preparation['reviewers'][name]:
                 raise ValueError('effective reviewer instructions changed; refresh preparation')
             skill = skill_path(provider_map[name]) or Path('command')
@@ -340,6 +384,8 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             else:
                 jobs[name] = {'skill': skill, 'handoff': {**handoff,
                     'reviewer_addendum': preparation['analysis']['reviewer_addenda'][name]}}
+                if contract == 'git-diff-v2':
+                    jobs[name]['handoff'] = compact_handoff(jobs[name]['handoff'], name)
                 if preparation.get('architecture'):
                     jobs[name]['handoff']['architecture_packet'] = architecture.handoff(
                         preparation['architecture'], context, name,
@@ -354,13 +400,24 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
     # Keep these immutable files with the private evidence, including on interruption.
     if jobs:
         directory = Path(tempfile.mkdtemp(prefix='review-handoffs-', dir=Path(context['patch']).parent))
+        references = {}
+        if any(job['handoff']['contract'] == 'git-diff-v2' for job in jobs.values()):
+            for field, value in (('full_preparation', preparation), ('full_decisions', decisions)):
+                path = directory / (field + '.json')
+                write(path, value)
+                path.chmod(0o400)
+                references[field] = {'path': str(path), 'sha256': preparation_api.file_hash(path)}
+                handoff_references.append(references[field])
         for index, (name, job) in enumerate(jobs.items()):
+            if job['handoff']['contract'] == 'git-diff-v2':
+                job['handoff'].update(references)
             job['path'] = directory / f'{index}.json'
             write(job['path'], job['handoff'])
             job['stats'] = stats.fork() if stats else None
             job['finished'] = Event()
             if session:
                 session.record(name, 'running')
+        unchanged()
 
     checkpoint_lock = RLock()
     launch_lock = RLock()

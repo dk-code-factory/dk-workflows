@@ -116,21 +116,26 @@ def normalize(value, *, drafting=False):
         value = {'skill': value if ':' in value else 'dk-workflows:' + value, 'host': 'current'}
     if not isinstance(value, dict):
         raise ValueError('Expected a skill binding or argument-vector command binding')
-    if set(value) == {'command'}:
+    contract = value.get('handoff_contract', 'git-diff-v1')
+    if (contract not in ('git-diff-v1', 'git-diff-v2')
+            or drafting and 'handoff_contract' in value):
+        raise ValueError('Reviewer handoff_contract must be git-diff-v1 or git-diff-v2')
+    extra = {'handoff_contract': contract} if contract != 'git-diff-v1' else {}
+    if set(value) - {'handoff_contract'} == {'command'}:
         argv = value['command']
         if not isinstance(argv, list) or not argv or any(not isinstance(s, str) or not s or '\0' in s for s in argv):
             raise ValueError('command must be a nonempty argument vector; shell text is not accepted')
         if not any('{handoff}' in arg for arg in argv):
             raise ValueError('command must receive the handoff through a {handoff} argument')
-        return {'command': list(argv)}
-    if set(value) - {'skill', 'host'} or not re.fullmatch(NAME + ':' + NAME, str(value.get('skill', ''))):
+        return {'command': list(argv), **extra}
+    if set(value) - {'skill', 'host', 'handoff_contract'} or not re.fullmatch(NAME + ':' + NAME, str(value.get('skill', ''))):
         raise ValueError('skill must be plugin-name:skill-name')
     if value['skill'].split(':')[1] in FORBIDDEN:
         raise ValueError('Recursive review orchestration cannot be a provider')
     host = value.get('host', 'current')
     if host not in ('current', 'codex', 'claude'):
         raise ValueError('host must be current, codex, or claude')
-    return {'skill': value['skill'], 'host': host}
+    return {'skill': value['skill'], 'host': host, **extra}
 
 
 def key(value):
@@ -181,6 +186,9 @@ def manifest_skill(root, host, namespace, name):
 def resolve(value):
     selected = _PINNED_BINDINGS.get().get(key(value))
     if selected is not None:
+        if (normalize(value).get('handoff_contract', 'git-diff-v1') !=
+                selected['binding'].get('handoff_contract', 'git-diff-v1')):
+            raise ValueError('Reviewer handoff contract changed; refresh preparation')
         from shared.runtime_bundles import verify_binding
         verify_binding(selected)
         return dict(selected)
