@@ -127,6 +127,12 @@ This is an overview of the effective model; private files store reviewers and dr
 
 Skill bindings use the selected host's registry and manifest. Commands receive a `git-diff-v1` handoff through an argument vector, without a shell. No DK-specific provider manifest is required. Missing or ambiguous selected installations fail with diagnostics; unused plugins do not affect lookup. Legacy wrapper identities normalize in memory to the corresponding native skill and `host: claude`. Existing private-state and telemetry paths remain unchanged; aliases are recorded in `runtime/shared/bindings.py` without rewriting past observations.
 
+Review bindings can explicitly select `"handoff_contract": "git-diff-v2"` for a
+provider that supports compact input. It carries shared guidance, active Decisions,
+the assigned addendum and hashed references to complete originals. Existing bindings
+retain full v1 delivery; mixed formats are supported. Contract changes require fresh
+preparation. See the [handoff contracts](runtime/dk-pr-review/references/handoff-contracts.md).
+
 Providers return findings or draft content only. DK owns pinned revisions, engineering preparation, active Decisions, evidence checks, bounded correction/review loops, review-state tokens, aggregation, retries, telemetry, and authorized publication. Draft providers use the `dk-draft-v1` content contract and cannot grant publication authority. PR title/body and force-push guards still require completed review tokens and fresh evidence. The supplied `scripts/repo_rules_hook.py` is an optional generic JSON startup hook; installation does not change existing hooks.
 
 For a Codex startup integration that follows installed plugin versions, copy

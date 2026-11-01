@@ -23,6 +23,12 @@ descriptor and validate every reusable checkpoint, including cached findings, be
 launching any missing reviewer to detect changed plugin selection/aspects as well as
 changed files. Every `git-diff-v1` handoff adds identical `preparation` and the selected
 `reviewer_addendum`. Preserve both through nested agents and correction retries.
+Bindings explicitly selecting `handoff_contract: git-diff-v2` instead receive the
+[compact contract](handoff-contracts.md), with all shared guidance, active Decisions,
+only their own addendum, and fingerprinted complete originals. Full preparation
+and current evidence still gate every launch, checkpoint and completion. A contract
+change requires refreshed preparation before cached results or missing reviewers
+can be used. Keep v1 as the default for existing providers.
 Tailoring applies boundaries to assigned axes while preserving native roles, finding
 thresholds, read-only restrictions and output contract. A fix direction names the
 required outcome without authorizing more architecture or stronger guarantees.

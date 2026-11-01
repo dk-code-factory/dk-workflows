@@ -165,7 +165,7 @@ class Scenario:
             inputs = json.JSONDecoder().raw_decode(prompt.split('INPUT INDEX (read original paths):\n', 1)[1])[0]
             batch = json.JSONDecoder().raw_decode(prompt.split(
                 'REASSESSMENT (one batch, read original changed and governing sources):\n', 1)[1])[0]
-            value = retain(parent, ids=batch['affected'], unmapped=batch['unmapped_changes'])
+            value = retain(parent, ids=batch['affected_ids'], unmapped=batch['unmapped_changes'])
             conclusions = prep.graph_api.conclusions(result)
             original_conclusions = prep.graph_api.conclusions(parent['analysis'])
             for item in value['dispositions']:

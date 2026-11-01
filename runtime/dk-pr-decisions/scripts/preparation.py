@@ -10,6 +10,7 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -19,6 +20,7 @@ from shared.engineering_identity import engineering_id, compatible_reference
 from shared.workflow_storage import allocate, owned
 from shared.model_diagnostics import FieldError
 from shared import architecture
+from shared.preparation_views import model_view
 
 VERSION = 3
 DIMENSIONS = ('correctness', 'remediation_depth', 'performance', 'compatibility', 'complexity')
@@ -163,12 +165,26 @@ def collect(manifest_path, *, on_call=None):
     return manifest, context, decisions, sources, reviewer_descriptors, prior
 
 
+def analyst_procedure(procedure):
+    """Keep analysis rules, excluding only known coordinator-only sections."""
+    coordinator_sections = {
+        '## Collect and run',
+        '## Fresh workflow storage and compatibility',
+        '## Rejected model output and recovery',
+    }
+    # New sections remain instructions unless explicitly assigned to the coordinator.
+    return ''.join(section for section in re.split(r'(?m)(?=^## )', procedure)
+                   if section.partition('\n')[0].rstrip() not in coordinator_sections)
+
+
 def analysis_prompt(manifest, context, decisions, sources, descriptors):
     references = Path(__file__).resolve().parents[1] / 'references'
-    procedure = (references / 'preparation.md').read_text()
+    procedure = analyst_procedure((references / 'preparation.md').read_text())
     return (
         'Perform Decisions engineering preparation, read-only. Do not edit code, Git refs, or GitHub. '
         'Inputs are already collected; analyze them under the procedure below. '
+        'Inspect complete original evidence; summaries are navigation, not replacements. '
+        'Missing required procedures or evidence block preparation. '
         'Before constructing the response, read the relevant fields in '
         'the data contract at this absolute path:\nRESPONSE CONTRACT: ' +
         str(references / 'preparation-contract.md') +
@@ -338,6 +354,7 @@ def policy():
     return digest({p.resolve().relative_to(plugin).as_posix(): file_hash(p) for p in (
         Path(__file__), Path(graph_api.__file__), Path(engineering.__file__),
         Path(architecture.__file__), architecture.PROCEDURE,
+        Path(__file__).resolve().parents[2] / 'shared/preparation_views.py',
         architecture.PROCEDURE.parent.parent / 'dk-architecture-review/procedure.md',
         architecture.PROCEDURE.parent.parent / 'dk-architecture-enforcer/procedure.md',
         Path(__file__).resolve().parents[1] / 'references/preparation.md',
@@ -369,14 +386,16 @@ def historical(path):
 
 
 def reassessment_prompt(prompt, parent_path, parent, paths, changed_sources, selected, unmapped, full=False):
-    values = graph_api.conclusions(parent['analysis'])
     return (prompt + '\n\nREASSESSMENT (one batch, read original changed and governing sources):\n' +
-            json.dumps({'parent_path': str(parent_path), 'parent': parent,
+            json.dumps({'parent_path': str(parent_path), 'parent': model_view(parent),
                         'changed_paths': paths, 'changed_sources': changed_sources,
-                        'affected': {k: values[parent['graph'][k]['location']] for k in sorted(selected)},
-                        'remaining_index': {k: v['location'] for k, v in parent['graph'].items() if k not in selected},
+                        'affected_ids': sorted(selected),
                         'unmapped_changes': unmapped, 'full_reassessment': full}, ensure_ascii=True) +
             '\nReturn the reassessment protocol from the preparation contract, not a new analysis. '
+            'Resolve affected_ids through parent.graph; each node location points into parent.analysis. '
+            'The parent view retains complete analysis, graph and governing fields. Read source.snapshot '
+            'when present, otherwise source.path, for retained evidence. The original artifact at parent_path '
+            'retains omitted transport and recovery bookkeeping; the view cannot authorize a gate. '
             'Address every affected conclusion and every unmapped change explicitly. Identify additional '
             'affected conclusions and their dependents. Retain unchanged values exactly. '
             'Use addition:N in watches.depends_on to reference the zero-based additions array index N '
@@ -513,7 +532,7 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
         return result
     prompt = analysis_prompt(manifest, context, decisions, sources, descriptors)
     if migration:
-        prompt += '\nMIGRATION: inspect original v1 preparation at ' + str(previous_preparation) + '\n' + json.dumps(parent)
+        prompt += '\nMIGRATION: inspect original v1 preparation at ' + str(previous_preparation) + '\n' + json.dumps(model_view(parent))
     if not parent or migration:
         result, graph = invoke(prompt, initial, 'migration' if migration else 'initial')
         retired = []
