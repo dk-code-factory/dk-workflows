@@ -113,7 +113,7 @@ binding files, for example:
 underscores. `host: current` is checked against the resolved executor; Claude and
 command bindings reject profile selection. Omission preserves existing provider
 identities and execution arguments and performs no profile metadata discovery.
-A readable profile-v2 file is required at `$CODEX_HOME/review.config.toml`
+A readable profile-v2 file is required at `$CODEX_HOME/<profile>.config.toml`
 (default home: `~/.codex`). This format was introduced in Codex 0.134; native
 selection rejects matching legacy selectors or tables in base `config.toml`.
 Definitions, model choices and user context thresholds stay in private Codex
@@ -153,9 +153,11 @@ an atomic snapshot against transient changes between observations.
 Metadata helpers leave unchanged sensitive settings in native private files and
 project only required selected-provider differences. Required generic header and
 nonblank bearer overrides use child-only native environment channels. A needed
-literal query/auth-argument override without a proven safe channel fails before
-that metadata helper starts; unused static-catalogue inference fields are not
-copied or rejected. Original fingerprints exclude random transport variable names.
+literal query/auth-argument or sensitive `model_catalog_url` override without a
+proven safe channel fails before that metadata helper starts. Required routing URL
+overrides containing username or password user-info also fail before launch.
+Unchanged URLs remain in their native files; unused static-catalogue endpoint and
+inference fields are not copied or rejected. Original fingerprints exclude random transport variable names.
 These channels never alter the actual `codex exec --profile` environment or argv.
 
 The native raw-catalogue facility cannot address the special internal Work/Chat
@@ -218,6 +220,12 @@ The value must be a positive integer number of seconds; invalid values fail befo
 starting the provider. This applies to Claude, Codex, and command providers used for
 reviews, preparation, Decisions, and drafting. It is not a deadline for the entire workflow.
 
+Native Codex profile verification runs before and after provider execution and at
+other freshness gates outside this provider-process timeout. Each native metadata
+operation has its own local 30-second budget; one app-server call shares that
+budget across its requests. Several sequential operations may add minutes. This
+is not a whole-attempt or whole-review deadline.
+
 Internal read-only analysis uses the calling host by default. After quota
 exhaustion, a coordinator may select an installed, authenticated alternate under
 the current task authorization by prefixing the original helper command with
@@ -230,6 +238,11 @@ resets a correction budget or relaxes evidence, review, CI or completion gates.
 See [the provider policy](common/lifecycle.md) for recovery and provenance details.
 
 Interruption aborts this invocation's in-flight provider transport and prevents later provider or correction launches, then waits for reviewer cleanup and checkpoint work before releasing session ownership. Completed checkpoints remain available for exact-evidence resume. Unfinished reviewers remain unknown rather than provider failures; a resume reruns them. Genuine failures observed before interruption retain their classification.
+
+An in-progress native profile metadata observation is not a cancellation point.
+It may finish its remaining locally bounded helpers before worker cleanup and
+checkpoint acknowledgement release ownership; interruption does not promise
+prompt cancellation of those metadata operations.
 
 Reviewer description, execution and configuration diagnostics reuse one Codex
 plugin inventory within each command invocation. A later invocation reads the

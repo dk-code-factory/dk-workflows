@@ -1,4 +1,5 @@
 """Offline profile selection, native config transport and retained-evidence guards."""
+import copy
 import hashlib
 import importlib.util
 import json
@@ -711,10 +712,53 @@ def test_native_catalog_default_selection_uses_same_private_snapshot(native_meta
     assert 'dk-codex-catalog-' not in json.dumps(value)
 
 
+def test_provider_auth_cwd_comparison_projects_only_typed_owned_paths(native_metadata_io, tmp_path):
+    def capture(root, *, command='./credential', unknown='unchanged', external=None):
+        root.mkdir(exist_ok=True)
+        (root / 'credentials').mkdir(exist_ok=True)
+        config = {'model': 'fixture-model', 'model_provider': 'custom',
+                  'model_catalog_json': '/file-backed/catalog.json',
+                  'model_providers': {'custom': {'name': 'Custom', 'auth': {
+                      'command': command, 'cwd': str(external or root / 'credentials'),
+                      'unknown': unknown}}}}
+        # Unchanged native-file-backed leaves need no helper CLI override.
+        config['_helper_baseline'] = copy.deepcopy(config)
+        original = copy.deepcopy(config)
+        result = NATIVE_METADATA(config, root)
+        assert config == original
+        return result
+
+    first, relocated = tmp_path / 'first', tmp_path / 'relocated'
+    before, after = capture(first), capture(relocated)
+    assert before['provider']['definition_sha256'] != after['provider']['definition_sha256']
+    assert before['_provider_comparison']['comparison'] == after['_provider_comparison']['comparison']
+    assert before['effective_settings'] == after['effective_settings']
+    comparison = before['_provider_comparison']['comparison']
+    for changed in (capture(first, command='./different-credential'),
+                    capture(first, unknown=str(first / 'opaque-value')),
+                    capture(first, unknown=str(relocated / 'opaque-value')),
+                    capture(first, external=tmp_path / 'external-credentials')):
+        assert changed['_provider_comparison']['comparison'] != comparison
+    assert capture(first, unknown=str(first / 'opaque-value'))['_provider_comparison']['comparison'] != (
+        capture(relocated, unknown=str(relocated / 'opaque-value'))['_provider_comparison']['comparison'])
+
+
+def test_native_toml_non_bmp_dictionary_keys_round_trip():
+    value = {'projects': {'/workspace/\U0001f680': {'trust_level': 'trusted'}},
+             'model_providers': {'\U00010400': {'name': 'Unicode provider'}}}
+    flags = profiles.config_flags(value)
+    decoded = {}
+    for index in range(0, len(flags), 2):
+        assert flags[index] == '-c'
+        decoded.update(tomllib.loads(flags[index + 1]))
+    assert decoded == value
+
+
 @pytest.mark.parametrize('static', [False, True])
 def test_explicit_catalog_route_preserves_actual_manager_matching(native_metadata_io, tmp_path, static):
     config = {'model': 'ns/fixture-model-v2', 'model_provider': 'custom',
               'model_providers': {'custom': {'name': 'Custom', 'model_catalog_url': 'https://catalog.invalid'}}}
+    config['_helper_baseline'] = copy.deepcopy(config)
     if static:
         config['model_catalog_json'] = '/configured-catalog.json'
     value = NATIVE_METADATA(config, tmp_path)
@@ -1092,12 +1136,14 @@ def test_required_unsupported_sensitive_delta_fails_before_affected_native_spawn
     assert not any('SENTINEL_' in json.dumps(item['argv']) for item in records)
 
 
-def test_static_configured_model_does_not_transport_unused_inference_credentials(native_private_config, tmp_path):
+@pytest.mark.parametrize('configured', [False, True])
+def test_static_catalogue_does_not_transport_unused_endpoint_or_inference_credentials(native_private_config, tmp_path, configured):
     home, save, observations = native_private_config
     secret = 'SENTINEL_UNUSED_INFERENCE'
     save({'model_provider': 'custom', 'model_providers': {'custom': {'name': 'Custom'}}},
-         {'model': 'fixture-model', 'model_catalog_json': str(home / 'catalog.json'),
+         {**({'model': 'fixture-model'} if configured else {}), 'model_catalog_json': str(home / 'catalog.json'),
           'model_providers': {'custom': {'http_headers': {'Authorization': secret},
+              'model_catalog_url': 'https://catalog.invalid/' + secret,
               'auth': {'command': './token', 'args': [secret]}, 'query_params': {'key': secret}}}})
     result = profiles.resolve_profile('review', tmp_path)
     assert result['catalog']['route'] == 'static'
@@ -1105,7 +1151,106 @@ def test_static_configured_model_does_not_transport_unused_inference_credentials
         assert secret not in json.dumps(record['argv'])
         if record['argv'][-1] == 'models':
             delta = record['overrides'].get('model_providers', {}).get('custom', {})
-            assert not {'http_headers', 'auth', 'query_params'} & delta.keys()
+            assert not {'http_headers', 'query_params', 'model_catalog_url'} & delta.keys()
+            assert 'auth' not in delta if configured else 'args' not in delta.get('auth', {})
+
+
+@pytest.mark.parametrize('provider', ['custom', 'openai'])
+@pytest.mark.parametrize('url', ['https://catalog.invalid/models?opaque=SENTINEL_CATALOG_QUERY',
+                                'https://catalog.invalid/SENTINEL_CATALOG_PATH/models'])
+def test_required_sensitive_catalogue_url_fails_before_affected_helper(native_private_config, tmp_path, provider, url):
+    _, save, observations = native_private_config
+    save({'model': 'fixture-model', 'model_provider': provider,
+          'model_providers': {provider: {'name': 'Custom'}}},
+         {'model_providers': {provider: {'model_catalog_url': url}}})
+    with pytest.raises(ValueError, match='transport unavailable: model_catalog_url') as failure:
+        profiles.resolve_profile('review', tmp_path)
+    assert url not in str(failure.value) and 'SENTINEL_' not in str(failure.value)
+    records = observations()
+    assert records and not any(record['argv'][-1] == 'models' for record in records)
+    assert all('SENTINEL_' not in json.dumps(record['argv']) for record in records)
+
+
+@pytest.mark.parametrize('managed', [False, True])
+def test_unchanged_sensitive_catalogue_url_stays_file_backed_with_other_changes(native_private_config, tmp_path, managed):
+    _, save, observations = native_private_config
+    url = 'https://catalog.invalid/SENTINEL_PRIVATE_PATH?opaque=SENTINEL_PRIVATE_QUERY'
+    definition = {'name': 'Custom', 'model_catalog_url': url}
+    base = {'model': 'fixture-model', 'model_provider': 'custom', 'model_providers': {'custom': definition}}
+    selected = {'model_providers': {'custom': {'name': 'Harmless selected name'}}}
+    policy = None
+    if managed:
+        selected['model_providers']['custom']['model_catalog_url'] = 'https://ignored.invalid/PROFILE_SENTINEL'
+        policy = {'modelProviders': {'custom': definition}, 'modelProvider': 'custom'}
+    save(base, selected, policy)
+    result = profiles.resolve_profile('review', tmp_path)
+    assert result['catalog']['route'] == 'explicit_endpoint'
+    assert 'SENTINEL_' not in json.dumps(result)
+    for record in observations():
+        assert 'SENTINEL_' not in json.dumps(record['argv'])
+        assert 'model_catalog_url' not in record['overrides'].get('model_providers', {}).get('custom', {})
+
+
+@pytest.mark.parametrize('url', ['https://provider.invalid/v1?region=west',
+    'https://provider.invalid/path@literal?email=name@example.invalid#@fragment',
+    'https://@provider.invalid/v1'])
+def test_plain_string_routing_urls_keep_existing_transport(url):
+    config = {'model_provider': 'custom', 'openai_base_url': url, 'chatgpt_base_url': url}
+    definition = {'name': 'Custom', 'base_url': url}
+    projection, _ = profiles.metadata_projection(config, 'custom', definition, False)
+    assert projection['openai_base_url'] == config['openai_base_url']
+    assert projection['chatgpt_base_url'] == config['chatgpt_base_url']
+    assert projection['model_providers']['custom']['base_url'] == definition['base_url']
+
+
+@pytest.mark.parametrize('field,static', [('base_url', False), ('base_url', True),
+                                       ('openai_base_url', False), ('chatgpt_base_url', False)])
+@pytest.mark.parametrize('userinfo', ['SENTINEL_URL_USERNAME', ':SENTINEL_URL_PASSWORD',
+    'SENTINEL_USER:SENTINEL_PASSWORD', '%53ENTINEL_USER:%53ENTINEL_PASSWORD'])
+def test_required_url_userinfo_fails_before_affected_helper(native_private_config, tmp_path, field, static, userinfo):
+    home, save, observations = native_private_config
+    base = {'model': 'fixture-model', 'model_provider': 'custom',
+            'model_providers': {'custom': {'name': 'Custom'}}}
+    selected = {'model_catalog_json': str(home / 'catalog.json')} if static else {}
+    url = 'https://' + userinfo + '@catalog.invalid/v1'
+    if field == 'base_url':
+        selected['model_providers'] = {'custom': {field: url}}
+    else:
+        selected[field] = url
+    save(base, selected)
+    with pytest.raises(ValueError, match='transport unavailable: ' + field) as failure:
+        profiles.resolve_profile('review', tmp_path)
+    assert url not in str(failure.value) and 'SENTINEL_' not in str(failure.value)
+    records = observations()
+    assert records and not any(record['argv'][-1] == 'models' for record in records)
+    assert all('SENTINEL_' not in json.dumps(record['argv']) for record in records)
+
+
+@pytest.mark.parametrize('field', ['base_url', 'openai_base_url', 'chatgpt_base_url'])
+def test_unchanged_url_userinfo_stays_native_file_backed(native_private_config, tmp_path, field):
+    _, save, observations = native_private_config
+    base = {'model': 'fixture-model', 'model_provider': 'custom',
+            'model_providers': {'custom': {'name': 'Custom'}}}
+    url = 'https://user:SENTINEL_NATIVE_PASSWORD@catalog.invalid/v1'
+    if field == 'base_url':
+        base['model_providers']['custom'][field] = url
+    else:
+        base[field] = url
+    save(base, {'model_providers': {'custom': {'name': 'Harmless selected change'}}})
+    value = profiles.resolve_profile('review', tmp_path)
+    assert 'SENTINEL_' not in json.dumps(value)
+    for record in observations():
+        assert 'SENTINEL_' not in json.dumps(record['argv'])
+
+
+@pytest.mark.parametrize('field', ['base_url', 'openai_base_url', 'chatgpt_base_url'])
+def test_url_parser_errors_are_field_only(field):
+    url = 'https://[SENTINEL_MALFORMED_URL'
+    config = {field: url} if field != 'base_url' else {}
+    definition = {'name': 'Custom', **({field: url} if field == 'base_url' else {})}
+    with pytest.raises(ValueError, match='unsupported ' + field + ' URL') as failure:
+        profiles.metadata_projection(config, 'custom', definition, False)
+    assert 'SENTINEL_' not in str(failure.value)
 
 
 def test_managed_sensitive_provider_replacement_stays_native_file_backed(native_private_config, tmp_path):
@@ -1186,6 +1331,7 @@ def test_ignored_builtin_provider_credentials_never_need_transport(native_privat
     secret = 'SENTINEL_IGNORED_BUILTIN'
     save({'model': 'fixture-model', 'model_provider': provider}, {'model_providers': {provider: {
         'name': 'Ignored', 'http_headers': {'Authorization': secret},
+        'base_url': 'https://user:' + secret + '@ignored.invalid',
         'experimental_bearer_token': secret, 'auth': {'command': './ignored', 'args': [secret]}}}})
     profiles.resolve_profile('review', tmp_path)
     for item in observations():

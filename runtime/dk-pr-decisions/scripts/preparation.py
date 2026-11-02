@@ -796,7 +796,7 @@ def _prepare_profiled(manifest_path, output_dir, analyzer=None, *, previous_prep
                         allocate(repository=context.get('repository', context['checkout'])))
         outside(workflow_dir, context.get('repository', context['checkout']))
         outside(workflow_dir, context['checkout'])
-        version_dir = Path(tempfile.mkdtemp(prefix='preparation-', dir=workflow_dir))
+        version_dir = Path(tempfile.mkdtemp(prefix='preparation-', dir=workflow_dir)).resolve()
         candidate.update(workflow_dir=workflow_dir, version_dir=version_dir, workspace=version_dir / 'checkout')
         git(context['checkout'], 'clone', '--quiet', '--no-hardlinks', '--no-checkout',
             context['checkout'], str(candidate['workspace']))

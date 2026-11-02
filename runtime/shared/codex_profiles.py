@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import tomllib
+from urllib.parse import urlsplit
 
 # Native configured values and resolved model metadata are separate evidence.
 SETTINGS = ('model', 'model_provider', 'model_reasoning_effort', 'model_reasoning_summary',
@@ -44,7 +45,7 @@ def toml_value(value):
     if isinstance(value, list):
         return '[' + ','.join(map(toml_value, value)) + ']'
     if isinstance(value, dict):
-        return '{' + ','.join(json.dumps(key) + '=' + toml_value(item)
+        return '{' + ','.join(json.dumps(key, ensure_ascii=False) + '=' + toml_value(item)
                               for key, item in value.items()) + '}'
     raise ValueError('Unsupported native Codex configuration value')
 
@@ -772,6 +773,16 @@ def _bridge_variable(env, value, reserved=()):
             return name
 
 
+def _verify_url_transport(field, value):
+    try:
+        parsed = urlsplit(value)
+        private = bool(parsed.username or parsed.password)
+    except (TypeError, ValueError, AttributeError):
+        raise ValueError('Native metadata verification unavailable: unsupported ' + field + ' URL') from None
+    if private:
+        raise ValueError('Native metadata credential transport unavailable: ' + field)
+
+
 def _safe_provider_delta(provider, baseline, desired, *, static_catalog, configured_model, env):
     baseline, desired = _provider_fields(provider, baseline), _provider_fields(provider, desired)
     difference = _delta(baseline, desired)
@@ -780,16 +791,20 @@ def _safe_provider_delta(provider, baseline, desired, *, static_catalog, configu
     unknown = set(difference) - _PROVIDER_FIELDS
     if unknown:
         raise ValueError('Native metadata verification unavailable: unsupported selected provider field')
+    if 'base_url' in difference:
+        _verify_url_transport('base_url', difference['base_url'])
     reserved = {item for definition in (baseline, desired)
                 for item in [definition.get('env_key'), *(definition.get('env_http_headers') or {}).values()]
                 if isinstance(item, str)}
     if static_catalog:
         # Static raw rows and picker filtering do not consult inference headers,
-        # query values or bearer/AWS credentials. Default-model filtering only
+        # query values, catalogue endpoints or bearer/AWS credentials. The
+        # explicit catalogue selects StaticModelsManager before endpoint use.
+        # Default-model filtering only
         # needs the provider command-auth presence, not its literal arguments.
         # Preserve factory name/base-url (including Bedrock GovCloud selection).
         for key in ('http_headers', 'env_http_headers', 'experimental_bearer_token', 'env_key',
-                    'query_params', 'aws'):
+                    'query_params', 'model_catalog_url', 'aws'):
             difference.pop(key, None)
         if configured_model:
             difference.pop('auth', None)
@@ -798,6 +813,8 @@ def _safe_provider_delta(provider, baseline, desired, *, static_catalog, configu
             if not difference['auth']:
                 difference.pop('auth')
         return difference
+    if 'model_catalog_url' in difference:
+        raise ValueError('Native metadata credential transport unavailable: model_catalog_url')
     for field in ('query_params',):
         if difference.get(field):
             raise ValueError('Native metadata credential transport unavailable: ' + field)
@@ -861,7 +878,9 @@ def metadata_projection(config, provider, definition, static):
     projection = _delta(baseline, desired)
     projection = {} if projection is _MISSING else projection
     projection = merge(config.get('_helper_discovery', {}), projection)
-    policy = config.get('_requirements', {})
+    for field in ('openai_base_url', 'chatgpt_base_url'):
+        if field in projection:
+            _verify_url_transport(field, projection[field])
     baseline_providers = {**baseline.get('model_providers', {}), **(policy.get('modelProviders') or {})}
     env = dict(os.environ)
     # Required policy definitions already remain native-file-backed. A profile

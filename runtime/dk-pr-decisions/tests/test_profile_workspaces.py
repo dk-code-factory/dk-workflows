@@ -278,3 +278,36 @@ def test_unchanged_profile_refresh_validates_parent_and_discards_candidate(profi
     assert Path(first['artifact']).read_bytes() == retained
     analyzer.assert_not_called()
     launch.assert_not_called()
+
+
+def test_symlinked_state_retains_success_and_unchanged_parent(profiled_package, monkeypatch, tmp_path):
+    package, binding, original, state, launch = profiled_package
+    state_root = Path(os.environ['XDG_STATE_HOME']).resolve()
+    state_alias = tmp_path / 'state-alias'
+    state_alias.symlink_to(state_root, target_is_directory=True)
+    monkeypatch.setenv('XDG_STATE_HOME', str(state_alias))
+    # Exercise fresh allocation through the symlinked state directory, rather
+    # than a preselected workflow directory already normalized by owned().
+    package.context.pop('workflow_dir')
+    package.write('context.json', package.context)
+    saved = prep.prepare(package.manifest_path, package.versions,
+                         analyzer=lambda *_: response(analysis((bindings.key(binding),))))
+    artifact_path = Path(saved['artifact'])
+    artifact = prep.read(artifact_path)
+    workspace = Path(artifact['workspace'])
+    assert workspace.is_dir() and workspace == workspace.resolve()
+    for key in ('reviewers/0', 'reviewer-execution/0'):
+        assert Path(prep.source_path(artifact, key)).is_file()
+    prep.validate(artifact, prep.context_for(artifact), package.decisions)
+    workflow = Path(artifact['workflow_dir'])
+    before = set(workflow.iterdir())
+    retained_bytes = artifact_path.read_bytes()
+    analyzer = Mock(side_effect=AssertionError('unchanged preparation reran analysis'))
+    refreshed = prep.prepare(package.manifest_path, package.versions, analyzer=analyzer,
+                             previous_preparation=artifact_path)
+    assert refreshed['artifact'] == saved['artifact']
+    assert refreshed['refresh']['mode'] == 'unchanged'
+    assert artifact_path.read_bytes() == retained_bytes
+    assert workspace.is_dir() and set(workflow.iterdir()) == before
+    analyzer.assert_not_called()
+    launch.assert_not_called()
