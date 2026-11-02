@@ -16,7 +16,7 @@ from threading import Event, RLock
 from shared.bindings import current_host, resolve
 from shared.diagnostics import Diagnostic, task
 from shared.private_state import write
-from shared.reviewer_telemetry import capture
+from shared.reviewer_telemetry import capture, trace_path
 from shared.workflow_storage import allocate
 
 
@@ -621,7 +621,7 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
         if host == 'codex':
             argv = ['codex', 'exec', '--ephemeral', '--sandbox', 'read-only', '--skip-git-repo-check',
                     '-C', str(checkout), '-o', str(output), '-']
-            if required_execution:
+            if required_execution or trace_path():
                 argv.insert(2, '--json')
         else:
             argv = ['claude', '--permission-mode', 'plan', '--no-session-persistence',

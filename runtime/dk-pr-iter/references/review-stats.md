@@ -44,6 +44,8 @@ If private initialization fails, `review-stats-recovery` beside the external pin
 patch retains `begin` and `record-review` payloads and execution evidence. Replay
 them once storage recovers; an unknown cycle must first be supplied from the saved
 iteration handoff. The saved explicit run ID keeps review replay attribution stable.
+Recovery payloads retain the capture start time so delayed replay keeps the
+original date attribution in bounded comparisons.
 Collection refuses destinations inside the source repository or review checkout.
 
 ## Coordinator assessment
@@ -83,7 +85,9 @@ Mutators: `begin_review(pr_url=..., cycle=..., head=..., preparation_id=...,
 reviewers=[...], attempt='1', run_id=None)`,
 `record_review(repo, run_id, reviewer, status=..., findings=[...], **metadata)`,
 `record_assessments(repo, assessments)`, `render_reports()`.
-Queries: `summary(repo=None, reviewer=None)`, `repositories()`, `details(repo, run_id)`.
+Queries: `summary(repo=None, reviewer=None, since=None, until=None,
+exclude_repos=(), group_by=())`, `repositories()`, `details(repo, run_id)`.
+The new summary arguments are keyword-only; existing calls remain compatible.
 Queries never write or call external processes. `summary` returns `total: null` for
 missing data, report paths and explicit incomplete-status warnings.
 Severity transitions and warnings are aggregated counts; individual observations
@@ -93,6 +97,8 @@ CLI responses wrap results in `{"api_version":1,"data":...}`:
 
 ```text
 review_stats.py summary [--repo HOST/OWNER/REPO] [--reviewer SKILL]
+  [--since ISO_DATE_OR_TIMESTAMP] [--until ISO_DATE_OR_TIMESTAMP]
+  [--exclude-repo HOST/OWNER/REPO ...] [--group-by FIELD ...]
 review_stats.py repositories
 review_stats.py details --repo HOST/OWNER/REPO --run RUN_ID
 review_stats.py begin --file RUN.json
@@ -104,7 +110,7 @@ review_stats.py render
 `begin` takes the Python keyword payload. `record-review` takes `run_id`, `reviewer`,
 `status` (`not_run|running|completed|failed|incomplete|exhausted`), `findings` and
 optional `duration_seconds`, `prompt_fingerprint`, `correction_retries`, `provider`,
-`model`, `usage`, `artifacts`, `reason`. Completed findings use the existing five-field
+`model`, `effort`, `usage`, `executions`, `artifacts`, `reason`. Completed findings use the existing five-field
 contract. Terminal results are immutable; identical replay is idempotent.
 
 `assess` takes a list with exactly `id`, `finding_id`, `canonical_issue`, `verdict`
@@ -137,3 +143,91 @@ issues and excluding unverified observations; each severity and total has a samp
 size, and an empty denominator yields null. Completed, clean (completed with no
 reported findings), failed/incomplete, exhausted and correction-retry counters describe
 operations separately. No missing data becomes a measured zero, recall or overall score.
+
+## Usage and bounded comparisons
+
+Instrumented Codex invocations use `exec --json` for structured root
+`turn.completed` usage while still reading the requested `-o` response file.
+JSON stdout is retained as evidence and never recovers a failed or unreadable
+response file. Other invocations keep their existing CLI output mode. The text
+stderr summary remains a fallback with source `codex_cli_summary`; it supplies
+only total tokens. Structured evidence uses `codex_cli_json`. Optional fields
+absent from an older CLI remain unknown. See [Codex non-interactive output](https://learn.chatgpt.com/docs/non-interactive-mode).
+
+OpenAI input includes cached input, and output includes reasoning output. These
+subsets must not be added to the respective totals. For Claude, normalized input
+is ordinary input plus cache-read and cache-creation input; if any of those
+components is absent, the combined input is unknown. Cache-read input remains a
+subset of this combined input. Claude modelUsage and nested agent totals are not
+added to the CLI total. See [Claude cache accounting](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+Raw provider usage is retained unchanged alongside normalization.
+
+`usage` retains every observed correction attempt, including null entries.
+Compact `executions` contain available execution/response/tool-call identities,
+provider, model, effort, stage, role, timestamp, prompt byte size and raw usage.
+An inclusive execution suppresses a descendant component only when the ancestor
+measures that component. Known child components below an unmeasured ancestor remain
+partial subtotals: the ancestor still contributes a missing measurement. Covered
+components do not add a second denominator. Identities
+are reconciled before ancestry checks, including execution aliases. Parent IDs
+resolve within their provider namespace, or across providers when unambiguous.
+Inherited quantities and duplicate available identities are excluded before
+aggregation, with exclusion counts reported. Inherited identity and ancestry
+edges remain available for descendant checks. Without an identity, no identity
+is invented to merge equal token quantities. Built-in instrumentation collects only the configured root
+execution and suppresses nested instrumentation. A running review links its
+private trace so interrupted work remains visible; resumed evidence with the
+same identities counts once. Running observations remain unfinished.
+Repeated snapshots merge complementary known usage and metadata fields in derived
+query records. Non-null values take precedence by observation timestamp, falling
+back to the owning run's start and then execution start. Undated evidence precedes
+dated evidence; ties retain input order. Source labels survive and quantities are
+never added together. Retained raw snapshots remain unchanged.
+An explicit total takes precedence over input plus output within an observation;
+otherwise that observation supplies a derived total. Snapshot precedence then
+applies to those totals too. `total_token_sources` distinguishes provider-reported
+and derived totals. Preserved components can come from different observations;
+`inconsistent_token_totals` counts reconciled executions whose known total differs
+from known input plus output. Coverage completeness does not imply consistency.
+
+Every token and cost component returns `known_subtotal` (null with no measured
+evidence), `measured_attempts`, `missing_attempts`, and `complete`. The top-level
+usage completeness describes coverage of observed attempts by any token usage,
+including coverage supplied by an inclusive ancestor before component suppression,
+not availability of every breakdown component. `reviews_without_execution_evidence`
+and `unfinished_reviews` prevent missing or running reviews from implying full
+coverage; an unknown attempt count is not fabricated. `not_run` reviewers have
+no measured executions. Historic all-or-nothing null usage remains unknown.
+Groups expose unobserved/unfinished reviews across the selected query and keep
+completeness false when those reviews cannot be allocated to execution groups.
+
+Bounds apply to the review run's persisted `started_at`, using `since <= start <
+until`. A date means midnight UTC; a timestamp requires `Z` or an explicit UTC
+offset and is normalized to UTC. A run without a usable timestamp is omitted
+from bounded queries with a warning, and retained in unbounded queries. Resume
+does not overwrite an existing run's start. Repeat `--exclude-repo` to omit
+normalized repositories. Repeat `--group-by` for a composite key using
+`repository`, `stage`, `provider`, `model`, `effort`, or `role`. Missing fields
+are null groups, never guessed defaults. Existing built-in evidence attributes
+stage `review` and role `root`; wider workflow stage instrumentation is separate.
+
+`review_runs` counts completed, failed (including exhausted), and incomplete
+review cohorts independently of individual reviewer counters. Workflow
+completion and merge are explicitly unknown: reviewer results alone cannot
+establish them. `requests.known_count` and input-token percentiles use only
+records explicitly scoped to an individual model `request`, including descendants
+whose token totals are covered by an inclusive parent. Request-only groups retain
+these samples without adding their tokens or costs again. Current CLI turn
+totals do not establish a model-request count or per-request input sizes, so
+those measurements remain unavailable for built-in CLI evidence. `prompt_bytes`
+describes submitted execution prompts, not tokenized model contexts. Distributions
+return sample size, minimum, median, p90, p95 and maximum, using linear
+interpolation; absent samples return null values. `task_duration_seconds` groups
+reviewer-level elapsed-time samples by reviewer/provider/model/effort; its
+`comparison_identity_complete` is false when any identity component is unknown.
+Parent elapsed time is never added to child execution durations.
+
+Available provider-reported USD cost is a covered subtotal with its source;
+no rate table or subscription allocation is inferred. It is not guaranteed
+billed cost. Raw evidence remains private. Historical comparisons are
+observational and do not establish savings or recall from a small sample.

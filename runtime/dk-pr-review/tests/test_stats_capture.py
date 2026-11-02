@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
@@ -179,6 +180,38 @@ def test_execution_corrections_retained_without_nested_double_counting(pinned, m
     assert api.summary()['total']['reviews']['correction_retries'] == 1
 
 
+def test_json_cli_capture_preserves_response_file_and_known_usage_on_missing_correction(pinned):
+    context, decisions, prep, names, git = pinned
+    prep['reviewers'] = {names[0]: prep['reviewers'][names[0]]}
+    prep['analysis']['reviewer_addenda'] = {names[0]: prep['analysis']['reviewer_addenda'][names[0]]}
+    prepare_current(context, decisions, prep)
+    stats = Capture(context, prep, names[:1], cycle=1)
+    responses = ['not json', json.dumps({'findings': []})]
+    usage = dict(input_tokens=100, cached_input_tokens=70, output_tokens=20, reasoning_output_tokens=5)
+    def fake(args, input, **kwargs):
+        assert '--json' in args
+        first = len(responses) == 2
+        Path(args[args.index('-o') + 1]).write_text(responses.pop(0))
+        # JSON stdout is transport evidence. It never substitutes for -o content.
+        return subprocess.CompletedProcess(args, 0,
+            json.dumps({'type': 'turn.completed', 'usage': usage}) if first else '', '')
+    with patch.object(executors, 'run_provider', side_effect=fake):
+        result = runner.review(context, names[:1], '', decisions, '', prep, stats=stats)
+    assert result['complete'] and result['findings'] == []
+    review = api.ledger(stats.repo)['runs'][stats.run_id]['reviews'][names[0]]
+    assert review['usage'] == [{**usage, 'source': 'codex_cli_json'}, None]
+    assert len(review['executions']) == 2
+    assert review['executions'][0]['execution_id'] != review['executions'][1]['execution_id']
+    summary = api.summary()['usage']
+    assert summary['tokens']['total_tokens']['known_subtotal'] == 120
+    assert summary['missing_attempts'] == 1 and not summary['complete']
+    assert summary['tokens']['reasoning_output_tokens']['known_subtotal'] == 5
+    trace = json.loads(next(stats.directory.glob('*-execution.json')).read_text())
+    assert trace['attempts'][0]['output'] == 'not json'
+    assert json.loads(trace['attempts'][0]['stdout'])['usage'] == usage
+    assert not git('status', '--porcelain')
+
+
 def test_standalone_no_capture_and_automatic_iteration_cycle_lookup(pinned):
     context, decisions, prep, names, git = pinned
     assert for_iteration(context, {**prep, 'mode': 'standalone'}, names) is None
@@ -207,6 +240,32 @@ def test_private_initialization_failure_retains_replayable_results(pinned, monke
     assert all(r['run_id'] == begin['run_id'] for r in reviews)
     assert all(r['status'] == 'completed' and r['findings'] == [finding()] for r in reviews)
     assert 'missing data' in capsys.readouterr().err
+    assert not git('status', '--porcelain')
+
+
+def test_offline_replay_preserves_capture_date_for_bounded_queries(pinned):
+    context, decisions, prep, names, git = pinned
+    captured_at = datetime(2026, 11, 1, 12, tzinfo=timezone.utc)
+    replayed_at = datetime(2026, 11, 3, 12, tzinfo=timezone.utc)
+    with patch('stats_capture.datetime', wraps=datetime) as clock:
+        clock.now.return_value = captured_at
+        with patch.object(api, 'begin_review', side_effect=OSError('storage unavailable')):
+            stats = for_iteration(context, prep, names, cycle=1)
+    stats.failure(names[0], 'interrupted while storage unavailable')
+    recovery = Path(context['patch']).parent / 'review-stats-recovery'
+    begin = json.loads(next(recovery.glob('begin-*.json')).read_text())
+    review = json.loads(next(recovery.glob('record-review-*.json')).read_text())
+    assert begin['started_at'] == captured_at.isoformat()
+    with patch.object(api, 'datetime', wraps=datetime) as clock:
+        clock.now.return_value = replayed_at
+        run = api.begin_review(**begin)
+        api.record_review(run['repository'], **review)
+    assert run['id'] == stats.run_id
+    assert run['started_at'] == captured_at.isoformat()
+    original = api.summary(since='2026-11-01', until='2026-11-02')
+    replay = api.summary(since='2026-11-03', until='2026-11-04')
+    assert original['review_runs']['failed'] == 1
+    assert replay['review_runs']['failed'] == 0
     assert not git('status', '--porcelain')
 
 
