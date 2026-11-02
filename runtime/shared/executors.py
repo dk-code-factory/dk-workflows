@@ -170,8 +170,9 @@ def provider_timeout():
 
 
 def execute_json(prompt, checkout, *, validate=None, executor=None, correction_instructions='',
-                 diagnostic_scope=None, retain_accepted=None, inherit_architecture=True):
-    """Correct model JSON once, without retrying provider failures or coercing data."""
+                 diagnostic_scope=None, retain_accepted=None, inherit_architecture=True,
+                 bound_correction=True):
+    """Correct JSON once; callers with their own file transport may disable bounding."""
     from shared.model_diagnostics import exchange
     retained_result = None
     def select(result):
@@ -187,7 +188,7 @@ def execute_json(prompt, checkout, *, validate=None, executor=None, correction_i
         if journal and journal.value['status'] == 'accepted':
             return retained_result
         return _execute_json(prompt, checkout, validate, executor, correction_instructions, journal,
-                             inherit_architecture)
+                             inherit_architecture, bound_correction)
 
 
 def _validate_result(result, validate):
@@ -198,7 +199,7 @@ def _validate_result(result, validate):
 
 
 def _execute_json(prompt, checkout, validate, executor, correction_instructions, journal,
-                  inherit_architecture):
+                  inherit_architecture, bound_correction):
     from shared.model_diagnostics import StorageFailure, preserve_failure
     original_prompt = prompt
     # Leave room below the backend's 1 MiB serialized-string limit for native
@@ -271,7 +272,7 @@ def _execute_json(prompt, checkout, validate, executor, correction_instructions,
                       'Follow the declared field types and preserve the same evidence and constraints. '
                       'Do not invent missing evidence or grant publication authority. ' + correction_instructions +
                       '\nPrior response:\n' + raw)
-            if len(json.dumps(prompt, ensure_ascii=True)) > correction_limit:
+            if bound_correction and len(json.dumps(prompt, ensure_ascii=True)) > correction_limit:
                 correction_evidence = allocate(repository=checkout)
                 original_file = retain('original-request', original_prompt)
                 prior_file = retain('prior-response', raw)
