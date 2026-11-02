@@ -140,6 +140,7 @@ def capture(function, *args, telemetry_prompt, telemetry_attempt, telemetry_prov
         evidence = result if result is not None else failure
         event = {'attempt': telemetry_attempt, 'execution_id': execution_id,
                  'started_at': started_at, 'stage': 'review', 'role': 'root',
+                 'observed_at': datetime.now(timezone.utc).isoformat(),
                  'scope': 'execution', 'inclusive': True,
                  'prompt_bytes': len(telemetry_prompt.encode('utf-8', errors='replace')),
                  'duration_seconds': time.monotonic() - start,

@@ -117,3 +117,85 @@ def test_timestamp_semantics_and_rejected_groups():
     for invalid in (['wrong'], ['model', 'model']):
         with pytest.raises(ValueError):
             usage.report([], invalid)
+
+
+def test_inclusive_ancestry_respects_provider_namespaces_and_unambiguous_cross_provider_parent():
+    records = [record('same', inclusive=True), record('same', 'command'),
+               record('child', 'command', parent_execution_id='same')]
+    result = usage.report(records)
+    assert result['executions'] == 3
+    assert result['tokens']['total_tokens']['known_subtotal'] == 360
+    assert result['excluded_records']['inclusive_children'] == 0
+    cross_provider = usage.report([record('root', inclusive=True),
+                                  record('child', 'claude', parent_execution_id='root')])
+    assert cross_provider['executions'] == 1
+    assert cross_provider['excluded_records']['inclusive_children'] == 1
+
+
+@pytest.mark.parametrize('reverse', [False, True])
+def test_inclusive_ancestry_reconciles_execution_aliases_before_suppressing_children(reverse):
+    records = [record('a', inclusive=True, response_id='r'), record('b', response_id='r'),
+               record('child', parent_execution_id='b'),
+               record('grandchild', parent_execution_id='child')]
+    result = usage.report(list(reversed(records)) if reverse else records)
+    assert result['executions'] == 1
+    assert result['tokens']['total_tokens']['known_subtotal'] == 120
+    assert result['excluded_records'] == dict(duplicates=1, inherited=0, inclusive_children=2)
+
+
+def test_null_snapshot_metadata_does_not_erase_known_fields_or_mutate_evidence():
+    first = record('a', model='m', effort='high', prompt_bytes=12)
+    result = usage.report([first, record('a', model=None, effort=None, prompt_bytes=None)],
+                          ['model', 'effort'])
+    assert result['groups'][0]['key'] == dict(model='m', effort='high')
+    assert result['prompt_bytes']['sample_size'] == 1
+    assert result['prompt_bytes']['median'] == 12
+    assert first['model'] == 'm' and first['prompt_bytes'] == 12
+
+
+def test_snapshot_precedence_uses_observation_time_and_preserves_bridge_field_recency():
+    records = [record('a', raw={'total_tokens': 20}, response_id='ra', model='latest',
+                      observed_at='2026-11-02T12:00:00Z'),
+               record('b', raw={'total_tokens': 10}, response_id='rb', model='older',
+                      observed_at='2026-11-02T11:00:00Z'),
+               dict(execution_id='a', response_id='rb', provider='codex',
+                    observed_at='2026-11-02T13:00:00Z')]
+    result = usage.report(records, ['model'])
+    assert result['executions'] == 1
+    assert result['tokens']['total_tokens']['known_subtotal'] == 20
+    assert result['groups'][0]['key'] == {'model': 'latest'}
+
+
+def test_inclusive_totals_preserve_deduplicated_request_samples_and_request_only_groups():
+    child = record('request', parent_execution_id='root', scope='request', role='child',
+                   raw={'input_tokens': 30, 'output_tokens': 1})
+    result = usage.report([record('root', inclusive=True, role='root'), child, dict(child)], ['role'])
+    assert result['executions'] == 1
+    assert result['tokens']['total_tokens']['known_subtotal'] == 120
+    assert result['requests'] == dict(known_count=1, unmeasured_executions=1, complete=False)
+    assert result['request_input_tokens']['median'] == 30
+    groups = {group['key']['role']: group for group in result['groups']}
+    assert groups['child']['executions'] == 0
+    assert groups['child']['tokens']['total_tokens']['known_subtotal'] is None
+    assert groups['child']['requests']['known_count'] == 1
+    assert groups['child']['request_input_tokens']['median'] == 30
+    assert groups['root']['request_input_tokens']['sample_size'] == 0
+
+
+def test_inherited_records_preserve_ancestry_and_aliases_without_contributing_usage():
+    result = usage.report([record('root', inclusive=True),
+                           record('bridge', inherited=True, parent_execution_id='root'),
+                           record('child', parent_execution_id='bridge')])
+    assert result['executions'] == 1
+    assert result['tokens']['total_tokens']['known_subtotal'] == 120
+    assert result['excluded_records'] == dict(duplicates=0, inherited=1, inclusive_children=1)
+    inherited_root = usage.report([record('root', inherited=True, inclusive=True),
+                                   record('child', parent_execution_id='root')])
+    assert inherited_root['executions'] == 1
+    assert inherited_root['excluded_records']['inclusive_children'] == 0
+    aliased = usage.report([record('a', inclusive=True, response_id='r'),
+                           record('b', inherited=True, response_id='r', raw={'total_tokens': 999}),
+                           record('child', parent_execution_id='b')])
+    assert aliased['executions'] == 1
+    assert aliased['tokens']['total_tokens']['known_subtotal'] == 120
+    assert aliased['excluded_records'] == dict(duplicates=0, inherited=1, inclusive_children=1)

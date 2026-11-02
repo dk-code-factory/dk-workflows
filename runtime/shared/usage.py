@@ -7,7 +7,7 @@ TOKEN_FIELDS = ('input_tokens', 'cached_input_tokens', 'output_tokens',
                 'reasoning_output_tokens', 'total_tokens')
 GROUP_FIELDS = ('repository', 'stage', 'provider', 'model', 'effort', 'role')
 EXECUTION_FIELDS = ('execution_id', 'parent_execution_id', 'response_id', 'tool_call_id',
-                    'inherited', 'inclusive', 'scope', 'started_at', 'stage', 'role',
+                    'inherited', 'inclusive', 'scope', 'started_at', 'observed_at', 'stage', 'role',
                     'prompt_bytes', 'provider', 'model', 'effort', 'usage')
 
 
@@ -57,65 +57,108 @@ def normalize(raw, provider):
     return result
 
 
+def provider_identity(record):
+    return {'openai': 'codex', 'anthropic': 'claude'}.get(record.get('provider'), record.get('provider'))
+
+
 def identities(record):
-    provider = {'openai': 'codex', 'anthropic': 'claude'}.get(record.get('provider'), record.get('provider'))
+    provider = provider_identity(record)
     return {(provider, key, record[key]) for key in
             ('execution_id', 'response_id', 'tool_call_id') if isinstance(record.get(key), str) and record[key]}
 
 
+def snapshot_order(record):
+    for key in ('observed_at', 'snapshot_at', 'started_at'):
+        try:
+            return timestamp(record.get(key))
+        except (ValueError, TypeError):
+            pass
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
 def unique_records(records):
-    """Exclude inherited evidence and descendants covered by inclusive totals."""
-    selected, aliases, seen = [], [], {}
-    excluded = {'duplicates': 0, 'inherited': 0, 'inclusive_children': 0}
-    parents = {r.get('execution_id'): r.get('parent_execution_id') for r in records if r.get('execution_id')}
-    inclusive = {r['execution_id'] for r in records if r.get('execution_id') and r.get('inclusive') and not r.get('inherited')}
-    for record in records:
-        if record.get('inherited'):
-            excluded['inherited'] += 1
+    """Reconcile identities before selecting totals and independent request samples."""
+    retained = sorted(records, key=snapshot_order)
+    roots, seen = list(range(len(retained))), {}
+
+    def root(index):
+        while roots[index] != index:
+            roots[index] = roots[roots[index]]
+            index = roots[index]
+        return index
+
+    for index, record in enumerate(retained):
+        for key in identities(record):
+            if key in seen:
+                roots[root(index)] = root(seen[key])
+            seen[key] = index
+    snapshots = {}
+    for index, record in enumerate(retained):
+        snapshots.setdefault(root(index), []).append(record)
+    selected, aliases, measured = [], [], []
+    for observations in snapshots.values():
+        items = [item for item in observations if not item.get('inherited')]
+        # Merge in observation order, including through transitive identity bridges.
+        # Non-null fields survive incomplete snapshots; raw evidence is untouched.
+        merged, raw, sources, keys = {}, {}, set(), set()
+        # Inherited observations supply identity and ancestry edges, never usage.
+        for item in observations:
+            keys.update(identities(item))
+            for key in ('execution_id', 'parent_execution_id', 'provider'):
+                if item.get(key) is not None:
+                    merged[key] = item[key]
+        for item in items:
+            merged.update({key: value for key, value in item.items() if value is not None})
+            value = item.get('usage')
+            if isinstance(value, dict):
+                raw.update({key: value for key, value in value.items() if value is not None})
+                sources.update(s for s in value.get('sources', []) if isinstance(s, str))
+                if isinstance(value.get('source'), str):
+                    sources.add(value['source'])
+        if len(items) > 1 and raw:
+            raw.update(source='merged_execution_snapshots', sources=sorted(sources))
+        merged['usage'] = raw or None
+        merged['inclusive'] = any(item.get('inclusive') for item in items)
+        selected.append(merged)
+        aliases.append(keys)
+        measured.append(bool(items))
+
+    executions, unqualified = {}, {}
+    for index, keys in enumerate(aliases):
+        for provider, kind, value in keys:
+            if kind == 'execution_id':
+                executions[provider, value] = index
+                unqualified.setdefault(value, set()).add(index)
+
+    def parent_index(record):
+        parent = record.get('parent_execution_id')
+        if not isinstance(parent, str) or not parent:
+            return None
+        local = executions.get((provider_identity(record), parent))
+        if local is not None:
+            return local
+        matches = unqualified.get(parent, set())
+        return next(iter(matches)) if len(matches) == 1 else None
+
+    totals = []
+    for index, record in enumerate(selected):
+        if not measured[index]:
             continue
-        parent, ancestors = record.get('parent_execution_id'), set()
+        parent, ancestors = parent_index(record), {index}
         covered = False
-        while parent and parent not in ancestors:
+        while parent is not None and parent not in ancestors:
             ancestors.add(parent)
-            if parent in inclusive:
+            if selected[parent].get('inclusive'):
                 covered = True
                 break
-            parent = parents.get(parent)
-        if covered:
-            excluded['inclusive_children'] += 1
-            continue
-        keys = identities(record)
-        matches = {seen[key] for key in keys if key in seen}
-        if matches:
-            excluded['duplicates'] += len(matches)
-            index = min(matches)
-            previous = selected[index]
-            # Merge complementary measured fields from snapshots of one
-            # execution, with newer non-null values winning. These are derived
-            # query records; retained raw evidence is never changed or summed.
-            candidates = [selected[i] for i in sorted(matches)] + [record]
-            merged, sources = {}, set()
-            for item in candidates:
-                raw = item.get('usage')
-                if isinstance(raw, dict):
-                    merged.update({key: value for key, value in raw.items() if value is not None})
-                    sources.update(s for s in raw.get('sources', []) if isinstance(s, str))
-                    if isinstance(raw.get('source'), str):
-                        sources.add(raw['source'])
-            if merged:
-                merged.update(source='merged_execution_snapshots', sources=sorted(sources))
-            selected[index] = {**previous, **record, 'usage': merged or None}
-            keys = keys.union(*(aliases[i] for i in matches))
-            for other in matches - {index}:
-                selected[other] = None
-                aliases[other] = set()
-            aliases[index] = keys
-            seen.update(dict.fromkeys(keys, index))
-            continue
-        seen.update(dict.fromkeys(keys, len(selected)))
-        selected.append(record)
-        aliases.append(keys)
-    return [record for record in selected if record is not None], excluded
+            parent = parent_index(selected[parent])
+        if not covered:
+            totals.append(record)
+    inherited = sum(bool(r.get('inherited')) for r in records)
+    excluded = {'duplicates': len(records) - inherited - sum(measured),
+                'inherited': inherited,
+                'inclusive_children': sum(measured) - len(totals)}
+    return totals, excluded, [r for r, active in zip(selected, measured) if active and r.get('scope') == 'request']
 
 
 def distribution(values):
@@ -131,7 +174,7 @@ def distribution(values):
             'max': values[-1] if values else None}
 
 
-def measurements(records):
+def measurements(records, requests):
     """Known subtotals always carry their denominator and missing count."""
     usages = [normalize(r.get('usage'), r.get('provider')) for r in records]
     result = {'executions': len(records), 'attempts_with_usage': sum(u is not None and any(u[k] is not None for k in TOKEN_FIELDS) for u in usages)}
@@ -149,15 +192,15 @@ def measurements(records):
         else:
             result['tokens'][key] = metric
     # CLI turn totals do not establish individual model-request sizes/counts.
-    requests = [r for r in records if r.get('scope') == 'request']
     result['requests'] = {'known_count': len(requests) if requests else None,
                           'unmeasured_executions': sum(r.get('scope') != 'request' for r in records),
-                          'complete': bool(records) and len(requests) == len(records)}
+                          'complete': bool(records) and all(r.get('scope') == 'request' for r in records)}
     result['usage_sources'] = sorted({u['source'] for u in usages if u and isinstance(u['source'], str)} |
         {source for r in records if isinstance(r.get('usage'), dict)
          for source in r['usage'].get('sources', []) if isinstance(source, str)})
-    result['request_input_tokens'] = distribution([u['input_tokens'] for r, u in zip(records, usages)
-        if r.get('scope') == 'request' and u and u['input_tokens'] is not None])
+    request_usage = [normalize(r.get('usage'), r.get('provider')) for r in requests]
+    result['request_input_tokens'] = distribution([u['input_tokens'] for u in request_usage
+        if u and u['input_tokens'] is not None])
     result['prompt_bytes'] = distribution([r['prompt_bytes'] for r in records if number(r.get('prompt_bytes'))])
     return result
 
@@ -165,12 +208,13 @@ def measurements(records):
 def report(records, groups=()):
     if any(field not in GROUP_FIELDS for field in groups) or len(set(groups)) != len(groups):
         raise ValueError('invalid or repeated usage grouping field')
-    records, excluded = unique_records(records)
-    grouped = {}
-    for record in records:
-        key = tuple(record.get(field) for field in groups)
-        grouped.setdefault(key, []).append(record)
-    return {**measurements(records), 'excluded_records': excluded,
+    records, excluded, requests = unique_records(records)
+    grouped, request_groups = {}, {}
+    for collection, target in ((records, grouped), (requests, request_groups)):
+        for record in collection:
+            key = tuple(record.get(field) for field in groups)
+            target.setdefault(key, []).append(record)
+    return {**measurements(records, requests), 'excluded_records': excluded,
             'group_by': list(groups), 'groups': [
-                {'key': dict(zip(groups, key)), **measurements(items)}
-                for key, items in sorted(grouped.items(), key=lambda item: json.dumps(item[0]))] if groups else []}
+                {'key': dict(zip(groups, key)), **measurements(grouped.get(key, []), request_groups.get(key, []))}
+                for key in sorted(grouped.keys() | request_groups.keys(), key=json.dumps)] if groups else []}

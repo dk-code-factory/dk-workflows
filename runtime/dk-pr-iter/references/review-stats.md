@@ -163,16 +163,21 @@ Raw provider usage is retained unchanged alongside normalization.
 `usage` retains every observed correction attempt, including null entries.
 Compact `executions` contain available execution/response/tool-call identities,
 provider, model, effort, stage, role, timestamp, prompt byte size and raw usage.
-An inclusive execution suppresses its descendants; inherited records and
-duplicate available identities are excluded before aggregation, with exclusion
-counts reported. Without an identity, no identity is invented to merge equal
-token quantities. Built-in instrumentation collects only the configured root
+An inclusive execution suppresses descendant token and cost totals. Identities
+are reconciled before ancestry checks, including execution aliases. Parent IDs
+resolve within their provider namespace, or across providers when unambiguous.
+Inherited quantities and duplicate available identities are excluded before
+aggregation, with exclusion counts reported. Inherited identity and ancestry
+edges remain available for descendant checks. Without an identity, no identity
+is invented to merge equal token quantities. Built-in instrumentation collects only the configured root
 execution and suppresses nested instrumentation. A running review links its
 private trace so interrupted work remains visible; resumed evidence with the
 same identities counts once. Running observations remain unfinished.
-Repeated snapshots merge complementary known fields in derived query records,
-with newer non-null values taking precedence and source labels retained; their
-quantities are never added together. Retained raw snapshots remain unchanged.
+Repeated snapshots merge complementary known usage and metadata fields in derived
+query records. Non-null values take precedence by observation timestamp, falling
+back to the owning run's start and then execution start. Undated evidence precedes
+dated evidence; ties retain input order. Source labels survive and quantities are
+never added together. Retained raw snapshots remain unchanged.
 
 Every token and cost component returns `known_subtotal` (null with no measured
 evidence), `measured_attempts`, `missing_attempts`, and `complete`. The top-level
@@ -198,7 +203,9 @@ stage `review` and role `root`; wider workflow stage instrumentation is separate
 review cohorts independently of individual reviewer counters. Workflow
 completion and merge are explicitly unknown: reviewer results alone cannot
 establish them. `requests.known_count` and input-token percentiles use only
-records explicitly scoped to an individual model `request`. Current CLI turn
+records explicitly scoped to an individual model `request`, including descendants
+whose token totals are covered by an inclusive parent. Request-only groups retain
+these samples without adding their tokens or costs again. Current CLI turn
 totals do not establish a model-request count or per-request input sizes, so
 those measurements remain unavailable for built-in CLI evidence. `prompt_bytes`
 describes submitted execution prompts, not tokenized model contexts. Distributions

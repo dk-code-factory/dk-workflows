@@ -16,6 +16,18 @@ REPO = 'github.com/o/r'
 SHA = 'a' * 40
 
 
+def test_snapshot_recency_uses_run_timestamp_instead_of_lexicographic_run_id():
+    for run_id, started_at, tokens in [('z-old', '2026-11-01', 10), ('a-new', '2026-11-02', 20)]:
+        current = stats.begin_review(pr_url=f'https://{REPO}/pull/2', cycle=1, head=SHA,
+                                     preparation_id='prep', reviewers=['a'], run_id=run_id,
+                                     started_at=started_at)
+        stats.record_review(REPO, current['id'], 'a', status='completed', executions=[{
+            'execution_id': 'same', 'provider': 'codex', 'usage': {'total_tokens': tokens}}])
+    result = stats.summary(REPO)['usage']
+    assert result['executions'] == 1
+    assert result['tokens']['total_tokens']['known_subtotal'] == 20
+
+
 @pytest.fixture(autouse=True)
 def private_storage(tmp_path, monkeypatch):
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'private'))

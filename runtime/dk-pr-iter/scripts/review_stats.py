@@ -287,7 +287,8 @@ def summary(repo=None, reviewer=None, *, since=None, until=None, exclude_repos=(
                     usage_unknown_reviews += not records and review['status'] != 'not_run'
                     unfinished_reviews += review['status'] == 'running'
                     executions.extend({**record, 'repository': repository, 'reviewer': name,
-                                       'run_id': run_id} for record in records)
+                                       'run_id': run_id, 'snapshot_at': run.get('started_at')}
+                                      for record in records)
                     if review.get('duration_seconds') is not None:
                         key = (name, review.get('provider'), review.get('model'), review.get('effort'))
                         task_durations.setdefault(key, []).append(review['duration_seconds'])
