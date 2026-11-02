@@ -12,10 +12,17 @@ import re
 import uuid
 
 from shared import bindings
+from shared.diagnostics import Diagnostic, task
 from shared.private_state import write
 from shared.workflow_storage import allocate
 
 _CURRENT = ContextVar('required_review_execution', default=None)
+
+
+class EvidenceFailure(Diagnostic):
+    """Mandatory native proof is unavailable, independently of provider failure."""
+
+
 _CORE = {
     'code-review-ad:code-review-ad': ['Toolkit', 'Standards', 'Spec'],
     'code-review-matpocock:code-review-matpocock': ['Standards'],
@@ -219,8 +226,14 @@ def record(host, stdout, stderr, returncode, attempt):
              'host': host, 'attempt': attempt, 'stdout': stdout, 'stderr': stderr,
              'returncode': returncode}
     path = collector['directory'] / f'attempt-{len(collector["attempts"])}.json'
-    write(path, value)
-    collector['attempts'].append({'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+    try:
+        write(path, value)
+        fingerprint = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise EvidenceFailure('review_execution_unavailable',
+            'Required specialist execution evidence could not be retained: ' + str(exc),
+            task('Repair private specialist execution evidence storage.', path), outcome='error') from exc
+    collector['attempts'].append({'path': str(path), 'sha256': fingerprint})
 
 
 def _events(raw):
@@ -255,7 +268,10 @@ def codex_passes(raw):
         receivers = item.get('receiver_thread_ids', [])
         if item.get('tool') == 'spawn_agent':
             role = _role(item.get('prompt'))
-            if role and isinstance(receivers, list) and len(receivers) == 1 and receivers[0] != root:
+            if role:
+                if (not isinstance(receivers, list) or len(receivers) != 1
+                        or not isinstance(receivers[0], str) or not receivers[0] or receivers[0] == root):
+                    raise ValueError('unsupported Codex specialist receiver state')
                 if receivers[0] in launched:
                     raise ValueError('duplicate Codex specialist identity')
                 launched[receivers[0]] = role

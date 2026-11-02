@@ -15,18 +15,20 @@ from shared.review_sessions import Session
 
 
 @pytest.fixture
-def native(tmp_path, monkeypatch):
+def native(tmp_path, monkeypatch, request):
     monkeypatch.setenv('DK_HOST', 'codex')
+    host = getattr(request, 'param', 'codex')
     package = Package(tmp_path)
     plugin = tmp_path / 'plugin'
-    (plugin / '.codex-plugin').mkdir(parents=True)
-    (plugin / '.codex-plugin/plugin.json').write_text(json.dumps({'name': 'fixture', 'version': '1.0.0'}))
+    manifest = plugin / f'.{host}-plugin/plugin.json'
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({'name': 'fixture', 'version': '1.0.0'}))
     procedure = plugin / 'skills/review/SKILL.md'
     procedure.parent.mkdir(parents=True)
     procedure.write_text('Review source read-only using independent Specialist.\n')
-    provider = {'skill': 'fixture:review', 'host': 'codex', 'nested_review_roles': ['Specialist']}
+    provider = {'skill': 'fixture:review', 'host': host, 'nested_review_roles': ['Specialist']}
     name = bindings.key(provider)
-    resolved = {'binding': provider, 'identity': name, 'executor': 'codex', 'version': '1.0.0',
+    resolved = {'binding': provider, 'identity': name, 'executor': host, 'version': '1.0.0',
                 'root': str(plugin), 'procedure': str(procedure)}
     monkeypatch.setattr(bindings, 'resolve', lambda _: resolved)
     descriptor = runner.describe_reviewer(provider)
@@ -108,6 +110,79 @@ def test_execution_evidence_storage_failure_stays_blocking(native, monkeypatch, 
     assert result['guard_failure'] and result['outcome'] == 'guard_failed'
     with pytest.raises(ValueError, match='review evidence guard failed'):
         review_coverage.verify(reference, prepared, accepted_failures=[name])
+
+
+@pytest.mark.parametrize('operation', ['write', 'read'])
+def test_native_attempt_storage_failure_cannot_be_accepted(native, monkeypatch, operation):
+    package, provider, name, prepared = native
+    transport(monkeypatch, ['{"findings":[]}'], [events()])
+    write = review_execution.write
+    read = Path.read_bytes
+    def fail_write(path, value):
+        if Path(path).name.startswith('attempt-'):
+            raise OSError('native attempt write failed')
+        return write(path, value)
+    def fail_read(path):
+        if path.name.startswith('attempt-'):
+            raise OSError('native attempt read failed')
+        return read(path)
+    monkeypatch.setattr(review_execution, 'write', fail_write if operation == 'write' else write)
+    if operation == 'read':
+        monkeypatch.setattr(Path, 'read_bytes', fail_read)
+    session = Session(package.context, prepared, [name])
+    with session.execution():
+        result = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=session)
+        reference = session.finish(result)
+    assert result['guard_failure'] and result['outcome'] == 'guard_failed'
+    assert not result.get('failed_reviewers')
+    saved = json.loads(Path(result['reviewer_execution'][name]['reference']['path']).read_text())
+    assert saved['assessment']['status'] == 'unavailable'
+    with pytest.raises(ValueError, match='review evidence guard failed'):
+        review_coverage.verify(reference, prepared, accepted_failures=[name])
+
+
+@pytest.mark.parametrize('native', ['claude'], indirect=True)
+@pytest.mark.parametrize('trace', ['not-json', '{"type":"system","session_id":"root"}',
+    '\n'.join([json.dumps({'type': 'result', 'subtype': 'success', 'result': '{"findings":[]}'})] * 2)])
+def test_native_stream_extraction_failure_cannot_be_accepted(native, monkeypatch, trace):
+    package, provider, name, prepared = native
+    calls = []
+    def run(argv, input, **kwargs):
+        assert '--output-format' in argv and 'stream-json' in argv and '--verbose' in argv
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, trace, '')
+    monkeypatch.setattr(executors, 'run_provider', run)
+    session = Session(package.context, prepared, [name])
+    with session.execution():
+        result = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=session)
+        reference = session.finish(result)
+    assert len(calls) == 1
+    assert result['guard_failure'] and result['outcome'] == 'guard_failed'
+    assert not result.get('failed_reviewers')
+    saved = json.loads(Path(result['reviewer_execution'][name]['reference']['path']).read_text())
+    attempt = json.loads(Path(saved['attempts'][0]['path']).read_text())
+    assert attempt['stdout'] == trace and attempt['returncode'] == 0
+    assert saved['assessment']['status'] == 'unavailable'
+    with pytest.raises(ValueError, match='review evidence guard failed'):
+        review_coverage.verify(reference, prepared, accepted_failures=[name])
+
+
+@pytest.mark.parametrize('detail,exhausted', [('authentication failed', False), ('usage limit reached', True)])
+def test_native_record_failure_preserves_original_provider_failure(native, monkeypatch, detail, exhausted):
+    package, provider, name, prepared = native
+    monkeypatch.setattr(executors, 'run_provider',
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 1, '', detail))
+    write = review_execution.write
+    def fail_attempt(path, value):
+        if Path(path).name.startswith('attempt-'):
+            raise OSError('native attempt write failed')
+        return write(path, value)
+    monkeypatch.setattr(review_execution, 'write', fail_attempt)
+    result = runner.review(package.context, [provider], '', package.decisions, '', prepared)
+    assert not result['complete'] and not result.get('guard_failure')
+    assert result['outcome'] == ('usage_exhausted' if exhausted else 'provider_failed')
+    failures = result['skipped_reviewers'] if exhausted else result['failed_reviewers']
+    assert detail in failures[0]['reason']
 
 
 def test_native_pass_completion_caches_proof_and_rechecks_it(native, monkeypatch):

@@ -248,6 +248,22 @@ def test_codex_missing_turn_completion_is_unavailable():
         execution.codex_passes(stream(codex_rows()[:-1]))
 
 
+@pytest.mark.parametrize('receivers', [None, [], 'child', ['child-a', 'child-b'],
+                                      ['root'], [''], [3], [{}]])
+def test_unsupported_marked_codex_spawn_is_unavailable_after_completed_roles(proof, receivers):
+    rows = codex_rows([*ROLES, 'Performance'])
+    rows.insert(-1, {'type': 'item.completed', 'item': {
+        'type': 'collab_tool_call', 'tool': 'spawn_agent', 'sender_thread_id': 'root',
+        'status': 'completed', 'prompt': 'DK_REVIEW_PASS=Toolkit\nContinue the required check.',
+        'receiver_thread_ids': receivers,
+        'agents_states': {'child-a': {'status': 'running'}, 'child-b': {'status': 'running'}}}})
+    reference = retained(proof, rows)
+    with pytest.raises(ValueError, match='execution unavailable'):
+        execution.verify(reference, BINDING, proof[2], proof[1])
+    assessment = json.loads(Path(reference['path']).read_text())['assessment']
+    assert 'unsupported Codex specialist receiver state' in assessment['unknown']
+
+
 def test_multiple_roles_in_one_native_child_are_not_independent_passes():
     rows = codex_rows(['Toolkit'])
     rows[2]['item']['prompt'] += '\nDK_REVIEW_PASS=Standards\nDK_REVIEW_PASS=Spec'

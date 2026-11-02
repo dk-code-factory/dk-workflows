@@ -584,7 +584,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             return {'status': 'tokens_exhausted', 'message': str(exc)}, None
         except Exception as exc:
             with checkpoint_lock:
-                guard_failure = checking
+                guard_failure = checking or isinstance(exc, review_execution.EvidenceFailure)
                 try:
                     unchanged()
                 except Exception as guard_error:

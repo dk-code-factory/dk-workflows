@@ -660,10 +660,17 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
                                   'Use a writable private TMPDIR if needed, then retry manually.', evidence),
                              outcome='error')
         if required_execution:
-            envelopes = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+            try:
+                envelopes = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+            except ValueError as exc:
+                raise review_execution.EvidenceFailure('review_execution_unavailable',
+                    'Claude native execution stream is malformed: ' + str(exc),
+                    task('Inspect the retained native specialist execution evidence.'), outcome='error') from exc
             results = [item for item in envelopes if isinstance(item, dict) and item.get('type') == 'result']
             if len(results) != 1:
-                raise RuntimeError('Claude native execution stream has no unique result')
+                raise review_execution.EvidenceFailure('review_execution_unavailable',
+                    'Claude native execution stream has no unique result',
+                    task('Inspect the retained native specialist execution evidence.'), outcome='error')
             envelope = results[0]
         else:
             envelope = json.loads(proc.stdout)
@@ -693,9 +700,9 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
                               stdout=output_text(getattr(result, 'stdout', None)),
                               stderr=output_text(getattr(result, 'stderr', None)),
                               timeout_seconds=timeout, output=output, failure=original, response=received)
-                except (StorageFailure, OSError) as exc:
+                except (review_execution.EvidenceFailure, StorageFailure, OSError) as exc:
                     retain_temp = True
-                    if not isinstance(exc, StorageFailure):
+                    if not isinstance(exc, (StorageFailure, review_execution.EvidenceFailure)):
                         exc = StorageFailure('model_diagnostics_failed', str(exc),
                                              task('Repair private diagnostic storage.'), outcome='error')
                     exc.action['artifacts'].append(temp)
