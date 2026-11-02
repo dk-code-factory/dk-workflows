@@ -16,6 +16,12 @@ pinned evidence. They also retain observed provider, model and effort. Unknown
 profile settings remain unknown; this feature does not inspect host credentials
 or invent effective settings from defaults.
 
+An explicitly selected retained invocation takes precedence over a different
+inherited invocation context. Same-invocation transport ancestry is preserved.
+Artifact fingerprints are best-effort observations of regular files up to 16 MiB;
+nonregular, oversized or changing files are skipped with a warning. Native helper
+parsing and evidence validation remain authoritative.
+
 Helper stages cover preparation, coordination, review, fixing, replies, CI,
 cleanup and completion. They measure the work dispatched through the bundled
 CLI. Native editing and reasoning outside these processes have no automatic
@@ -55,6 +61,8 @@ remains partial. Parent elapsed time and child durations are not summed into a
 whole-workflow duration. Equal quantities without matching identities are not
 deduplicated. Missing tokens, compactions, tool output sizes, model-request counts
 and host coordination observations remain unknown rather than zero.
+Managed lifecycle registration can precede its transport identity; without an
+observed ancestry link, its host component conservatively remains unknown.
 
 Records are private under the user's state directory, outside the source checkout
 and plugin. They are not distributed or automatically deleted. The existing

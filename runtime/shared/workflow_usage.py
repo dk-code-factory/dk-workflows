@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import sys
 import time
 import uuid
@@ -21,6 +22,7 @@ from shared.private_state import read, write
 VERSION = 1
 ENV = 'DK_WORKFLOW_USAGE'
 LOCK_TIMEOUT_SECONDS = 0.25
+MAX_EVIDENCE_BYTES = 16 * 1024 * 1024
 ACTIVE = ContextVar('workflow_usage_context', default=None)
 _ID = re.compile(r'[a-f0-9]{32}')
 STAGES = {
@@ -73,15 +75,19 @@ def context(env=None):
     try:
         if env.get(ENV):
             value = checked(json.loads(env[ENV]))
-        elif env.get('DK_UPDATE_PARENT'):
+        if env.get('DK_UPDATE_PARENT') and (value is None or value['invocation_id'] != env['DK_UPDATE_PARENT']):
             stored = read(token_path(env['DK_UPDATE_PARENT']), None)
-            value = checked(stored) if stored else None
-        if active is not None and value is not None and active['workflow_id'] == value['workflow_id']:
+            # A selected lifecycle receipt owns its invocation identity. An
+            # unknown external-plugin token may still inherit its caller's context.
+            if stored is not None:
+                value = checked(stored)
+        if (active is not None and value is not None
+                and active['workflow_id'] == value['workflow_id']
+                and active['invocation_id'] == value['invocation_id']):
             value = {**value, **{key: active[key] for key in ('stage', 'role', 'pinned_evidence') if key in active}}
         return value or active
-    except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
-        if env.get(ENV):
-            warning(exc)
+    except Exception as exc:
+        warning(exc)
     return active
 
 
@@ -213,12 +219,12 @@ def stage(command, arguments):
 
 
 def input_evidence(arguments, cwd):
-    """Retain hashes of supplied pinned artifacts, without copying their bodies."""
+    """Hash bounded regular artifact candidates without parsing native arguments."""
     result = []
     accepted = {'--context', '--preparation', '--preparation-file', '--decisions-file',
                 '--handoff', '--handoff-file'}
-    try:
-        for index, argument in enumerate(arguments):
+    for index, argument in enumerate(arguments):
+        try:
             key, separator, value = argument.partition('=')
             if key not in accepted:
                 continue
@@ -227,12 +233,26 @@ def input_evidence(arguments, cwd):
             path = Path(value)
             path = path if path.is_absolute() else Path(cwd) / path
             digest = hashlib.sha256()
-            with path.open('rb') as stream:
-                for block in iter(lambda: stream.read(65536), b''):
+            # Nonblocking open also handles FIFOs before fstat can reject them.
+            # Check the descriptor, so replacing a pathname cannot bypass type checks.
+            descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+            with os.fdopen(descriptor, 'rb') as stream:
+                before = os.fstat(stream.fileno())
+                if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_EVIDENCE_BYTES:
+                    raise ValueError('usage artifact must be a regular file within the size budget: ' + str(path))
+                remaining = before.st_size
+                while remaining:
+                    block = stream.read(min(65536, remaining))
+                    if not block:
+                        raise ValueError('usage artifact changed while reading: ' + str(path))
                     digest.update(block)
+                    remaining -= len(block)
+                after = os.fstat(stream.fileno())
+                if (stream.read(1) or (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns)):
+                    raise ValueError('usage artifact changed while reading: ' + str(path))
             result.append({'argument': key, 'path': str(path.resolve()), 'sha256': digest.hexdigest()})
-    except (OSError, ValueError) as exc:
-        warning(exc)
+        except Exception as exc:
+            warning(exc)
     return result
 
 

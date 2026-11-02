@@ -316,3 +316,82 @@ def test_helper_pins_supplied_evidence_and_provider_attempt_to_stage(lifecycle, 
     assert helper['helper_id'] == execution['helper_id']
     import hashlib
     assert execution['evidence']['pinned'][0]['sha256'] == hashlib.sha256(evidence.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize('source', ['environment', 'token'])
+def test_context_repository_timeout_preserves_helper_and_provider_execution(lifecycle, monkeypatch, capsys, source):
+    _, ctx = lifecycle()
+    env = ({telemetry.ENV: json.dumps(ctx)} if source == 'environment'
+           else {'DK_UPDATE_PARENT': ctx['invocation_id']})
+    from shared import repository_scope
+    def fail(*args, **kwargs):
+        raise subprocess.TimeoutExpired(['git', 'rev-parse'], 15)
+    monkeypatch.setattr(repository_scope, 'checkout_roots', fail)
+    with telemetry.helper('review-loop', ['check'], ROOT, env) as observed:
+        assert observed['env'] == env
+    result = SimpleNamespace(returncode=0, stdout='unchanged', stderr='')
+    calls = []
+    def provider(*args, **kwargs):
+        calls.append(kwargs['env'])
+        return result
+    assert reviewer_telemetry.capture(provider, ['provider'], env=env,
+        telemetry_prompt='go', telemetry_attempt=0, telemetry_provider='codex') is result
+    assert len(calls) == 1
+    assert 'Workflow usage evidence unavailable' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('failure', ['corrupt', 'unreadable'])
+def test_failed_token_index_lookup_warns_without_stopping_work(lifecycle, monkeypatch, capsys, failure):
+    _, ctx = lifecycle()
+    path = telemetry.token_path(ctx['invocation_id'])
+    if failure == 'corrupt':
+        path.write_text('broken JSON')
+    else:
+        read = telemetry.read
+        def denied(target, default):
+            if Path(target) == path:
+                raise PermissionError('unreadable usage index')
+            return read(target, default)
+        monkeypatch.setattr(telemetry, 'read', denied)
+    env = {'DK_UPDATE_PARENT': ctx['invocation_id']}
+    with telemetry.helper('review-loop', ['check'], ROOT, env) as observed:
+        assert observed['env'] == env
+    assert telemetry.context(env) is None
+    assert 'Workflow usage evidence unavailable' in capsys.readouterr().err
+
+
+def test_selected_child_invocation_overrides_inherited_context_and_preserves_its_ancestry(lifecycle, monkeypatch):
+    parent, parent_ctx = lifecycle()
+    inherited = {**parent_ctx, 'parent_execution_id': 'parent-provider'}
+    monkeypatch.setenv(telemetry.ENV, json.dumps(inherited))
+    child, child_ctx = lifecycle('child-token', 'dk-pr-review', parent['token'])
+    # The current provider's environment still belongs to the parent when its
+    # caller explicitly selects a different retained invocation.
+    env = {telemetry.ENV: json.dumps(inherited), 'DK_UPDATE_PARENT': child['token']}
+    assert telemetry.context(env) == child_ctx
+    assert child_ctx['parent_execution_id'] == 'parent-provider'
+    # Same-invocation transport ancestry and helper metadata remain authoritative.
+    current = {**child_ctx, 'parent_execution_id': 'child-provider',
+               'helper_id': 'active-helper', 'pinned_evidence': [{'sha256': 'retained'}]}
+    assert telemetry.context({**env, telemetry.ENV: json.dumps(current)}) == current
+    with telemetry.helper('reviewers', [], ROOT, env) as observed:
+        def provider(*args, **kwargs):
+            supplied = json.loads(kwargs['env'][telemetry.ENV])
+            assert supplied['invocation_id'] == child['token']
+            return SimpleNamespace(returncode=0, stdout='', stderr='')
+        reviewer_telemetry.capture(provider, ['provider'], env=observed['env'],
+            telemetry_prompt='go', telemetry_attempt=0, telemetry_provider='codex')
+    events = records(parent_ctx['path'], 'execution')
+    assert len(events) == 2 and all(event['invocation_id'] == child['token'] for event in events)
+    assert all(event['parent_invocation_id'] == parent['token'] for event in events)
+
+
+def test_oversized_artifact_candidates_remain_unknown_and_native_work_continues(lifecycle, tmp_path, monkeypatch, capsys):
+    _, ctx = lifecycle()
+    path = tmp_path / 'oversized.json'
+    path.write_bytes(b'x' * 129)
+    monkeypatch.setattr(telemetry, 'MAX_EVIDENCE_BYTES', 128)
+    with telemetry.helper('reviewers', ['--context', str(path)], tmp_path,
+                          {telemetry.ENV: json.dumps(ctx)}) as observed:
+        assert json.loads(observed['env'][telemetry.ENV])['pinned_evidence'] == []
+    assert 'regular file within the size budget' in capsys.readouterr().err

@@ -47,9 +47,9 @@ def clean_environment(tmp_path):
     return env
 
 
-def command(env, cwd, *args, check=True):
+def command(env, cwd, *args, check=True, timeout=30):
     return subprocess.run([sys.executable, str(CLI), '--cwd', str(cwd), *args],
-                          env=env, text=True, capture_output=True, check=check)
+                          env=env, text=True, capture_output=True, check=check, timeout=timeout)
 
 
 @pytest.mark.parametrize('terminal', ['completed', 'limited'])
@@ -169,3 +169,47 @@ def test_review_resume_retains_coverage_and_checkpoint_reuse_without_new_executi
     assert not [event for event in report['events'] if event['kind'] == 'execution']
     assert report['workflow_outcome'] == 'unknown'
     assert not git('status', '--porcelain')
+
+
+@pytest.mark.parametrize('special', ['device', 'fifo'])
+def test_nonregular_evidence_candidate_does_not_delay_native_argument_rejection(tmp_path, special):
+    env = clean_environment(tmp_path)
+    opened = json.loads(command(env, tmp_path, '--host', 'codex', 'begin', '--skill', 'dk-pr-review').stdout)
+    try:
+        if special == 'fifo':
+            path = tmp_path / 'artifact.fifo'
+            os.mkfifo(path)
+        else:
+            path = Path('/dev/zero')
+        failed = command(env, tmp_path, '--invocation', opened['invocation'], 'review-loop',
+            'check', '--kind', 'split', '--state', 'invalid', '--context', str(path),
+            check=False, timeout=10)
+        assert failed.returncode == 2
+        assert 'unrecognized arguments' in failed.stderr
+        assert 'regular file within the size budget' in failed.stderr
+    finally:
+        command(env, tmp_path, '--invocation', opened['invocation'], 'end')
+
+
+def test_real_child_receipt_selects_child_under_inherited_parent_context(tmp_path):
+    env = clean_environment(tmp_path)
+    parent = json.loads(command(env, tmp_path, '--host', 'codex', 'begin', '--skill', 'dk-pr-iter').stdout)
+    child = None
+    try:
+        inherited = dict(env, **{workflow_usage.ENV: json.dumps({**parent['workflow_usage'],
+                                                              'parent_execution_id': 'parent-provider'}),
+                                'DK_UPDATE_PARENT': parent['token']})
+        child = json.loads(command(inherited, tmp_path, '--host', 'codex', 'begin',
+                                  '--skill', 'dk-pr-review').stdout)
+        result = json.loads(command(inherited, tmp_path, '--invocation', child['invocation'],
+            '--pr', 'https://github.com/o/r/pull/2', 'run-state', 'start-run').stdout)
+        assert result['outcome'] == 'success'
+        report = workflow_usage.query(parent['workflow_usage']['path'])
+        helpers = [item for item in report['events'] if item['kind'] == 'helper']
+        assert helpers and all(item['invocation_id'] == child['token'] for item in helpers)
+        assert all(item['parent_invocation_id'] == parent['token'] for item in helpers)
+        assert all(item['parent_execution_id'] == 'parent-provider' for item in helpers)
+    finally:
+        if child is not None:
+            command(env, tmp_path, '--invocation', child['invocation'], 'end')
+        command(env, tmp_path, '--invocation', parent['invocation'], 'end')
