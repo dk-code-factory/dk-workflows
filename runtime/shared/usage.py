@@ -45,8 +45,16 @@ def normalize(raw, provider):
         components = [raw.get(key) for key in ('input_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens')]
         result['input_tokens'] = sum(components) if all(number(n) for n in components) else None
         result['cached_input_tokens'] = raw.get('cache_read_input_tokens') if number(raw.get('cache_read_input_tokens')) else None
-    if result['input_tokens'] is not None and result['output_tokens'] is not None:
-        result['total_tokens'] = result['input_tokens'] + result['output_tokens']
+    components_known = result['input_tokens'] is not None and result['output_tokens'] is not None
+    component_total = result['input_tokens'] + result['output_tokens'] if components_known else None
+    result['total_tokens_consistent'] = (result['total_tokens'] == component_total
+        if result['total_tokens'] is not None and components_known else None)
+    if result['total_tokens'] is None:
+        result['total_tokens'] = component_total
+    result['total_tokens_source'] = ('provider_reported' if number(raw.get('total_tokens'))
+                                     else 'derived_input_output' if component_total is not None else None)
+    if isinstance(raw.get('total_tokens_source'), str):
+        result['total_tokens_source'] = raw['total_tokens_source']
     for child, parent in (('cached_input_tokens', 'input_tokens'), ('reasoning_output_tokens', 'output_tokens')):
         if result[child] is not None and result[parent] is not None and result[child] > result[parent]:
             result[child] = None
@@ -74,6 +82,11 @@ def snapshot_order(record):
         except (ValueError, TypeError):
             pass
     return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def source_labels(raw):
+    labels = raw.get('sources')
+    return [label for label in labels if isinstance(label, str)] if isinstance(labels, (list, tuple)) else []
 
 
 def unique_records(records):
@@ -112,7 +125,11 @@ def unique_records(records):
             value = item.get('usage')
             if isinstance(value, dict):
                 raw.update({key: value for key, value in value.items() if value is not None})
-                sources.update(s for s in value.get('sources', []) if isinstance(s, str))
+                normalized = normalize(value, merged.get('provider'))
+                if normalized['total_tokens'] is not None:
+                    raw['total_tokens'] = normalized['total_tokens']
+                    raw['total_tokens_source'] = normalized['total_tokens_source']
+                sources.update(source_labels(value))
                 if isinstance(value.get('source'), str):
                     sources.add(value['source'])
         if len(items) > 1 and raw:
@@ -141,19 +158,22 @@ def unique_records(records):
         return next(iter(matches)) if len(matches) == 1 else None
 
     totals = []
+    normalized = [normalize(record.get('usage'), record.get('provider')) for record in selected]
     for index, record in enumerate(selected):
         if not measured[index]:
             continue
         parent, ancestors = parent_index(record), {index}
-        covered = False
+        covered = set()
         while parent is not None and parent not in ancestors:
             ancestors.add(parent)
-            if selected[parent].get('inclusive'):
-                covered = True
-                break
+            if selected[parent].get('inclusive') and normalized[parent] is not None:
+                covered.update(key for key in (*TOKEN_FIELDS, 'cost_usd')
+                               if normalized[parent][key] is not None)
             parent = parent_index(selected[parent])
-        if not covered:
-            totals.append(record)
+        known = {key for key in (*TOKEN_FIELDS, 'cost_usd')
+                 if normalized[index] is not None and normalized[index][key] is not None}
+        if not covered or known - covered:
+            totals.append({**record, '_covered_usage_fields': sorted(covered)})
     inherited = sum(bool(r.get('inherited')) for r in records)
     excluded = {'duplicates': len(records) - inherited - sum(measured),
                 'inherited': inherited,
@@ -177,15 +197,23 @@ def distribution(values):
 def measurements(records, requests):
     """Known subtotals always carry their denominator and missing count."""
     usages = [normalize(r.get('usage'), r.get('provider')) for r in records]
+    for record, value in zip(records, usages):
+        if value is not None:
+            for key in record.get('_covered_usage_fields', ()):
+                value[key] = None
     result = {'executions': len(records), 'attempts_with_usage': sum(u is not None and any(u[k] is not None for k in TOKEN_FIELDS) for u in usages)}
+    result['inconsistent_token_totals'] = sum(u is not None and u['total_tokens_consistent'] is False for u in usages)
+    result['total_token_sources'] = sorted({u['total_tokens_source'] for u in usages
+        if u is not None and u['total_tokens'] is not None and u['total_tokens_source'] is not None})
     result['missing_attempts'] = len(records) - result['attempts_with_usage']
     result['complete'] = bool(records) and result['missing_attempts'] == 0
     result['tokens'] = {}
     for key in (*TOKEN_FIELDS, 'cost_usd'):
-        values = [u[key] for u in usages if u is not None and u[key] is not None]
+        eligible = [u for r, u in zip(records, usages) if key not in r.get('_covered_usage_fields', ())]
+        values = [u[key] for u in eligible if u is not None and u[key] is not None]
         metric = {'known_subtotal': sum(values) if values else None,
-                  'measured_attempts': len(values), 'missing_attempts': len(records) - len(values),
-                  'complete': bool(records) and len(values) == len(records)}
+                  'measured_attempts': len(values), 'missing_attempts': len(eligible) - len(values),
+                  'complete': bool(eligible) and len(values) == len(eligible)}
         if key == 'cost_usd':
             result['cost'] = {**metric, 'currency': 'USD', 'interpretation': 'provider-reported evidence; not guaranteed billed cost',
                               'sources': sorted({u['cost_source'] for u in usages if u and u['cost_source']})}
@@ -197,7 +225,7 @@ def measurements(records, requests):
                           'complete': bool(records) and all(r.get('scope') == 'request' for r in records)}
     result['usage_sources'] = sorted({u['source'] for u in usages if u and isinstance(u['source'], str)} |
         {source for r in records if isinstance(r.get('usage'), dict)
-         for source in r['usage'].get('sources', []) if isinstance(source, str)})
+         for source in source_labels(r['usage'])})
     request_usage = [normalize(r.get('usage'), r.get('provider')) for r in requests]
     result['request_input_tokens'] = distribution([u['input_tokens'] for u in request_usage
         if u and u['input_tokens'] is not None])

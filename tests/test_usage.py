@@ -199,3 +199,85 @@ def test_inherited_records_preserve_ancestry_and_aliases_without_contributing_us
     assert aliased['executions'] == 1
     assert aliased['tokens']['total_tokens']['known_subtotal'] == 120
     assert aliased['excluded_records'] == dict(duplicates=0, inherited=1, inclusive_children=1)
+
+
+@pytest.mark.parametrize('reverse', [False, True])
+def test_latest_explicit_total_survives_older_breakdown_with_disagreement_visible(reverse):
+    records = [record('same', raw={'input_tokens': 100, 'output_tokens': 20},
+                      observed_at='2026-11-02T11:00:00Z'),
+               record('same', raw={'total_tokens': 150},
+                      observed_at='2026-11-02T12:00:00Z')]
+    result = usage.report(list(reversed(records)) if reverse else records)
+    assert result['tokens']['total_tokens']['known_subtotal'] == 150
+    assert result['tokens']['input_tokens']['known_subtotal'] == 100
+    assert result['tokens']['output_tokens']['known_subtotal'] == 20
+    assert result['inconsistent_token_totals'] == 1
+    assert result['total_token_sources'] == ['provider_reported']
+    assert 'total_tokens' not in records[0]['usage']
+
+
+def test_newer_complete_breakdown_supplies_derived_total_before_snapshot_merge():
+    result = usage.report([
+        record('same', raw={'total_tokens': 150}, observed_at='2026-11-02T11:00:00Z'),
+        record('same', raw={'input_tokens': 180, 'output_tokens': 20},
+               observed_at='2026-11-02T12:00:00Z')])
+    assert result['tokens']['total_tokens']['known_subtotal'] == 200
+    assert result['inconsistent_token_totals'] == 0
+    assert result['total_token_sources'] == ['derived_input_output']
+    normalized = usage.normalize({'input_tokens': 100, 'output_tokens': 20, 'total_tokens': 150}, 'codex')
+    assert normalized['total_tokens'] == 150
+    assert normalized['total_tokens_consistent'] is False
+
+
+def test_unmeasured_inclusive_parent_retains_child_usage_as_partial_subtotal():
+    result = usage.report([
+        {'execution_id': 'root', 'provider': 'codex', 'inclusive': True, 'usage': None},
+        record('child', parent_execution_id='root', raw={
+            'input_tokens': 100, 'output_tokens': 20, 'total_cost_usd': .25})])
+    assert result['executions'] == 2
+    assert result['excluded_records']['inclusive_children'] == 0
+    assert result['tokens']['total_tokens'] == dict(
+        known_subtotal=120, measured_attempts=1, missing_attempts=1, complete=False)
+    assert result['cost']['known_subtotal'] == .25
+    assert result['cost']['measured_attempts'] == 1 and result['cost']['missing_attempts'] == 1
+    assert not result['cost']['complete'] and not result['complete']
+
+
+def test_inclusive_parent_covers_only_measured_components_without_double_counting():
+    child = record('child', parent_execution_id='root', scope='request', role='child',
+                   raw={'input_tokens': 30, 'output_tokens': 1, 'total_cost_usd': .25})
+    result = usage.report([record('root', inclusive=True, role='root', raw={'total_tokens': 120}),
+                           child, dict(child)], ['role'])
+    assert result['tokens']['total_tokens'] == dict(
+        known_subtotal=120, measured_attempts=1, missing_attempts=0, complete=True)
+    assert result['tokens']['input_tokens'] == dict(
+        known_subtotal=30, measured_attempts=1, missing_attempts=1, complete=False)
+    assert result['cost']['known_subtotal'] == .25 and not result['cost']['complete']
+    assert result['cost']['missing_attempts'] == 1
+    assert result['requests']['known_count'] == 1
+    assert result['request_input_tokens']['median'] == 30
+    groups = {group['key']['role']: group for group in result['groups']}
+    assert groups['child']['tokens']['total_tokens']['known_subtotal'] is None
+    assert not groups['child']['tokens']['total_tokens']['complete']
+    assert groups['child']['cost']['known_subtotal'] == .25
+    assert child['usage'] == {'input_tokens': 30, 'output_tokens': 1, 'total_cost_usd': .25}
+
+
+def test_inclusive_token_measurement_does_not_discard_child_cost():
+    result = usage.report([record('root', inclusive=True),
+        record('child', parent_execution_id='root', raw={
+            'input_tokens': 100, 'cached_input_tokens': 70, 'output_tokens': 20,
+            'reasoning_output_tokens': 5, 'total_cost_usd': .25})])
+    assert result['tokens']['total_tokens'] == dict(
+        known_subtotal=120, measured_attempts=1, missing_attempts=0, complete=True)
+    assert result['tokens']['cached_input_tokens']['known_subtotal'] == 70
+    assert result['cost']['known_subtotal'] == .25
+    assert result['cost']['missing_attempts'] == 1 and not result['cost']['complete']
+
+
+@pytest.mark.parametrize('labels', [None, 1, 'not-a-list', {'source': 'bad'}, [None, {}, 'valid']])
+def test_optional_source_labels_cannot_poison_usage_reports(labels):
+    result = usage.report([record('same', raw={'total_tokens': 10, 'sources': labels})])
+    assert result['tokens']['total_tokens']['known_subtotal'] == 10
+    assert result['usage_sources'] == (['provider_metadata', 'valid'] if isinstance(labels, list)
+                                      else ['provider_metadata'])

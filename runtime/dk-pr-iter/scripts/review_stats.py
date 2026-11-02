@@ -428,6 +428,9 @@ def markdown(value, title):
               f'Executions: {usage["executions"]}; with usage: {usage["attempts_with_usage"]}; '
               f'missing usage: {usage["missing_attempts"]}; reviews without execution evidence: '
               f'{usage["reviews_without_execution_evidence"]}. Complete: {usage["complete"]}.', '',
+              f'Token totals disagree with available input/output components in '
+              f'{usage["inconsistent_token_totals"]} executions. Total sources: '
+              f'{", ".join(usage["total_token_sources"]) or "unknown"}.', '',
               '| Component | Known subtotal | Measured attempts | Missing attempts | Complete |',
               '| --- | ---: | ---: | ---: | --- |']
     for component, metric in usage['tokens'].items():

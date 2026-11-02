@@ -333,3 +333,18 @@ def test_usage_cli_filters_are_read_only_and_unknown_metrics_explicit():
     assert result['usage']['cost']['known_subtotal'] is None
     assert not result['usage']['complete']
     assert result['usage']['group_by'] == ['model', 'effort']
+
+
+def test_recorded_nullable_source_metadata_remains_queryable_and_renderable():
+    r = run(reviewers=('a',))
+    stats.record_review(REPO, r['id'], 'a', status='completed', executions=[{
+        'execution_id': 'same', 'provider': 'codex',
+        'usage': {'input_tokens': 100, 'output_tokens': 20, 'total_tokens': 150, 'sources': None}}])
+    result = stats.summary(REPO)['usage']
+    assert result['tokens']['total_tokens']['known_subtotal'] == 150
+    assert result['inconsistent_token_totals'] == 1
+    reports = stats.render_reports()
+    text = Path(reports['user']).read_text()
+    assert 'Token totals disagree with available input/output components in 1 executions.' in text
+    assert 'Total sources: provider_reported.' in text
+    assert stats.ledger(REPO)['runs'][r['id']]['reviews']['a']['executions'][0]['usage']['sources'] is None

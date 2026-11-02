@@ -163,7 +163,10 @@ Raw provider usage is retained unchanged alongside normalization.
 `usage` retains every observed correction attempt, including null entries.
 Compact `executions` contain available execution/response/tool-call identities,
 provider, model, effort, stage, role, timestamp, prompt byte size and raw usage.
-An inclusive execution suppresses descendant token and cost totals. Identities
+An inclusive execution suppresses a descendant component only when the ancestor
+measures that component. Known child components below an unmeasured ancestor remain
+partial subtotals: the ancestor still contributes a missing measurement. Covered
+components do not add a second denominator. Identities
 are reconciled before ancestry checks, including execution aliases. Parent IDs
 resolve within their provider namespace, or across providers when unambiguous.
 Inherited quantities and duplicate available identities are excluded before
@@ -178,6 +181,12 @@ query records. Non-null values take precedence by observation timestamp, falling
 back to the owning run's start and then execution start. Undated evidence precedes
 dated evidence; ties retain input order. Source labels survive and quantities are
 never added together. Retained raw snapshots remain unchanged.
+An explicit total takes precedence over input plus output within an observation;
+otherwise that observation supplies a derived total. Snapshot precedence then
+applies to those totals too. `total_token_sources` distinguishes provider-reported
+and derived totals. Preserved components can come from different observations;
+`inconsistent_token_totals` counts reconciled executions whose known total differs
+from known input plus output. Coverage completeness does not imply consistency.
 
 Every token and cost component returns `known_subtotal` (null with no measured
 evidence), `measured_attempts`, `missing_attempts`, and `complete`. The top-level
