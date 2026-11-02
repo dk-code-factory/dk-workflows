@@ -167,8 +167,6 @@ def collect(manifest_path, *, on_call=None, workspace=None, capture_dir=None, ex
                 descriptor = updated
             else:
                 association = associated[name]
-                if association['derived_from'] != original_identity:
-                    raise ValueError('retained reviewer execution association changed')
                 target = Path(path(association['path']))
                 descriptor = read(target)
                 runner.validate_descriptor(descriptor)

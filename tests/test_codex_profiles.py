@@ -319,14 +319,54 @@ if full:
     if selected:
         cfg = merge(cfg, normalized(tomllib.loads((home / (selected + '.config.toml')).read_text()), home))
     discovery = merge(cfg, overrides)
+    managed_file = home / 'managed.toml'
+    managed = normalized(tomllib.loads(managed_file.read_text()), home) if managed_file.exists() else {}
+    discovery = merge(discovery, managed)
+    requirements_file = home / 'requirements.json'
+    requirements = json.loads(requirements_file.read_text()) if requirements_file.exists() else {}
     project_file = pathlib.Path.cwd() / '.codex/config.toml'
     if project_file.exists() and discovery.get('projects', {}).get(os.getcwd(), {}).get('trust_level') == 'trusted':
         project = normalized(tomllib.loads(project_file.read_text()), project_file.parent)
+        trusted_proxy = discovery.get('features', {}).get('network_proxy', {})
+        trusted_proxy = trusted_proxy if isinstance(trusted_proxy, dict) else {}
+        configured = trusted_proxy.get('credential_broker') is True
+        enabled = configured and trusted_proxy.get('enabled') is True
+        # loader::apply_credential_broker_requirements (1015-1048): masking
+        # also enables sanitation, with requirements.network.enabled=false last.
+        required_features = requirements.get('features', {})
+        masking = required_features.get('credential_masking',
+                    discovery.get('features', {}).get('credential_masking', False))
+        if masking or configured:
+            enabled = (masking or required_features.get('network_proxy', enabled)) and (
+                requirements.get('network', {}).get('enabled') is not False)
+            configured = True
+        protected = {key for credential in trusted_proxy.get('credentials', {}).values()
+                     for key in [*credential.get('env', []), credential.get('url_prefix_from_env')] if key}
+        features = project.get('features', {})
+        features.pop('credential_masking', None)
+        if isinstance(features.get('multi_agent_v2'), dict):
+            features['multi_agent_v2'].pop('message_board_remote', None)
+        proxy = features.get('network_proxy')
+        if isinstance(proxy, dict):
+            proxy.pop('credentials', None)
+            proxy.pop('credential_broker', None)
+            if configured:
+                proxy.pop('enabled', None)
+        policy = project.get('shell_environment_policy', {})
+        if enabled:
+            policy.pop('experimental_use_profile', None)
+            if isinstance(policy.get('set'), dict):
+                policy['set'] = {key: value for key, value in policy['set'].items()
+                                 if key not in protected and key.upper() not in {'ZDOTDIR', 'BASH_ENV'}}
         cfg = merge(cfg, project)
         layers.insert(0, {'name': {'type': 'project', 'dotCodexFolder': str(project_file.parent)}, 'version': version(project), 'config': project})
     cfg = merge(cfg, overrides)
     if overrides:
         layers.insert(0, {'name': {'type': 'sessionFlags'}, 'version': version(overrides), 'config': overrides})
+    if managed:
+        cfg = merge(cfg, managed)
+        layers.insert(0, {'name': {'type': 'legacyManagedConfigTomlFromFile', 'file': str(managed_file)},
+                         'version': version(managed), 'config': managed})
     requirements_file = home / 'requirements.json'
     requirements = json.loads(requirements_file.read_text()) if requirements_file.exists() else {}
     for native, key in [('modelProvider', 'model_provider'), ('modelCatalogJson', 'model_catalog_json')]:
@@ -336,7 +376,8 @@ if full:
     provider = cfg['model_providers'].get(cfg.get('model_provider', 'openai'), {})
     trace = {'argv': args, 'overrides': overrides, 'headers': headers(provider), 'reverse_headers': headers(provider, True),
              'env': {key: value for key, value in os.environ.items() if key.startswith(('DK_CODEX_METADATA_', 'TEST_NATIVE_')) and key not in json.loads(os.environ.get('DK_TEST_NATIVE_RESERVED', '[]'))},
-             'auth': provider.get('auth'), 'query_params': provider.get('query_params'), 'projects': cfg.get('projects')}
+             'auth': provider.get('auth'), 'query_params': provider.get('query_params'), 'projects': cfg.get('projects'),
+             'features': cfg.get('features'), 'shell_environment_policy': cfg.get('shell_environment_policy')}
     with open(os.environ['DK_TEST_NATIVE_TRACE'], 'a') as output:
         output.write(json.dumps(trace) + '\n')
     if args[-1] == 'models':
@@ -1251,6 +1292,182 @@ def test_url_parser_errors_are_field_only(field):
     with pytest.raises(ValueError, match='unsupported ' + field + ' URL') as failure:
         profiles.metadata_projection(config, 'custom', definition, False)
     assert 'SENTINEL_' not in str(failure.value)
+
+
+@pytest.mark.parametrize('url,private', [
+    ('https:////user:SECRET@catalog.invalid/v1', True),
+    ('https:user:SECRET@catalog.invalid/v1', True),
+    ('https:/user:SECRET@catalog.invalid/v1', True),
+    (r'https:\\user:SECRET@catalog.invalid/v1', True),
+    (r'https:/\user:SECRET@catalog.invalid/v1', True),
+    ('\0 \tht\ntps:\\user:SECRET@catalog.invalid/v1\r ', True),
+    ('HtTpS:////user:SECRET@catalog.invalid', True),
+    ('https://catalog.invalid/path@label?contact=a@b', False),
+    ('https:////catalog.invalid/path@label?contact=a@b', False),
+    (r'https://catalog.invalid\path@label', False),
+    ('custom:opaque@path?x=y', False), ('custom:/path@label', False),
+    ('custom:////path@label', False), ('custom://user:SECRET@catalog.invalid/path', True),
+    ('file:///tmp/user:SECRET@path', False), ('file://user:SECRET@catalog.invalid/path', True),
+    ('https://@catalog.invalid/', False), ('https://:@catalog.invalid/', False),
+    ('https://user@@catalog.invalid/', True), ('https://%75:%50@catalog.invalid/', True),
+    ('socks5://user:SECRET@catalog.invalid', True), ('socks5:////user:SECRET@catalog.invalid', False),
+    ('ftp:////user:SECRET@catalog.invalid', True), (r'wss:\user:SECRET@catalog.invalid', True),
+])
+def test_native_url_credential_position_matches_source_and_rust_probe(url, private):
+    if private:
+        with pytest.raises(ValueError, match='transport unavailable: tested_url') as failure:
+            profiles._verify_url_transport('tested_url', url)
+        assert url not in str(failure.value) and 'SECRET' not in str(failure.value)
+    else:
+        profiles._verify_url_transport('tested_url', url)
+
+
+def credential_family(*, destination='https://catalog.invalid/api', env='TEST_NATIVE_CREDENTIAL'):
+    # Complete native CredentialProviderConfig; no invented control-only table.
+    return {'env': [env], 'patterns': ['credential_[A-Za-z0-9]+'], 'url_prefixes': [destination],
+            'url_prefix_from_env': 'TEST_NATIVE_DESTINATION', 'auth': ['bearer'],
+            'header': 'X-Credential', 'prefix': 'Bearer '}
+
+
+@pytest.mark.parametrize('path', [
+    ('features', 'network_proxy', 'proxy_url'), ('features', 'network_proxy', 'socks_url'),
+    ('features', 'multi_agent_v2', 'message_board_remote', 'url'),
+    ('features', 'multi_agent_v2', 'message_board_remote', 'bearer_token'),
+    ('model_providers', 'custom', 'gateway_oauth', 'authorization_url'),
+    ('model_providers', 'custom', 'gateway_oauth', 'token_url'),
+])
+def test_explicit_projection_schema_credentials_stop_before_affected_helper(native_private_config, tmp_path, monkeypatch, path):
+    _, save, observations = native_private_config
+    secret = 'SENTINEL_SCHEMA_CREDENTIAL'
+    value = secret if path[-1] == 'bearer_token' else 'https:////user:' + secret + '@catalog.invalid/api'
+    selected = value
+    for key in reversed(path):
+        selected = {key: selected}
+    save({'model': 'fixture-model', 'model_provider': 'custom',
+          'model_providers': {'custom': {'name': 'Custom'}}}, selected)
+    launches, spawn = [], profiles.subprocess.Popen
+    def launch(argv, **kwargs):
+        launches.append(argv)
+        return spawn(argv, **kwargs)
+    monkeypatch.setattr(profiles.subprocess, 'Popen', launch)
+    with pytest.raises(ValueError, match='transport unavailable:') as failure:
+        profiles.resolve_profile('review', tmp_path)
+    assert secret not in str(failure.value)
+    assert launches and secret not in json.dumps(launches)  # Includes holder argv.
+    assert not any(item['argv'][-1] == 'models' for item in observations())
+
+
+@pytest.mark.parametrize('destination', ['https://user:SENTINEL_DESTINATION@catalog.invalid/api',
+    'user:SENTINEL_DESTINATION@catalog.invalid/api', '*.user:SENTINEL_DESTINATION@catalog.invalid'])
+def test_discovery_credential_destination_guard_precedes_selected_argv(native_private_config, tmp_path, destination):
+    _, save, observations = native_private_config
+    save({'model': 'fixture-model'}, {'features': {'network_proxy': {'enabled': True,
+        'credential_broker': True, 'credentials': {'custom': credential_family(destination=destination)}}}})
+    with pytest.raises(ValueError, match='network_proxy.credentials.url_prefixes') as failure:
+        profiles.resolve_profile('review', tmp_path)
+    assert 'SENTINEL_' not in str(failure.value)
+    records = observations()
+    assert len(records) == 1 and records[0]['argv'][-1] == 'app-server'
+    assert 'features' not in records[0]['overrides']
+    assert not any('SENTINEL_' in json.dumps(record['argv']) for record in records)
+
+
+@pytest.mark.parametrize('destination', ['catalog.invalid/api', '*.catalog.invalid/api',
+    '127.0.0.1:8080/path@label', 'https://catalog.invalid/path@label'])
+def test_ordinary_credential_destinations_and_token_env_names_are_metadata(native_private_config, tmp_path, destination):
+    _, save, observations = native_private_config
+    save({'model': 'fixture-model'}, {'features': {'credential_masking': False,
+        'network_proxy': {'enabled': False, 'credential_broker': True,
+            'credentials': {'custom': credential_family(destination=destination)}},
+        'multi_agent_v2': {'message_board_remote': {'url': 'https://catalog.invalid/path@label',
+            'bearer_token_env_var': 'TEST_NATIVE_REMOTE_TOKEN'}}}})
+    result = profiles.resolve_profile('review', tmp_path)
+    assert result['effective_settings']['model'] == 'fixture-model'
+    records = observations()
+    assert any(record['argv'][-1] == 'models' for record in records)
+    assert any(record['features']['network_proxy']['credentials']['custom']['url_prefixes'] == [destination]
+               for record in records if (record.get('features') or {}).get('network_proxy', {}).get('credentials'))
+
+
+def test_project_routing_overrides_unsafe_lower_profile_without_discovery_copy(native_private_config, tmp_path):
+    _, save, observations = native_private_config
+    save({'model': 'fixture-model'}, {'projects': {str(tmp_path): {'trust_level': 'trusted'}},
+        'features': {'network_proxy': {'proxy_url': 'https://user:SENTINEL_IGNORED_PROXY@catalog.invalid'}}})
+    project = tmp_path / '.codex'
+    project.mkdir()
+    (project / 'config.toml').write_text('[features.network_proxy]\nproxy_url="https://project.invalid/route"\n')
+    result = profiles.resolve_profile('review', tmp_path)
+    assert result['effective_settings']['model'] == 'fixture-model'
+    for record in observations():
+        assert 'SENTINEL_' not in json.dumps(record['argv'])
+        assert record['features']['network_proxy']['proxy_url'] == 'https://project.invalid/route'
+
+
+def test_file_backed_feature_credentials_remain_private_across_all_helpers(native_private_config, tmp_path, monkeypatch):
+    _, save, observations = native_private_config
+    features = {'credential_masking': True, 'network_proxy': {'enabled': True, 'credential_broker': True,
+        'proxy_url': 'https:////user:SENTINEL_BASE_PROXY@catalog.invalid',
+        'credentials': {'custom': credential_family(destination='https://user:SENTINEL_BASE_DEST@catalog.invalid')}},
+        'multi_agent_v2': {'message_board_remote': {'url': 'https://user:SENTINEL_REMOTE_URL@catalog.invalid',
+            'bearer_token': 'SENTINEL_FILE_TOKEN', 'bearer_token_env_var': 'TEST_NATIVE_REMOTE_TOKEN'}}}
+    selected = copy.deepcopy(features)
+    selected['network_proxy']['enable_socks5'] = True
+    save({'model_provider': 'custom', 'model_providers': {'custom': {'name': 'Custom'}}, 'features': features},
+         {'features': selected})
+    launches, spawn = [], profiles.subprocess.Popen
+    def launch(argv, **kwargs):
+        launches.append(argv)
+        return spawn(argv, **kwargs)
+    monkeypatch.setattr(profiles.subprocess, 'Popen', launch)
+    value = profiles.resolve_profile('review', tmp_path)
+    assert 'SENTINEL_' not in json.dumps(value)
+    assert launches and 'SENTINEL_' not in json.dumps(launches)
+    assert any(item['argv'][-1] == 'models' for item in observations())
+    assert all('SENTINEL_' not in json.dumps(item['argv']) for item in observations())
+
+
+@pytest.mark.parametrize('enabled,masking,managed,network_disabled', [
+    (True, False, False, False), (False, False, False, False), (False, True, False, False),
+    (False, True, False, True), (True, True, True, False)])
+def test_selected_discovery_uses_complete_native_sanitation_controls(
+        native_private_config, tmp_path, enabled, masking, managed, network_disabled):
+    home, save, observations = native_private_config
+    feature = {'credential_masking': masking, 'network_proxy': {'enabled': enabled, 'credential_broker': True,
+        'credentials': {'custom': credential_family()}}}
+    selected = {'features': feature, 'projects': {str(tmp_path): {'trust_level': 'trusted'}}}
+    base = {'model': 'fixture-model', 'features': {'network_proxy': {'enabled': False}}}
+    if managed:
+        # Higher trusted leaves override a selected unsupported destination.
+        selected['features']['network_proxy']['credentials']['custom']['url_prefixes'] = [
+            'https://user:SENTINEL_IGNORED_PROFILE@catalog.invalid']
+        required = {'features': {'network_proxy': {'enabled': False,
+            'credentials': {'custom': credential_family()}}}}
+        (home / 'managed.toml').write_text('\n'.join(key + '=' + profiles.toml_value(item)
+                                                  for key, item in required.items()))
+    save(base, selected, {'network': {'enabled': False}} if network_disabled else None)
+    project = tmp_path / '.codex'
+    project.mkdir()
+    project_config = {'features': {'credential_masking': False, 'network_proxy': {'enabled': False,
+        'proxy_url': 'https://project.invalid/path@label', 'credential_broker': False,
+        'credentials': {'ignored': credential_family(env='PROJECT_ONLY')}}},
+        'shell_environment_policy': {'set': {'TEST_NATIVE_CREDENTIAL': 'project credential',
+            'TEST_NATIVE_DESTINATION': 'project destination', 'ORDINARY': 'keep'}}}
+    (project / 'config.toml').write_text('\n'.join(key + '=' + profiles.toml_value(item)
+                                                 for key, item in project_config.items()))
+    value, config = profiles.selected_layers('review', tmp_path)
+    assert config['features']['network_proxy']['proxy_url'] == 'https://project.invalid/path@label'
+    selected_round = observations()[-1]
+    actual_enabled = enabled and not managed
+    assert selected_round['features']['network_proxy']['enabled'] is actual_enabled
+    assert selected_round['features']['credential_masking'] is masking
+    assert 'ignored' not in selected_round['features']['network_proxy']['credentials']
+    protected = selected_round['shell_environment_policy']['set']
+    sanitized = (masking or actual_enabled) and not network_disabled
+    assert protected == ({'ORDINARY': 'keep'} if sanitized else project_config['shell_environment_policy']['set'])
+    # Retained identities/config describe the selected round, never provisional sanitation.
+    assert config['_helper_baseline']['shell_environment_policy']['set'] == protected
+    assert any(item['name']['type'] == 'project' for item in value['layers'])
+    assert all('SENTINEL_' not in json.dumps(item['argv']) for item in observations())
 
 
 def test_managed_sensitive_provider_replacement_stays_native_file_backed(native_private_config, tmp_path):

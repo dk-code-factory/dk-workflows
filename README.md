@@ -150,15 +150,24 @@ without a catalogue override. Bounded input/catalogue rereads reject observed
 drift before launch, checkpoint reuse and result acceptance; they do not promise
 an atomic snapshot against transient changes between observations.
 
-Metadata helpers leave unchanged sensitive settings in native private files and
-project only required selected-provider differences. Required generic header and
-nonblank bearer overrides use child-only native environment channels. A needed
-literal query/auth-argument or sensitive `model_catalog_url` override without a
-proven safe channel fails before that metadata helper starts. Required routing URL
-overrides containing username or password user-info also fail before launch.
-Unchanged URLs remain in their native files; unused static-catalogue endpoint and
-inference fields are not copied or rejected. Original fingerprints exclude random transport variable names.
-These channels never alter the actual `codex exec --profile` environment or argv.
+Metadata helpers project required differences in selected-provider definitions,
+catalogue paths, top-level routing/auth settings and features, together with
+project trust/root markers and native sanitation controls. Discovery omits proxy
+routing URLs; credential-family destinations may require a private baseline read
+before the authoritative selected discovery round. Unchanged sensitive leaves
+stay in native files. Broker/masking booleans, credential environment-variable
+names and ordinary credential-family metadata remain supported.
+
+Required generic header and eligible bearer overrides use child-only native
+environment channels. Needed literal query/auth-argument, sensitive
+`model_catalog_url` or message-board bearer-token overrides without a proven safe
+channel fail before the affected helper starts. Explicit routing, OAuth, proxy,
+credential-destination and message-board URL fields reject required username or
+password user-info using native credential-position rules. This does not classify
+arbitrary path/query or other String values as secrets. Unused static-catalogue
+endpoint and inference fields are not copied or rejected. Original fingerprints
+exclude random transport variable names. These channels never alter the actual
+`codex exec --profile` environment or argv.
 
 The native raw-catalogue facility cannot address the special internal Work/Chat
 originator partitions used by some first-party hosts. Verification fails clearly
@@ -224,7 +233,8 @@ Native Codex profile verification runs before and after provider execution and a
 other freshness gates outside this provider-process timeout. Each native metadata
 operation has its own local 30-second budget; one app-server call shares that
 budget across its requests. Several sequential operations may add minutes. This
-is not a whole-attempt or whole-review deadline.
+includes an additional baseline operation when credential-family discovery needs
+private leaf comparison. It is not a whole-attempt or whole-review deadline.
 
 Internal read-only analysis uses the calling host by default. After quota
 exhaustion, a coordinator may select an installed, authenticated alternate under

@@ -182,6 +182,7 @@ def validate_profile(name, cwd):
 
 def read_config(cwd, overrides=None, *, models=False, requirements=False, env=None):
     """Keep startup, pipe and cleanup failures inside the named native contract."""
+    _verify_projection_transport(overrides or {})
     try:
         return _read_config(cwd, overrides, models=models, requirements=requirements, env=env)
     except (OSError, subprocess.SubprocessError) as exc:
@@ -448,8 +449,39 @@ def selected_layers(name, cwd):
     features = profile.get('features', {})
     if isinstance(features, dict):
         trusted = {key: features[key] for key in ('network_proxy', 'credential_masking') if key in features}
+        trusted = copy.deepcopy(trusted)
+        proxy = trusted.get('network_proxy')
+        if isinstance(proxy, dict):
+            # Routing is not a native pre-project sanitation input. Its final
+            # below-project value is reconstructed and guarded for metadata.
+            proxy.pop('proxy_url', None)
+            proxy.pop('socks_url', None)
         if trusted:
             discovery['features'] = trusted
+        credentials = proxy.get('credentials') if isinstance(proxy, dict) else None
+        if isinstance(credentials, dict) and any(isinstance(item, dict) and 'url_prefixes' in item
+                                                 for item in credentials.values()):
+            # This provisional native read supplies private file-backed leaves;
+            # only the subsequent selected round supplies retained provenance.
+            baseline, _ = read_config(cwd, {key: value for key, value in discovery.items()
+                                          if key != 'features'}, requirements=True)
+            if (not isinstance(baseline, dict) or not isinstance(baseline.get('config'), dict)
+                    or not isinstance(baseline.get('layers'), list)):
+                raise ValueError('Codex discovery baseline returned unsupported metadata')
+            selected = merge(baseline['config'], {'features': trusted})
+            # Managed layers win over the user profile in native trusted
+            # sanitation discovery. Project/session routing is not trusted here.
+            for layer in reversed(baseline['layers']):
+                if (isinstance(layer, dict) and isinstance(layer.get('name'), dict) and
+                        layer['name'].get('type') in HIGHER - {'project', 'sessionFlags'} and
+                        not layer.get('disabledReason') and isinstance(layer.get('config'), dict)):
+                    selected = merge(selected, layer['config'])
+            difference = _delta(baseline['config'].get('features', {}), selected.get('features', {}))
+            if difference is _MISSING:
+                discovery.pop('features', None)
+            else:
+                discovery['features'] = difference
+    _verify_projection_transport(discovery)
     result, agent = read_config(cwd, discovery, requirements=True)
     if (not isinstance(result, dict) or not isinstance(result.get('config'), dict)
             or not isinstance(result.get('origins'), dict) or not isinstance(result.get('layers'), list)):
@@ -662,6 +694,7 @@ def model_metadata(model, catalog, route):
 
 def read_catalog(cwd, projection, *, env=None):
     # Never retain native diagnostics or secret-bearing override arguments.
+    _verify_projection_transport(projection)
     with tempfile.TemporaryFile() as output:
         try:
             result = run_native(['codex', *config_flags(projection), 'debug', 'models'], cwd, output, env=env)
@@ -775,12 +808,69 @@ def _bridge_variable(env, value, reserved=()):
 
 def _verify_url_transport(field, value):
     try:
-        parsed = urlsplit(value)
+        # url 2.5.8 uses WHATWG special-scheme authority handling. This is
+        # comparison-only credential positioning, never URL rewriting/validation.
+        comparison = value.strip(''.join(map(chr, range(33))))
+        comparison = comparison.translate({9: None, 10: None, 13: None})
+        scheme = re.match(r'([A-Za-z][A-Za-z0-9+.-]*):', comparison)
+        if scheme and scheme[1].lower() in {'http', 'https', 'ws', 'wss', 'ftp'}:
+            rest = comparison[scheme.end():].lstrip('/\\').replace('\\', '/')
+            comparison = scheme[1].lower() + '://' + rest
+        parsed = urlsplit(comparison)
         private = bool(parsed.username or parsed.password)
     except (TypeError, ValueError, AttributeError):
         raise ValueError('Native metadata verification unavailable: unsupported ' + field + ' URL') from None
     if private:
         raise ValueError('Native metadata credential transport unavailable: ' + field)
+
+
+def _verify_projection_transport(projection):
+    """Guard explicit native schema leaves actually transported by helpers."""
+    for field in ('openai_base_url', 'chatgpt_base_url'):
+        if field in projection:
+            _verify_url_transport(field, projection[field])
+    for provider in (projection.get('model_providers') or {}).values():
+        if not isinstance(provider, dict):
+            continue  # Native validation owns non-table schema errors.
+        if 'base_url' in provider:
+            _verify_url_transport('base_url', provider['base_url'])
+        oauth = provider.get('gateway_oauth')
+        if isinstance(oauth, dict):
+            for field in ('authorization_url', 'token_url'):
+                if field in oauth:
+                    _verify_url_transport('gateway_oauth.' + field, oauth[field])
+    features = projection.get('features')
+    if not isinstance(features, dict):
+        return
+    proxy = features.get('network_proxy')
+    if isinstance(proxy, dict):
+        for field in ('proxy_url', 'socks_url'):
+            if field in proxy:
+                _verify_url_transport('features.network_proxy.' + field, proxy[field])
+        credentials = proxy.get('credentials')
+        for credential in credentials.values() if isinstance(credentials, dict) else ():
+            if isinstance(credential, dict):
+                urls = credential.get('url_prefixes', [])
+                if not isinstance(urls, list):
+                    raise ValueError('Native metadata verification unavailable: '
+                                     'unsupported features.network_proxy.credentials.url_prefixes')
+                for url in urls:
+                    # CredentialDestination::parse trims, removes an explicit
+                    # :// scheme and optional wildcard, then parses as HTTPS.
+                    if isinstance(url, str):
+                        destination = url.strip().split('://', 1)[-1]
+                        if destination.startswith('*.'):
+                            destination = 'wildcard.' + destination[2:]
+                        url = 'https://' + destination
+                    _verify_url_transport('features.network_proxy.credentials.url_prefixes', url)
+    agents = features.get('multi_agent_v2')
+    remote = agents.get('message_board_remote') if isinstance(agents, dict) else None
+    if isinstance(remote, dict):
+        if 'bearer_token' in remote:
+            raise ValueError('Native metadata credential transport unavailable: '
+                             'features.multi_agent_v2.message_board_remote.bearer_token')
+        if 'url' in remote:
+            _verify_url_transport('features.multi_agent_v2.message_board_remote.url', remote['url'])
 
 
 def _safe_provider_delta(provider, baseline, desired, *, static_catalog, configured_model, env):
@@ -791,8 +881,7 @@ def _safe_provider_delta(provider, baseline, desired, *, static_catalog, configu
     unknown = set(difference) - _PROVIDER_FIELDS
     if unknown:
         raise ValueError('Native metadata verification unavailable: unsupported selected provider field')
-    if 'base_url' in difference:
-        _verify_url_transport('base_url', difference['base_url'])
+    _verify_projection_transport({'model_providers': {provider: difference}})
     reserved = {item for definition in (baseline, desired)
                 for item in [definition.get('env_key'), *(definition.get('env_http_headers') or {}).values()]
                 if isinstance(item, str)}
@@ -878,9 +967,6 @@ def metadata_projection(config, provider, definition, static):
     projection = _delta(baseline, desired)
     projection = {} if projection is _MISSING else projection
     projection = merge(config.get('_helper_discovery', {}), projection)
-    for field in ('openai_base_url', 'chatgpt_base_url'):
-        if field in projection:
-            _verify_url_transport(field, projection[field])
     baseline_providers = {**baseline.get('model_providers', {}), **(policy.get('modelProviders') or {})}
     env = dict(os.environ)
     # Required policy definitions already remain native-file-backed. A profile
@@ -889,6 +975,7 @@ def metadata_projection(config, provider, definition, static):
                                 static_catalog=static, configured_model=config.get('model') is not None, env=env)
     if delta:
         projection['model_providers'] = {provider: delta}
+    _verify_projection_transport(projection)
     return projection, env
 
 
