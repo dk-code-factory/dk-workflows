@@ -106,6 +106,90 @@ def test_blank_handoff_task_or_actions_are_rejected(tmp_path, field, value):
     assert 'handoff_not_narrow_or_pinned' in codes(report)
 
 
+@pytest.mark.parametrize('scenario', ['ci-head', 'ci-waiter', 'checkpoint-head',
+                                     'preparation-id', 'worker-id', 'event-id'])
+@pytest.mark.parametrize('value,valid', [('', False), (' \t\n ', False), ('opaque identity:42', True)])
+def test_linked_observations_require_nonblank_opaque_identities(tmp_path, scenario, value, valid):
+    trace = fixture_trace()
+    for event in trace['events']:
+        if scenario == 'ci-head' and event['kind'].startswith('ci_'):
+            event['head'] = value
+        elif scenario == 'ci-waiter' and event['kind'].startswith('ci_'):
+            event['waiter'] = value
+        elif scenario == 'checkpoint-head' and event['kind'] in ('checkpoint', 'resume'):
+            event['head'] = value
+        elif scenario == 'preparation-id':
+            for field in ('preparation_id', 'previous', 'current', 'preparation'):
+                if event.get(field) == 'prep-a':
+                    event[field] = value
+        elif scenario == 'worker-id' and event.get('agent') == 'fixer-a':
+            event['agent'] = value
+        elif scenario == 'event-id':
+            if event['id'] == 'e36':
+                event['id'] = value
+            if event.get('checkpoint') == 'e36':
+                event['checkpoint'] = value
+    path = save_trace(tmp_path, trace)
+    if valid:
+        assert evaluator.evaluate(path)['status'] == 'passed'
+    else:
+        with pytest.raises(evaluator.InvalidTrace, match='identity'):
+            evaluator.evaluate(path)
+
+
+@pytest.mark.parametrize('kind,field', [('timeout', 'stage'), ('message', 'agent'),
+                                      ('output', 'artifact'), ('update', 'cause'),
+                                      ('refresh', 'current'), ('resume', 'preparation')])
+@pytest.mark.parametrize('value', ['', ' \t\n '])
+def test_blank_observation_identifiers_and_references_are_invalid(tmp_path, kind, field, value):
+    trace = fixture_trace()
+    next(e for e in trace['events'] if e['kind'] == kind)[field] = value
+    with pytest.raises(evaluator.InvalidTrace, match='identity'):
+        evaluator.evaluate(save_trace(tmp_path, trace))
+
+
+@pytest.mark.parametrize('message_type', ['material', 'heartbeat'])
+def test_noncompletion_messages_allow_empty_result(tmp_path, message_type):
+    trace = fixture_trace()
+    next(e for e in trace['events'] if e['kind'] == 'message').update(type=message_type, result='')
+    report = evaluator.evaluate(save_trace(tmp_path, trace))
+    assert report['status'] == ('failed' if message_type == 'heartbeat' else 'passed')
+    assert codes(report) == ({'routine_heartbeat'} if message_type == 'heartbeat' else set())
+
+
+@pytest.mark.parametrize('mode', ['receipt', 'page', 'full_log', 'full_diff', 'full_conversation'])
+def test_nonhelp_output_allows_empty_helper(tmp_path, mode):
+    trace = fixture_trace()
+    if mode in ('receipt', 'page'):
+        next(e for e in trace['events'] if e['kind'] == 'output' and e['mode'] == mode)['helper'] = ''
+    else:
+        output = copy.deepcopy(next(e for e in trace['events'] if e['kind'] == 'output'))
+        output.update(id='diagnostic-output', at_ms=trace['events'][-1]['at_ms'], mode=mode, helper='',
+                      need='Inspect the retained evidence for the reported failure.', need_event='e10')
+        trace['events'].append(output)
+    assert evaluator.evaluate(save_trace(tmp_path, trace))['status'] == 'passed'
+
+
+@pytest.mark.parametrize('source', ['', ' \t\n '])
+def test_blank_source_identifier_is_invalid(tmp_path, source):
+    trace = fixture_trace()
+    path = save_trace(tmp_path, trace)
+    trace['sources'][source] = trace['sources'].pop('capture')
+    for event in trace['events']:
+        event['evidence']['source'] = source
+    path.write_text(json.dumps(trace))
+    with pytest.raises(evaluator.InvalidTrace, match='invalid source ID'):
+        evaluator.evaluate(path)
+
+
+def test_optional_output_fields_may_remain_empty(tmp_path):
+    trace = fixture_trace()
+    output = next(e for e in trace['events'] if e['kind'] == 'output')
+    output['need_event'] = ''
+    output['need'] = output['text'] = ''
+    assert evaluator.evaluate(save_trace(tmp_path, trace))['status'] == 'passed'
+
+
 @pytest.mark.parametrize('category', ['agent_status', 'file', 'git', 'github', 'provider', 'ci'])
 def test_every_timeout_driven_evidence_query_is_rejected(tmp_path, category):
     trace = fixture_trace()

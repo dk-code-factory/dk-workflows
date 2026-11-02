@@ -32,6 +32,10 @@ SCHEMAS = {
     'resume': ('reuse', {'checkpoint': str, 'preparation': str, 'head': str, 'action': str}),
 }
 OPTIONAL_FIELDS = {'ci_start': {'deadline_ms': int}}
+# Required identifiers and references, distinct from potentially empty prose.
+IDENTITY_FIELDS = {'id', 'stage', 'cause', 'agent', 'head', 'waiter',
+                   'artifact', 'preparation_id', 'previous', 'current',
+                   'preparation', 'checkpoint'}
 ROLES = {'reviewer': {'review'}, 'architecture-reviewer': {'review'},
          'fixer': {'feedback', 'fix'}, 'reply': {'feedback', 'review', 'completion'},
          'preparation': {'preparation'}, 'decisions': {'decisions'}, 'completion': {'completion'}}
@@ -84,6 +88,7 @@ def load_trace(path):
     require(isinstance(trace['sources'], dict) and isinstance(trace['events'], list), 'invalid sources/events')
     sources = {}
     for key, source in trace['sources'].items():
+        require(identity(key), 'invalid source ID')
         require(isinstance(source, dict) and set(source) == {'path', 'sha256'}, f'invalid source: {key}')
         require(isinstance(source['path'], str) and bool(source['path']), f'invalid source path: {key}')
         sha = source['sha256']
@@ -106,7 +111,8 @@ def load_trace(path):
         fields.update({k: t for k, t in OPTIONAL_FIELDS.get(kind, {}).items() if k in event})
         require(set(event) == set(fields), f'unexpected or missing {kind} fields')
         require(all(type(event[k]) is t for k, t in fields.items()), f'invalid {kind} field type')
-        require(event['id'] and event['id'] not in ids, 'duplicate/empty event ID')
+        require(all(identity(event[k]) for k in IDENTITY_FIELDS & event.keys()), f'invalid {kind} identity')
+        require(event['id'] not in ids, 'duplicate event ID')
         ids.add(event['id'])
         require(event['at_ms'] >= 0 and event['at_ms'] >= previous, 'events must have nonnegative monotonic timestamps')
         previous = event['at_ms']

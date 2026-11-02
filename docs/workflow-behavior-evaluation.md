@@ -128,7 +128,13 @@ copying a synthetic event or asserting that a policy passed.
    Mismatched hashes and malformed/unsupported events are invalid, never passing.
 
 `SCHEMAS` and `OPTIONAL_FIELDS` in the evaluator declare the event fields; extra fields, including
-self-reported `passed` labels, are rejected. `ROLES`, `PINS` and `GOVERNING` declare
+self-reported `passed` labels, are rejected. `IDENTITY_FIELDS` requires nonblank
+event, worker and stage identifiers, CI heads/waiters, preparation identities and
+their required references. Source IDs must also be nonblank. These remain opaque
+labels; no SHA format is imposed. Optional diagnostic fields, message results and
+output helper names retain their existing mode-specific checks. Output text/need
+and handoff inline context retain their permitted empty values.
+`ROLES`, `PINS` and `GOVERNING` declare
 the supported handoff and reuse model. Event timestamps measure recorded ordering;
 material-report checks require the next action to report the notification. They
 cannot establish wall-clock reporting latency across missing host observations.
