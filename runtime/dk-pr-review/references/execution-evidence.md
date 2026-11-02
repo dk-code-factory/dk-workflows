@@ -69,10 +69,13 @@ change.
 A complete supported native stream proving an omitted required pass is reported
 as missing execution. Absent, malformed or unsupported host evidence and unknown
 conditional applicability are unavailable evidence. Existing provider failure,
-usage exhaustion and interruption handling remains distinct. Unknown host event
-shapes fail closed. No live provider-compatibility or general recall claim follows
-from offline transport regressions; unsupported host versions need a separately
-authorized compatibility trial. Command providers declaring independent roles
+usage exhaustion and interruption handling remains distinct. Unsupported root
+collaboration status/state containers and root assistant/user message containers
+are unavailable evidence, even after earlier successful pass completions. Foreign
+and nested events cannot supply completion; unrelated metadata is ignored. No live
+provider-compatibility or general recall claim follows from offline transport
+regressions; unsupported host versions need a separately authorized compatibility
+trial. Command providers declaring independent roles
 currently have no trusted native-event adapter and therefore cannot claim their
 completion; command providers without these obligations retain their contract.
 

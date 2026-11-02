@@ -336,6 +336,135 @@ def test_unsupported_marked_claude_launch_is_unavailable_after_completed_roles(p
     assert 'unsupported Claude specialist call identity' in assessment['unknown']
 
 
+def malformed_execution_events():
+    events = []
+    for tool in ('spawn_agent', 'wait', 'send_input', 'close_agent'):
+        item = {'type': 'collab_tool_call', 'tool': tool, 'sender_thread_id': 'root',
+                'receiver_thread_ids': ['extra-child' if tool == 'spawn_agent' else 'child-0'],
+                'status': 'completed', 'prompt': 'DK_REVIEW_PASS=Audit\nContinue inspection.',
+                'agents_states': {}}
+        for field, values in (
+                ('status', [None, 'unsupported', 1]),
+                ('agents_states', [None, [], 'unsupported', 1]),
+                ('receiver_thread_ids', [None, [], 'child-0', [''], [1], ['root']])):
+            for value in values:
+                events.append(('codex', {'type': 'item.completed', 'item': {**item, field: value}}))
+        for field in ('status', 'sender_thread_id'):
+            missing = copy.deepcopy(item)
+            del missing[field]
+            events.append(('codex', {'type': 'item.completed', 'item': missing}))
+        if tool != 'spawn_agent':
+            missing = copy.deepcopy(item)
+            del missing['agents_states']
+            events.append(('codex', {'type': 'item.completed', 'item': missing}))
+        events.append(('codex', {'type': 'item.completed', 'item': {
+            **item, 'agents_states': {'child-0': {'status': 'unsupported'}}}}))
+    for kind in ('assistant', 'user'):
+        row = {'type': kind, 'session_id': 'session'}
+        events.append(('claude', row))
+        for message in (None, [], 'unsupported', {}, {'content': None}, {'content': {}},
+                        {'content': 'unsupported'}, {'content': [None]}, {'content': ['unsupported']}):
+            events.append(('claude', {**row, 'message': message}))
+    for tool in ('Task', 'Agent', 'SendMessage'):
+        block = {'type': 'tool_use', 'name': tool, 'id': 'extra-call'}
+        for args in (None, [], 'unsupported'):
+            events.append(('claude', {'type': 'assistant', 'session_id': 'session',
+                'message': {'content': [{**block, 'input': args}]}}))
+        if tool != 'SendMessage':
+            for args in ({}, {'prompt': None}, {'prompt': []}):
+                events.append(('claude', {'type': 'assistant', 'session_id': 'session',
+                    'message': {'content': [{**block, 'input': args}]}}))
+    result = {'type': 'tool_result', 'tool_use_id': 'call-0', 'is_error': False,
+              'content': claude_result(0)}
+    for field, values in (
+            ('tool_use_id', [None, '', 0]),
+            ('is_error', [None, 'false', 0]),
+            ('content', [None, {}, [], [None], [{'type': 'text', 'text': None}]])):
+        for value in values:
+            events.append(('claude', {'type': 'user', 'session_id': 'session',
+                'message': {'content': [{**result, field: value}]}}))
+    events.append(('claude', {'type': 'user', 'session_id': 'session',
+        'message': {'content': [{'type': 'tool_result', 'content': claude_result(0)}]}}))
+    return events
+
+
+@pytest.mark.parametrize('host,event', malformed_execution_events())
+@pytest.mark.parametrize('correction_attempt', [False, True])
+def test_malformed_execution_events_cannot_reuse_prior_completion(proof, host, event, correction_attempt):
+    repository, path, descriptor = proof
+    binding = {'skill': 'fixture:review', 'host': host, 'nested_review_roles': ['Audit']}
+    descriptor['execution']['executor'] = host
+    make_rows = codex_rows if host == 'codex' else claude_rows
+    rows = make_rows(['Audit'])
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        execution.record(host, stream(rows), '', 0, 0)
+        reference = execution.finish(collector, {'findings': []})
+    execution.verify(reference, binding, descriptor, path)
+
+    if correction_attempt:
+        correction = make_rows(['Audit'])
+        correction.insert(-1, event)
+    else:
+        rows.insert(-1, event)
+    original = {'findings': [{'message': 'Original finding retained.'}]}
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        execution.record(host, stream(rows), '', 0, 0)
+        if correction_attempt:
+            execution.record(host, stream(correction), '', 0, 1)
+        reference = execution.finish(collector, original)
+    with pytest.raises(ValueError, match='execution unavailable'):
+        execution.verify(reference, binding, descriptor, path, original)
+    evidence = json.loads(Path(reference['path']).read_text())
+    assert evidence['original_result'] == original
+    assert evidence['assessment']['status'] == 'unavailable'
+    assert evidence['assessment']['unknown']
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+def test_supported_metadata_and_excluded_events_preserve_complete_evidence(proof, host):
+    repository, path, descriptor = proof
+    binding = {'skill': 'fixture:review', 'host': host, 'nested_review_roles': ['Audit']}
+    descriptor['execution']['executor'] = host
+    if host == 'codex':
+        rows = codex_rows(['Audit'])
+        rows.insert(-1, {'type': 'item.completed', 'item': {
+            'type': 'agent_message', 'text': 'Review complete.', 'optional_metadata': {'x': 1}}})
+        rows.insert(-1, {'type': 'item.completed', 'item': {
+            'type': 'collab_tool_call', 'sender_thread_id': 'foreign-root', 'status': None}})
+        rows[2]['item']['optional_metadata'] = {'x': 1}
+    else:
+        rows = claude_rows(['Audit'])
+        rows.insert(-1, {'type': 'assistant', 'session_id': 'session', 'message': {'content': [
+            {'type': 'thinking', 'thinking': 'Reviewing the evidence.'},
+            {'type': 'text', 'text': 'Review complete.', 'optional_metadata': {'x': 1}},
+            {'type': 'tool_use', 'name': 'Read', 'id': 'read', 'input': {'file_path': 'source.py'}}]}})
+        rows.insert(-1, {'type': 'assistant', 'session_id': 'foreign-session', 'message': None})
+        rows.insert(-1, {'type': 'user', 'session_id': 'session', 'parent_tool_use_id': 'nested', 'message': None})
+        rows.insert(-1, {'type': 'user', 'session_id': 'session', 'message': {'content': [
+            {'type': 'tool_result', 'tool_use_id': 'read', 'content': {'unrelated': 'metadata'}}]}})
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        execution.record(host, stream(rows), '', 0, 0)
+        reference = execution.finish(collector, {'findings': []})
+    execution.verify(reference, binding, descriptor, path)
+
+
+def test_claude_failed_child_result_cannot_reuse_earlier_completion(proof):
+    repository, path, descriptor = proof
+    binding = {'skill': 'fixture:review', 'host': 'claude', 'nested_review_roles': ['Audit']}
+    descriptor['execution']['executor'] = 'claude'
+    rows = claude_rows(['Audit'])
+    rows.insert(-1, {'type': 'user', 'session_id': 'session', 'message': {'content': [
+        {'type': 'tool_result', 'tool_use_id': 'call-0', 'is_error': True, 'content': 'Child failed.'}]}})
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        execution.record('claude', stream(rows), '', 0, 0)
+        reference = execution.finish(collector, {'findings': []})
+    with pytest.raises(ValueError, match='execution missing:.*Audit'):
+        execution.verify(reference, binding, descriptor, path)
+    assessment = json.loads(Path(reference['path']).read_text())['assessment']
+    assert assessment['unknown'] == []
+    assert assessment['completed'] == []
+
+
 def test_retained_valid_proof_binds_findings_and_private_transport(proof):
     result = {'findings': [{'message': 'Original finding retained.'}]}
     ref = retained(proof, result=result)
