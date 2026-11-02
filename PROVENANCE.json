@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.7.4",
+      "description": "Add passive private workflow usage attribution across lifecycle invocations, helper stages, native and command provider attempts, review coverage and checkpoint reuse; retain explicit unknown host measurements and completion status separately from reviewer quality statistics."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.7.2",
       "description": "Separate preparation analyst instructions from downstream worker guidance and validate worker contracts through existing bounded preparation correction, preserving read-only authorization and immutable evidence."
     },

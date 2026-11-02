@@ -25,7 +25,7 @@ from shared.private_state import root, read, write, mutate, atomic_bytes
 from shared.flaky_tests import Registry, record_flaky
 from shared import review_coverage, review_sessions, review_reconciliation
 from shared.engineering_identity import engineering_id, compatible_reference
-from shared import bindings
+from shared import bindings, workflow_usage
 from shared import preparation_graph
 from shared.workflow_storage import allocate, owned
 from shared.diagnostics import Diagnostic, emit, command as recovery_command, task, human
@@ -1252,9 +1252,13 @@ def main():
                                     verification=a.verification_file, assessment=a.series_assessment)
             elif a.command in {'start-run', 'resume-run'}:
                 result = mutate(path, default, lambda d: start_run(d, resume=a.command == 'resume-run'))
+                workflow_usage.observe('run', status='resumed' if a.command == 'resume-run' else 'active', source='run_state', evidence={
+                    'run_id': result['id'], 'repository': a.repo, 'pr': a.pr, 'run_record': str(path)})
             elif a.command == 'adopt-run': result = mutate(path, default, adopt_run)
             elif a.command == 'finish-run':
                 result = mutate(path, default, lambda d: finish_run(d, a.status, a.reason))
+                workflow_usage.observe('run', status=result['status'], source='run_state', evidence={
+                    'run_id': result['id'], 'repository': a.repo, 'pr': a.pr, 'run_record': str(path)})
             elif a.command == 'review-assess':
                 result = reviewer_assessments(read(path, default), a.repo, json.loads(Path(a.file).read_text()))
             elif a.command == 'preparation': result = mutate(path, default, lambda d: attach_preparation(d, a.file, a.pr_url, a.head, expected_parent=a.expected_parent))

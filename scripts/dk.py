@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'runtime'))
 from shared.command_results import ResultFile, receipt, default_path, inspect_result
-from shared import cli_reference, invocations
+from shared import cli_reference, invocations, workflow_usage
 from shared.diagnostics import Diagnostic, emit
 
 ARTIFACT_DEFAULTS = {'run-state', 'replies', 'reviewers', 'conversation', 'inline-feedback',
@@ -49,6 +49,7 @@ ROUTES = {
     'commit-lines': ('runtime/shared/commit_message_lines.py', None, None, False),
     'validate-review': ('runtime/dk-pr-review/scripts/validate_result.py', None, None, False),
     'update': ('scripts/update.py', None, None, False),
+    'workflow-usage': ('runtime/shared/workflow_usage.py', None, None, False),
 }
 PART = re.compile(r'^[A-Za-z0-9_.-]+$')
 
@@ -286,11 +287,19 @@ def dispatch(arguments, result_file=None):
             parser.error(str(exc))
         print(json.dumps(result, sort_keys=True))
         return 0
-    if result_file is not None:
-        _, code = result_file.run(args.command, argv, cwd, env)
+    # Help and usage reports are local inspection, not observed workflow work.
+    collecting = args.command != 'workflow-usage' and not any(x in ('--help', '-h') for x in args.arguments)
+    with workflow_usage.helper(args.command, args.arguments, cwd, env,
+            artifact=str(result_file.path) if result_file else None) if collecting else nullcontext({'env': env}) as observed:
+        if result_file is not None:
+            terminal, code = result_file.run(args.command, argv, cwd, observed['env'])
+            observed['status'] = {'success': 'returned', 'blocked': 'incomplete',
+                'error': 'failed', 'interrupted': 'interrupted'}.get(terminal.get('outcome'), 'unknown')
+            return code
+        status = subprocess.run(argv, cwd=cwd, env=observed['env']).returncode
+        code = status if status >= 0 else 128 - status
+        observed['status'] = 'returned' if code == 0 else 'interrupted' if code >= 128 else 'failed'
         return code
-    status = subprocess.run(argv, cwd=cwd, env=env).returncode
-    return status if status >= 0 else 128 - status
 
 
 def main():
