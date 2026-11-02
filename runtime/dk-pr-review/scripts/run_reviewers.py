@@ -527,17 +527,23 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                         result = architecture.review(job['handoff']['architecture'], job['handoff']['context'],
                             job['handoff']['decisions'], recipient_packet=job['handoff']['architecture_packet'])
                     else:
+                        checking = True
                         with review_execution.collect(provider_map[name], preparation['reviewers'][name],
                                                       job['path'], job['checkout']) as collector:
+                            checking = False
                             result = None
                             try:
                                 result = run_skill_reviewer(provider_map[name], job['skill'], job['path'], job['checkout'])
                             finally:
+                                checking = True
                                 evidence = review_execution.finish(collector, result)
                                 if evidence is not None:
                                     execution_evidence[name] = {'reference': evidence, 'handoff': str(job['path'])}
+                                checking = False
                         if result.get('status') not in ('incomplete', 'tokens_exhausted'):
+                            checking = True
                             review_execution.verify(evidence, provider_map[name], preparation['reviewers'][name], job['path'], result)
+                            checking = False
                 finally:
                     if worker_stats:
                         job['duration_seconds'] = time.monotonic() - worker_stats.start

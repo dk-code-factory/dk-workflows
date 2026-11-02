@@ -37,6 +37,11 @@ The executor requests Codex JSON events and Claude verbose stream JSON for these
 reviews. Codex proof pairs a direct `collab_tool_call` spawn with a completed
 agent result in the same native thread. Claude proof pairs a direct synchronous
 Task/Agent tool use with its successful tool result in the same native session.
+Claude results must include the supported native synchronous completion envelope
+with the child identity and usage trailer; successful background launch messages
+remain unfinished. Direct child IDs and declared names bind subsequent SendMessage
+work to that child and invalidate its prior completion. Other resume/result formats
+are unavailable evidence; shutdown messages alone preserve completed work.
 Each child prompt carries one exact `DK_REVIEW_PASS=<role>` marker. Multiple
 markers, parent prose, launch acknowledgements, foreign sessions and unfinished
 children do not establish coverage. Reactivating a child invalidates its earlier

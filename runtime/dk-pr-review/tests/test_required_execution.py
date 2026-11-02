@@ -81,6 +81,35 @@ def test_clean_json_cannot_complete_without_native_passes(native, monkeypatch, t
     assert saved['assessment']['status'] == reason
 
 
+@pytest.mark.parametrize('trace', [events(missing=True), ''])
+def test_execution_gate_failure_cannot_be_accepted_as_provider_failure(native, monkeypatch, trace):
+    package, provider, name, prepared = native
+    transport(monkeypatch, ['{"findings":[]}'], [trace])
+    session = Session(package.context, prepared, [name])
+    with session.execution():
+        result = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=session)
+        reference = session.finish(result)
+    with pytest.raises(ValueError, match='review evidence guard failed'):
+        review_coverage.verify(reference, prepared, accepted_failures=[name])
+    assert result['guard_failure'] and result['outcome'] == 'guard_failed'
+    assert not result.get('failed_reviewers')
+    assert result['reviewer_execution'][name]['reference']
+
+
+@pytest.mark.parametrize('stage', ['allocate', 'finish'])
+def test_execution_evidence_storage_failure_stays_blocking(native, monkeypatch, stage):
+    package, provider, name, prepared = native
+    transport(monkeypatch, ['{"findings":[]}'], [events()])
+    session = Session(package.context, prepared, [name])
+    monkeypatch.setattr(review_execution, stage, Mock(side_effect=OSError('execution evidence storage failed')))
+    with session.execution():
+        result = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=session)
+        reference = session.finish(result)
+    assert result['guard_failure'] and result['outcome'] == 'guard_failed'
+    with pytest.raises(ValueError, match='review evidence guard failed'):
+        review_coverage.verify(reference, prepared, accepted_failures=[name])
+
+
 def test_native_pass_completion_caches_proof_and_rechecks_it(native, monkeypatch):
     package, provider, name, prepared = native
     calls = transport(monkeypatch, ['{"findings":[]}'], [events()])

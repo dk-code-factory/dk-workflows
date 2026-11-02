@@ -260,10 +260,24 @@ def codex_passes(raw):
                     raise ValueError('duplicate Codex specialist identity')
                 launched[receivers[0]] = role
         states = item.get('agents_states', {})
+        if item.get('tool') == 'send_input':
+            if (not isinstance(receivers, list) or not receivers
+                    or any(not isinstance(child, str) or not child for child in receivers)):
+                raise ValueError('unsupported Codex reactivation receiver state')
+            for child in receivers:
+                if child not in launched:
+                    continue
+                completed.discard(child)
+                reports.pop(child, None)
+                if not isinstance(states, dict) or not isinstance(states.get(child), dict):
+                    raise ValueError('unsupported Codex reactivation state')
         if isinstance(states, dict):
             for child, state in states.items():
-                if child not in launched or not isinstance(state, dict):
+                if child not in launched:
                     continue
+                if (not isinstance(state, dict) or state.get('status') not in
+                        {'pending_init', 'running', 'completed', 'interrupted', 'errored', 'shutdown', 'not_found'}):
+                    raise ValueError('unsupported Codex specialist state')
                 if (state.get('status') == 'completed' and isinstance(state.get('message'), str) and state['message'].strip()):
                     completed.add(child)
                     reports[child] = {'role': launched[child], 'text': state['message']}
@@ -285,6 +299,7 @@ def claude_passes(raw):
     if not isinstance(session, str) or not session:
         raise ValueError('Claude native session identity unavailable')
     launched, completed, reports = {}, set(), {}
+    identities, aliases = {}, {}
     for row in rows:
         # Parent tool-use and tool-result events only; nested transcripts cannot
         # be substituted for an independent direct specialist of this reviewer.
@@ -297,20 +312,58 @@ def claude_passes(raw):
         for block in content:
             if not isinstance(block, dict):
                 continue
-            if row.get('type') == 'assistant' and block.get('type') == 'tool_use' and block.get('name') in ('Task', 'Agent'):
+            if row.get('type') == 'assistant' and block.get('type') == 'tool_use' and block.get('name') == 'SendMessage':
+                args = block.get('input', {})
+                if not isinstance(args, dict):
+                    raise ValueError('unsupported Claude specialist reactivation')
+                target, message = args.get('to'), args.get('message')
+                if isinstance(message, str):
+                    calls = (set(launched) if target == '*' else
+                             {identities.get(target), aliases.get(target)} if isinstance(target, str) else set())
+                    if not isinstance(target, str) or not target:
+                        raise ValueError('unsupported Claude specialist reactivation target')
+                    for call in calls - {None}:
+                        completed.discard(call)
+                        reports.pop(call, None)
+                elif not isinstance(message, dict) or message.get('type') not in {
+                        'shutdown_request', 'shutdown_response', 'plan_approval_response'}:
+                    raise ValueError('unsupported Claude specialist message')
+            elif row.get('type') == 'assistant' and block.get('type') == 'tool_use' and block.get('name') in ('Task', 'Agent'):
                 args = block.get('input', {})
                 role = _role(args.get('prompt')) if isinstance(args, dict) else None
                 call = block.get('id')
-                if role and isinstance(call, str) and call and not args.get('run_in_background'):
+                if isinstance(args, dict) and args.get('resume'):
+                    if role or args['resume'] in identities:
+                        raise ValueError('unsupported Claude specialist resume evidence')
+                if role and isinstance(call, str) and call:
                     if call in launched:
                         raise ValueError('duplicate Claude specialist call')
                     launched[call] = role
+                    alias = args.get('name')
+                    if isinstance(alias, str) and alias:
+                        if alias in aliases:
+                            raise ValueError('duplicate Claude specialist name')
+                        aliases[alias] = call
             elif row.get('type') == 'user' and block.get('type') == 'tool_result':
                 call = block.get('tool_use_id')
                 content = block.get('content')
                 text = content if isinstance(content, str) else '\n'.join(
                     p.get('text', '') for p in content if isinstance(p, dict)) if isinstance(content, list) else ''
                 if call in launched and not block.get('is_error') and isinstance(text, str) and text.strip():
+                    if text.startswith('Async agent launched successfully.\n'):
+                        continue
+                    # The native synchronous result appends this completion envelope;
+                    # ordinary text and background-launch acknowledgements lack it.
+                    match = re.search(
+                        r"(?m)^agentId: ([A-Za-z0-9_-]+) \(use SendMessage with to: '\1' to continue this agent\)"
+                        r'(?:\nworktreePath: [^\n]*\nworktreeBranch: [^\n]*)?'
+                        r'\n<usage>total_tokens: [0-9]+\ntool_uses: [0-9]+\nduration_ms: [0-9]+</usage>\s*\Z', text)
+                    if match is None:
+                        raise ValueError('unsupported Claude specialist result envelope')
+                    child = match[1]
+                    if child in identities and identities[child] != call:
+                        raise ValueError('duplicate Claude specialist identity')
+                    identities[child] = call
                     completed.add(call)
                     reports[call] = {'role': launched[call], 'text': text}
     return {'launched': sorted(launched.values()),

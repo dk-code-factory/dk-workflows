@@ -35,6 +35,11 @@ def codex_rows(roles=ROLES, *, state='completed', sender='root', message='Inspec
     return rows
 
 
+def claude_result(number, text='No findings.'):
+    return text + (f"\nagentId: child-{number} (use SendMessage with to: 'child-{number}' to continue this agent)"
+                   '\n<usage>total_tokens: 10\ntool_uses: 1\nduration_ms: 1</usage>')
+
+
 def claude_rows(roles=ROLES, *, tool='Task', background=False, is_error=False, session='session', parent=None):
     rows = [{'type': 'system', 'subtype': 'init', 'session_id': session}]
     for number, role in enumerate(roles):
@@ -44,7 +49,9 @@ def claude_rows(roles=ROLES, *, tool='Task', background=False, is_error=False, s
                          'input': {'prompt': f'DK_REVIEW_PASS={role}\nInspect.', 'run_in_background': background}}]}})
         rows.append({'type': 'user', 'session_id': session, 'parent_tool_use_id': parent,
                      'message': {'content': [{'type': 'tool_result', 'tool_use_id': call,
-                         'is_error': is_error, 'content': [{'type': 'text', 'text': 'No findings.'}]}]}})
+                         'is_error': is_error, 'content': [{'type': 'text', 'text':
+                             f'Async agent launched successfully.\nagentId: child-{number}\nThe agent is working in the background.'
+                             if background else claude_result(number)}]}]}})
     rows.append({'type': 'result', 'subtype': 'success', 'is_error': False,
                  'session_id': session, 'result': '{"findings": []}'})
     return rows
@@ -86,11 +93,22 @@ def test_native_launch_and_completed_result_establish_each_role(parser, rows):
     assert parsed['native_session']
 
 
-@pytest.mark.parametrize('state', ['running', 'interrupted', 'errored', 'shutdown', 'not_found'])
+@pytest.mark.parametrize('state', ['pending_init', 'running', 'interrupted', 'errored', 'shutdown', 'not_found'])
 def test_codex_spawn_or_terminal_failure_is_not_a_completed_specialist(state):
     parsed = execution.codex_passes(stream(codex_rows(state=state)))
     assert parsed['launched'] == sorted(ROLES)
     assert parsed['completed'] == []
+
+
+def test_codex_pending_initialization_can_later_complete(proof):
+    rows = codex_rows([*ROLES, 'Performance'])
+    for row in rows:
+        item = row.get('item', {})
+        if item.get('tool') == 'spawn_agent':
+            child = item['receiver_thread_ids'][0]
+            item['agents_states'][child]['status'] = 'pending_init'
+    reference = retained(proof, rows)
+    execution.verify(reference, BINDING, proof[2], proof[1])
 
 
 def test_codex_empty_completion_and_foreign_sender_are_not_proof():
@@ -102,6 +120,91 @@ def test_codex_empty_completion_and_foreign_sender_are_not_proof():
                                   claude_rows(parent='nested-tool')])
 def test_claude_background_failure_or_nested_transcript_cannot_prove_completion(rows):
     assert execution.claude_passes(stream(rows))['completed'] == []
+
+
+def test_claude_implicit_background_launch_is_not_completion(proof):
+    repository, path, descriptor = proof
+    binding = {'skill': 'fixture:review', 'host': 'claude', 'nested_review_roles': ['Audit']}
+    descriptor['execution']['executor'] = 'claude'
+    rows = claude_rows(['Audit'], background=True)
+    del rows[1]['message']['content'][0]['input']['run_in_background']
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        execution.record('claude', stream(rows), '', 0, 0)
+        reference = execution.finish(collector, {'findings': []})
+    with pytest.raises(ValueError, match='execution missing:.*Audit'):
+        execution.verify(reference, binding, descriptor, path)
+
+
+@pytest.mark.parametrize('text', ['No findings.', 'Unexpected native result status.'])
+def test_claude_unknown_success_result_is_unavailable(proof, text):
+    repository, path, descriptor = proof
+    binding = {'skill': 'fixture:review', 'host': 'claude', 'nested_review_roles': ['Audit']}
+    descriptor['execution']['executor'] = 'claude'
+    rows = claude_rows(['Audit'])
+    rows[2]['message']['content'][0]['content'] = text
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        execution.record('claude', stream(rows), '', 0, 0)
+        reference = execution.finish(collector, {'findings': []})
+    with pytest.raises(ValueError, match='execution unavailable'):
+        execution.verify(reference, binding, descriptor, path)
+    assessment = json.loads(Path(reference['path']).read_text())['assessment']
+    assert 'unsupported Claude specialist result envelope' in assessment['unknown']
+
+
+@pytest.mark.parametrize('target', ['child-0', 'reviewer'])
+def test_claude_sendmessage_reactivation_invalidates_completion(proof, target):
+    rows = claude_rows()
+    rows[1]['message']['content'][0]['input']['name'] = 'reviewer'
+    rows.insert(-1, {'type': 'assistant', 'session_id': 'session', 'message': {'content': [
+        {'type': 'tool_use', 'name': 'SendMessage', 'id': 'followup',
+         'input': {'to': target, 'message': 'Finish the remaining required check.', 'summary': 'Review correction'}}]}})
+    rows.insert(-1, {'type': 'user', 'session_id': 'session', 'message': {'content': [
+        {'type': 'tool_result', 'tool_use_id': 'followup', 'content': json.dumps({
+            'success': True, 'message': f'Agent "{target}" was stopped (completed); resumed it in the background.'})}]}})
+    parsed = execution.claude_passes(stream(rows))
+    assert parsed['completed'] == ['Spec', 'Standards']
+    assert parsed['unfinished'] == ['Toolkit']
+    repository, path, descriptor = proof
+    binding = {**BINDING, 'host': 'claude'}
+    descriptor['execution']['executor'] = 'claude'
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        execution.record('claude', stream(rows), '', 0, 0)
+        reference = execution.finish(collector, {'findings': []})
+    with pytest.raises(ValueError, match='execution missing:.*Toolkit'):
+        execution.verify(reference, binding, descriptor, path)
+
+
+def test_claude_shutdown_message_preserves_completed_review():
+    rows = claude_rows()
+    rows.insert(-1, {'type': 'assistant', 'session_id': 'session', 'message': {'content': [
+        {'type': 'tool_use', 'name': 'SendMessage', 'id': 'close',
+         'input': {'to': 'child-0', 'message': {'type': 'shutdown_request'}}}]}})
+    assert execution.claude_passes(stream(rows))['completed'] == sorted(ROLES)
+
+
+def test_claude_one_native_child_cannot_impersonate_independent_roles():
+    rows = claude_rows()
+    rows[4]['message']['content'][0]['content'] = claude_result(0)
+    with pytest.raises(ValueError, match='duplicate Claude specialist identity'):
+        execution.claude_passes(stream(rows))
+
+
+def test_claude_unrelated_sendmessage_preserves_completed_review():
+    rows = claude_rows()
+    rows.insert(-1, {'type': 'assistant', 'session_id': 'session', 'message': {'content': [
+        {'type': 'tool_use', 'name': 'SendMessage', 'id': 'unrelated',
+         'input': {'to': 'other-agent', 'message': 'Unrelated work.', 'summary': 'Other task'}}]}})
+    assert execution.claude_passes(stream(rows))['completed'] == sorted(ROLES)
+
+
+@pytest.mark.parametrize('prompt', ['Finish the required check.', 'DK_REVIEW_PASS=Toolkit\nFinish.'])
+def test_claude_resume_without_supported_completion_evidence_is_unavailable(prompt):
+    rows = claude_rows()
+    rows.insert(-1, {'type': 'assistant', 'session_id': 'session', 'message': {'content': [
+        {'type': 'tool_use', 'name': 'Agent', 'id': 'resume',
+         'input': {'resume': 'child-0', 'prompt': prompt}}]}})
+    with pytest.raises(ValueError, match='unsupported Claude specialist resume evidence'):
+        execution.claude_passes(stream(rows))
 
 
 def test_claude_foreign_session_tool_events_cannot_supply_results():
@@ -344,7 +447,7 @@ def applicability_reference(proof, *, mutate=None, required=False, source_role='
             rows[3 + number * 2]['item']['agents_states'][f'child-{number}']['message'] = report
         else:
             number = roles.index(source_role)
-            rows[2 + number * 2]['message']['content'][0]['content'] = report
+            rows[2 + number * 2]['message']['content'][0]['content'] = claude_result(number, report)
         execution.record(host, stream(rows), '', 0, 0)
         ref = execution.finish(collector, {'findings': []})
     return ref, binding, descriptor
@@ -427,6 +530,22 @@ def test_later_reactivation_of_native_child_invalidates_earlier_completion(proof
         execution.verify(ref, BINDING, proof[2], proof[1])
 
 
+@pytest.mark.parametrize('states', ['absent', None, [], 'unsupported', {}, {'child-0': None},
+                                  {'other-child': {'status': 'running'}}])
+def test_codex_unsupported_reactivation_state_is_unavailable(proof, states):
+    rows = codex_rows([*ROLES, 'Performance'])
+    item = {'type': 'collab_tool_call', 'tool': 'send_input', 'sender_thread_id': 'root',
+            'receiver_thread_ids': ['child-0'], 'status': 'completed', 'prompt': 'Finish the required check.'}
+    if states != 'absent':
+        item['agents_states'] = states
+    rows.insert(-1, {'type': 'item.completed', 'item': item})
+    reference = retained(proof, rows)
+    with pytest.raises(ValueError, match='execution unavailable'):
+        execution.verify(reference, BINDING, proof[2], proof[1])
+    assessment = json.loads(Path(reference['path']).read_text())['assessment']
+    assert 'unsupported Codex reactivation state' in assessment['unknown']
+
+
 def test_closing_completed_native_child_preserves_its_completed_review(proof):
     rows = codex_rows([*ROLES, 'Performance'])
     rows.insert(-1, {'type': 'item.completed', 'item': {
@@ -473,7 +592,7 @@ def test_toolkit_all_applicable_specialists_require_real_native_completions(proo
                                        else 'No applicable change under the pinned method criterion.'}
                                 for role in conditional}}
         rows = claude_rows([primary])
-        rows[2]['message']['content'][0]['content'] = 'DK_REVIEW_APPLICABILITY_JSON=' + json.dumps(assessment)
+        rows[2]['message']['content'][0]['content'] = claude_result(0, 'DK_REVIEW_APPLICABILITY_JSON=' + json.dumps(assessment))
         execution.record('claude', stream(rows), '', 0, 0)
         ref = execution.finish(collector, {'findings': []})
     with pytest.raises(ValueError, match='execution missing:.*pr-test-analyzer'):
@@ -534,7 +653,7 @@ def test_matpocock_no_spec_skip_needs_independent_bound_confirmation(proof, host
         if host == 'codex':
             rows[3]['item']['agents_states']['child-0']['message'] = text
         else:
-            rows[2]['message']['content'][0]['content'] = text
+            rows[2]['message']['content'][0]['content'] = claude_result(0, text)
         execution.record(host, stream(rows), '', 0, 0)
         ref = execution.finish(collector, {'findings': []})
     if spec_available:
