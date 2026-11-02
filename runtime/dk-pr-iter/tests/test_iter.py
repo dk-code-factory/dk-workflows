@@ -197,6 +197,95 @@ def test_head_change_before_or_after_checks(monkeypatch):
     assert ci.observe("1", SHA)["result"] == "head_changed"
 
 
+@pytest.mark.parametrize('returncode', [1, 8])
+@pytest.mark.parametrize('terminal_bucket,expected', [('pass', 'success'), ('fail', 'failure')])
+def test_empty_checks_wait_for_same_head_registration(monkeypatch, returncode,
+                                                     terminal_bucket, expected):
+    elapsed = [0]
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if argv[2] == 'view':
+            return subprocess.CompletedProcess(argv, 0, json.dumps({'headRefOid': SHA}), '')
+        if elapsed[0] == 0:
+            return subprocess.CompletedProcess(
+                argv, returncode, '', "no checks reported on the 'topic' branch\n")
+        checks = [{'bucket': 'pending' if elapsed[0] == 10 else terminal_bucket,
+                   'link': 'https://github.com/acme/project/actions/runs/123/job/456'}]
+        return subprocess.CompletedProcess(argv, 0, json.dumps(checks), '')
+
+    monkeypatch.setattr(ci, 'github_run', run)
+    result = ci.wait('https://github.com/acme/project/pull/1', SHA, repo='acme/project',
+                     timeout=60, interval=10, no_checks_grace=30, clock=lambda: elapsed[0],
+                     sleep=lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds))
+    assert result['result'] == expected and result['elapsed_seconds'] == 20
+    assert result['checks'][0]['link'].endswith('/runs/123/job/456')
+    assert [argv[2] for argv in calls] == ['view', 'checks', 'view'] * 3
+    assert all('--repo' in argv and 'acme/project' in argv for argv in calls)
+
+
+@pytest.mark.parametrize('timeout,grace,expected', [(60, 20, 'no_checks'), (20, 60, 'timeout')])
+def test_empty_checks_remain_bounded(monkeypatch, timeout, grace, expected):
+    elapsed = [0]
+
+    def run(argv, **kwargs):
+        if argv[2] == 'view':
+            return subprocess.CompletedProcess(argv, 0, json.dumps({'headRefOid': SHA}), '')
+        return subprocess.CompletedProcess(
+            argv, 8, '', "no checks reported on the 'topic' branch")
+
+    monkeypatch.setattr(ci, 'github_run', run)
+    result = ci.wait('1', SHA, timeout=timeout, interval=10, no_checks_grace=grace,
+                     clock=lambda: elapsed[0],
+                     sleep=lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds))
+    assert result['result'] == expected and result['elapsed_seconds'] == 20
+    assert result['checks'] == []
+
+
+def test_empty_checks_recheck_head(monkeypatch):
+    responses = iter([
+        subprocess.CompletedProcess([], 0, json.dumps({'headRefOid': SHA}), ''),
+        subprocess.CompletedProcess([], 8, '', "no checks reported on the 'topic' branch"),
+        subprocess.CompletedProcess([], 0, json.dumps({'headRefOid': OTHER}), ''),
+    ])
+    monkeypatch.setattr(ci, 'github_run', lambda *args, **kwargs: next(responses))
+    assert ci.observe('1', SHA) == {
+        'result': 'head_changed', 'head': SHA, 'actual_head': OTHER, 'checks': []}
+
+
+@pytest.mark.parametrize('returncode,stdout,stderr', [
+    (4, '', 'not authenticated'),
+    (1, '', 'HTTP 401: Bad credentials'),
+    (1, '', 'error connecting to api.github.com'),
+    (1, '', ''),
+    (8, '', ''),
+    (8, '', 'checks pending'),
+    (0, '', "no checks reported on the 'topic' branch"),
+    (2, '', "no checks reported on the 'topic' branch"),
+    (4, '', "no checks reported on the 'topic' branch"),
+    (8, '', "HTTP 401\nno checks reported on the 'topic' branch"),
+    (8, '', "no required checks reported on the 'topic' branch"),
+    (8, 'invalid JSON', "no checks reported on the 'topic' branch"),
+])
+def test_empty_checks_do_not_hide_errors(monkeypatch, returncode, stdout, stderr):
+    def run(argv, **kwargs):
+        if argv[2] == 'view':
+            return subprocess.CompletedProcess(argv, 0, json.dumps({'headRefOid': SHA}), '')
+        return subprocess.CompletedProcess(argv, returncode, stdout, stderr)
+
+    monkeypatch.setattr(ci, 'github_run', run)
+    with pytest.raises(RuntimeError):
+        ci.observe('1', SHA)
+
+
+def test_no_checks_diagnostic_is_specific_to_checks_command(monkeypatch):
+    monkeypatch.setattr(ci, 'github_run', lambda *args, **kwargs: subprocess.CompletedProcess(
+        [], 8, '', "no checks reported on the 'topic' branch"))
+    with pytest.raises(RuntimeError):
+        ci.observe('1', SHA)
+
+
 def test_wait_timeout_and_no_checks():
     ticks = iter([0, 11])
     clock = lambda: next(ticks)

@@ -23,6 +23,12 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 def gh_json(args):
     result = github_run(["gh", *args], capture_output=True, text=True, check=False)
     if not result.stdout.strip():
+        # gh v2.86.0 reports absent checks as an error before exporting JSON.
+        # Accept its exit 1 and the pending exit 8 required by the CI contract.
+        if (args[:2] == ["pr", "checks"] and result.returncode in {1, 8}
+                and re.fullmatch(r"no checks reported on the '[^\r\n]+' branch",
+                                 result.stderr.strip())):
+            return []
         raise RuntimeError(result.stderr.strip() or f"gh exited {result.returncode}")
     try:
         return json.loads(result.stdout)

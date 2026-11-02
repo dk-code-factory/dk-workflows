@@ -118,6 +118,39 @@ def test_transient_read_recovery_does_not_hide_ci_head_change(monkeypatch):
     assert result['result'] == 'head_changed' and result['actual_head'] == 'b'*40
 
 
+def test_ci_no_checks_after_transient_recovery_uses_existing_grace(monkeypatch):
+    import importlib.util
+    path = Path(__file__).resolve().parents[1] / 'runtime/dk-pr-iter/scripts/ci_wait.py'
+    spec = importlib.util.spec_from_file_location('empty_checks_ci_wait', path)
+    waiter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(waiter)
+    head = 'a' * 40
+    meta = json.dumps({'headRefOid': head})
+    responses = iter([
+        subprocess.CompletedProcess([], 0, meta, ''),
+        subprocess.CompletedProcess([], 1, '', 'HTTP 502: Bad Gateway'),
+        subprocess.CompletedProcess([], 8, '', "no checks reported on the 'topic' branch"),
+        subprocess.CompletedProcess([], 0, meta, ''),
+        subprocess.CompletedProcess([], 0, meta, ''),
+        subprocess.CompletedProcess([], 0, '[{"bucket":"pass"}]', ''),
+        subprocess.CompletedProcess([], 0, meta, ''),
+    ])
+    calls, retries, elapsed = [], [], [0]
+
+    def run(argv, **kwargs):
+        calls.append(argv[2])
+        return next(responses)
+
+    monkeypatch.setattr(reads.subprocess, 'run', run)
+    monkeypatch.setattr(reads.time, 'sleep', retries.append)
+    result = waiter.wait('https://github.com/o/r/pull/1', head, interval=10,
+                         clock=lambda: elapsed[0],
+                         sleep=lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds))
+    assert result['result'] == 'success' and result['elapsed_seconds'] == 10
+    assert calls == ['view', 'checks', 'checks', 'view', 'view', 'checks', 'view']
+    assert len(retries) == 1
+
+
 
 def test_exhausted_timeouts_preserve_original_exception_and_partial_output(monkeypatch):
     timeout = subprocess.TimeoutExpired(['gh'], 1, output=b'partial', stderr=b'transport timeout')
