@@ -287,6 +287,28 @@ def describe_reviewer(name):
         **({'handoff_contract': contract} if contract != 'git-diff-v1' else {})})
 
 
+def describe_prepared(context, reviewers, preparation):
+    """Inspect validated retained providers without registry discovery or execution."""
+    names = [bindings.key(value) for value in reviewers]
+    if names != preparation['reviewer_order']:
+        raise ValueError('configured reviewer membership or order changed; refresh preparation')
+    for provider, name in zip(reviewers, names):
+        execution = preparation['reviewers'][name].get('execution')
+        if not execution:
+            raise ValueError('prepared description requires retained execution bindings; refresh preparation')
+        if bindings.normalize(provider) != bindings.normalize(execution['binding']):
+            raise ValueError('configured reviewer binding changed; refresh preparation')
+    checkout = context['checkout']
+    if (run(['git', 'rev-parse', 'HEAD'], checkout).strip() != context['head_sha']
+            or run(['git', 'status', '--porcelain=v1'], checkout).strip()):
+        raise ValueError('prepared isolated checkout changed; refresh preparation')
+    with bindings.pinned_bindings(preparation['reviewers']):
+        descriptors = [describe_reviewer(provider) for provider in reviewers]
+    if any(value != preparation['reviewers'][name] for name, value in zip(names, descriptors)):
+        raise ValueError('effective reviewer instructions changed; refresh preparation')
+    return {'reviewers': descriptors}
+
+
 def compact_handoff(handoff, reviewer):
     prepared = handoff['preparation']
     if prepared.get('preparation_version', 1) < 3 or 'decisions' not in handoff['decisions']:
@@ -693,7 +715,11 @@ def main():
     parser.add_argument('--scope-file')
     parser.add_argument('--decisions-file')
     parser.add_argument('--preparation-file')
-    parser.add_argument('--describe', action='store_true', help='Describe effective reviewers without launching a model')
+    description = parser.add_mutually_exclusive_group()
+    description.add_argument('--describe', action='store_true',
+                             help='Discover installed reviewers without launching a model')
+    description.add_argument('--describe-prepared', action='store_true',
+                             help='Validate and describe retained reviewers without registry lookup or execution')
     parser.add_argument('--rules-file')
     parser.add_argument('--stats-cycle', type=int, help='Iteration cycle (normally read from the private run record)')
     parser.add_argument('--stats-attempt', help='Optional suffix for statistics IDs derived from the session and invocation')
@@ -701,8 +727,20 @@ def main():
     parser.add_argument('--resume', action='store_true', help='Explicitly resume an interrupted session with identical evidence')
     parser.add_argument('--run-record', help='Compatibility adapter for earlier iteration callers')
     args = parser.parse_args()
+    if args.describe_prepared:
+        try:
+            return _run_cli(args, parser)
+        except Exception as exc:
+            raise ValueError(f'prepared reviewer description failed: {exc}; refresh preparation '
+                             'and verify retained reviewer resources') from exc
+    return _run_cli(args, parser)
+
+
+def _run_cli(args, parser):
     preparation = preparation_api.read(args.preparation_file) if args.preparation_file else None
     fresh = preparation is not None and preparation.get('preparation_version', 1) >= 3
+    if args.describe_prepared and not fresh:
+        parser.error('--describe-prepared requires a current --preparation-file; refresh preparation')
     context = preparation_api.context_for(preparation) if fresh else json.loads(Path(args.context).read_text())
     if fresh and Path(args.context).exists():
         supplied = preparation_api.read(args.context)
@@ -712,7 +750,7 @@ def main():
             if (Path(supplied[field]).exists() and preparation_api.file_hash(supplied[field]) !=
                     preparation['sources'][field]['sha256']):
                 raise ValueError('supplied ' + field + ' differs from prepared evidence')
-    if not args.describe and (not args.decisions_file or not args.preparation_file):
+    if not (args.describe or args.describe_prepared) and (not args.decisions_file or not args.preparation_file):
         parser.error('--decisions-file and --preparation-file are required to launch reviewers')
     config = json.loads(run(['python3', str(ROOT/'dk-config/scripts/repo_rules.py'),
                              '--cwd', context['repository'], '--pr', context['url'],
@@ -724,7 +762,15 @@ def main():
         return
     decisions = validate_decisions(context, preparation_api.read(preparation_api.source_path(preparation, 'decisions'))
                                   if fresh else json.loads(Path(args.decisions_file).read_text()))
-    if fresh and Path(args.decisions_file).exists():
+    if args.describe_prepared:
+        if args.decisions_file:
+            if validate_decisions(context, preparation_api.read(args.decisions_file)) != decisions:
+                raise ValueError('supplied Decisions changed; refresh preparation')
+        preparation = preparation_api.load(args.preparation_file, context, decisions)
+        result = describe_prepared(context, config['reviewers'], preparation)
+        print(json.dumps(result, ensure_ascii=True))
+        return
+    if fresh and args.decisions_file and Path(args.decisions_file).exists():
         if validate_decisions(context, preparation_api.read(args.decisions_file)) != decisions:
             raise ValueError('supplied Decisions changed; refresh preparation')
     preparation = preparation_api.load(args.preparation_file, context, decisions)
