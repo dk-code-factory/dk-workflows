@@ -65,7 +65,7 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
-      "version": "1.7.1",
+      "version": "1.7.2",
       "description": "Separate preparation analyst instructions from downstream worker guidance and validate worker contracts through existing bounded preparation correction, preserving read-only authorization and immutable evidence."
     },
     {
