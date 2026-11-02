@@ -176,6 +176,38 @@ def test_execution_corrections_retained_without_nested_double_counting(pinned, m
     assert api.summary()['total']['reviews']['correction_retries'] == 1
 
 
+def test_json_cli_capture_preserves_response_file_and_known_usage_on_missing_correction(pinned):
+    context, decisions, prep, names, git = pinned
+    prep['reviewers'] = {names[0]: prep['reviewers'][names[0]]}
+    prep['analysis']['reviewer_addenda'] = {names[0]: prep['analysis']['reviewer_addenda'][names[0]]}
+    prepare_current(context, decisions, prep)
+    stats = Capture(context, prep, names[:1], cycle=1)
+    responses = ['not json', json.dumps({'findings': []})]
+    usage = dict(input_tokens=100, cached_input_tokens=70, output_tokens=20, reasoning_output_tokens=5)
+    def fake(args, input, **kwargs):
+        assert '--json' in args
+        first = len(responses) == 2
+        Path(args[args.index('-o') + 1]).write_text(responses.pop(0))
+        # JSON stdout is transport evidence. It never substitutes for -o content.
+        return subprocess.CompletedProcess(args, 0,
+            json.dumps({'type': 'turn.completed', 'usage': usage}) if first else '', '')
+    with patch.object(executors, 'run_provider', side_effect=fake):
+        result = runner.review(context, names[:1], '', decisions, '', prep, stats=stats)
+    assert result['complete'] and result['findings'] == []
+    review = api.ledger(stats.repo)['runs'][stats.run_id]['reviews'][names[0]]
+    assert review['usage'] == [{**usage, 'source': 'codex_cli_json'}, None]
+    assert len(review['executions']) == 2
+    assert review['executions'][0]['execution_id'] != review['executions'][1]['execution_id']
+    summary = api.summary()['usage']
+    assert summary['tokens']['total_tokens']['known_subtotal'] == 120
+    assert summary['missing_attempts'] == 1 and not summary['complete']
+    assert summary['tokens']['reasoning_output_tokens']['known_subtotal'] == 5
+    trace = json.loads(next(stats.directory.glob('*-execution.json')).read_text())
+    assert trace['attempts'][0]['output'] == 'not json'
+    assert json.loads(trace['attempts'][0]['stdout'])['usage'] == usage
+    assert not git('status', '--porcelain')
+
+
 def test_standalone_no_capture_and_automatic_iteration_cycle_lookup(pinned):
     context, decisions, prep, names, git = pinned
     assert for_iteration(context, {**prep, 'mode': 'standalone'}, names) is None

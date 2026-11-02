@@ -14,6 +14,19 @@ recorded repositories. Read `details` only when the request needs individual run
 findings, assessment history or retained evidence. See [the API contract](../dk-pr-iter/references/review-stats.md)
 for definitions and schema.
 
+For bounded comparisons, use inclusive `--since` and exclusive `--until` ISO
+dates (midnight UTC) or timestamps with explicit offsets. Repeat `--exclude-repo`
+for repository exclusions, and `--group-by` for a composite usage grouping by
+`repository`, `stage`, `provider`, `model`, `effort` and/or `role`. Report omitted
+undated legacy runs. Distinguish known token/cost subtotals and measured/missing
+attempts from complete measurements; component completeness can differ. Keep
+unknown model/effort groups explicit. Show request input percentiles only when
+per-request evidence exists; CLI turn totals do not establish those samples.
+Use reviewer-task duration medians/ranges with their sample size and identity
+completeness. Completed review cohorts do not prove completed workflows or merge.
+Available cost is provider-reported evidence, not guaranteed billed cost;
+historical before/after comparisons remain observational.
+
 Return a compact comparison with Major, Minor, Nit and total where relevant, precision
 and its adjudicated sample size, shared/exclusive contributions, and incomplete review
 counts. Link `data.reports.user` and the relevant repository report paths. Distinguish

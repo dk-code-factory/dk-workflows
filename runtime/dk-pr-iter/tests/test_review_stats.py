@@ -225,3 +225,99 @@ def test_same_defect_with_different_reported_severities_preserves_observations()
     a = complete(r, 'a', [finding(), finding(severity='Minor'), finding()])
     assert len(a['findings']) == 2
     assert len({f['canonical_issue'] for f in a['findings']}) == 1
+
+
+def test_date_boundaries_exclusions_grouping_and_legacy_unknown_timestamps():
+    def make(cycle, date, repository=REPO):
+        r = stats.begin_review(pr_url=f'https://{repository}/pull/2', cycle=cycle, head=SHA,
+            preparation_id='prep', reviewers=['a'], started_at=date)
+        stats.record_review(repository, r['id'], 'a', status='completed', findings=[],
+            provider='codex', model='m', effort='high', duration_seconds=cycle,
+            executions=[dict(execution_id=str(cycle) + repository, provider='codex', model='m',
+                effort='high', role='root', stage='review', usage={'total_tokens': 10})])
+        return r
+    make(1, '2026-11-01T23:59:59Z')
+    make(2, '2026-11-01T20:00:00-04:00')
+    make(3, '2026-11-03T00:00:00Z')
+    make(4, '2026-11-02', 'git.example/o/excluded')
+    old = make(5, '2026-11-02')
+    stats.mutate(stats.ledger_path(REPO), {}, lambda d: d['runs'][old['id']].pop('started_at'))
+    result = stats.summary(since='2026-11-02', until='2026-11-03',
+        exclude_repos=['GIT.EXAMPLE/O/EXCLUDED'], group_by=['repository', 'stage', 'model', 'effort', 'role'])
+    assert result['run_count'] == 1
+    assert result['repositories'] == [REPO]
+    assert result['usage']['tokens']['total_tokens']['known_subtotal'] == 10
+    assert result['usage']['groups'][0]['key'] == dict(repository=REPO, stage='review', model='m', effort='high', role='root')
+    assert result['task_duration_seconds'][0]['median'] == 2
+    assert result['task_duration_seconds'][0]['comparison_identity_complete']
+    assert result['review_runs'] == dict(completed=1, failed=0, incomplete=0)
+    assert result['workflows']['completed'] is None
+    assert 'missing a usable timestamp' in ' '.join(result['warnings'])
+    assert stats.summary(exclude_repos=[REPO, 'git.example/o/excluded'])['usage']['executions'] == 0
+    with pytest.raises(ValueError):
+        stats.summary(since='2026-11-03', until='2026-11-02')
+
+
+def test_partial_legacy_usage_and_unknown_attempt_denominators():
+    r = run()
+    stats.record_review(REPO, r['id'], 'a', status='completed', findings=[], provider='codex',
+        usage=[{'total_tokens': 20, 'source': 'codex_cli_summary'}, None])
+    stats.record_review(REPO, r['id'], 'b', status='failed', findings=[])
+    result = stats.summary()
+    assert result['usage']['executions'] == 2
+    assert result['usage']['missing_attempts'] == 1
+    assert result['usage']['reviews_without_execution_evidence'] == 1
+    assert result['usage']['tokens']['total_tokens'] == dict(known_subtotal=20,
+        measured_attempts=1, missing_attempts=1, complete=False, unobserved_reviews=1)
+    assert result['review_runs'] == dict(completed=0, failed=1, incomplete=0)
+
+
+def test_group_completeness_retains_unobserved_review_uncertainty():
+    r = run()
+    stats.record_review(REPO, r['id'], 'a', status='completed', findings=[], provider='codex',
+        usage=[{'total_tokens': 20}])
+    stats.record_review(REPO, r['id'], 'b', status='failed', findings=[])
+    group, = stats.summary(group_by=['model'])['usage']['groups']
+    assert group['tokens']['total_tokens']['known_subtotal'] == 20
+    assert group['unobserved_reviews_in_query'] == 1
+    assert not group['complete'] and not group['tokens']['total_tokens']['complete']
+    selected, = stats.summary(reviewer='a', group_by=['model'])['usage']['groups']
+    assert selected['tokens']['total_tokens']['complete']
+
+
+def test_interrupted_trace_and_resumed_identity_do_not_duplicate_tokens(tmp_path):
+    r = run(reviewers=('a',))
+    trace = tmp_path / 'attempt-execution.json'
+    evidence = dict(execution_id='same-request', provider='codex', model='m',
+                    usage={'input_tokens': 100, 'output_tokens': 20})
+    trace.write_text(json.dumps({'attempts': [evidence]}))
+    stats.record_review(REPO, r['id'], 'a', status='running', artifacts=[str(trace)])
+    partial = stats.summary()['usage']
+    assert partial['tokens']['total_tokens']['known_subtotal'] == 120
+    assert partial['unfinished_reviews'] == 1 and not partial['complete']
+    resumed = stats.begin_review(pr_url=r['pr_url'], cycle=1, head=SHA, preparation_id='prep',
+                                 reviewers=['a'], attempt='resumed')
+    stats.record_review(REPO, resumed['id'], 'a', status='completed', findings=[], executions=[evidence])
+    result = stats.summary()
+    assert result['usage']['executions'] == 1
+    assert result['usage']['excluded_records']['duplicates'] == 1
+    assert result['usage']['tokens']['total_tokens']['known_subtotal'] == 120
+    assert result['review_runs'] == dict(completed=1, failed=0, incomplete=1)
+    assert stats.begin_review(pr_url=resumed['pr_url'], cycle=1, head=SHA, preparation_id='prep',
+                              reviewers=['a'], attempt='resumed')['started_at'] == resumed['started_at']
+
+
+def test_usage_cli_filters_are_read_only_and_unknown_metrics_explicit():
+    r = run(reviewers=('a',))
+    complete(r, 'a', [])
+    proc = subprocess.run([sys.executable, str(SCRIPT), 'summary', '--since', '2020-01-01',
+        '--until', '2099-01-01', '--exclude-repo', 'github.com/o/other',
+        '--exclude-repo', 'github.com/o/third', '--group-by', 'model', '--group-by', 'effort'],
+        capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    result = json.loads(proc.stdout)['data']
+    assert result['usage']['requests']['known_count'] is None
+    assert result['usage']['tokens']['input_tokens']['known_subtotal'] is None
+    assert result['usage']['cost']['known_subtotal'] is None
+    assert not result['usage']['complete']
+    assert result['usage']['group_by'] == ['model', 'effort']

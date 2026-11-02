@@ -5,6 +5,7 @@ All query operations are local and read-only. Mutation payloads are retained bef
 ledger writes so failed collection can be replayed with the same identifiers.
 """
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 import argparse
@@ -19,6 +20,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 from shared.private_state import root, read, mutate
+from shared import usage as usage_api
 
 API_VERSION = 1
 SEVERITIES = ('Major', 'Minor', 'Nit')
@@ -81,7 +83,8 @@ def observation_id(run_id, reviewer, finding):
     return 'f-' + digest([run_id, reviewer, finding])
 
 
-def begin_review(*, pr_url, cycle, head, preparation_id, reviewers, attempt='1', run_id=None):
+def begin_review(*, pr_url, cycle, head, preparation_id, reviewers, attempt='1', run_id=None,
+                 started_at=None):
     repo, pr = pr_identity(pr_url)
     if type(cycle) is not int or cycle < 1 or not re.fullmatch(r'[0-9a-f]{40,64}', head):
         raise ValueError('positive cycle and pinned head required')
@@ -93,7 +96,8 @@ def begin_review(*, pr_url, cycle, head, preparation_id, reviewers, attempt='1',
     run_id = run_id or 'r-' + digest(identity)
     if not re.fullmatch(r'[A-Za-z0-9_-]+', run_id):
         raise ValueError('invalid run ID')
-    item = {**identity, 'id': run_id, 'reviews': {
+    started_at = usage_api.timestamp(started_at).isoformat() if started_at else datetime.now(timezone.utc).isoformat()
+    item = {**identity, 'id': run_id, 'started_at': started_at, 'reviews': {
         name: {'id': 'a-' + digest([run_id, name]), 'status': 'not_run',
                'findings': [], 'duration_seconds': None, 'correction_retries': None,
                'provider': None, 'model': None, 'usage': None, 'artifacts': []}
@@ -130,8 +134,11 @@ def record_review(repo, run_id, reviewer, *, status, findings=None, **metadata):
         unique[fid] = {'id': fid, 'reported': finding,
                        'canonical_issue': 'i-' + finding_key(finding)}
     if set(metadata) - {'duration_seconds', 'prompt_fingerprint', 'correction_retries',
-                        'provider', 'model', 'usage', 'artifacts', 'reason'}:
+                        'provider', 'model', 'effort', 'usage', 'artifacts', 'reason', 'executions'}:
         raise ValueError('unknown review metadata')
+    if 'executions' in metadata and (not isinstance(metadata['executions'], list) or
+            any(not isinstance(item, dict) for item in metadata['executions'])):
+        raise ValueError('executions must be a list of evidence records')
     for key in ('duration_seconds', 'correction_retries'):
         if metadata.get(key) is not None and (type(metadata[key]) not in (int, float)
                 or not math.isfinite(metadata[key]) or metadata[key] < 0
@@ -218,24 +225,72 @@ def count(target, severity):
     target['total'] += 1
 
 
-def summary(repo=None, reviewer=None):
+def review_executions(review):
+    """Current traces survive interruption; historical usage stays readable."""
+    if review['status'] == 'running':
+        for path in review.get('artifacts', []):
+            if path.endswith('-execution.json'):
+                return usage_api.execution_records(read(Path(path), {'attempts': []}).get('attempts', []))
+    if 'executions' in review:
+        return review['executions']
+    raw = review.get('usage')
+    if isinstance(raw, dict):
+        raw = [raw]
+    if isinstance(raw, list):
+        return [{'usage': item, 'provider': review.get('provider'), 'model': review.get('model'),
+                 'scope': 'execution', 'inclusive': True} for item in raw]
+    return []
+
+
+def summary(repo=None, reviewer=None, *, since=None, until=None, exclude_repos=(), group_by=()):
     """Query v1. Counts observations separately from PR-scoped unique credits."""
-    repos = [normalize_repo(repo)] if repo else repositories()
+    lower = usage_api.timestamp(since) if since else None
+    upper = usage_api.timestamp(until) if until else None
+    if lower and upper and lower >= upper:
+        raise ValueError('since must be earlier than until')
+    excluded_repos = {normalize_repo(value) for value in exclude_repos}
+    repos = [r for r in ([normalize_repo(repo)] if repo else repositories()) if r not in excluded_repos]
     reviewers, total, issues = {}, row(), {}
     warnings = {}
     def warn(label, n=1):
         warnings[label] = warnings.get(label, 0) + n
     run_count = 0
+    executions, task_durations = [], {}
+    review_runs = dict.fromkeys(('completed', 'failed', 'incomplete'), 0)
+    usage_unknown_reviews = 0
+    unfinished_reviews = 0
     for repository in repos:
         data = ledger(repository)
         latest = {a['finding_id']: a for a in data['assessment_history']}
         for run_id, run in sorted(data['runs'].items()):
+            if lower or upper:
+                try:
+                    observed = usage_api.timestamp(run.get('started_at'))
+                except (ValueError, TypeError):
+                    warn(f'{repository} runs missing a usable timestamp')
+                    continue
+                if (lower and observed < lower) or (upper and observed >= upper):
+                    continue
             run_count += 1
+            selected_reviews = [r for n, r in run['reviews'].items() if reviewer is None or n == reviewer]
+            if selected_reviews:
+                states = {r['status'] for r in selected_reviews}
+                run_status = 'completed' if states == {'completed'} else ('failed' if states & {'failed', 'exhausted'} else 'incomplete')
+                review_runs[run_status] += 1
             comparable = (len(run['reviewers']) > 1 and
                           all(r['status'] == 'completed' for r in run['reviews'].values()) and
                           all(latest.get(f['id'], {}).get('verdict', 'unverified') != 'unverified'
                               for r in run['reviews'].values() for f in r['findings']))
             for name, review in run['reviews'].items():
+                if reviewer is None or name == reviewer:
+                    records = review_executions(review)
+                    usage_unknown_reviews += not records and review['status'] != 'not_run'
+                    unfinished_reviews += review['status'] == 'running'
+                    executions.extend({**record, 'repository': repository, 'reviewer': name,
+                                       'run_id': run_id} for record in records)
+                    if review.get('duration_seconds') is not None:
+                        key = (name, review.get('provider'), review.get('model'), review.get('effort'))
+                        task_durations.setdefault(key, []).append(review['duration_seconds'])
                 r = reviewers.setdefault(name, row())
                 for target in (r, total):
                     status = review['status']
@@ -303,7 +358,28 @@ def summary(repo=None, reviewer=None):
         else:
             total = None
         reviewers = {reviewer: reviewers[reviewer]} if reviewer in reviewers else {}
+    usage = usage_api.report(executions, group_by)
+    usage['reviews_without_execution_evidence'] = usage_unknown_reviews
+    usage['unfinished_reviews'] = unfinished_reviews
+    usage['complete'] = usage['complete'] and usage_unknown_reviews == 0 and unfinished_reviews == 0
+    for scope in [usage, *usage['groups']]:
+        # A review without execution evidence cannot be safely allocated to an
+        # execution-level group. Preserve that uncertainty for every group.
+        scope['unobserved_reviews_in_query'] = usage_unknown_reviews
+        scope['unfinished_reviews_in_query'] = unfinished_reviews
+        scope['complete'] = scope['complete'] and usage_unknown_reviews == 0 and unfinished_reviews == 0
+        for metric in [*scope['tokens'].values(), scope['cost'], scope['requests']]:
+            metric['unobserved_reviews'] = usage_unknown_reviews
+            metric['complete'] = metric['complete'] and usage_unknown_reviews == 0 and unfinished_reviews == 0
     return {'api_version': API_VERSION, 'repositories': repos, 'run_count': run_count,
+            'filters': {'since': lower.isoformat() if lower else None,
+                        'until': upper.isoformat() if upper else None,
+                        'exclude_repos': sorted(excluded_repos)},
+            'usage': usage, 'review_runs': review_runs,
+            'workflows': {'completed': None, 'reason': 'Reviewer evidence does not establish workflow completion or merge.'},
+            'task_duration_seconds': [{'reviewer': k[0], 'provider': k[1], 'model': k[2], 'effort': k[3],
+                                      'comparison_identity_complete': all(k),
+                                      **usage_api.distribution(v)} for k, v in sorted(task_durations.items(), key=lambda x: json.dumps(x[0]))],
             'reviewers': reviewers, 'total': total if run_count and reviewers else None,
             'warnings': [f'{label}: {n}' for label, n in sorted(warnings.items())], 'reports': {
                 'user': str(stats_home() / 'review-stats.md'),
@@ -346,6 +422,24 @@ def markdown(value, title):
                 f'{transition}: {n}' for transition, n in sorted(item['severity_changes'].items())), '']
     if value['total'] is None:
         lines += ['No recorded reviews.', '']
+    usage = value['usage']
+    lines += ['## Usage evidence', '',
+              f'Executions: {usage["executions"]}; with usage: {usage["attempts_with_usage"]}; '
+              f'missing usage: {usage["missing_attempts"]}; reviews without execution evidence: '
+              f'{usage["reviews_without_execution_evidence"]}. Complete: {usage["complete"]}.', '',
+              '| Component | Known subtotal | Measured attempts | Missing attempts | Complete |',
+              '| --- | ---: | ---: | ---: | --- |']
+    for component, metric in usage['tokens'].items():
+        lines.append(f'| {component} | {metric["known_subtotal"] if metric["known_subtotal"] is not None else "unknown"} '
+                     f'| {metric["measured_attempts"]} | {metric["missing_attempts"]} | {metric["complete"]} |')
+    lines += ['', 'Cached input is part of input; reasoning output is part of output. '
+              'Missing components and request sizes remain unknown. CLI execution totals do not measure individual model requests.', '',
+              'Review runs: ' + ', '.join(f'{key}: {n}' for key, n in value['review_runs'].items()) + '. '
+              'Completed workflows: unknown (reviewer evidence alone does not establish completion or merge).', '',
+              f'Provider-reported USD known subtotal: {usage["cost"]["known_subtotal"]}; '
+              f'measured attempts: {usage["cost"]["measured_attempts"]}; '
+              f'missing attempts: {usage["cost"]["missing_attempts"]}. Not guaranteed billed cost.', '',
+              'Historical comparisons are observational; task duration samples are grouped by reviewer/provider/model/effort.', '']
     if value['warnings']:
         lines += ['## Missing data', '', *['- ' + w for w in value['warnings']], '']
     return '\n'.join(lines)
@@ -412,6 +506,10 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
     q = sub.add_parser('summary')
     q.add_argument('--repo'); q.add_argument('--reviewer')
+    q.add_argument('--since', help='inclusive ISO date (UTC midnight) or timestamp with offset')
+    q.add_argument('--until', help='exclusive ISO date (UTC midnight) or timestamp with offset')
+    q.add_argument('--exclude-repo', action='append', default=[], help='repeatable HOST/OWNER/REPO exclusion')
+    q.add_argument('--group-by', action='append', choices=usage_api.GROUP_FIELDS, default=[])
     sub.add_parser('repositories')
     d = sub.add_parser('details'); d.add_argument('--repo', required=True); d.add_argument('--run', required=True)
     for command in ('begin', 'record-review', 'assess'):
@@ -422,7 +520,8 @@ def main():
     args = parser.parse_args()
     try:
         if args.command == 'summary':
-            result = summary(args.repo, args.reviewer)
+            result = summary(args.repo, args.reviewer, since=args.since, until=args.until,
+                             exclude_repos=args.exclude_repo, group_by=args.group_by)
         elif args.command == 'repositories':
             result = {'api_version': API_VERSION, 'repositories': repositories()}
         elif args.command == 'details':
