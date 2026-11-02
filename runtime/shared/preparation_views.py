@@ -23,7 +23,7 @@ def model_view(prepared):
     for source in result.get('sources', {}).values():
         # An immutable snapshot replaces the duplicated original transport path.
         # Preserve the original shape when an extension could depend on it.
-        if (set(source) <= {'path', 'snapshot', 'sha256', 'mode', 'origin_identity'}
+        if (set(source) <= {'path', 'snapshot', 'sha256', 'mode', 'origin_identity', 'reviewer', 'derived_from'}
                 and isinstance(source.get('snapshot'), str) and source['snapshot']):
             source['path'] = source.pop('snapshot')
     report = result.get('refresh')
@@ -61,6 +61,36 @@ def reviewer_view(prepared, reviewer):
                          'sources', 'execution', 'effective_prompt', 'aspects', 'handoff_contract'}
     execution_fields = {'binding', 'identity', 'executor', 'plugin_id', 'root', 'procedure', 'version',
                         'origin_root', 'bundle_digest', 'argv', 'bundles', 'codex_execution'}
+    def known_identity(value):
+        if value is None:
+            return True
+        if (not isinstance(value, dict) or set(value) != {'version', 'workspace', 'paths',
+                'layers', 'provider', 'baseline', 'exact_sha256'} or value['version'] != 1
+                or not isinstance(value['workspace'], str) or not isinstance(value['exact_sha256'], str)
+                or not isinstance(value['paths'], dict) or not isinstance(value['layers'], list)):
+            return False
+        if any(not isinstance(path, str) or not isinstance(item, dict) or set(item) not in ({'relative', 'target'}, {'external_target'})
+               or any(not isinstance(field, str) for field in item.values())
+               for path, item in value['paths'].items()):
+            return False
+        if any(not isinstance(item, dict) or set(item) != {'name', 'version', 'config_sha256',
+                'comparison_sha256', 'source_sha256', 'projected', 'source_path', 'source_target'} or not isinstance(item['name'], dict)
+                or set(item['name']) - {'type', 'file', 'profile', 'dotCodexFolder', 'domain', 'key', 'id', 'name'}
+                or any(field is not None and not isinstance(field, str) for field in item['name'].values())
+                or any(not isinstance(item[key], str) for key in ('version', 'config_sha256', 'comparison_sha256'))
+                or item['source_sha256'] is not None and not isinstance(item['source_sha256'], str)
+                or any(item[field] is not None and not isinstance(item[field], str)
+                       for field in ('source_path', 'source_target'))
+                or type(item['projected']) is not bool for item in value['layers']):
+            return False
+        provider = value['provider']
+        if provider is not None and (not isinstance(provider, dict) or set(provider) != {'exact', 'comparison'}
+                                     or any(not isinstance(field, str) for field in provider.values())):
+            return False
+        return (isinstance(value['baseline'], dict) and set(value['baseline']) == {
+            'config', 'comparison', 'origins', 'comparison_origins'}
+            and all(isinstance(field, str) for field in value['baseline'].values()))
+
     def known_profile(value):
         if value is None:
             return True
@@ -73,7 +103,8 @@ def reviewer_view(prepared, reviewer):
                 and isinstance(item.get('version'), str))
         return (isinstance(value, dict) and set(value) <= {
             'profile', 'profile_source', 'codex_version', 'settings', 'origins', 'setting_sources',
-            'effective_settings', 'expected_observations', 'catalog', 'provider', 'layers', 'requirements_sha256'}
+            'effective_settings', 'expected_observations', 'catalog', 'provider', 'layers', 'requirements_sha256', 'identity_evidence'}
+            and known_identity(value.get('identity_evidence'))
             and isinstance(value.get('profile'), str) and isinstance(value.get('codex_version'), str)
             and isinstance(value.get('settings'), dict) and set(value['settings']) <= set(SETTINGS)
             and all(item is None or type(item) in (str, int, bool) for item in value['settings'].values())

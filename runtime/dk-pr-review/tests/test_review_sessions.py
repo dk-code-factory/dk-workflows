@@ -254,7 +254,7 @@ def test_resumed_profile_checkpoint_requires_same_effective_settings(pinned, tmp
     names[0] = bindings.key(binding)
     descriptor = prep['reviewers'].pop(old)
     prep['reviewers'][names[0]] = {**descriptor, 'reviewer': names[0], 'execution': execution,
-        'effective_prompt': json.dumps(execution, sort_keys=True)}
+        'effective_prompt': json.dumps(execution, sort_keys=True) + '\nReview the pinned change.'}
     prep['reviewers'] = {name: prep['reviewers'][name] for name in names}
     prep['analysis']['reviewer_addenda'][names[0]] = prep['analysis']['reviewer_addenda'].pop(old)
     prepare_current(context, decisions, prep)

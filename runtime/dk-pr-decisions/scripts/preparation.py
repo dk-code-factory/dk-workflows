@@ -74,7 +74,7 @@ def validate_run_history(source, key):
     graph_api.semantic(key, Path(source).read_bytes())
 
 
-def collect(manifest_path, *, on_call=None):
+def collect(manifest_path, *, on_call=None, workspace=None, capture_dir=None, execution_captures=None):
     """Require an explicit complete package; empty categories need a source explaining why."""
     manifest_path = Path(manifest_path).resolve()
     manifest = read(manifest_path)
@@ -83,6 +83,7 @@ def collect(manifest_path, *, on_call=None):
         return str((base / value).resolve())
     context_path = path(manifest['context'])
     context = read(context_path)
+    original_checkout = context['checkout']
     decisions_path = path(manifest['decisions'])
     # Reuse the exact runner validator, including the unified API and live body snapshot.
     import importlib.util
@@ -116,25 +117,84 @@ def collect(manifest_path, *, on_call=None):
                 if record.get('complete') is True:
                     graph_api.feedback(record, pr_url=context['url'], head_sha=context['head_sha'])
             paths[f'{category}/{index}'] = path(value)
-    reviewer_descriptors = {}
+    origin_overrides = manifest.get('source_origins', {})
+    if not isinstance(origin_overrides, dict):
+        raise ValueError('source_origins requires captured source keys and nonempty original identities')
+    reviewer_descriptors, derived_sources = {}, {}
+    associations = manifest.get('reviewer_execution', [])
+    if not isinstance(associations, list) or any(not isinstance(item, dict) or
+            set(item) != {'reviewer', 'path', 'derived_from', 'sha256', 'original_sha256'} or
+            any(not text(value) for value in item.values()) for item in associations):
+        raise ValueError('invalid retained reviewer execution association')
+    associated = {item['reviewer']: item for item in associations}
+    if len(associated) != len(associations):
+        raise ValueError('duplicate retained reviewer execution association')
     for index, value in enumerate(evidence['reviewers']):
-        descriptor = read(path(value))
+        supplied_path = path(value)
+        supplied_bytes = Path(supplied_path).read_bytes()
+        descriptor = json.loads(supplied_bytes)
         runner.validate_descriptor(descriptor)
         name = descriptor['reviewer']
         if name in reviewer_descriptors:
             raise ValueError('duplicate reviewer descriptor')
+        profiled = 'codex_profile' in (descriptor.get('execution') or {}).get('binding', {})
+        if profiled and (workspace is not None or name in associated):
+            key = 'reviewer-execution/' + str(index)
+            original_key = 'reviewers/' + str(index)
+            original_identity = origin_overrides.get(original_key) or graph_api.source_identity(
+                original_key, {'path': supplied_path}, original_checkout, supplied_bytes)
+            if name in associated:
+                association = associated[name]
+                if (association['derived_from'] != original_identity or
+                        association['original_sha256'] != hashlib.sha256(supplied_bytes).hexdigest() or
+                        file_hash(path(association['path'])) != association['sha256']):
+                    raise ValueError('retained reviewer execution association or snapshot changed')
+            if workspace is not None:
+                updated = runner.capture_execution(descriptor, workspace)
+                if Path(supplied_path).read_bytes() != supplied_bytes:
+                    raise ValueError('reviewer execution or supplied descriptor changed during preparation')
+                target = Path(capture_dir) / 'reviewer-execution' / (str(index) + '.json')
+                retained = execution_captures.get(name)
+                if retained is None:
+                    from shared.private_state import write
+                    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    write(target, updated)
+                    execution_captures[name] = {'original': hashlib.sha256(supplied_bytes).hexdigest(),
+                                               'sha256': file_hash(target), 'descriptor': updated}
+                elif (retained['original'] != hashlib.sha256(supplied_bytes).hexdigest()
+                        or retained['descriptor'] != updated or file_hash(target) != retained['sha256']):
+                    raise ValueError('reviewer execution or supplied descriptor changed during preparation')
+                descriptor = updated
+            else:
+                association = associated[name]
+                if association['derived_from'] != original_identity:
+                    raise ValueError('retained reviewer execution association changed')
+                target = Path(path(association['path']))
+                descriptor = read(target)
+                runner.validate_descriptor(descriptor)
+                if (descriptor['reviewer'] != name or
+                        descriptor.get('execution', {}).get('binding') !=
+                        read(supplied_path).get('execution', {}).get('binding')):
+                    raise ValueError('retained reviewer execution binding changed')
+            paths[key] = str(target)
+            derived_sources[key] = {'reviewer': name, 'derived_from': original_identity}
         reviewer_descriptors[name] = descriptor
         for n, source in enumerate(descriptor['sources']):
             source_path = Path(source['path'])
             if file_hash(source_path) != source['sha256']:
                 raise ValueError('reviewer prompt source changed')
             paths[f'reviewer-source/{index}/{n}'] = str(source_path)
+    if set(associated) - reviewer_descriptors.keys():
+        raise ValueError('retained reviewer execution association lacks supplied evidence')
     if not reviewer_descriptors:
         raise ValueError('reviewer descriptors are required')
     if git(context['checkout'], 'rev-parse', 'HEAD') != context['head_sha']:
         raise ValueError('preparation checkout moved from pinned head')
     if git(context['checkout'], 'status', '--porcelain=v1'):
         raise ValueError('preparation requires a clean isolated checkout')
+    if workspace is not None and derived_sources:
+        if git(workspace, 'rev-parse', 'HEAD') != context['head_sha'] or git(workspace, 'status', '--porcelain=v1'):
+            raise ValueError('owned preparation workspace changed')
     architecture_analyzer = (lambda prompt, checkout, validate: architecture.analyze(
         prompt, checkout, validate, on_call=on_call)) if on_call else None
     architecture_value = architecture.prepare(context, decisions, analyzer=architecture_analyzer,
@@ -144,6 +204,8 @@ def collect(manifest_path, *, on_call=None):
         paths[f'architecture-exceptions/{index}'] = reference['path']
     sources = {key: {'path': str(Path(value).resolve()), 'sha256': file_hash(value)}
                for key, value in paths.items()}
+    for key, association in derived_sources.items():
+        sources[key].update(association)
     modes = manifest.get('source_modes', {})
     if (not isinstance(modes, dict) or set(modes) - set(sources)
             or any(mode not in {'capture', 'live'} for mode in modes.values())):
@@ -151,9 +213,10 @@ def collect(manifest_path, *, on_call=None):
     for key, source in sources.items():
         category = key.split('/')[0]
         captured = (key in {'manifest', 'context', 'decisions', 'metadata', 'patch'}
-                    or category in {'reviewers', 'prior_preparation', 'architecture', 'architecture-exceptions'}
+                    or category in {'reviewers', 'reviewer-execution', 'prior_preparation', 'architecture', 'architecture-exceptions'}
                     or category in {'production', 'tests'} and
-                    Path(source['path']).is_relative_to(Path(context['checkout'])))
+                    (Path(source['path']).is_relative_to(Path(original_checkout)) or
+                     Path(source['path']).is_relative_to(Path(context['checkout']))))
         if category == 'run_history':
             value = read(source['path'])
             captured |= isinstance(value, dict) and value.get('preparation_history_version') == 1
@@ -161,6 +224,8 @@ def collect(manifest_path, *, on_call=None):
             value = read(source['path'])
             captured |= value.get('complete') is True
         source['mode'] = modes.get(key, 'capture' if captured else 'live')
+        if key in derived_sources and source['mode'] != 'capture':
+            raise ValueError('owned reviewer execution evidence must be captured')
     origins = manifest.get('source_origins', {})
     if (not isinstance(origins, dict) or set(origins) - set(sources)
             or any(not text(value) or sources[key]['mode'] != 'capture' for key, value in origins.items())):
@@ -168,7 +233,7 @@ def collect(manifest_path, *, on_call=None):
     for key, source in sources.items():
         if source['mode'] == 'capture':
             source['origin_identity'] = origins.get(key) or graph_api.source_identity(
-                key, source, context['checkout'], Path(source['path']).read_bytes())
+                key, source, original_checkout, Path(source['path']).read_bytes())
             if key == 'architecture/0':
                 source['origin_identity'] = 'architecture:' + architecture.load(architecture_value['packet'])['repository']
     prior = []
@@ -622,6 +687,7 @@ def policy():
         Path(__file__), Path(graph_api.__file__), Path(engineering.__file__),
         Path(architecture.__file__), architecture.PROCEDURE,
         Path(__file__).resolve().parents[2] / 'shared/preparation_views.py',
+        Path(__file__).resolve().parents[2] / 'shared/codex_profiles.py',
         architecture.PROCEDURE.parent.parent / 'dk-architecture-review/procedure.md',
         architecture.PROCEDURE.parent.parent / 'dk-architecture-enforcer/procedure.md',
         Path(agreement_binding.__file__),
@@ -686,7 +752,7 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
     manifest = read(manifest_path)
     context = read(Path(manifest_path).resolve().parent / manifest['context'])
     with span(context['url'], 'preparation') as timing:
-        result = _prepare(manifest_path, output_dir, analyzer,
+        result = _prepare_profiled(manifest_path, output_dir, analyzer,
                           previous_preparation=previous_preparation, full_analysis=full_analysis)
         timing['reused'] = result['refresh']['model_call_count'] == 0
         # Injected offline analyzers bypass transport accounting.
@@ -695,12 +761,77 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
         return result
 
 
-def _prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=None, full_analysis=False):
+def _prepare_profiled(manifest_path, output_dir, analyzer=None, *, previous_preparation=None, full_analysis=False):
+    """Own an early profile workspace; retain late allocation for unprofiled work."""
+    import shutil
+    manifest_path = Path(manifest_path).resolve()
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes)
+    context_path = (manifest_path.parent / manifest['context']).resolve()
+    context_bytes = context_path.read_bytes()
+    context = json.loads(context_bytes)
+    output_dir = outside(output_dir, context.get('repository', context['checkout']))
+    outside(output_dir, context['checkout'])
+    parent = historical(previous_preparation) if previous_preparation else None
+    bootstrap = {'manifest': hashlib.sha256(manifest_bytes).hexdigest(),
+                 'context': hashlib.sha256(context_bytes).hexdigest(),
+                 'parent': file_hash(previous_preparation) if parent else None, 'reviewers': {}}
+    profiled = False
+    evidence = manifest.get('evidence')
+    reviewers = evidence.get('reviewers') if isinstance(evidence, dict) else None
+    for value in reviewers if isinstance(reviewers, list) else []:
+        if not isinstance(value, str) or not value:
+            continue  # collect retains the complete package-validation contract.
+        source = (manifest_path.parent / value).resolve()
+        content = source.read_bytes()
+        descriptor = json.loads(content)
+        bootstrap['reviewers'][str(source)] = hashlib.sha256(content).hexdigest()
+        execution = descriptor.get('execution') if isinstance(descriptor, dict) else None
+        binding = execution.get('binding') if isinstance(execution, dict) else None
+        profiled |= isinstance(binding, dict) and 'codex_profile' in binding
+    candidate = {}
+    def allocate_workspace():
+        workflow_dir = (owned(parent['workflow_dir']) if parent and parent.get('workflow_dir') else
+                        owned(context['workflow_dir']) if context.get('workflow_dir') else
+                        allocate(repository=context.get('repository', context['checkout'])))
+        outside(workflow_dir, context.get('repository', context['checkout']))
+        outside(workflow_dir, context['checkout'])
+        version_dir = Path(tempfile.mkdtemp(prefix='preparation-', dir=workflow_dir))
+        candidate.update(workflow_dir=workflow_dir, version_dir=version_dir, workspace=version_dir / 'checkout')
+        git(context['checkout'], 'clone', '--quiet', '--no-hardlinks', '--no-checkout',
+            context['checkout'], str(candidate['workspace']))
+        git(candidate['workspace'], 'checkout', '--quiet', '--detach', context['head_sha'])
+    keep = False
+    try:
+        if profiled:
+            allocate_workspace()
+        result = _prepare(manifest_path, output_dir, analyzer, previous_preparation=previous_preparation,
+                          full_analysis=full_analysis, candidate=candidate,
+                          allocate_workspace=allocate_workspace, bootstrap=bootstrap)
+        keep = bool(candidate) and Path(result['artifact']).resolve().is_relative_to(candidate['version_dir'])
+        return result
+    finally:
+        if candidate and not keep:
+            shutil.rmtree(candidate['version_dir'])
+
+
+def _prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=None, full_analysis=False,
+             candidate, allocate_workspace, bootstrap):
     calls = 0
     def count():
         nonlocal calls
         calls += 1
-    manifest, context, decisions, sources, descriptors, prior = collect(manifest_path, on_call=count)
+    execution_captures = {}
+    def collection():
+        return collect(manifest_path, on_call=count, workspace=candidate.get('workspace'),
+                       capture_dir=candidate.get('version_dir'),
+                       execution_captures=execution_captures)
+    manifest, context, decisions, sources, descriptors, prior = collection()
+    if (file_hash(manifest_path) != bootstrap['manifest'] or
+            file_hash((Path(manifest_path).parent / manifest['context']).resolve()) != bootstrap['context']):
+        raise ValueError('preparation source changed during analysis: bootstrap input drift')
+    if any(file_hash(path) != value for path, value in bootstrap['reviewers'].items()):
+        raise ValueError('supplied reviewer changed during analysis: bootstrap input drift')
     collection_sources = dict(sources)
     # Capture collection order before rebinding citation slots. Manifest aliases
     # can disappear after publication; retained paths must not resolve them again.
@@ -711,6 +842,8 @@ def _prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=N
     current['policy'] = policy()
     parent = historical(previous_preparation) if previous_preparation else None
     parent_hash = file_hash(previous_preparation) if parent else None
+    if parent_hash != bootstrap['parent']:
+        raise ValueError('selected parent changed during workspace allocation')
     consumed_lineage = ({str(Path(previous_preparation).resolve()): (parent_hash, parent['preparation_id'])}
                         if parent else {})
     if parent and parent['identity']['pr_url'] != context['url']:
@@ -884,7 +1017,7 @@ def _prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=N
     # Recollect the entire package: additions, removals and input movement cannot
     # hide behind the initial index. Check again immediately before publication.
     def unchanged():
-        again = collect(manifest_path, on_call=count)
+        again = collection()
         live = graph_api.inputs(again[1], again[3])
         live['policy'] = policy()
         live_sources = again[3]
@@ -919,97 +1052,94 @@ def _prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=N
     if (parent and parent['preparation_version'] == VERSION and not force_full and mode == 'operational' and parent['identity'] == identity
             and parent['inputs'] == current and
             parent.get('reviewer_paths') == reviewer_paths and
-            {k: (v['path'], v['sha256']) for k, v in parent['sources'].items()} ==
-            {k: (v['path'], v['sha256']) for k, v in sources.items()}):
-        validate(parent, context, decisions, require_ready=False)
+            {k: (v['path'], v['sha256']) for k, v in parent['sources'].items() if not k.startswith('reviewer-execution/')} ==
+            {k: (v['path'], v['sha256']) for k, v in sources.items() if not k.startswith('reviewer-execution/')}):
+        validate(parent, context_for(parent), decisions, require_ready=False)
         report['mode'] = 'unchanged'
         return {'artifact': str(Path(previous_preparation).resolve()), 'preparation_id': parent['preparation_id'],
                 'engineering_id': engineering_id(parent), 'readiness': parent['readiness'], 'refresh': report}
-    workflow_dir = (owned(parent['workflow_dir']) if parent and parent.get('workflow_dir') else
-                    owned(context['workflow_dir']) if context.get('workflow_dir') else
-                    allocate(repository=context.get('repository', context['checkout'])))
-    outside(workflow_dir, context.get('repository', context['checkout']))
-    outside(workflow_dir, context['checkout'])
-    version_dir = Path(tempfile.mkdtemp(prefix='preparation-', dir=workflow_dir))
-    try:
-        workspace = version_dir / 'checkout'
-        git(context['checkout'], 'clone', '--quiet', '--no-hardlinks', '--no-checkout',
-            context['checkout'], str(workspace))
-        git(workspace, 'checkout', '--quiet', '--detach', context['head_sha'])
-        for key, source in sources.items():
-            target = version_dir / 'evidence' / key
-            target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            content = Path(source['path']).read_bytes()
-            if hashlib.sha256(content).hexdigest() != source['sha256']:
-                raise ValueError('preparation source changed while retaining evidence')
-            target.write_bytes(content)
-            os.chmod(target, 0o400)
-            source['snapshot'] = str(target)
-        # Retain a directly usable collection manifest, not only its old aliases.
-        # Live inputs keep their original paths; captured inputs use private copies.
-        from shared.private_state import write
-        recovered_context = {**context, 'checkout': str(workspace),
-                             'metadata': sources['metadata']['snapshot'], 'patch': sources['patch']['snapshot'],
-                             'workflow_dir': str(workflow_dir), 'context_file': str(version_dir / 'context.json')}
-        context_path = version_dir / 'context.json'
-        write(context_path, recovered_context)
-        recovery = {**manifest, 'context': str(context_path), 'decisions': sources['decisions']['snapshot'],
-                    'evidence': {}, 'source_modes': {}, 'source_origins': {}}
-        for key in ('manifest', 'context', 'decisions', 'metadata', 'patch'):
-            recovery['source_modes'][key] = sources[key]['mode']
-            if sources[key]['mode'] == 'capture':
-                recovery['source_origins'][key] = sources[key]['origin_identity']
-        for category, values in manifest['evidence'].items():
-            recovery['evidence'][category] = []
-            for index, value in enumerate(values):
-                original = str((Path(manifest_path).resolve().parent / value).resolve())
-                key = category + '/' + str(index)
-                source = collection_sources[key]
-                recovery['evidence'][category].append(source['snapshot'] if source['mode'] == 'capture' else original)
-                recovery['source_modes'][key] = source['mode']
-                if source['mode'] == 'capture':
-                    recovery['source_origins'][key] = source['origin_identity']
-        # Reviewer instruction sources are collected from the preserved descriptor.
-        for key, source in collection_sources.items():
-            if key.startswith('reviewer-source/'):
-                recovery['source_modes'][key] = source['mode']
-                if source['mode'] == 'capture':
-                    recovery['source_origins'][key] = source['origin_identity']
-        manifest_target = version_dir / 'manifest.json'
-        write(manifest_target, recovery)
-        context_path.chmod(0o400)
-        manifest_target.chmod(0o400)
-        captured_paths = {(source['path'], source['sha256']): source['snapshot'] for source in sources.values()}
-        architecture_scope = architecture.governing_sources({key: captured_paths[source['path'], source['sha256']]
-            for key, source in collection_sources.items() if key.split('/')[0] in architecture.SCOPE_SOURCES})
-        unchanged()
-        report['model_call_count'] = calls
-        artifact = {'preparation_version': VERSION, 'mode': manifest['mode'], 'identity': identity,
-                    'architecture': {'packet': {'path': sources['architecture/0']['snapshot'],
-                        'fingerprint': read(sources['architecture/0']['snapshot'])['fingerprint']},
-                        'catalog': read(sources['architecture/0']['snapshot'])['catalog'],
-                        'exceptions': manifest.get('architecture_exceptions', []),
-                        'governing': architecture_scope},
-                    'workflow_dir': str(workflow_dir), 'workspace': str(workspace),
-                    'recovery_manifest': {'path': str(manifest_target), 'sha256': file_hash(manifest_target)},
-                    'recovery_context': {'path': str(context_path), 'sha256': file_hash(context_path)},
-                    'reviewer_order': list(descriptors),
-                    'sources': sources, 'reviewers': descriptors, 'reviewer_paths': reviewer_paths, 'analysis': result,
-                    'graph': graph, 'retired_ids': retired, 'inputs': current,
-                    'parent': ({'preparation_id': parent['preparation_id'],
-                                'path': str(Path(previous_preparation).resolve()), 'sha256': parent_hash,
-                                'migration': migration} if parent else None),
-                    'refresh': report, 'readiness': readiness(result)}
-        artifact['engineering_id'] = engineering_id(artifact)
-        artifact['preparation_id'] = digest(artifact)
-        validate(artifact, context, decisions, require_ready=False)
-        target = version_dir / 'preparation.json'
-        write(target, artifact)
+    if not candidate:
+        allocate_workspace()
+    version_dir, workspace, workflow_dir = (candidate[key] for key in ('version_dir', 'workspace', 'workflow_dir'))
+    for key, source in sources.items():
+        target = version_dir / 'evidence' / key
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        content = Path(source['path']).read_bytes()
+        if hashlib.sha256(content).hexdigest() != source['sha256']:
+            raise ValueError('preparation source changed while retaining evidence')
+        target.write_bytes(content)
         os.chmod(target, 0o400)
-    except BaseException:
-        import shutil
-        shutil.rmtree(version_dir)
-        raise
+        source['snapshot'] = str(target)
+    # Retain a directly usable collection manifest, not only its old aliases.
+    # Live inputs keep their original paths; captured inputs use private copies.
+    from shared.private_state import write
+    recovered_context = {**context, 'checkout': str(workspace),
+                         'metadata': sources['metadata']['snapshot'], 'patch': sources['patch']['snapshot'],
+                         'workflow_dir': str(workflow_dir), 'context_file': str(version_dir / 'context.json')}
+    context_path = version_dir / 'context.json'
+    write(context_path, recovered_context)
+    recovery = {**manifest, 'context': str(context_path), 'decisions': sources['decisions']['snapshot'],
+                'evidence': {}, 'source_modes': {}, 'source_origins': {}}
+    for key in ('manifest', 'context', 'decisions', 'metadata', 'patch'):
+        recovery['source_modes'][key] = sources[key]['mode']
+        if sources[key]['mode'] == 'capture':
+            recovery['source_origins'][key] = sources[key]['origin_identity']
+    for category, values in manifest['evidence'].items():
+        recovery['evidence'][category] = []
+        for index, value in enumerate(values):
+            original = str((Path(manifest_path).resolve().parent / value).resolve())
+            key = category + '/' + str(index)
+            source = collection_sources[key]
+            recovery['evidence'][category].append(source['snapshot'] if source['mode'] == 'capture' else original)
+            recovery['source_modes'][key] = source['mode']
+            if source['mode'] == 'capture':
+                recovery['source_origins'][key] = source['origin_identity']
+    # Reviewer instruction sources are collected from the preserved descriptor.
+    for key, source in collection_sources.items():
+        if key.startswith('reviewer-source/'):
+            recovery['source_modes'][key] = source['mode']
+            if source['mode'] == 'capture':
+                recovery['source_origins'][key] = source['origin_identity']
+    if execution_captures:
+        recovery['reviewer_execution'] = [
+            {'reviewer': source['reviewer'], 'path': source['snapshot'], 'derived_from': source['derived_from'],
+             'sha256': source['sha256'], 'original_sha256': execution_captures[source['reviewer']]['original']}
+            for key, source in collection_sources.items() if key.startswith('reviewer-execution/')]
+        for key, source in collection_sources.items():
+            if key.startswith('reviewer-execution/'):
+                recovery['source_modes'][key] = 'capture'
+                recovery['source_origins'][key] = source['origin_identity']
+    manifest_target = version_dir / 'manifest.json'
+    write(manifest_target, recovery)
+    context_path.chmod(0o400)
+    manifest_target.chmod(0o400)
+    captured_paths = {(source['path'], source['sha256']): source['snapshot'] for source in sources.values()}
+    architecture_scope = architecture.governing_sources({key: captured_paths[source['path'], source['sha256']]
+        for key, source in collection_sources.items() if key.split('/')[0] in architecture.SCOPE_SOURCES})
+    unchanged()
+    report['model_call_count'] = calls
+    artifact = {'preparation_version': VERSION, 'mode': manifest['mode'], 'identity': identity,
+                'architecture': {'packet': {'path': sources['architecture/0']['snapshot'],
+                    'fingerprint': read(sources['architecture/0']['snapshot'])['fingerprint']},
+                    'catalog': read(sources['architecture/0']['snapshot'])['catalog'],
+                    'exceptions': manifest.get('architecture_exceptions', []),
+                    'governing': architecture_scope},
+                'workflow_dir': str(workflow_dir), 'workspace': str(workspace),
+                'recovery_manifest': {'path': str(manifest_target), 'sha256': file_hash(manifest_target)},
+                'recovery_context': {'path': str(context_path), 'sha256': file_hash(context_path)},
+                'reviewer_order': list(descriptors),
+                'sources': sources, 'reviewers': descriptors, 'reviewer_paths': reviewer_paths, 'analysis': result,
+                'graph': graph, 'retired_ids': retired, 'inputs': current,
+                'parent': ({'preparation_id': parent['preparation_id'],
+                            'path': str(Path(previous_preparation).resolve()), 'sha256': parent_hash,
+                            'migration': migration} if parent else None),
+                'refresh': report, 'readiness': readiness(result)}
+    artifact['engineering_id'] = engineering_id(artifact)
+    artifact['preparation_id'] = digest(artifact)
+    validate(artifact, context, decisions, require_ready=False)
+    target = version_dir / 'preparation.json'
+    write(target, artifact)
+    os.chmod(target, 0o400)
     return {'artifact': str(target), 'preparation_id': artifact['preparation_id'],
             'engineering_id': engineering_id(artifact), 'readiness': artifact['readiness'], 'refresh': report}
 

@@ -124,10 +124,20 @@ profile-controlled project trust/root markers and managed precedence. Relative
 `model_catalog_json` and `model_instructions_file` references use the selected
 file's lexical parent; inherited references keep their native origins. Contents
 and canonical targets are fingerprinted separately. Required facilities include
-native configuration/requirements reads, model listing, active catalogue discovery
-and `debug prompt-input`. The adapter was validated with Codex 0.164.1; unavailable
+native configuration/requirements reads, active catalogue discovery and
+`debug prompt-input`. Native default-model resolution also uses model listing
+when the accepted API-key catalogue projection does not apply. The adapter was
+validated with Codex 0.164.1; unavailable
 facilities or unsupported metadata fail visibly, and native version changes
 invalidate preparation.
+
+For profiled reviewers, preparation captures execution evidence in its owned
+execution checkout before analysis, retaining the supplied descriptor separately.
+Internal analysis keeps its existing source context. Native project trust is
+observed in the actual execution checkout; original-checkout trust is not copied.
+Exact live evidence stays workspace-bound. Engineering comparison projects only
+proved typed owned paths with content, source and target evidence; external
+references, trust changes and unknown fields remain governing.
 
 Preparation and telemetry distinguish configured values, effective request
 settings and CLI header observations. Native catalogue defaults, effort aliases,
@@ -139,6 +149,14 @@ catalogue capture; actual execution continues through `codex exec --profile`
 without a catalogue override. Bounded input/catalogue rereads reject observed
 drift before launch, checkpoint reuse and result acceptance; they do not promise
 an atomic snapshot against transient changes between observations.
+
+Metadata helpers leave unchanged sensitive settings in native private files and
+project only required selected-provider differences. Required generic header and
+nonblank bearer overrides use child-only native environment channels. A needed
+literal query/auth-argument override without a proven safe channel fails before
+that metadata helper starts; unused static-catalogue inference fields are not
+copied or rejected. Original fingerprints exclude random transport variable names.
+These channels never alter the actual `codex exec --profile` environment or argv.
 
 The native raw-catalogue facility cannot address the special internal Work/Chat
 originator partitions used by some first-party hosts. Verification fails clearly

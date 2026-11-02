@@ -1,6 +1,7 @@
 """Portable bindings resolved from host registries, never by cache enumeration."""
 from contextlib import contextmanager
 from contextvars import ContextVar
+import copy
 import hashlib
 import json
 import os
@@ -80,6 +81,7 @@ def codex_plugins():
 
 _PINNED_BINDINGS = ContextVar('dk_pinned_bindings', default={})
 _EXECUTION_DIRECTORY = ContextVar('dk_execution_directory', default=None)
+_PINNED_PROFILE_CHECKS = ContextVar('dk_pinned_profile_checks', default=None)
 
 
 @contextmanager
@@ -99,45 +101,67 @@ def validate_version(registry_version, manifest):
 
 
 @contextmanager
-def pinned_bindings(descriptors, *, cwd=None):
+def pinned_bindings(descriptors, *, cwd=None, cache_profiles=True):
     with execution_directory(cwd or _EXECUTION_DIRECTORY.get() or Path.cwd()):
-        with _pinned_bindings(descriptors):
+        with _pinned_bindings(descriptors, cache_profiles=cache_profiles):
             yield
 
 
 @contextmanager
-def _pinned_bindings(descriptors):
+def profile_observation(descriptors, *, cwd):
+    """Fresh short profile checks without replacing the cohort's frozen bindings."""
+    with execution_directory(cwd):
+        with _pinned_bindings(descriptors, keep_bindings=True):
+            yield
+
+
+def verify_retained(name, value):
+    """Validate the supplied retained provider without changing its registry identity."""
     from shared.runtime_bundles import verify, verify_binding
-    pinned = {}
+    canonical = key(value['binding'])
+    alias = name in ALIASES and normalize(name) == normalize(value['binding'])
+    if value.get('executor') == 'command':
+        if name != canonical or value.get('identity') != canonical or not value.get('bundles'):
+            raise ValueError('invalid retained command binding')
+        verify_binding(value)
+        return
+    host = current_host() if value['binding'].get('host', 'current') == 'current' else value['binding']['host']
+    if (value.get('executor') != host or (name != canonical and not alias)
+            or value.get('identity') != canonical or verify(value['root']) != value.get('bundle_digest')):
+        raise ValueError('invalid retained reviewer binding')
+    procedure, manifest = manifest_skill(Path(value['root']), value['executor'],
+                                         *value['binding']['skill'].split(':'))
+    validate_version(value.get('version'), manifest)
+    if str(procedure) != value['procedure']:
+        raise ValueError('retained reviewer procedure or version changed')
+
+
+@contextmanager
+def _pinned_bindings(descriptors, *, cache_profiles=True, keep_bindings=False):
+    pinned, checks = {}, {} if cache_profiles else None
+    cwd = _EXECUTION_DIRECTORY.get()
     for name, descriptor in descriptors.items():
         value = descriptor.get('execution')
         if value is None:
             continue  # Legacy preparation keeps its original registry validation.
-        canonical = key(value['binding'])
-        alias = name in ALIASES and normalize(name) == normalize(value['binding'])
-        if value.get('executor') == 'command':
-            if name != canonical or value.get('identity') != canonical or not value.get('bundles'):
-                raise ValueError('invalid retained command binding')
-            verify_binding(value)
-            pinned[name] = value
-            continue
-        host = current_host() if value['binding'].get('host', 'current') == 'current' else value['binding']['host']
-        if (value.get('executor') != host or (name != canonical and not alias)
-                or value.get('identity') != canonical or verify(value['root']) != value.get('bundle_digest')):
-            raise ValueError('invalid retained reviewer binding')
+        verify_retained(name, value)
         if 'codex_profile' in value['binding']:
             from shared.codex_profiles import verify_profile
-            verify_profile(value, _EXECUTION_DIRECTORY.get())
-        procedure, manifest = manifest_skill(Path(value['root']), value['executor'],
-                                             *value['binding']['skill'].split(':'))
-        validate_version(value.get('version'), manifest)
-        if str(procedure) != value['procedure']:
-            raise ValueError('retained reviewer procedure or version changed')
+            verify_profile(value, cwd)
+            if checks is not None:
+                checks[name] = (copy.deepcopy(value), cwd)
         pinned[name] = value
+    if keep_bindings:
+        current = _PINNED_BINDINGS.get()
+        if any(current.get(name) is not value for name, value in pinned.items()):
+            raise ValueError('profile observation requires the exact retained binding scope')
+        pinned = current
     token = _PINNED_BINDINGS.set(pinned)
+    checked = _PINNED_PROFILE_CHECKS.set(checks)
     try:
         yield
     finally:
+        _PINNED_PROFILE_CHECKS.reset(checked)
         _PINNED_BINDINGS.reset(token)
 
 
@@ -247,11 +271,15 @@ def resolve(value):
         if (normalize(value).get('handoff_contract', 'git-diff-v1') !=
                 selected['binding'].get('handoff_contract', 'git-diff-v1')):
             raise ValueError('Reviewer handoff contract changed; refresh preparation')
-        from shared.runtime_bundles import verify_binding
-        verify_binding(selected)
+        verify_retained(key(value), selected)
         if 'codex_profile' in selected['binding']:
-            from shared.codex_profiles import verify_profile
-            verify_profile(selected, _EXECUTION_DIRECTORY.get())
+            cwd = _EXECUTION_DIRECTORY.get()
+            checks = _PINNED_PROFILE_CHECKS.get()
+            if checks is None or checks.get(key(value)) != (selected, cwd):
+                from shared.codex_profiles import verify_profile
+                verify_profile(selected, cwd)
+                if checks is not None:
+                    checks[key(value)] = (copy.deepcopy(selected), cwd)
         return dict(selected)
     binding = normalize(value)
     if 'command' in binding:

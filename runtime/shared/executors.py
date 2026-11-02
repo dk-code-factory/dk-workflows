@@ -626,6 +626,7 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
                 outcome='error')
     profile = resolved.get('codex_execution') if resolved else None
     if resolved and 'codex_profile' in resolved['binding']:
+        checkout = Path(checkout).resolve()
         from shared.codex_profiles import verify_profile
         verify_profile(resolved, checkout)
     temp = tempfile.mkdtemp(prefix='dk-provider-')

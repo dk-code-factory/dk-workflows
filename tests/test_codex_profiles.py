@@ -4,7 +4,9 @@ import importlib.util
 import json
 import os
 import select
+import signal
 from pathlib import Path
+from types import SimpleNamespace
 import subprocess
 import sys
 import tomllib
@@ -199,7 +201,8 @@ def test_unproven_native_layering_is_rejected(profile_install, monkeypatch, shap
 
 def test_profile_execution_forwards_cli_and_retains_settings_telemetry(profile_install, tmp_path, monkeypatch):
     binding = profile_install['binding']
-    resolved = bindings.resolve(binding)
+    with bindings.execution_directory(tmp_path):
+        resolved = bindings.resolve(binding)
     trace = tmp_path / 'trace.json'
     monkeypatch.setenv(ENV, str(trace))
     def run(argv, **kwargs):
@@ -219,7 +222,8 @@ def test_profile_execution_forwards_cli_and_retains_settings_telemetry(profile_i
 
 @pytest.mark.parametrize('detail', ['model: wrong-model', 'reasoning effort: low', 'context window: 9999'])
 def test_observed_setting_mismatch_blocks_response_without_json_correction(profile_install, tmp_path, monkeypatch, detail):
-    resolved = bindings.resolve(profile_install['binding'])
+    with bindings.execution_directory(tmp_path):
+        resolved = bindings.resolve(profile_install['binding'])
     def run(argv, **kwargs):
         Path(argv[argv.index('-o') + 1]).write_text('{"findings":[]}')
         return subprocess.CompletedProcess(argv, 0, '', detail + '\nuser\n')
@@ -229,7 +233,8 @@ def test_observed_setting_mismatch_blocks_response_without_json_correction(profi
 
 
 def test_profile_drift_during_execution_blocks_response(profile_install, tmp_path, monkeypatch):
-    resolved = bindings.resolve(profile_install['binding'])
+    with bindings.execution_directory(tmp_path):
+        resolved = bindings.resolve(profile_install['binding'])
     def run(argv, **kwargs):
         profile_install['profile'].write_text('model = "changed"\n')
         Path(argv[argv.index('-o') + 1]).write_text('{"findings":[]}')
@@ -251,12 +256,99 @@ def test_known_profile_fields_keep_compact_delivery_and_unknown_extensions_gover
     assert preparation_views.reviewer_view(prepared, execution['identity'])['reviewers'] == prepared['reviewers']
 
 
-@pytest.mark.parametrize('paged', [False, True, 'repeat'])
-def test_native_config_transport_waits_for_initialize_and_cleans_up(tmp_path, monkeypatch, paged):
-    # A real child enforces the request boundary; model turns are rejected.
+@pytest.fixture
+def native_child(tmp_path, monkeypatch):
     script = tmp_path / 'codex'
-    script.write_text('#!' + sys.executable + '\n' + """
+    script.write_text('#!' + sys.executable + '\n' + r"""
 import json, os, sys
+import hashlib, pathlib, re, tomllib
+full = bool(os.environ.get('DK_TEST_NATIVE_FULL'))
+
+def merge(base, value):
+    result = dict(base)
+    for key, item in value.items():
+        result[key] = merge(result[key], item) if isinstance(result.get(key), dict) and isinstance(item, dict) else item
+    return result
+
+def version(value):
+    return 'sha256:' + hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+def normalized(value, parent):
+    value = json.loads(json.dumps(value))
+    for field in ('model_catalog_json', 'model_instructions_file'):
+        if isinstance(value.get(field), str):
+            value[field] = os.path.normpath(os.path.join(str(parent), value[field]))
+    for provider in value.get('model_providers', {}).values():
+        auth = provider.get('auth') if isinstance(provider, dict) else None
+        if isinstance(auth, dict) and isinstance(auth.get('cwd'), str):
+            auth['cwd'] = os.path.normpath(os.path.join(str(parent), auth['cwd']))
+    return value
+
+def headers(provider, reverse=False):
+    result = {}
+    valid_name = lambda name: bool(re.fullmatch(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+", name)) and len(name) <= 65535
+    def valid_value(value):
+        try:
+            return all(byte == 9 or byte >= 32 and byte != 127 for byte in value.encode('utf-8'))
+        except UnicodeError:
+            return False
+    for field in ('http_headers', 'env_http_headers'):
+        items = list(provider.get(field, {}).items())
+        for name, item in reversed(items) if reverse else items:
+            value = os.environ.get(item) if field == 'env_http_headers' else item
+            if value is not None and valid_name(name) and valid_value(value) and (field != 'env_http_headers' or value.strip()):
+                result[name.lower()] = value
+    return result
+
+cfg, layers, requirements, overrides = {}, [], {}, {}
+if full:
+    home = pathlib.Path(os.environ['CODEX_HOME'])
+    file = home / 'config.toml'
+    base = normalized(tomllib.loads(file.read_text()) if file.exists() else {}, home)
+    cfg = json.loads(json.dumps(base))
+    layers.append({'name': {'type': 'user', 'file': str(file), 'profile': None}, 'version': version(base), 'config': base})
+    args = sys.argv[1:]
+    for index, arg in enumerate(args):
+        if arg == '-c':
+            overrides = merge(overrides, tomllib.loads(args[index + 1]))
+    selected = None
+    if '--profile' in args:
+        selected = args[args.index('--profile') + 1]
+    selected = next((arg.split('=', 1)[1] for arg in args if arg.startswith('--profile=')), selected)
+    if selected:
+        cfg = merge(cfg, normalized(tomllib.loads((home / (selected + '.config.toml')).read_text()), home))
+    discovery = merge(cfg, overrides)
+    project_file = pathlib.Path.cwd() / '.codex/config.toml'
+    if project_file.exists() and discovery.get('projects', {}).get(os.getcwd(), {}).get('trust_level') == 'trusted':
+        project = normalized(tomllib.loads(project_file.read_text()), project_file.parent)
+        cfg = merge(cfg, project)
+        layers.insert(0, {'name': {'type': 'project', 'dotCodexFolder': str(project_file.parent)}, 'version': version(project), 'config': project})
+    cfg = merge(cfg, overrides)
+    if overrides:
+        layers.insert(0, {'name': {'type': 'sessionFlags'}, 'version': version(overrides), 'config': overrides})
+    requirements_file = home / 'requirements.json'
+    requirements = json.loads(requirements_file.read_text()) if requirements_file.exists() else {}
+    for native, key in [('modelProvider', 'model_provider'), ('modelCatalogJson', 'model_catalog_json')]:
+        if requirements.get(native) is not None:
+            cfg[key] = requirements[native]
+    cfg['model_providers'] = {**cfg.get('model_providers', {}), **requirements.get('modelProviders', {})}
+    provider = cfg['model_providers'].get(cfg.get('model_provider', 'openai'), {})
+    trace = {'argv': args, 'overrides': overrides, 'headers': headers(provider), 'reverse_headers': headers(provider, True),
+             'env': {key: value for key, value in os.environ.items() if key.startswith(('DK_CODEX_METADATA_', 'TEST_NATIVE_')) and key not in json.loads(os.environ.get('DK_TEST_NATIVE_RESERVED', '[]'))},
+             'auth': provider.get('auth'), 'query_params': provider.get('query_params'), 'projects': cfg.get('projects')}
+    with open(os.environ['DK_TEST_NATIVE_TRACE'], 'a') as output:
+        output.write(json.dumps(trace) + '\n')
+    if args[-1] == 'models':
+        if os.environ.get('DK_TEST_NATIVE_FAILURE') == 'models':
+            print('SENTINEL_NATIVE_FAILURE_DETAIL', file=sys.stderr)
+            sys.exit(3)
+        catalog = pathlib.Path(cfg.get('model_catalog_json', home / 'catalog.json'))
+        print(catalog.read_text())
+        sys.exit(0)
+    if args[-1] == 'prompt-input':
+        print('[]')
+        sys.exit(0)
+
 initialized = False
 ready = False
 for line in sys.stdin:
@@ -274,13 +366,19 @@ for line in sys.stdin:
     elif method == 'config/read':
         assert ready
         assert request['params'] == {'cwd': os.getcwd(), 'includeLayers': True}
-        result = {'config': {}, 'origins': {}, 'layers': []}
+        result = {'config': cfg, 'origins': {key: {'name': layers[-1]['name'], 'version': layers[-1]['version']} for key in cfg}, 'layers': layers} if full else {'config': {}, 'origins': {}, 'layers': []}
     elif method == 'configRequirements/read':
         assert ready and request['params'] == {}
-        result = {'requirements': None}
+        result = {'requirements': requirements or None}
     elif method == 'model/list':
         assert ready and request['params'].get('includeHidden') is True
-        if os.environ.get('DK_TEST_PAGED') and 'cursor' not in request['params']:
+        if full:
+            data = json.loads(pathlib.Path(cfg.get('model_catalog_json', home / 'catalog.json')).read_text())
+            result = {'data': [{'model': row['slug'], 'isDefault': index == 0} for index, row in enumerate(data['models'])]}
+        elif os.environ.get('DK_TEST_PAGED') == 'nonobject':
+            print('[]', flush=True)
+            continue
+        elif os.environ.get('DK_TEST_PAGED') and 'cursor' not in request['params']:
             result = {'data': [{'model': 'hidden-model', 'isDefault': False}], 'nextCursor': 'second'}
         elif os.environ.get('DK_TEST_PAGED'):
             assert request['params']['cursor'] == 'second'
@@ -294,11 +392,61 @@ for line in sys.stdin:
     print(json.dumps({'id': request['id'], 'result': result}), flush=True)
 """)
     script.chmod(0o700)
-    monkeypatch.setenv('PATH', str(tmp_path))
+    monkeypatch.setenv('PATH', str(tmp_path) + os.pathsep + os.environ.get('PATH', ''))
+    home = tmp_path / 'native-home'
+    home.mkdir()
+    monkeypatch.setenv('CODEX_HOME', str(home))
+    for key in ('CODEX_API_KEY', 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE'):
+        monkeypatch.delenv(key, raising=False)
+    reserved = [key for key in os.environ if key.startswith('DK_CODEX_METADATA_')]
+    monkeypatch.setenv('DK_TEST_NATIVE_RESERVED', json.dumps(reserved))
+    for key in list(os.environ):
+        if key.startswith('TEST_NATIVE_'):
+            monkeypatch.delenv(key)
+    return home
+
+
+@pytest.mark.parametrize('paged', [False, True, 'repeat', 'nonobject', 'timeout', 'brokenpipe'])
+def test_native_config_transport_waits_for_initialize_and_cleans_up(tmp_path, monkeypatch, native_child, paged):
     if paged:
-        monkeypatch.setenv('DK_TEST_PAGED', 'repeat' if paged == 'repeat' else '1')
+        monkeypatch.setenv('DK_TEST_PAGED', paged if isinstance(paged, str) else '1')
     if paged == 'repeat':
         with pytest.raises(ValueError, match='repeated cursor'):
+            profiles.read_config(tmp_path, requirements=True, models=True)
+        return
+    if paged in ('timeout', 'brokenpipe'):
+        original = profiles.subprocess.Popen
+        clock = SimpleNamespace(now=0.0)
+        launched = []
+        class Writer:
+            def __init__(self, stream):
+                self.stream = stream
+            def write(self, payload):
+                if paged == 'brokenpipe':
+                    raise BrokenPipeError('SENTINEL_PRIVATE_PIPE_DETAIL')
+                if json.loads(payload).get('method') == 'model/list':
+                    clock.now = 31.0
+                return self.stream.write(payload)
+            def flush(self):
+                return self.stream.flush()
+            def close(self):
+                return self.stream.close()
+        def launch(*args, **kwargs):
+            process = original(*args, **kwargs)
+            launched.append(process)
+            process.stdin = Writer(process.stdin)
+            return process
+        monkeypatch.setattr(profiles.subprocess, 'Popen', launch)
+        if paged == 'timeout':
+            monkeypatch.setattr(profiles, 'time', SimpleNamespace(monotonic=lambda: clock.now))
+        pattern = 'model/list.*shared 30-second' if paged == 'timeout' else 'Native Codex.*BrokenPipeError'
+        with pytest.raises(ValueError, match=pattern) as failure:
+            profiles.read_config(tmp_path, requirements=True, models=True)
+        assert 'SENTINEL_PRIVATE_PIPE_DETAIL' not in str(failure.value)
+        assert launched[0].returncode is not None
+        return
+    if paged == 'nonobject':
+        with pytest.raises(ValueError, match='model/list.*non-object'):
             profiles.read_config(tmp_path, requirements=True, models=True)
         return
     result, agent, listing = profiles.read_config(tmp_path, requirements=True, models=True)
@@ -308,7 +456,7 @@ for line in sys.stdin:
                                     {'model': 'visible-model', 'isDefault': True}]}
         catalog = {'models': [metadata(slug='hidden-model', visibility='hidden'),
                               metadata(slug='visible-model', visibility='list')]}
-        monkeypatch.setattr(profiles, 'read_catalog', lambda *args: catalog)
+        monkeypatch.setattr(profiles, 'read_catalog', lambda *args, **kwargs: catalog)
         monkeypatch.delenv('CODEX_API_KEY', raising=False)
         monkeypatch.delenv('CODEX_INTERNAL_ORIGINATOR_OVERRIDE', raising=False)
         assert NATIVE_METADATA({}, tmp_path)['effective_settings']['model'] == 'visible-model'
@@ -534,13 +682,14 @@ def native_metadata_io(tmp_path, monkeypatch):
     catalog = {'models': [metadata(priority=1, visibility='list', supported_in_api=True)]}
     listing = {'data': [{'model': 'fixture-model', 'isDefault': True}]}
     calls = []
-    def read_catalog(cwd, projection):
+    def read_catalog(cwd, projection, **kwargs):
         calls.append(('catalog', projection))
         if 'model_catalog_json' in projection and Path(projection['model_catalog_json']).exists():
             return json.loads(Path(projection['model_catalog_json']).read_text())
         return json.loads(json.dumps(catalog))
     def read_config(cwd, projection, **kwargs):
-        assert kwargs == {'models': True}
+        assert kwargs.get('models') is True
+        assert isinstance(kwargs.get('env'), dict)
         assert json.loads(Path(projection['model_catalog_json']).read_text()) == catalog
         calls.append(('models', projection))
         return {}, 'codex_exec/0.164.1', listing
@@ -643,7 +792,7 @@ def test_no_profile_exec_keeps_exact_arguments_and_avoids_all_metadata(tmp_path,
 
 def test_native_validation_and_catalog_errors_discard_secret_bearing_diagnostics(tmp_path, monkeypatch):
     secret = 'SENTINEL_NATIVE_PROVIDER_SECRET'
-    def fail(argv, cwd, stdout):
+    def fail(argv, cwd, stdout, **kwargs):
         return subprocess.CompletedProcess(argv, 1, '', secret)
     monkeypatch.setattr(profiles, 'run_native', fail)
     with pytest.raises(ValueError) as validation:
@@ -689,7 +838,7 @@ def test_governing_source_change_during_metadata_discovery_blocks_preparation(pr
 def test_native_catalog_change_between_captures_fails_not_silently_retries(native_metadata_io, tmp_path, monkeypatch):
     catalog, _, _ = native_metadata_io
     calls = []
-    def read(cwd, projection):
+    def read(cwd, projection, **kwargs):
         calls.append(projection)
         result = json.loads(json.dumps(catalog))
         if len(calls) > 1:
@@ -716,7 +865,7 @@ def test_native_catalog_matching_prefers_longest_prefix_and_keeps_instructions_h
     assert secret not in json.dumps(selected) and len(digest) == 64
 
 
-@pytest.mark.skipif(os.name != 'posix' or not hasattr(os, 'pidfd_open'), reason='Linux owned-process notification')
+@pytest.mark.skipif(os.name != 'posix' or not hasattr(os, 'pidfd_open') or not hasattr(signal, 'pidfd_send_signal'), reason='Linux owned-process notification')
 def test_native_helper_cleanup_stops_credential_command_descendants(tmp_path):
     pid_file = tmp_path / 'credential-child.pid'
     code = ('import subprocess,sys; from pathlib import Path; '
@@ -731,4 +880,583 @@ def test_native_helper_cleanup_stops_credential_command_descendants(tmp_path):
     try:
         assert select.select([descriptor], [], [], 2)[0], 'owned credential child survived helper cleanup'
     finally:
-        os.close(descriptor)
+        try:
+            signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        finally:
+            os.close(descriptor)
+
+
+def test_app_server_startup_failure_has_named_secret_safe_contract(tmp_path, monkeypatch):
+    def missing(*args, **kwargs):
+        raise FileNotFoundError('SENTINEL_PRIVATE_STARTUP_DETAIL')
+    monkeypatch.setattr(profiles.subprocess, 'Popen', missing)
+    with pytest.raises(ValueError, match='Native Codex.*FileNotFoundError') as failure:
+        profiles.read_config(tmp_path)
+    assert 'SENTINEL_PRIVATE_STARTUP_DETAIL' not in str(failure.value)
+
+
+@pytest.mark.parametrize('name', [None, 'invalid-name-shape', [], {'type': []}, {'type': 'user', 'file': None}, {'type': 'project', 'dotCodexFolder': None}])
+def test_bad_layer_name_is_diagnosed_before_field_dereference(profile_install, monkeypatch, name):
+    response, agent = profile_install['read_config'](Path.cwd())
+    response['layers'][0]['name'] = name
+    monkeypatch.setattr(profiles, 'read_config', lambda *args, **kwargs: (response, agent))
+    result = bindings.diagnose(profile_install['binding'])
+    assert len(result['missing']) == 1 and 'unsupported layer shape' in result['missing'][0]
+
+
+def test_managed_catalogue_retains_requirements_origin_and_actual_reference(profile_install, tmp_path, monkeypatch):
+    catalogue = tmp_path / 'managed-catalogue.json'
+    catalogue.write_text('{"models": []}')
+    response, agent = profile_install['read_config'](tmp_path)
+    response['_requirements'] = {'modelCatalogJson': str(catalogue)}
+    monkeypatch.setattr(profiles, 'read_config', lambda *args, **kwargs: (response, agent))
+    profile_install['profile'].write_text('model_catalog_json="missing-overridden-catalogue.json"\n')
+    value, _ = profiles.selected_layers('review', tmp_path)
+    assert value['settings']['model_catalog_json'] == str(catalogue)
+    assert value['origins']['model_catalog_json'] == {
+        'name': {'type': 'requirements'}, 'version': 'sha256:' + profiles.fingerprint(response['_requirements'])}
+    assert value['setting_sources']['model_catalog_json']['path'] == str(catalogue)
+
+
+@pytest.mark.parametrize('higher,malformed_lower', [({}, False), ({'command': './other-token'}, False),
+    ({'cwd': '/managed/credentials'}, False), ({'command': './managed-token', 'cwd': '/managed/cwd'}, True)])
+def test_explicit_profile_auth_cwd_preserves_winning_leaf_origin(profile_install, tmp_path, higher, malformed_lower):
+    profile_install['profile'].write_text('model_provider="custom"\n[model_providers.custom]\nname="Custom"\n'
+        '[model_providers.custom.auth]\ncommand="./token"\ncwd="credentials"\n')
+    if malformed_lower:
+        profile_install['profile'].write_text('model_provider="custom"\n[model_providers.custom]\n'
+            'name="Custom"\nauth="ignored-lower-shape"\n')
+    if higher:
+        auth = higher
+        profile_install['higher'].append({'name': {'type': 'legacyManagedConfigTomlFromFile', 'file': '/managed/config.toml'},
+            'version': 'managed-auth', 'config': {'model_providers': {'custom': {'auth': auth}}}})
+    _, config = profiles.selected_layers('review', tmp_path)
+    actual = config['model_providers']['custom']['auth']
+    expected = higher.get('cwd') or str(profile_install['home'] / 'credentials')
+    assert actual['cwd'] == expected
+    assert actual['command'] == higher.get('command', './token')
+
+
+@pytest.mark.parametrize('cwd', [None, []])
+def test_auth_cwd_omission_and_overridden_malformed_lower_value_are_preserved(profile_install, tmp_path, cwd):
+    contents = '[model_providers.custom.auth]\ncommand="./token"\n'
+    if cwd is not None:
+        contents += 'cwd=[]\n'
+        profile_install['higher'].append({'name': {'type': 'legacyManagedConfigTomlFromFile', 'file': '/managed/config.toml'},
+            'version': 'managed-cwd', 'config': {'model_providers': {'custom': {'auth': {'cwd': '/managed/cwd'}}}}})
+    profile_install['profile'].write_text(contents)
+    _, config = profiles.selected_layers('review', tmp_path)
+    auth = config['model_providers']['custom']['auth']
+    assert auth.get('cwd') == (None if cwd is None else '/managed/cwd')
+    if cwd is None:
+        assert 'cwd' not in auth
+
+
+@pytest.mark.parametrize('selected', [False, True])
+def test_only_selected_profile_canonicalizes_execution_cwd(profile_install, tmp_path, monkeypatch, selected):
+    physical = tmp_path / 'physical'
+    (physical / 'nested').mkdir(parents=True)
+    canonical = physical / 'checkout'
+    canonical.mkdir()
+    (tmp_path / 'alias').symlink_to(physical / 'nested', target_is_directory=True)
+    raw = tmp_path / 'alias/../checkout'
+    resolved = bindings.resolve(profile_install['binding']) if selected else None
+    verified = []
+    monkeypatch.setattr(profiles, 'verify_profile', lambda value, cwd: verified.append(cwd))
+    def run(argv, **kwargs):
+        expected = canonical if selected else raw
+        assert argv[argv.index('-C') + 1] == str(expected)
+        assert kwargs['cwd'] == expected
+        Path(argv[argv.index('-o') + 1]).write_text('{}')
+        return subprocess.CompletedProcess(argv, 0, '', '')
+    monkeypatch.setattr(executors, 'run_provider', run)
+    assert executors.execute_process('Read evidence', raw, 'codex', {'DK_HOST': 'codex'}, resolved, 0, 10) == '{}'
+    assert verified == ([canonical, canonical] if selected else [])
+
+
+@pytest.fixture
+def native_private_config(native_child, tmp_path, monkeypatch):
+    home = native_child
+    trace = tmp_path / 'native-trace.jsonl'
+    monkeypatch.setenv('DK_TEST_NATIVE_FULL', '1')
+    monkeypatch.setenv('DK_TEST_NATIVE_TRACE', str(trace))
+    (home / 'catalog.json').write_text(json.dumps({'models': [metadata(priority=0, visibility='list', supported_in_api=True)]}))
+    def save(base, profile, policy=None):
+        (home / 'config.toml').write_text('\n'.join(key + '=' + profiles.toml_value(value) for key, value in base.items()))
+        (home / 'review.config.toml').write_text('\n'.join(key + '=' + profiles.toml_value(value) for key, value in profile.items()))
+        if policy is not None:
+            (home / 'requirements.json').write_text(json.dumps(policy))
+    def observations():
+        return [json.loads(line) for line in trace.read_text().splitlines()]
+    return home, save, observations
+
+
+@pytest.mark.parametrize('dynamic', [None, '', ' \t ', 'invalid\r\nvalue', 'SENTINEL_ENV_WIN', '\udcff', '☃'])
+def test_all_native_helper_argv_use_private_environment_and_native_header_precedence(
+        native_private_config, tmp_path, monkeypatch, dynamic):
+    home, save, observations = native_private_config
+    base_secret, selected_secret = 'SENTINEL_BASE_HEADER', 'SENTINEL_SELECTED_HEADER'
+    base_provider = {'name': 'Custom', 'base_url': 'https://catalog.invalid',
+        'http_headers': {'AUTHORIZATION': base_secret, 'X-Base': 'unchanged'},
+        'env_http_headers': {'Authorization': 'TEST_NATIVE_AUTH', 'authorization': 'TEST_NATIVE_OTHER'}}
+    base = {'model_provider': 'custom', 'model_providers': {'custom': base_provider},
+            'projects': {str(tmp_path): {'trust_level': 'untrusted'}}}
+    profile = {'model_providers': {'custom': {'http_headers': {'AUTHORIZATION': selected_secret}}},
+               'projects': {str(tmp_path): {'trust_level': 'trusted'}}, 'project_root_markers': ['.git']}
+    save(base, profile)
+    project = tmp_path / '.codex'
+    project.mkdir()
+    (project / 'config.toml').write_text('model_context_window=1600\n')
+    if dynamic is not None:
+        monkeypatch.setenv('TEST_NATIVE_AUTH', dynamic)
+    monkeypatch.setenv('TEST_NATIVE_OTHER', '')
+    before = dict(os.environ)
+    first = profiles.resolve_profile('review', tmp_path)
+    second = profiles.resolve_profile('review', tmp_path)
+    assert first == second  # Fresh random bridge names never enter retained provenance.
+    assert os.environ.keys() == before.keys()
+    assert not [key for key, value in before.items() if os.environ[key] != value]
+    assert first['effective_settings']['model_context_window'] == 1600
+    assert not any(secret in json.dumps(first) for secret in (base_secret, selected_secret, 'SENTINEL_ENV_WIN'))
+    expected = dynamic if dynamic in ('SENTINEL_ENV_WIN', '☃') else selected_secret
+    records = observations()
+    for record in records:
+        assert not any(secret in json.dumps(record['argv']) for secret in (base_secret, selected_secret, 'SENTINEL_ENV_WIN'))
+    metadata_calls = [record for record in records if record['argv'][-1] == 'models' or
+                      'model_catalog_json' in record['overrides']]
+    assert len(metadata_calls) == 8  # Both complete raw-catalog/list sequences.
+    for record in metadata_calls:
+        assert record['headers'] == record['reverse_headers'] == {'authorization': expected, 'x-base': 'unchanged'}
+        assert record['projects'][str(tmp_path)]['trust_level'] == 'trusted'
+    if expected == selected_secret:
+        assert any(selected_secret in record['env'].values() for record in metadata_calls)
+
+
+def test_unchanged_native_file_secrets_and_unselected_fields_are_not_reprojected(native_private_config, tmp_path):
+    _, save, observations = native_private_config
+    sentinel = 'SENTINEL_FILE_BACKED_SECRET'
+    definition = {'name': 'Custom', 'base_url': 'https://catalog.invalid',
+                  'query_params': {'key': sentinel}, 'auth': {'command': './token', 'args': [sentinel]},
+                  'http_headers': {'Authorization': sentinel}}
+    save({'model': 'fixture-model', 'model_provider': 'custom', 'model_providers': {
+        'custom': definition, 'unselected': {'name': 'Unused', 'query_params': {'key': sentinel}}}},
+         {'model_reasoning_effort': 'high'})
+    value = profiles.resolve_profile('review', tmp_path)
+    assert value['effective_settings']['model'] == 'fixture-model'
+    for record in observations():
+        assert sentinel not in json.dumps(record['argv'])
+        if record['argv'][-1] == 'models':
+            assert 'model_providers' not in record['overrides']
+            assert record['auth']['args'] == [sentinel] and record['query_params'] == {'key': sentinel}
+
+
+def test_required_bearer_override_preserves_bytes_and_existing_env_key_precedence(native_private_config, tmp_path, monkeypatch):
+    _, save, observations = native_private_config
+    token = '  SENTINEL_BEARER_BYTES  '
+    save({'model': 'fixture-model', 'model_provider': 'custom', 'model_providers': {
+        'custom': {'name': 'Custom', 'base_url': 'https://catalog.invalid'}}},
+         {'model_providers': {'custom': {'experimental_bearer_token': token}}})
+    result = profiles.resolve_profile('review', tmp_path)
+    assert token not in json.dumps(result)
+    records = observations()
+    raw = [item for item in records if item['argv'][-1] == 'models']
+    assert raw and all(token not in json.dumps(item['argv']) for item in records)
+    for item in raw:
+        projected = item['overrides']['model_providers']['custom']
+        assert 'experimental_bearer_token' not in projected
+        assert item['env'][projected['env_key']] == token
+    baseline = {'name': 'Custom', 'env_key': 'TEST_NATIVE_KEY'}
+    desired = {**baseline, 'experimental_bearer_token': token}
+    env = {}
+    delta = profiles._safe_provider_delta('custom', baseline, desired,
+        static_catalog=False, configured_model=True, env=env)
+    assert delta == {} and 'TEST_NATIVE_KEY' not in env  # Preserve the original missing-env error.
+
+
+@pytest.mark.parametrize('field,override', [
+    ('query_params', {'query_params': {'key': 'SENTINEL_QUERY_OVERRIDE'}}),
+    ('auth.args', {'auth': {'command': './token', 'args': ['SENTINEL_AUTH_OVERRIDE']}}),
+])
+def test_required_unsupported_sensitive_delta_fails_before_affected_native_spawn(native_private_config, tmp_path, field, override):
+    _, save, observations = native_private_config
+    save({'model': 'fixture-model', 'model_provider': 'custom',
+          'model_providers': {'custom': {'name': 'Custom', 'base_url': 'https://catalog.invalid'}}},
+         {'model_providers': {'custom': override}})
+    with pytest.raises(ValueError, match=field) as failure:
+        profiles.resolve_profile('review', tmp_path)
+    assert 'SENTINEL_' not in str(failure.value)
+    records = observations()
+    assert records and not any(item['argv'][-1] == 'models' for item in records)
+    assert not any('SENTINEL_' in json.dumps(item['argv']) for item in records)
+
+
+def test_static_configured_model_does_not_transport_unused_inference_credentials(native_private_config, tmp_path):
+    home, save, observations = native_private_config
+    secret = 'SENTINEL_UNUSED_INFERENCE'
+    save({'model_provider': 'custom', 'model_providers': {'custom': {'name': 'Custom'}}},
+         {'model': 'fixture-model', 'model_catalog_json': str(home / 'catalog.json'),
+          'model_providers': {'custom': {'http_headers': {'Authorization': secret},
+              'auth': {'command': './token', 'args': [secret]}, 'query_params': {'key': secret}}}})
+    result = profiles.resolve_profile('review', tmp_path)
+    assert result['catalog']['route'] == 'static'
+    for record in observations():
+        assert secret not in json.dumps(record['argv'])
+        if record['argv'][-1] == 'models':
+            delta = record['overrides'].get('model_providers', {}).get('custom', {})
+            assert not {'http_headers', 'auth', 'query_params'} & delta.keys()
+
+
+def test_managed_sensitive_provider_replacement_stays_native_file_backed(native_private_config, tmp_path):
+    _, save, observations = native_private_config
+    secret = 'SENTINEL_MANAGED_PROVIDER'
+    save({'model': 'fixture-model', 'model_provider': 'custom'},
+         {'model_providers': {'custom': {'name': 'Overridden', 'auth': {'command': './bad', 'args': ['unused-profile']}}}},
+         {'modelProvider': 'custom', 'modelProviders': {'custom': {
+            'name': 'Required', 'base_url': 'https://catalog.invalid', 'query_params': {'key': secret}}}})
+    value = profiles.resolve_profile('review', tmp_path)
+    assert value['effective_settings']['model_provider'] == 'custom'
+    for item in observations():
+        assert secret not in json.dumps(item['argv'])
+        if item['argv'][-1] == 'models':
+            assert 'model_providers' not in item['overrides']
+            assert item['query_params'] == {'key': secret}
+
+
+def test_protected_helper_failure_has_no_argv_or_diagnostic_secret(native_private_config, tmp_path, monkeypatch):
+    _, save, observations = native_private_config
+    secret = 'SENTINEL_HEADER_ON_FAILURE'
+    save({'model': 'fixture-model', 'model_provider': 'custom', 'model_providers': {'custom': {'name': 'Custom'}}},
+         {'model_providers': {'custom': {'http_headers': {'Authorization': secret}}}})
+    monkeypatch.setenv('DK_TEST_NATIVE_FAILURE', 'models')
+    with pytest.raises(ValueError) as failure:
+        profiles.resolve_profile('review', tmp_path)
+    assert secret not in str(failure.value) and 'SENTINEL_NATIVE_FAILURE_DETAIL' not in str(failure.value)
+    records = observations()
+    assert any(secret in item['env'].values() for item in records)
+    assert all(secret not in json.dumps(item['argv']) for item in records)
+
+
+@pytest.mark.parametrize('value,expected', [('', ''), (' \t ', ' \t '), ('☃\t', '☃\t'), ('bad\n', None)])
+def test_header_present_blank_unicode_and_invalid_values_preserve_native_semantics(value, expected):
+    baseline = {'name': 'Custom', 'http_headers': {'X-Test': 'old'}, 'env_http_headers': {'x-test': 'OLD_ENV'}}
+    desired = profiles.merge(baseline, {'http_headers': {'X-Test': value}, 'env_http_headers': {'x-test': 'MISSING_ENV'}})
+    env = {'OLD_ENV': 'old-dynamic'}
+    delta = profiles._safe_provider_delta('custom', baseline, desired,
+        static_catalog=False, configured_model=True, env=env)
+    merged = profiles.merge(baseline, delta)
+    assert profiles._headers(merged, env) == ({} if expected is None else {'x-test': expected})
+    if value.strip():
+        assert json.dumps(value, ensure_ascii=False)[1:-1] not in ''.join(
+            profiles.config_flags({'model_providers': {'custom': delta}}))
+
+
+def test_header_duplicate_ambiguity_and_explicit_bearer_override_are_not_fabricated():
+    with pytest.raises(ValueError, match='ambiguous'):
+        profiles._safe_provider_delta('custom', {}, {'name': 'Custom', 'http_headers': {'X-A': 'one', 'x-a': 'two'}},
+            static_catalog=False, configured_model=True, env={})
+    desired = {'name': 'Custom', 'http_headers': {'Authorization': 'secret-one', 'authorization': 'secret-two'},
+               'env_key': 'REAL_KEY'}
+    env = {'REAL_KEY': 'actual-bearer'}
+    result = profiles._safe_provider_delta('custom', {}, desired, static_catalog=False, configured_model=True, env=env)
+    assert 'http_headers' not in result and result['env_key'] == 'REAL_KEY'
+
+
+def test_native_helper_rebinds_every_inherited_dynamic_case_variant(native_private_config, tmp_path, monkeypatch):
+    _, save, observations = native_private_config
+    secret = 'SENTINEL_FINAL_HEADER'
+    base = {'model': 'fixture-model', 'model_provider': 'custom', 'model_providers': {'custom': {
+        'name': 'Custom', 'http_headers': {'Authorization': 'SENTINEL_LOWER_LITERAL'},
+        'env_http_headers': {'authorization': 'TEST_NATIVE_AUTH', 'AUTHORIZATION': 'TEST_NATIVE_OTHER'}}}}
+    save(base, {'model_providers': {'custom': {'http_headers': {'Authorization': secret},
+        'env_http_headers': {'authorization': 'MISSING_ONE', 'AUTHORIZATION': 'MISSING_TWO'}}}})
+    monkeypatch.setenv('TEST_NATIVE_AUTH', 'SENTINEL_OLD_DYNAMIC_ONE')
+    monkeypatch.setenv('TEST_NATIVE_OTHER', 'SENTINEL_OLD_DYNAMIC_TWO')
+    profiles.resolve_profile('review', tmp_path)
+    for item in observations():
+        assert secret not in json.dumps(item['argv'])
+        if item['argv'][-1] == 'models':
+            assert item['headers'] == item['reverse_headers'] == {'authorization': secret}
+
+
+@pytest.mark.parametrize('provider', ['openai', 'ollama', 'lmstudio'])
+def test_ignored_builtin_provider_credentials_never_need_transport(native_private_config, tmp_path, provider):
+    _, save, observations = native_private_config
+    secret = 'SENTINEL_IGNORED_BUILTIN'
+    save({'model': 'fixture-model', 'model_provider': provider}, {'model_providers': {provider: {
+        'name': 'Ignored', 'http_headers': {'Authorization': secret},
+        'experimental_bearer_token': secret, 'auth': {'command': './ignored', 'args': [secret]}}}})
+    profiles.resolve_profile('review', tmp_path)
+    for item in observations():
+        assert secret not in json.dumps(item['argv'])
+        if item['argv'][-1] == 'models':
+            assert 'model_providers' not in item['overrides']
+
+
+@pytest.mark.parametrize('name', ['bad name', '☃', ''])
+def test_invalid_native_header_names_are_ignored_without_secret_argv(name):
+    secret = 'SENTINEL_IGNORED_HEADER'
+    result = profiles._safe_provider_delta('custom', {}, {'name': 'Custom', 'http_headers': {name: secret}},
+        static_catalog=False, configured_model=False, env={})
+    assert secret not in json.dumps(result) and 'http_headers' not in result
+
+
+def test_generated_transport_variable_cannot_activate_an_original_missing_reference(monkeypatch):
+    first, second = 'A' * 32, 'B' * 32
+    missing = 'DK_CODEX_METADATA_' + first
+    sequence = iter([first, second])
+    monkeypatch.setattr(profiles.secrets, 'token_hex', lambda size: next(sequence))
+    baseline = {'name': 'Custom', 'env_http_headers': {'X-B': missing}}
+    desired = profiles.merge(baseline, {'http_headers': {'X-A': 'SENTINEL_HEADER'}})
+    env = {}
+    result = profiles._safe_provider_delta('custom', baseline, desired, static_catalog=False, configured_model=False, env=env)
+    assert missing not in env
+    assert result['env_http_headers']['x-a'] == 'DK_CODEX_METADATA_' + second
+
+
+def test_guard_reuses_verified_profile_only_for_exact_descriptor_and_canonical_cwd(profile_install, tmp_path, monkeypatch):
+    binding = profile_install['binding']
+    with bindings.execution_directory(tmp_path):
+        retained = retained_binding(bindings.resolve(binding))
+    descriptors = {bindings.key(binding): {'execution': retained}}
+    original = profiles.resolve_profile
+    observed = []
+    def resolve(name, cwd=None):
+        observed.append(str(cwd))
+        return original(name, cwd)
+    monkeypatch.setattr(profiles, 'resolve_profile', resolve)
+    with bindings.pinned_bindings(descriptors, cwd=tmp_path):
+        assert bindings.resolve(binding) == retained
+        assert bindings.resolve(binding) == retained
+        assert len(observed) == 1
+        with bindings.pinned_bindings(descriptors, cwd=tmp_path):
+            bindings.resolve(binding)
+        assert len(observed) == 2  # A new logical guard always observes afresh.
+        with bindings.execution_directory(tmp_path / 'different'):
+            with pytest.raises(ValueError, match='execution settings changed'):
+                bindings.resolve(binding)
+        assert len(observed) == 3
+        procedure = retained['procedure']
+        retained['procedure'] = str(Path(procedure).with_name('different.md'))
+        try:
+            with pytest.raises(ValueError, match='procedure or version changed'):
+                bindings.resolve(binding)
+        finally:
+            retained['procedure'] = procedure
+        assert len(observed) == 3  # Tamper check precedes native discovery.
+    with bindings.pinned_bindings(descriptors, cwd=tmp_path, cache_profiles=False):
+        bindings.resolve(binding)
+        bindings.resolve(binding)
+    assert len(observed) == 6  # Long binding lifetimes cannot become review-wide caches.
+
+
+def test_explicit_prelaunch_postexecution_and_new_guard_bypass_short_guard_reuse(profile_install, tmp_path, monkeypatch):
+    binding = profile_install['binding']
+    with bindings.execution_directory(tmp_path):
+        retained = retained_binding(bindings.resolve(binding))
+    descriptors = {bindings.key(binding): {'execution': retained}}
+    original, observations = profiles.resolve_profile, []
+    def resolve(*args):
+        observations.append(args)
+        return original(*args)
+    monkeypatch.setattr(profiles, 'resolve_profile', resolve)
+    def run(argv, **kwargs):
+        Path(argv[argv.index('-o') + 1]).write_text('{}')
+        return subprocess.CompletedProcess(argv, 0, '', '')
+    monkeypatch.setattr(executors, 'run_provider', run)
+    with bindings.pinned_bindings(descriptors, cwd=tmp_path):
+        bindings.resolve(binding)
+        assert executors.execute_process('Review', tmp_path, 'codex', {'DK_HOST': 'codex'}, retained, 0, 10) == '{}'
+        assert len(observations) == 3  # Entry plus explicit pre-launch/post-result.
+        profile_install['profile'].write_text('model="changed-during-guard"\n')
+        assert bindings.resolve(binding) == retained  # Same short observation only.
+        with pytest.raises(ValueError, match='execution settings changed'):
+            profiles.verify_profile(retained, tmp_path)
+        with pytest.raises(ValueError, match='execution settings changed'):
+            with bindings.pinned_bindings(descriptors, cwd=tmp_path):
+                pass
+
+
+def test_complete_native_api_baseline_values_and_origins_survive_omitted_packaged_layers(profile_install, tmp_path, monkeypatch):
+    profile_install['profile'].write_text('model_reasoning_effort="high"\n')
+    response, agent = profile_install['read_config'](tmp_path)
+    response['config']['model_context_window'] = 14000
+    origin = {'name': {'type': 'packagedDefaults', 'file': '/native/defaults.toml'}, 'version': 'native-defaults-v1'}
+    response['origins']['model_context_window'] = origin
+    monkeypatch.setattr(profiles, 'read_config', lambda *args, **kwargs: (response, agent))
+    value, _ = profiles.selected_layers('review', tmp_path)
+    assert value['settings']['model_context_window'] == 14000
+    assert value['origins']['model_context_window'] == origin
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='owned POSIX process group')
+@pytest.mark.parametrize('exit_code', [0, 23, -signal.SIGTERM])
+def test_native_holder_reports_native_status_and_signals_before_reaping(tmp_path, monkeypatch, exit_code):
+    original_spawn, original_group = profiles.subprocess.Popen, profiles.os.killpg
+    events, launched = [], []
+    class Owned:
+        def __init__(self, process):
+            self.process = process
+        def __getattr__(self, name):
+            return getattr(self.process, name)
+        def poll(self):
+            pytest.fail('holder was polled before group cleanup')
+        def terminate(self):
+            pytest.fail('terminate may reap before group cleanup')
+        def wait(self, **kwargs):
+            assert events and events[-1] == ('group', self.process.pid)
+            events.append(('wait', self.process.pid))
+            return self.process.wait(**kwargs)
+    def spawn(argv, **kwargs):
+        assert argv[:4] == [sys.executable, '-I', '-S', '-c']
+        process = original_spawn(argv, **kwargs)
+        launched.append(process)
+        return Owned(process)
+    def group(pid, sig):
+        events.append(('group', pid))
+        return original_group(pid, sig)
+    monkeypatch.setattr(profiles.subprocess, 'Popen', spawn)
+    monkeypatch.setattr(profiles.os, 'killpg', group)
+    code = 'import sys;sys.exit(' + str(exit_code) + ')' if exit_code >= 0 else (
+        'import os,signal;os.kill(os.getpid(),signal.SIGTERM)')
+    result = profiles.run_native([sys.executable, '-I', '-S', '-c', code], tmp_path, subprocess.DEVNULL)
+    assert result.returncode == exit_code and result.args == []
+    assert launched[0].returncode == -signal.SIGKILL
+    assert events == [('group', launched[0].pid), ('wait', launched[0].pid)]
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='owned POSIX helper status protocol')
+@pytest.mark.parametrize('packet,expected', [(b'invalid\n', 'malformed'), (b'9' * 40 + b'\n', 'bound'), (b'', 'unavailable')])
+def test_native_holder_rejects_bounded_status_failures_and_drains(tmp_path, monkeypatch, packet, expected):
+    code = ('import os,sys;status,control=map(int,sys.argv[1:3]);'
+            'os.write(status,' + repr(packet) + ');os.close(status);os.read(control,1)')
+    monkeypatch.setattr(profiles, '_NATIVE_HOLDER', code)
+    original, processes = profiles.subprocess.Popen, []
+    def spawn(*args, **kwargs):
+        process = original(*args, **kwargs)
+        processes.append(process)
+        return process
+    monkeypatch.setattr(profiles.subprocess, 'Popen', spawn)
+    with pytest.raises(ValueError, match='Native Codex.*' + expected):
+        profiles.run_native([sys.executable, '-c', 'raise SystemExit(0)'], tmp_path, subprocess.DEVNULL)
+    assert processes[0].returncode == -signal.SIGKILL
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='owned POSIX helper startup')
+def test_native_holder_missing_executable_is_unavailable_not_status_127(tmp_path):
+    with pytest.raises(ValueError, match='exit status unavailable'):
+        profiles.run_native([str(tmp_path / 'missing-native')], tmp_path, subprocess.DEVNULL)
+
+
+@pytest.mark.skipif(os.name != 'posix' or not Path('/proc').exists(), reason='controlled Linux FD inspection')
+def test_native_holder_preserves_context_and_does_not_inherit_protocol_descriptors(tmp_path):
+    output = tmp_path / 'native-output.json'
+    code = ('import json,os,pathlib,sys; '
+            'parent=pathlib.Path("/proc")/str(os.getppid())/"cmdline"; '
+            'args=parent.read_bytes().split(b"\\0"); '
+            'private=list(map(int,args[5:7])); '
+            'opened=[]; '
+            '\nfor fd in private:\n'
+            ' try:os.fstat(fd);opened.append(True)\n'
+            ' except OSError:opened.append(False)\n'
+            'print(json.dumps({"cwd":os.getcwd(),"value":os.environ["TEST_NATIVE_VALUE"],'
+            '"argv":sys.argv[1:],"private_open":opened}))')
+    env = dict(os.environ, TEST_NATIVE_VALUE='SENTINEL_ENV_ONLY')
+    # Startup hooks and a cwd-local subprocess module must not enter the holder.
+    (tmp_path / 'subprocess.py').write_text('raise RuntimeError("untrusted holder module")')
+    (tmp_path / 'sitecustomize.py').write_text('raise RuntimeError("untrusted startup hook")')
+    with output.open('wb') as stream:
+        result = profiles.run_native([sys.executable, '-I', '-S', '-c', code, 'literal arg'], tmp_path, stream, env=env)
+    assert result.returncode == 0
+    assert json.loads(output.read_text()) == {'cwd': str(tmp_path), 'value': 'SENTINEL_ENV_ONLY',
+                                           'argv': ['literal arg'], 'private_open': [False, False]}
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='owned POSIX timeout cleanup')
+def test_native_holder_timeout_kills_active_native_child_without_reaping_first(tmp_path, monkeypatch):
+    original_spawn, original_selector = profiles.subprocess.Popen, profiles.selectors.DefaultSelector
+    launched = []
+    def spawn(*args, **kwargs):
+        process = original_spawn(*args, **kwargs)
+        launched.append(process)
+        return process
+    class Timeout:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def register(self, *args): pass
+        def select(self, timeout):
+            with original_selector() as readiness:
+                readiness.register(launched[0].stdout, profiles.selectors.EVENT_READ)
+                assert readiness.select(3), 'controlled native never became ready'
+                assert launched[0].stdout.readline() == b'ready\n'
+            return []
+    monkeypatch.setattr(profiles.subprocess, 'Popen', spawn)
+    monkeypatch.setattr(profiles.selectors, 'DefaultSelector', Timeout)
+    try:
+        with pytest.raises(subprocess.TimeoutExpired) as failure:
+            profiles.run_native([sys.executable, '-I', '-S', '-c',
+                'import time;print("ready",flush=True);time.sleep(120)'], tmp_path, subprocess.PIPE)
+        assert failure.value.cmd == []
+        assert launched[0].returncode == -signal.SIGKILL
+    finally:
+        for process in launched:
+            if process.stdout is not None:
+                process.stdout.close()
+
+
+@pytest.mark.skipif(os.name != 'posix' or not hasattr(os, 'pidfd_open') or
+                    not hasattr(signal, 'pidfd_send_signal'), reason='controlled Linux process exit notification')
+def test_holder_control_eof_stops_an_active_native_child(tmp_path):
+    status_read, status_write = os.pipe()
+    control_read, control_write = os.pipe()
+    process, native_fd = None, None
+    try:
+        code = 'import os,time;print(os.getpid(),flush=True);time.sleep(120)'
+        process = subprocess.Popen([sys.executable, '-I', '-S', '-c', profiles._NATIVE_HOLDER,
+            str(status_write), str(control_read), sys.executable, '-I', '-S', '-c', code],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True,
+            pass_fds=(status_write, control_read), close_fds=True)
+        os.close(status_write)
+        status_write = None
+        os.close(control_read)
+        control_read = None
+        assert select.select([process.stdout], [], [], 3)[0], 'controlled child did not start'
+        native_fd = os.pidfd_open(int(process.stdout.readline()))
+        os.close(control_write)  # Simulate loss of the owning parent while native is active.
+        control_write = None
+        assert process.wait(timeout=3) == -signal.SIGKILL
+        assert select.select([native_fd], [], [], 3)[0], 'native child survived owner loss'
+        assert os.read(status_read, 32) == b''  # No fabricated native success status.
+    finally:
+        if process is not None:
+            if process.returncode is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)  # Still unreaped/owned here.
+                except ProcessLookupError:
+                    pass
+                process.wait(timeout=3)
+            if process.stdout is not None:
+                process.stdout.close()
+        if native_fd is not None:
+            try:
+                signal.pidfd_send_signal(native_fd, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            os.close(native_fd)
+        for descriptor in (status_read, status_write, control_read, control_write):
+            if descriptor is not None:
+                os.close(descriptor)
+
+
+def test_short_profile_observation_preserves_shared_cohort_binding_map(profile_install, tmp_path):
+    binding = profile_install['binding']
+    with bindings.execution_directory(tmp_path):
+        retained = retained_binding(bindings.resolve(binding))
+    descriptors = {bindings.key(binding): {'execution': retained}}
+    with bindings.pinned_bindings(descriptors, cwd=tmp_path, cache_profiles=False):
+        cohort = bindings._PINNED_BINDINGS.get()
+        with bindings.profile_observation(descriptors, cwd=tmp_path):
+            assert bindings._PINNED_BINDINGS.get() is cohort
+            assert bindings.resolve(binding) == retained
+        assert bindings._PINNED_BINDINGS.get() is cohort

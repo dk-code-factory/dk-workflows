@@ -154,5 +154,5 @@ def provider_scope(binding):
     from shared import bindings
     resolved = retained_binding(bindings.resolve(binding))
     execution = resolved if resolved.get('bundle_digest') or resolved.get('bundles') else None
-    with bindings.pinned_bindings({bindings.key(binding): {'execution': execution}}):
+    with bindings.pinned_bindings({bindings.key(binding): {'execution': execution}}, cache_profiles=False):
         yield

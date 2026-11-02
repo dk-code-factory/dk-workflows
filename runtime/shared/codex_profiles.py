@@ -8,8 +8,10 @@ import os
 from pathlib import Path
 import re
 import selectors
+import secrets
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import tomllib
@@ -69,34 +71,92 @@ def native_path(value, base):
     return Path(os.path.normpath(os.path.join(str(base), value)))
 
 
+# This local holder reserves its group-leader PID until parent cleanup. The
+# watcher starts before the native child so parent death also bounds active work.
+_NATIVE_HOLDER = r"""import os, signal, subprocess, sys, threading
+status, control = map(int, sys.argv[1:3])
+def watch_owner():
+    try:
+        while os.read(control, 1):
+            pass
+    finally:
+        os.killpg(os.getpgrp(), signal.SIGKILL)
+owner = threading.Thread(target=watch_owner, daemon=True)
+owner.start()
+try:
+    try:
+        child = subprocess.Popen(sys.argv[3:], close_fds=True)
+        code = child.wait()
+        os.write(status, (str(code) + "\n").encode("ascii"))
+    except OSError:
+        pass
+    finally:
+        os.close(status)
+    owner.join()
+finally:
+    os.killpg(os.getpgrp(), signal.SIGKILL)
+"""
+
+
 def stop_native(process):
-    """Drain this isolated native helper and any credential-command descendants."""
-    if process.poll() is None:
+    """Signal the owned group before any operation can reap its leader."""
+    if os.name == 'posix':
+        if process.returncode is not None:
+            raise ValueError('Native Codex helper group ownership was released before cleanup')
         try:
-            process.terminate()
+            os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-    try:
-        process.wait(timeout=2)
-    except subprocess.TimeoutExpired:
+    elif process.returncode is None:
         process.kill()
-        process.wait()
-    finally:
-        if os.name == 'posix':
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+    process.wait(timeout=2)
 
 
-def run_native(argv, cwd, stdout):
-    process = subprocess.Popen(argv, cwd=cwd, stdout=stdout, stderr=subprocess.DEVNULL,
-                               start_new_session=(os.name == 'posix'))
+def run_native(argv, cwd, stdout, *, env=None):
+    child_env = dict(os.environ if env is None else env)
+    if os.name != 'posix':
+        process = subprocess.Popen(argv, cwd=cwd, stdout=stdout, stderr=subprocess.DEVNULL, env=child_env)
+        try:
+            return subprocess.CompletedProcess([], process.wait(timeout=30))
+        finally:
+            stop_native(process)
+    status_read = status_write = control_read = control_write = None
+    process = None
     try:
-        returncode = process.wait(timeout=30)
-        return subprocess.CompletedProcess([], returncode)
+        status_read, status_write = os.pipe()
+        control_read, control_write = os.pipe()
+        process = subprocess.Popen([sys.executable, '-I', '-S', '-c', _NATIVE_HOLDER,
+                                    str(status_write), str(control_read), *argv], cwd=cwd,
+            stdout=stdout, stderr=subprocess.DEVNULL, env=child_env, start_new_session=True,
+            pass_fds=(status_write, control_read), close_fds=True)
+        os.close(status_write)
+        status_write = None
+        os.close(control_read)
+        control_read = None
+        payload, deadline = bytearray(), time.monotonic() + 30
+        with selectors.DefaultSelector() as selector:
+            selector.register(status_read, selectors.EVENT_READ)
+            while b'\n' not in payload:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not selector.select(remaining):
+                    raise subprocess.TimeoutExpired([], 30)
+                block = os.read(status_read, 33 - len(payload))
+                if not block:
+                    raise ValueError('Native Codex helper exit status unavailable')
+                payload.extend(block)
+                if len(payload) > 32:
+                    raise ValueError('Native Codex helper exit status exceeded its bound')
+        if re.fullmatch(rb'-?[0-9]{1,10}\n', payload) is None:
+            raise ValueError('Native Codex helper returned malformed exit status')
+        return subprocess.CompletedProcess([], int(payload))
     finally:
-        stop_native(process)
+        try:
+            if process is not None:
+                stop_native(process)
+        finally:
+            for descriptor in (status_read, status_write, control_read, control_write):
+                if descriptor is not None:
+                    os.close(descriptor)
 
 
 def profile_flags(name):
@@ -119,11 +179,21 @@ def validate_profile(name, cwd):
                          'with codex --profile NAME debug prompt-input privately')
 
 
-def read_config(cwd, overrides=None, *, models=False, requirements=False):
-    """Ask the native loader for enabled layers and their precedence/origins."""
+def read_config(cwd, overrides=None, *, models=False, requirements=False, env=None):
+    """Keep startup, pipe and cleanup failures inside the named native contract."""
+    try:
+        return _read_config(cwd, overrides, models=models, requirements=requirements, env=env)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError('Native Codex app-server transport unavailable (' +
+                         type(exc).__name__ + ')') from None
+
+
+def _read_config(cwd, overrides=None, *, models=False, requirements=False, env=None):
+    """Ask the native loader for enabled layers under one shared time budget."""
     deadline = time.monotonic() + 30
     process = subprocess.Popen(['codex', *config_flags(overrides or {}), 'app-server'], cwd=cwd, stdin=subprocess.PIPE,
-                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=(os.name == 'posix'))
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=(os.name == 'posix'),
+                               env=dict(os.environ if env is None else env))
     buffered = bytearray()
     try:
         with selectors.DefaultSelector() as selector:
@@ -136,24 +206,27 @@ def read_config(cwd, overrides=None, *, models=False, requirements=False):
                     while b'\n' in buffered:
                         line, _, rest = buffered.partition(b'\n')
                         buffered[:] = rest
-                        event = json.loads(line)
+                        try:
+                            event = json.loads(line)
+                        except (ValueError, UnicodeError):
+                            raise ValueError('Codex ' + method + ' returned malformed JSON') from None
                         if not isinstance(event, dict):
-                            raise ValueError('Codex config/read returned a non-object event')
+                            raise ValueError('Codex ' + method + ' returned a non-object event')
                         if event.get('id') == identity:
                             if 'error' in event:
                                 raise ValueError('Codex native metadata request failed: ' + method)
                             if 'result' not in event:
-                                raise ValueError('Codex returned a malformed native metadata response')
+                                raise ValueError('Codex ' + method + ' returned a malformed native metadata response')
                             return event['result']
                     remaining = deadline - time.monotonic()
                     if remaining <= 0 or not selector.select(remaining):
-                        raise ValueError('Codex config/read timed out after 30 seconds')
+                        raise ValueError('Codex ' + method + ' exceeded the shared 30-second metadata budget')
                     block = os.read(process.stdout.fileno(), 65536)
                     if not block:
-                        raise ValueError('Codex native metadata ended without a response')
+                        raise ValueError('Codex ' + method + ' native metadata ended without a response')
                     buffered.extend(block)
                     if len(buffered) > 16 * 1024 * 1024:
-                        raise ValueError('Codex config/read response exceeds 16 MiB')
+                        raise ValueError('Codex ' + method + ' response exceeds 16 MiB')
             initialized = request(1, 'initialize', {
                 'clientInfo': {'name': 'codex_exec', 'version': '1'},
                 'capabilities': {'experimentalApi': True}})
@@ -203,6 +276,158 @@ def fingerprint(value):
                                      default=str).encode()).hexdigest()
 
 
+def _owned_path(value, cwd, paths):
+    """Capture lexical/canonical ownership now; later comparisons need no live aliases."""
+    if not isinstance(value, str) or not Path(value).is_absolute():
+        return value
+    lexical = Path(os.path.normpath(value))
+    try:
+        canonical = lexical.resolve()
+    except (OSError, RuntimeError):
+        return value
+    try:
+        relative = lexical.relative_to(cwd).as_posix()
+        target = canonical.relative_to(cwd).as_posix()
+    except ValueError:
+        paths[value] = {'external_target': str(canonical)}
+        return value  # External lexical/target relationships remain exact.
+    paths[value] = {'relative': relative, 'target': target}
+    return {'owned_workspace_path': relative, 'target': target}
+
+
+def _config_identity(config, cwd, paths, *, requirements=False):
+    value = copy.deepcopy(config)
+    if not isinstance(value, dict):
+        return value
+    catalog = 'modelCatalogJson' if requirements else 'model_catalog_json'
+    for field in (catalog,) if requirements else (catalog, 'model_instructions_file'):
+        if field in value:
+            value[field] = _owned_path(value[field], cwd, paths)
+    providers = value.get('modelProviders' if requirements else 'model_providers')
+    if isinstance(providers, dict):
+        for provider in providers.values():
+            auth = provider.get('auth') if isinstance(provider, dict) else None
+            if isinstance(auth, dict) and 'cwd' in auth:
+                auth['cwd'] = _owned_path(auth['cwd'], cwd, paths)
+    return value
+
+
+def _source_identity(source, cwd, paths):
+    value = copy.deepcopy(source)
+    for field in ('file', 'dotCodexFolder'):
+        if field in value:
+            value[field] = _owned_path(value[field], cwd, paths)
+    return value
+
+
+def _layer_identity(layer, cwd, paths):
+    config = layer['config']
+    projected = _config_identity(config, cwd, paths)
+    _source_identity(layer['name'], cwd, paths)
+    source = layer['name'].get('file')
+    if layer['name'].get('type') == 'project':
+        source = str(Path(layer['name']['dotCodexFolder']) / 'config.toml')
+    try:
+        source_hash = hashlib.sha256(Path(source).read_bytes()).hexdigest() if isinstance(source, str) else None
+    except OSError:
+        source_hash = None
+    target = None
+    if isinstance(source, str):
+        _owned_path(source, cwd, paths)
+        try:
+            target = str(Path(source).resolve())
+        except (OSError, RuntimeError):
+            target = None
+        if target is not None:
+            _owned_path(target, cwd, paths)
+    return {'name': copy.deepcopy(layer['name']), 'version': layer['version'],
+            'source_path': source, 'source_target': target,
+            'config_sha256': fingerprint(config), 'comparison_sha256': fingerprint(projected),
+            'source_sha256': source_hash, 'projected': projected != config}
+
+
+def _source_comparison(item, layers, path):
+    result = copy.deepcopy(item)
+    if not isinstance(result, dict) or not isinstance(result.get('name'), dict):
+        return result
+    for layer in layers:
+        if (isinstance(layer, dict) and layer.get('name') == item['name'] and
+                layer.get('version') == item.get('version') and layer.get('projected') is True
+                and isinstance(layer.get('source_sha256'), str)):
+            # Native versions hash the complete normalized JSON. Public
+            # layer JSON plus raw file SHA also covers redaction/type loss.
+            result['version'] = {'native_config': layer['comparison_sha256'],
+                                 'source': layer['source_sha256']}
+            if 'config_sha256' in result:
+                result['config_sha256'] = layer['comparison_sha256']
+            break
+    for field in ('file', 'dotCodexFolder'):
+        if field in result['name']:
+            result['name'][field] = path(result['name'][field])
+    for field in ('source_path', 'source_target'):
+        if field in result:
+            result[field] = path(result[field])
+    return result
+
+
+def profile_identity(snapshot):
+    """Project only captured typed ownership; opaque values and unknown extensions govern."""
+    value = copy.deepcopy(snapshot)
+    proof = value.get('identity_evidence')
+    if (not isinstance(proof, dict) or set(proof) != {'version', 'workspace', 'paths', 'layers',
+            'provider', 'baseline', 'exact_sha256'} or proof['version'] != 1 or
+            proof['exact_sha256'] != fingerprint({key: item for key, item in value.items()
+                                                 if key != 'identity_evidence'})):
+        return value
+    workspace, paths = proof['workspace'], proof['paths']
+    if not isinstance(workspace, str) or not isinstance(paths, dict) or not isinstance(proof['layers'], list):
+        return value
+    if any(not isinstance(item, dict) or not (
+            set(item) == {'external_target'} and isinstance(item['external_target'], str) or
+            set(item) == {'relative', 'target'} and all(isinstance(field, str) and
+                not Path(field).is_absolute() and '..' not in Path(field).parts for field in item.values()))
+            for item in paths.values()):
+        return value
+    def path(item):
+        association = paths.get(item) if isinstance(item, str) else None
+        if not isinstance(association, dict) or set(association) != {'relative', 'target'}:
+            return item
+        for field in association.values():
+            if (not isinstance(field, str) or Path(field).is_absolute() or '..' in Path(field).parts):
+                return item
+        if str(Path(workspace) / association['relative']) != item:
+            return item
+        return {'owned_workspace_path': association['relative'], 'target': association['target']}
+    def source(item):
+        return _source_comparison(item, proof['layers'], path)
+    for field in ('model_catalog_json', 'model_instructions_file'):
+        if field in value.get('settings', {}):
+            value['settings'][field] = path(value['settings'][field])
+    for reference in value.get('setting_sources', {}).values():
+        if isinstance(reference, dict):
+            for field in ('path', 'resolved_path'):
+                if field in reference:
+                    reference[field] = path(reference[field])
+    value['layers'] = [source(item) for item in value.get('layers', [])]
+    value['origins'] = {key: source(item) for key, item in value.get('origins', {}).items()}
+    value['profile_source'] = source(value.get('profile_source'))
+    provider = proof['provider']
+    if (isinstance(provider, dict) and set(provider) == {'exact', 'comparison'} and
+            value.get('provider', {}).get('definition_sha256') == provider['exact']):
+        value['provider']['definition_sha256'] = provider['comparison']
+        proof['provider'] = {'exact': provider['comparison'], 'comparison': provider['comparison']}
+    baseline = proof['baseline']
+    if isinstance(baseline, dict) and set(baseline) == {'config', 'comparison', 'origins', 'comparison_origins'}:
+        baseline['config'], baseline['origins'] = baseline['comparison'], baseline['comparison_origins']
+    proof['layers'] = [source(item) for item in proof['layers']]
+    proof['workspace'] = '<owned-execution-workspace>'
+    proof['paths'] = sorted([({'relative': item['relative'], 'target': item['target']}
+                              if 'relative' in item else {'path': original, **item})
+                             for original, item in paths.items()], key=lambda item: fingerprint(item))
+    proof['exact_sha256'] = fingerprint({key: item for key, item in value.items() if key != 'identity_evidence'})
+    return value
+
+
 def selected_layers(name, cwd):
     if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_-]+', name):
         raise ValueError('codex_profile must be a plain native profile name')
@@ -232,20 +457,28 @@ def selected_layers(name, cwd):
     if not version or tuple(map(int, version.groups())) < (0, 134, 0):
         raise ValueError('codex_profile requires modern profile-v2 native metadata facilities')
     layers = result['layers']
-    users = [i for i, layer in enumerate(layers)
-             if isinstance(layer, dict) and layer.get('name', {}).get('type') == 'user']
+    for layer in layers:
+        if (not isinstance(layer, dict) or not isinstance(layer.get('name'), dict)
+                or not isinstance(layer['name'].get('type'), str)
+                or not isinstance(layer.get('config'), dict) or not isinstance(layer.get('version'), str)):
+            raise ValueError('Codex config/read returned an unsupported layer shape')
+        required = {'project': ('dotCodexFolder',), 'user': ('file',), 'system': ('file',),
+                    'packagedDefaults': ('file',), 'legacyManagedConfigTomlFromFile': ('file',)}
+        if any(not isinstance(layer['name'].get(field), str)
+               for field in required.get(layer['name']['type'], ())):
+            raise ValueError('Codex config/read returned an unsupported layer shape')
+    users = [i for i, layer in enumerate(layers) if layer['name'].get('type') == 'user']
     if len(users) != 1:
         raise ValueError('Codex config/read returned ambiguous user/profile layers')
     index = users[0]
     for i, layer in enumerate(layers):
-        if (not isinstance(layer, dict) or not isinstance(layer.get('name'), dict)
-                or not isinstance(layer.get('config'), dict) or not isinstance(layer.get('version'), str)):
-            raise ValueError('Codex config/read returned an unsupported layer shape')
         allowed = HIGHER if i < index else LOWER if i > index else {'user'}
         if layer['name'].get('type') not in allowed:
             raise ValueError('Codex config/read returned unsupported layer precedence')
     base = layers[index]
-    if (Path(base['name'].get('file', '')).resolve() != (home / 'config.toml').resolve()
+    if not isinstance(base['name'].get('file'), str):
+        raise ValueError('Codex config/read returned an unsupported layer shape')
+    if (Path(base['name']['file']).resolve() != (home / 'config.toml').resolve()
             or base['name'].get('profile') is not None or base.get('disabledReason')):
         raise ValueError('Codex config/read did not resolve the expected base user configuration')
     # Native normalizes each file before merging. Preserve lexical selected
@@ -255,7 +488,16 @@ def selected_layers(name, cwd):
                          and layer['name']['type'] != 'sessionFlags' for layer in layers[:index])
         if field in profile and not overridden:
             profile[field] = str(native_path(profile[field], path.parent))
-    merged, origins = {}, {}
+    # Explicit provider auth.cwd is also an AbsolutePathBuf in native profile
+    # loading. Normalize benign strings before the recursive merge; ignored
+    # malformed lower leaves remain for authentic final validation to assess.
+    providers = profile.get('model_providers')
+    if isinstance(providers, dict):
+        for provider in providers.values():
+            auth = provider.get('auth') if isinstance(provider, dict) else None
+            if isinstance(auth, dict) and isinstance(auth.get('cwd'), str):
+                auth['cwd'] = str(native_path(auth['cwd'], path.parent))
+    merged, origins = copy.deepcopy(result['config']), copy.deepcopy(result['origins'])
     ordered = [*reversed(layers[index:]), {'name': source['name'], 'version': source['version'],
                'config': profile}, *reversed(layers[:index])]
     for layer in ordered:
@@ -268,11 +510,15 @@ def selected_layers(name, cwd):
     policy = result.get('_requirements', {})
     if not isinstance(policy, dict):
         raise ValueError('Codex returned unsupported requirements metadata')
+    merged['_helper_baseline'] = copy.deepcopy(result['config'])
+    merged['_helper_discovery'] = copy.deepcopy(discovery)
     merged['_requirements'] = policy
     merged['_native_version'] = version.group(0).strip('/ ')
     settings = {field: merged.get(field) for field in SETTINGS}
     if policy.get('modelCatalogJson') is not None:
         settings['model_catalog_json'] = policy['modelCatalogJson']
+        origins['model_catalog_json'] = {'name': {'type': 'requirements'},
+                                        'version': 'sha256:' + fingerprint(policy)}
     references = {}
     for field in ('model_catalog_json', 'model_instructions_file'):
         value = settings[field]
@@ -289,10 +535,26 @@ def selected_layers(name, cwd):
         references[field] = {'path': value, 'resolved_path': real, 'sha256': digest}
     provenance = [{**{key: layer[key] for key in ('name', 'version')},
                    'disabled': bool(layer.get('disabledReason'))} for layer in layers]
+    paths = {}
+    identities = [_layer_identity(layer, Path(cwd), paths) for layer in layers]
+    _config_identity(merged, Path(cwd), paths)
+    _source_identity(source['name'], Path(cwd), paths)
+    _config_identity(policy, Path(cwd), paths, requirements=True)
+    for reference in references.values():
+        for field in ('path', 'resolved_path'):
+            _owned_path(reference[field], Path(cwd), paths)
+    merged['_identity_paths'] = paths
+    baseline_config = _config_identity(result['config'], Path(cwd), paths)
+    baseline_origins = {key: _source_comparison(value, identities,
+                        lambda item: _owned_path(item, Path(cwd), paths))
+                        for key, value in result['origins'].items()}
+    baseline = {'config': fingerprint(result['config']), 'comparison': fingerprint(baseline_config),
+                'origins': fingerprint(result['origins']), 'comparison_origins': fingerprint(baseline_origins)}
     return {'profile': name, 'profile_source': source, 'codex_version': version.group(0).strip('/ '),
             'settings': settings, 'origins': {field: origins.get(field) for field in SETTINGS},
             'setting_sources': references, 'layers': provenance,
-            'requirements_sha256': fingerprint(policy)}, merged
+            'requirements_sha256': fingerprint(policy),
+            'identity_evidence': {'version': 1, 'workspace': str(cwd), 'paths': paths, 'layers': identities, 'baseline': baseline}}, merged
 
 
 # Native correspondence: openai/codex a09812981de703f18f38015cd5d500ab373f616c,
@@ -379,7 +641,7 @@ def model_metadata(model, catalog, route):
                 candidate = longest(suffix)
     if candidate is None:
         # Public native synthetic ModelInfo, not a private user model/threshold.
-        # models-manager/src/model_info.rs::model_info_from_slug (94-145).
+        # models-manager/src/model_info.rs::model_info_from_slug.
         candidate = {'slug': model, 'default_reasoning_level': None,
                      'supported_reasoning_levels': [], 'multi_agent_reasoning_effort': None,
                      'context_window': 272000, 'max_context_window': 272000,
@@ -397,11 +659,11 @@ def model_metadata(model, catalog, route):
     return metadata, fingerprint(candidate), origin
 
 
-def read_catalog(cwd, projection):
+def read_catalog(cwd, projection, *, env=None):
     # Never retain native diagnostics or secret-bearing override arguments.
     with tempfile.TemporaryFile() as output:
         try:
-            result = run_native(['codex', *config_flags(projection), 'debug', 'models'], cwd, output)
+            result = run_native(['codex', *config_flags(projection), 'debug', 'models'], cwd, output, env=env)
         except (OSError, subprocess.SubprocessError) as exc:
             raise ValueError('Native active catalog discovery unavailable (' + type(exc).__name__ + ')') from None
         if result.returncode:
@@ -421,7 +683,7 @@ def read_catalog(cwd, projection):
     return catalog
 
 
-def provider_environment(definition):
+def provider_environment(definition, *, env=None):
     names = {'CODEX_INTERNAL_ORIGINATOR_OVERRIDE', 'CODEX_API_KEY', 'OPENAI_API_KEY',
              'OPENAI_ORGANIZATION', 'OPENAI_PROJECT', 'CODEX_OSS_PORT', 'CODEX_OSS_BASE_URL',
              'GOOGLE_CLOUD_PROJECT', 'GOOGLE_CLOUD_LOCATION', 'GOOGLE_APPLICATION_CREDENTIALS',
@@ -432,11 +694,186 @@ def provider_environment(definition):
     headers = definition.get('env_http_headers') or {}
     if isinstance(headers, dict):
         names.update(value for value in headers.values() if isinstance(value, str))
-    return fingerprint({name: os.environ.get(name) for name in sorted(names)})
+    env = os.environ if env is None else env
+    return fingerprint({name: env.get(name) for name in sorted(names)})
+
+
+_MISSING = object()
+_AMBIGUOUS = object()
+_PROVIDER_FIELDS = {'name', 'base_url', 'model_catalog_url', 'env_key', 'env_key_instructions',
+    'experimental_bearer_token', 'auth', 'gateway_oauth', 'aws', 'wire_api', 'query_params',
+    'http_headers', 'env_http_headers', 'request_max_retries', 'stream_max_retries',
+    'stream_idle_timeout_ms', 'websocket_connect_timeout_ms', 'requires_openai_auth',
+    'supports_websockets', 'supports_standalone_web_search', 'capabilities', 'project_id',
+    'location', 'credential_file', 'include_internal_metadata'}
+
+
+def _delta(baseline, desired):
+    """Only required leaves under native recursive table-merge semantics."""
+    if isinstance(baseline, dict) and isinstance(desired, dict):
+        result = {}
+        for key, value in desired.items():
+            difference = _delta(baseline.get(key, _MISSING), value)
+            if difference is not _MISSING:
+                result[key] = difference
+        return result if result else _MISSING
+    return _MISSING if baseline == desired else copy.deepcopy(desired)
+
+
+def _provider_fields(provider, definition):
+    # These configured replacements are ignored by the native builtin merge.
+    if provider == 'openai':
+        return {key: definition[key] for key in ('model_catalog_url',) if key in definition}
+    return {} if provider in {'ollama', 'lmstudio'} else copy.deepcopy(definition)
+
+
+def _header_name(value):
+    return (isinstance(value, str) and len(value) <= 65535 and
+            re.fullmatch(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+", value) is not None)
+
+
+def _header_value(value):
+    if not isinstance(value, str):
+        return False
+    try:
+        return all(byte == 9 or byte >= 32 and byte != 127 for byte in value.encode('utf-8'))
+    except UnicodeError:
+        return False
+
+
+def _headers(definition, env, *, ignored=(), ambiguous=False):
+    static, dynamic = {}, {}
+    for name, value in (definition.get('http_headers') or {}).items():
+        if _header_name(name) and _header_value(value):
+            static.setdefault(name.lower(), set()).add(value)
+    for name, variable in (definition.get('env_http_headers') or {}).items():
+        value = env.get(variable) if isinstance(variable, str) else None
+        if _header_name(name) and _header_value(value) and value.strip():
+            dynamic.setdefault(name.lower(), set()).add(value)
+    result = {}
+    for name in static.keys() | dynamic.keys():
+        if name in ignored:
+            continue
+        values = dynamic.get(name) or static[name]  # Native literal pass, then env pass.
+        if len(values) != 1:
+            if not ambiguous:
+                raise ValueError('Native metadata verification unavailable: ambiguous case-insensitive headers')
+            result[name] = _AMBIGUOUS
+        else:
+            result[name] = next(iter(values))
+    return result
+
+
+def _bridge_variable(env, value, reserved=()):
+    while True:
+        name = 'DK_CODEX_METADATA_' + secrets.token_hex(16).upper()
+        if name not in env and name not in reserved:
+            env[name] = value
+            return name
+
+
+def _safe_provider_delta(provider, baseline, desired, *, static_catalog, configured_model, env):
+    baseline, desired = _provider_fields(provider, baseline), _provider_fields(provider, desired)
+    difference = _delta(baseline, desired)
+    if difference is _MISSING:
+        return {}
+    unknown = set(difference) - _PROVIDER_FIELDS
+    if unknown:
+        raise ValueError('Native metadata verification unavailable: unsupported selected provider field')
+    reserved = {item for definition in (baseline, desired)
+                for item in [definition.get('env_key'), *(definition.get('env_http_headers') or {}).values()]
+                if isinstance(item, str)}
+    if static_catalog:
+        # Static raw rows and picker filtering do not consult inference headers,
+        # query values or bearer/AWS credentials. Default-model filtering only
+        # needs the provider command-auth presence, not its literal arguments.
+        # Preserve factory name/base-url (including Bedrock GovCloud selection).
+        for key in ('http_headers', 'env_http_headers', 'experimental_bearer_token', 'env_key',
+                    'query_params', 'aws'):
+            difference.pop(key, None)
+        if configured_model:
+            difference.pop('auth', None)
+        elif isinstance(difference.get('auth'), dict):
+            difference['auth'].pop('args', None)
+            if not difference['auth']:
+                difference.pop('auth')
+        return difference
+    for field in ('query_params',):
+        if difference.get(field):
+            raise ValueError('Native metadata credential transport unavailable: ' + field)
+    auth = difference.get('auth')
+    if isinstance(auth, dict) and auth.get('args'):
+        raise ValueError('Native metadata credential transport unavailable: auth.args')
+    aws = difference.get('aws')
+    if isinstance(aws, dict):
+        for field in ('credential_export', 'auth_refresh'):
+            if isinstance(aws.get(field), dict) and aws[field].get('args'):
+                raise ValueError('Native metadata credential transport unavailable: aws.' + field + '.args')
+    # Raw header values are never copied just because a different leaf changed.
+    if 'http_headers' in difference or 'env_http_headers' in difference:
+        ignored = {'authorization'} if (desired.get('env_key') is not None or
+                                           desired.get('experimental_bearer_token') is not None) else set()
+        wanted = _headers(desired, env, ignored=ignored)
+        existing = _headers(baseline, env, ignored=ignored, ambiguous=True)
+        difference.pop('http_headers', None)
+        difference.pop('env_http_headers', None)
+        for name in wanted.keys() | existing.keys():
+            value = wanted.get(name, _MISSING)
+            if value == existing.get(name, _MISSING):
+                continue
+            if provider in {'amazon-bedrock', 'amazon-bedrock-runtime', 'gcp'}:
+                raise ValueError('Native metadata credential transport unavailable: builtin http_headers')
+            literal_names = {key for key in (baseline.get('http_headers') or {})
+                             if _header_name(key) and key.lower() == name}
+            env_names = {key for key in (baseline.get('env_http_headers') or {})
+                         if _header_name(key) and key.lower() == name}
+            if value is not _MISSING and value.strip():
+                variable = _bridge_variable(env, value, reserved)
+                # Native recursive merge retains inherited dynamic case variants.
+                for key in env_names | {name}:
+                    difference.setdefault('env_http_headers', {})[key] = variable
+            else:
+                # Blank literals are present headers; env variables would be
+                # skipped. A nonsecret invalid literal preserves absent headers.
+                literal = '\r' if value is _MISSING else value
+                for key in literal_names | {name}:
+                    difference.setdefault('http_headers', {})[key] = literal
+                variable = _bridge_variable(env, '', reserved)
+                for key in env_names:
+                    difference.setdefault('env_http_headers', {})[key] = variable
+    if 'experimental_bearer_token' in difference:
+        token = desired.get('experimental_bearer_token')
+        if desired.get('env_key') is not None:
+            difference.pop('experimental_bearer_token')  # Native env_key wins, including its error.
+        elif isinstance(token, str) and token.strip():
+            difference.pop('experimental_bearer_token')
+            difference['env_key'] = _bridge_variable(env, token, reserved)
+    return difference
+
+
+def metadata_projection(config, provider, definition, static):
+    baseline = copy.deepcopy(config.get('_helper_baseline', {}))
+    policy = config.get('_requirements', {})
+    baseline['model_provider'] = policy.get('modelProvider') or baseline.get('model_provider') or 'openai'
+    desired = {key: config[key] for key in METADATA_KEYS
+               if key != 'model_providers' and config.get(key) is not None}
+    desired['model_provider'] = provider
+    projection = _delta(baseline, desired)
+    projection = {} if projection is _MISSING else projection
+    projection = merge(config.get('_helper_discovery', {}), projection)
+    policy = config.get('_requirements', {})
+    baseline_providers = {**baseline.get('model_providers', {}), **(policy.get('modelProviders') or {})}
+    env = dict(os.environ)
+    # Required policy definitions already remain native-file-backed. A profile
+    # definition cannot override that exact replacement in the helper either.
+    delta = _safe_provider_delta(provider, baseline_providers.get(provider, {}), definition,
+                                static_catalog=static, configured_model=config.get('model') is not None, env=env)
+    if delta:
+        projection['model_providers'] = {provider: delta}
+    return projection, env
 
 
 def native_metadata(config, cwd):
-    projection = {key: config[key] for key in METADATA_KEYS if config.get(key) is not None}
     policy = config.get('_requirements', {})
     provider = policy.get('modelProvider') or config.get('model_provider') or 'openai'
     providers = {**config.get('model_providers', {}), **(policy.get('modelProviders') or {})}
@@ -454,7 +891,9 @@ def native_metadata(config, cwd):
         raise ValueError('Effective Codex metadata verification is unavailable for the selected '
                          'internal originator partition; use an ordinary Codex CLI environment '
                          'or an explicit native model_catalog_json snapshot')
-    catalog = read_catalog(cwd, projection)
+    projection, child_env = metadata_projection(config, provider, definition, static)
+    original_environment = provider_environment(definition, env=child_env)
+    catalog = read_catalog(cwd, projection, env=child_env)
     # Pin only the metadata helper, not actual exec. Shared native list policy
     # sorts/auth-filters/default-marks this exact immutable raw catalogue.
     model = config.get('model')
@@ -483,9 +922,9 @@ def native_metadata(config, cwd):
                 path.write_text(json.dumps(catalog))
                 path.chmod(0o600)
                 pinned = {**projection, 'model_catalog_json': str(path)}
-                if fingerprint(read_catalog(cwd, pinned)) != fingerprint(catalog):
+                if fingerprint(read_catalog(cwd, pinned, env=child_env)) != fingerprint(catalog):
                     raise ValueError('Native metadata helper did not preserve the captured catalog snapshot')
-                _, _, listing = read_config(cwd, pinned, models=True)
+                _, _, listing = read_config(cwd, pinned, models=True, env=child_env)
             if not isinstance(listing, dict) or not isinstance(listing.get('data'), list):
                 raise ValueError('Native model/list returned an unsupported shape')
             rows = listing['data']
@@ -504,22 +943,30 @@ def native_metadata(config, cwd):
     route = 'static' if static else 'explicit_endpoint' if routing.get('model_catalog_url') else 'default'
     metadata, row_hash, origin = model_metadata(model, catalog, route)
     effective = effective_settings(config, model, provider, metadata)
-    if fingerprint(read_catalog(cwd, projection)) != fingerprint(catalog):
+    if fingerprint(read_catalog(cwd, projection, env=child_env)) != fingerprint(catalog):
         raise ValueError('Native active catalog changed during profile resolution; refresh preparation')
-    return {'effective_settings': effective,
+    if provider_environment(definition) != original_environment:
+        raise ValueError('Codex governing environment changed during profile resolution; refresh preparation')
+    definition_input = {'native_definition_version': config.get('_native_version'),
+        'builtin_or_selected_id': provider, 'configured': definition,
+        'openai_base_url': config.get('openai_base_url'),
+        'auth': {key: config.get(key) for key in METADATA_KEYS if key not in {'model_providers', 'model_catalog_json'}},
+        'requirements': policy}
+    projected_input = copy.deepcopy(definition_input)
+    projected_input['configured'] = _config_identity({'model_providers': {provider: definition}},
+        Path(cwd), {})['model_providers'][provider]
+    projected_input['auth'] = _config_identity(projected_input['auth'], Path(cwd), {})
+    projected_input['requirements'] = _config_identity(policy, Path(cwd), {}, requirements=True)
+    return {'_provider_comparison': {'exact': fingerprint(definition_input), 'comparison': fingerprint(projected_input)},
+            'effective_settings': effective,
             'expected_observations': {'model': model, 'model_provider': provider,
                 'model_reasoning_effort': config.get('model_reasoning_effort') or 'none',
                 'model_context_window': effective['model_context_window'],
                 'model_auto_compact_token_limit': effective['model_auto_compact_token_limit']},
             'catalog': {'sha256': fingerprint(catalog), 'selected_row_sha256': row_hash,
                         'metadata': metadata, 'origin': origin, 'route': route, 'selection': selection},
-            'provider': {'id': provider, 'definition_sha256': fingerprint({
-                'native_definition_version': config.get('_native_version'),
-                'builtin_or_selected_id': provider, 'configured': definition,
-                'openai_base_url': config.get('openai_base_url'),
-                'auth': {key: config.get(key) for key in METADATA_KEYS if key not in {
-                    'model_providers', 'model_catalog_json'}},
-                'requirements': policy}), 'environment_sha256': provider_environment(definition)}}
+            'provider': {'id': provider, 'definition_sha256': fingerprint(definition_input),
+                         'environment_sha256': original_environment}}
 
 
 def resolve_profile(name, cwd=None):
@@ -529,14 +976,19 @@ def resolve_profile(name, cwd=None):
     authentic validation, discovery and execution checks; they are not an atomic
     guarantee against inputs changing away and back between observations.
     """
-    cwd = Path(cwd or Path.cwd()).absolute()
+    cwd = Path(cwd or Path.cwd()).resolve()
     before, config = selected_layers(name, cwd)
     validate_profile(name, cwd)
     native = native_metadata(config, cwd)
     after, _ = selected_layers(name, cwd)
     if before != after:
         raise ValueError('Codex governing inputs changed during profile resolution; refresh preparation')
-    return {**before, **native}
+    provider_comparison = native.pop('_provider_comparison', None)
+    value = {**before, **native}
+    value['identity_evidence']['provider'] = provider_comparison
+    value['identity_evidence']['exact_sha256'] = fingerprint(
+        {key: item for key, item in value.items() if key != 'identity_evidence'})
+    return value
 
 
 def verify_profile(resolved, cwd=None):
