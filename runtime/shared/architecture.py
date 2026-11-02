@@ -663,7 +663,7 @@ def validate_child(child, parent, reference):
         raise ValueError('Architecture child packet parent linkage differs')
     if any(child[key] != parent[key] for key in (
             'repository', 'catalog', 'baseline', 'head', 'tree', 'task', 'scope',
-            'scope_contents', 'governing_sources')):
+            'scope_contents', 'governing_sources')) or child.get('checkout') != parent.get('checkout'):
         raise ValueError('Architecture child packet scope differs from parent')
     if parent['paths'] is not None and (child['paths'] is None
             or not set(child['paths']).issubset(parent['paths'])):
@@ -671,7 +671,7 @@ def validate_child(child, parent, reference):
 
 
 def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, governing=None,
-           identity=None, catalog=None, parent=None):
+           identity=None, catalog=None, parent=None, checkout=None, inherit_provider=True):
     if not agent or not task:
         raise ValueError('Agent identity and task/PR scope required')
     if paths is not None:
@@ -686,7 +686,7 @@ def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, go
         catalog = current(root, identity, baseline=baseline)
     deferred = scoped_obligations(catalog, paths)
     head = git(root, 'rev-parse', '--verify', (head or 'HEAD') + '^{commit}').strip()
-    provider_parent = os.environ.get('DK_ARCHITECTURE_PACKET')
+    provider_parent = os.environ.get('DK_ARCHITECTURE_PACKET') if inherit_provider else None
     if provider_parent:
         own = json.loads(provider_parent)
         own_packet = validate_packet(own, root)
@@ -696,6 +696,10 @@ def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, go
         elif parent != expected_parent:
             raise ValueError('Architecture provider delivery parent linkage differs')
     inherited = validate_packet(parent, root) if parent else None
+    if checkout is None:
+        checkout = ((own_packet if provider_parent else inherited).get('checkout', {})
+                    if provider_parent or inherited is not None else
+                    checkout_lineage(root)[1])
     if inherited is not None and governing is None:
         governing = inherited.get('governing_sources', {})
     value = seal({'schema_version': 2 if parent else 1, 'kind': 'architecture-packet', 'repository': catalog['repository'],
@@ -704,8 +708,8 @@ def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, go
                   'tree': git(root, 'rev-parse', head + '^{tree}').strip(), 'scope': digest(scope),
                   'scope_contents': scope, 'governing_sources': governing or {},
                   'rules': inherited_rules(catalog, agent, paths, inherited),
-                  'deferred_obligations': deferred,
-                  **({'parent': parent} if parent else {})})
+                  **({'parent': parent} if parent else {}),
+                  **({'checkout': checkout} if checkout else {})})
     if parent:
         validate_child(value, inherited, parent)
     if provider_parent:
@@ -723,30 +727,53 @@ def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, go
     return retain(directory / 'packets' / (value['fingerprint'] + '.json'), value)
 
 
-def checkout_identities(root):
-    """Retained review clones may have a local origin pointing to their source."""
+def checkout_lineage(root):
+    """Return identities and the terminal source of retained local Git clones."""
     identities, seen = set(), set()
     root = Path(root).resolve()
     while root not in seen:
         seen.add(root)
         identities.add('path:' + str(root))
-        identities.add(repository_scope.repository(root))
+        repository = repository_scope.repository(root)
+        identities.add(repository)
+        checkout = {'path': str(root), 'repository': repository}
         origin = repository_scope.git_remote(root, 'origin')
         if not origin:
             break
         candidate = Path(origin.removeprefix('file://'))
         if not candidate.is_absolute():
             candidate = root / candidate
-        if not candidate.is_dir() or repository_scope.normalize_remote(origin):
+        if repository_scope.normalize_remote(origin):
+            break
+        identities.add('path:' + str(candidate.resolve()))
+        if not candidate.is_dir():
+            checkout = {'path': str(candidate.resolve()), 'repository': 'path:' + str(candidate.resolve())}
             break
         root = candidate.resolve()
-    return identities
+    else:
+        raise ValueError('Architecture checkout origin lineage contains a cycle')
+    return identities, checkout
 
 
 def validate_packet(reference, root, *, agent=None, paths=None, current_catalog=True, live=True):
     value = load(reference)
-    if live and value.get('repository') not in checkout_identities(root):
-        raise ValueError('Architecture packet belongs to a different repository')
+    if live:
+        identities, _ = checkout_lineage(root)
+        checkout = value.get('checkout')
+        if checkout is None:
+            belongs = value.get('repository') in identities
+        else:
+            # PR metadata may supply repository identity independently of local
+            # remotes. Seal the actual source checkout and follow only its clone
+            # lineage, including a deleted terminal source of a durable clone.
+            if (not isinstance(checkout, dict) or set(checkout) != {'path', 'repository'}
+                    or not isinstance(checkout['path'], str) or not Path(checkout['path']).is_absolute()
+                    or not isinstance(checkout['repository'], str)):
+                raise ValueError('Architecture checkout provenance is invalid')
+            belongs = ('path:' + checkout['path'] in identities
+                       and (not Path(checkout['path']).exists() or checkout['repository'] in identities))
+        if not belongs:
+            raise ValueError('Architecture packet belongs to a different repository')
     if (value.get('kind') != 'architecture-packet'
             or value.get('schema_version') not in (1, 2)
             or (value['schema_version'] == 2) != ('parent' in value)):
@@ -852,7 +879,7 @@ def validate_preparation(value, context, decisions, *, live=True):
     return saved
 
 
-def handoff(value, context, agent, paths=None):
+def handoff(value, context, agent, paths=None, *, inherit_provider=True):
     coordinator = validate_packet(value['packet'], context['checkout'])
     for key, field in (('base_sha', 'baseline'), ('head_sha', 'head'), ('url', 'task'),
                        ('repository_identity', 'repository')):
@@ -869,7 +896,16 @@ def handoff(value, context, agent, paths=None):
                   head=coordinator['head'], identity=coordinator['repository'], catalog=catalog,
                   scope=coordinator['scope_contents'],
                   governing=governing,
-                  parent=value['packet'] if coordinator['agent'] != 'coordinator' else None)
+                  parent=value['packet'] if coordinator['agent'] != 'coordinator' else None,
+                  checkout=coordinator.get('checkout', {}), inherit_provider=inherit_provider)
+
+
+def delivery_scope(value):
+    """Comparable delivery content; retained governing paths may relocate."""
+    return {**{key: item for key, item in value.items()
+               if key not in {'fingerprint', 'governing_sources'}},
+            'governing_sources': {key: reference['fingerprint']
+                                  for key, reference in value.get('governing_sources', {}).items()}}
 
 
 def provider_packet(reference, root, agent, paths=None, *, parent=None):
@@ -905,7 +941,7 @@ def enforce(reference, root, *, evaluator=None, user=None):
         source(root, delivered['head'], ref)
     obligation = request['rule']
     enforcer_packet = handoff({'packet': request['packet']}, {'checkout': str(root)},
-                              'dk-architecture-enforcer', request['paths'])
+                              'dk-architecture-enforcer', request['paths'], inherit_provider=False)
     def validate(value):
         if (not isinstance(value, dict) or set(value) != {'established', 'rationale', 'evidence'}
                 or type(value['established']) is not bool
@@ -1013,7 +1049,8 @@ def review(value, context, decisions, *, exceptions=None, reviewer=None, recipie
     if exceptions is not None and exceptions != prepared_exceptions:
         raise ValueError('Architecture review exceptions differ from preparation')
     delivered = validate_preparation(value, context, decisions)
-    reference = recipient_packet or handoff(value, context, 'dk-architecture-review', delivered['paths'])
+    reference = recipient_packet or handoff(value, context, 'dk-architecture-review', delivered['paths'],
+                                            inherit_provider=False)
     recipient = validate_packet(reference, context['checkout'], agent='dk-architecture-review', paths=delivered['paths'])
     if any(recipient[key] != delivered[key] for key in ('head', 'tree', 'baseline', 'catalog', 'task', 'scope')):
         raise ValueError('Architecture evaluator packet differs from pinned preparation')

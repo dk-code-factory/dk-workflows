@@ -535,10 +535,11 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             try:
                 if preparation.get('architecture'):
                     parent = job['handoff']['architecture_packet']
-                    if parent != expected_packet:
-                        raise ValueError('Retained architecture delivery differs from expected recipient packet')
                     delivered = architecture.validate_packet(parent, checkout,
                         agent='dk-architecture-review' if name == 'architecture-review' else name)
+                    expected = architecture.validate_packet(expected_packet, checkout, agent=delivered['agent'])
+                    if architecture.delivery_scope(delivered) != architecture.delivery_scope(expected):
+                        raise ValueError('Retained architecture delivery differs from expected recipient packet')
                     prepared_packet = architecture.load(preparation['architecture']['packet'])
                     if any(delivered[key] != prepared_packet[key] for key in (
                             'repository', 'catalog', 'baseline', 'head', 'tree', 'task', 'scope', 'paths')):

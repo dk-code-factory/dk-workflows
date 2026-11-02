@@ -150,7 +150,7 @@ def semantic(key, content):
         # their original sources. Keep the packet's raw provenance pinned, but
         # do not make every code edit invalidate every engineering conclusion.
         return {k: v for k, v in value.items() if k not in {
-            'head', 'fingerprint', 'tree', 'paths', 'scope', 'scope_contents', 'governing_sources'}}
+            'head', 'fingerprint', 'tree', 'paths', 'scope', 'scope_contents', 'governing_sources', 'checkout'}}
     if key == 'manifest':
         value = dict(value)
         associations = value.get('reviewer_execution')

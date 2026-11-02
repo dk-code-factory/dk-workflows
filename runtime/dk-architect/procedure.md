@@ -78,6 +78,11 @@ The coordinator pre-exports declared nested review packets before read-only
 provider launch. Nested packets retain their exact parent reference and the union
 of inherited obligations and recipient-selected rules; their paths cannot exceed
 the parent budget. Top-level coordinator delivery retains recipient filtering.
+New packets seal the source checkout independently of the pinned PR repository
+identity. Validation follows its local Git clone origins, including the terminal
+source path after that source is removed; matching commits in an unrelated
+checkout do not establish this lineage. Retained handoffs preserve the source
+anchor.
 Providers read their declared packet map. An exact unchanged delivery can be
 reused without directory, permission or lock writes. Missing packets, undeclared
 recipients, changed evidence and expanded scope require fresh coordinator delivery

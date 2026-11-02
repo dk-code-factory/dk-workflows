@@ -1764,7 +1764,7 @@ def test_nested_delivery_unions_rules_and_reuses_without_any_state_writes(repo, 
 
 
 @pytest.mark.parametrize('field', ['repository', 'catalog', 'baseline', 'head', 'tree', 'task',
-                                 'scope', 'scope_contents', 'governing_sources', 'paths', 'parent', 'rules'])
+                                 'scope', 'scope_contents', 'governing_sources', 'paths', 'parent', 'rules', 'checkout'])
 def test_nested_delivery_rejects_resealed_scope_and_inheritance_changes(repo, field):
     initialize(repo, [obligation(), obligation('child', agents=['Spec'])])
     parent = deliver(repo, paths=['src/core.py'])
@@ -1773,7 +1773,8 @@ def test_nested_delivery_rejects_resealed_scope_and_inheritance_changes(repo, fi
     replacements = {'repository': 'path:/other', 'catalog': '0' * 64, 'baseline': '0' * 40,
         'head': '0' * 40, 'tree': '0' * 40, 'task': 'different', 'scope': '0' * 64,
         'scope_contents': {}, 'governing_sources': {'issues': {}}, 'paths': None,
-        'parent': deliver(repo, 'other', paths=['src/core.py']), 'rules': [a.load(child)['rules'][1]]}
+        'parent': deliver(repo, 'other', paths=['src/core.py']), 'rules': [a.load(child)['rules'][1]],
+        'checkout': {'path': str(repo.parent / 'unrelated'), 'repository': 'path:/unrelated'}}
     value[field] = replacements[field]
     invalid = a.seal({k: v for k, v in value.items() if k != 'fingerprint'})
     reference = a.retain(Path(child['path']).with_name(invalid['fingerprint'] + '.json'), invalid)
@@ -1813,3 +1814,78 @@ def test_conditional_nested_obligations_keep_scoped_deferrals(repo):
     reference = a.retain(Path(child['path']).with_name(changed['fingerprint'] + '.json'), changed)
     with pytest.raises(ValueError, match='deferred obligations differ'):
         a.validate_packet(reference, repo)
+
+
+def test_pinned_repository_identity_survives_durable_clone_source_removal(repo, tmp_path):
+    import shutil
+    identity = 'remote:github.com/example/head'
+    catalog = a.ensure(repo, identity=identity, analyzer=lambda *_: model_result(rules=[obligation()]))
+    packet = a.packet(repo, 'worker', ['src/core.py'], task='pinned-pr', scope={'goal': 'core'},
+                      identity=identity, catalog=catalog)
+    assert a.load(packet)['repository'] == identity
+    assert a.load(packet)['checkout'] == {'path': str(repo), 'repository': 'path:' + str(repo)}
+    retained = tmp_path / 'retained'
+    run(repo, 'clone', '-q', str(repo), str(retained))
+    shutil.rmtree(repo)
+    assert a.provider_packet(packet, retained, 'worker') == packet
+    # The sealed PR identity alone cannot authorize an unrelated same-tree clone.
+    run(retained, 'remote', 'remove', 'origin')
+    with pytest.raises(ValueError, match='different repository'):
+        a.provider_packet(packet, retained, 'worker')
+
+
+def test_delivery_scope_preserves_fields_but_ignores_governing_snapshot_relocation(repo, tmp_path):
+    initialize(repo, [obligation()])
+    first, second = tmp_path / 'first.json', tmp_path / 'second.json'
+    first.write_text('{"instruction":"Keep the boundary"}')
+    second.write_bytes(first.read_bytes())
+    left = a.load(deliver(repo, paths=['src/core.py'], governing=a.governing_sources({'issues/0': first})))
+    right = a.load(deliver(repo, paths=['src/core.py'], governing=a.governing_sources({'issues/0': second})))
+    assert left['fingerprint'] != right['fingerprint']
+    assert a.delivery_scope(left) == a.delivery_scope(right)
+    second.write_text('{"instruction":"Change the boundary"}')
+    changed = a.load(deliver(repo, paths=['src/core.py'], governing=a.governing_sources({'issues/0': second})))
+    assert a.delivery_scope(left) != a.delivery_scope(changed)
+    for field in ('agent', 'task', 'scope', 'rules', 'paths', 'checkout'):
+        changed = {**right, field: None}
+        assert a.delivery_scope(left) != a.delivery_scope(changed)
+
+
+def test_checkout_provenance_is_operational_but_raw_lineage_remains_required(repo):
+    from shared import preparation_graph
+    initialize(repo, [obligation()])
+    reference = deliver(repo, paths=['src/core.py'])
+    value = a.load(reference)
+    changed = a.seal({**{k: v for k, v in value.items() if k != 'fingerprint'},
+                      'checkout': {'path': str(repo.parent / 'unrelated'), 'repository': 'path:/unrelated'}})
+    assert changed['fingerprint'] != value['fingerprint']
+    semantic = lambda packet: preparation_graph.semantic('architecture/0', json.dumps(packet).encode())
+    assert semantic(value) == semantic(changed)
+    invalid = a.retain(Path(reference['path']).with_name(changed['fingerprint'] + '.json'), changed)
+    with pytest.raises(ValueError, match='different repository'):
+        a.validate_packet(invalid, repo)
+    # Unknown fields still govern preparation; only the named provenance field is operational.
+    assert semantic(value) != semantic({**value, 'new_requirement': 'Keep an additional boundary'})
+
+
+def test_owned_role_preparation_ignores_unrelated_ambient_packet(repo, tmp_path, monkeypatch):
+    catalog = initialize(repo)
+    a.edit(repo, obligation(auto_approve=True, approval_when='Core has one supported entry point.'),
+           user=USER, expected=catalog['fingerprint'])
+    ctx, decisions = context(repo, tmp_path)
+    prepared = a.prepare(ctx, decisions)
+    worker = a.handoff(prepared, ctx, 'worker', ['src/core.py'])
+    pending = request(repo, worker)
+    ambient = deliver(repo, 'unrelated', paths=[])
+    parent_environment = json.dumps(ambient)
+    monkeypatch.setenv('DK_ARCHITECTURE_PACKET', parent_environment)
+    reviewed = a.review(prepared, ctx, decisions, reviewer=lambda *_: {
+        'complete': True, 'reason': '', 'coverage': [verdict(obligation())]})
+    assert a.load(a.load(reviewed)['packet'])['task'] == ctx['url']
+    enforced = a.enforce(pending, repo, evaluator=lambda *_: {'established': True,
+        'rationale': 'Core has one entry point.', 'evidence': [{'path': 'src/core.py'}]})
+    enforcer = a.load(a.load(enforced)['enforcer_packet'])
+    assert enforcer['parent'] == worker and enforcer['task'] == ctx['url']
+    assert os.environ['DK_ARCHITECTURE_PACKET'] == parent_environment
+    with pytest.raises(ValueError, match='scope differs|parent linkage'):
+        a.handoff(prepared, ctx, 'undeclared', ['src/core.py'])

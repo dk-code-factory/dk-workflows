@@ -95,3 +95,10 @@ Internal architecture evaluators run the owned reviewer or enforcer role from th
 caller's retained package. Their actual lifecycle entry and completion run outside
 the provider sandbox, which receives the managed invocation. They do not discover
 a replacement installed version or start another lifecycle inside the sandbox.
+
+An eligible interrupted session may keep its original top-level packet when an
+operational preparation refresh relocates governing snapshots. Both packets must
+validate, every delivery field must agree, and governing slot fingerprints must
+match. Original packets, paths and checkpoints remain immutable. Every nested
+packet still names the exact retained top-level parent; relocation does not permit
+substituting a parent or changing its inherited scope.
