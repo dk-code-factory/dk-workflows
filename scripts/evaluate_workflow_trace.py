@@ -176,10 +176,16 @@ def evaluate(path):
             pending_text.pop(event['stage'], None)
             require(event['signal'] in ('result', 'failure', 'decision', 'completion'), 'invalid notification signal')
             if event['signal'] in ('failure', 'decision'):
-                # The normalized next communication/action must report the material change.
-                following = [e for e in events[events.index(event) + 1:] if e['kind'] not in ('notification',)]
-                if (not following or following[0]['kind'] != 'update' or following[0]['cause'] != event['id']
-                        or not following[0]['text'].strip()):
+                # One immediate report may consolidate a contiguous notification batch.
+                start = end = events.index(event)
+                while start > 0 and events[start - 1]['kind'] == 'notification':
+                    start -= 1
+                while end < len(events) and events[end]['kind'] == 'notification':
+                    end += 1
+                batch = {e['id'] for e in events[start:end]}
+                following = events[end] if end < len(events) else None
+                if (not following or following['kind'] != 'update' or following['cause'] not in batch
+                        or not following['text'].strip()):
                     problem(family, event, 'material_report_delayed')
         elif kind == 'update':
             trigger = cause(event)

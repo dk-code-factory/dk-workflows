@@ -138,8 +138,15 @@ Optional diagnostic fields retain their existing checks. Output text/need
 and handoff inline context retain their permitted empty values.
 `ROLES`, `PINS` and `GOVERNING` declare
 the supported handoff and reuse model. Event timestamps measure recorded ordering;
-material-report checks require the next action to report the notification. They
-cannot establish wall-clock reporting latency across missing host observations.
+material-report checks require the first action after a contiguous notification
+batch to be a nonblank update whose unary `cause` names a notification in that
+batch. This allows one immediate consolidated report for consecutive material
+changes, including batches mixed with result/completion notifications. Any
+intervening action breaks the batch, and an outside-batch cause cannot justify
+its report. The human normalizer must verify that the report text covers every
+material change; the evaluator checks presence, ordering and cause membership,
+not semantic completeness. It cannot establish wall-clock reporting latency
+across missing host observations.
 The fixture's 160-character pending sentence and 4096-byte receipt/page bounds are
 local diagnostic examples, not production token limits or a replacement for native
 helper pagination. Retained complete evidence must still be inspected when needed.

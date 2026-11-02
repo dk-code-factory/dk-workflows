@@ -290,6 +290,72 @@ def test_material_notification_requires_nonblank_report(tmp_path, signal, text):
     assert 'material_report_delayed' in codes(report)
 
 
+def consolidated_trace(signals, cause_index=0):
+    trace = fixture_trace()
+    first = next(e for e in trace['events'] if e['id'] == 'e10')
+    report = next(e for e in trace['events'] if e['id'] == 'e13')
+    batch = []
+    for index, signal in enumerate(signals):
+        event = copy.deepcopy(first)
+        event.update(id=('e10', 'e12')[index] if index < 2 else f'batch-{index}',
+                     at_ms=first['at_ms'] + index, signal=signal)
+        batch.append(event)
+    report.update(at_ms=batch[-1]['at_ms'], cause=batch[cause_index]['id'],
+                  text='All reported failures need investigation, and decisions remain pending.')
+    start = trace['events'].index(first)
+    trace['events'][start:start + 4] = [*batch, report]
+    return trace, batch, report
+
+
+@pytest.mark.parametrize('signals', [('failure', 'decision'), ('failure', 'decision', 'failure'),
+                                    ('result', 'failure', 'decision', 'completion')])
+@pytest.mark.parametrize('cause_index', [0, -1])
+def test_contiguous_notifications_allow_one_immediate_report(tmp_path, signals, cause_index):
+    trace, _, _ = consolidated_trace(signals, cause_index)
+    assert evaluator.evaluate(save_trace(tmp_path, trace))['status'] == 'passed'
+
+
+@pytest.mark.parametrize('mutation', ['blank', 'whitespace', 'output', 'query', 'timeout',
+                                     'unrelated-cause', 'outside-batch', 'omitted',
+                                     'no-following-action', 'nonupdate'])
+def test_consolidated_reports_preserve_promptness_and_batch_causality(tmp_path, mutation):
+    trace, batch, report = consolidated_trace(('failure', 'decision'))
+    if mutation in ('blank', 'whitespace'):
+        report['text'] = '' if mutation == 'blank' else ' \t\n '
+    elif mutation == 'unrelated-cause':
+        report['cause'] = 'e2'
+    elif mutation == 'outside-batch':
+        prior = copy.deepcopy(batch[0])
+        prior.update(id='earlier-notification', signal='result')
+        boundary = {'id': 'earlier-action', 'kind': 'timeout', 'at_ms': prior['at_ms'], 'stage': 'preparation'}
+        start = trace['events'].index(batch[0])
+        trace['events'][start:start] = [prior, boundary]
+        report['cause'] = prior['id']
+    elif mutation == 'omitted':
+        trace['events'].remove(report)
+    elif mutation == 'no-following-action':
+        trace['events'] = trace['events'][:trace['events'].index(report)]
+    else:
+        action = {'id': 'intervening-action', 'kind': mutation, 'at_ms': report['at_ms']}
+        if mutation == 'output':
+            action = copy.deepcopy(next(e for e in trace['events'] if e['kind'] == 'output'))
+            action.update(id='intervening-action', at_ms=report['at_ms'])
+        elif mutation == 'query':
+            action.update(category='git', cause=batch[0]['id'])
+        elif mutation == 'timeout':
+            action['stage'] = 'preparation'
+        else:
+            action.update(kind='transition', stage='feedback', cause=batch[0]['id'])
+        index = trace['events'].index(report)
+        if mutation == 'nonupdate':
+            trace['events'][index] = action
+        else:
+            trace['events'].insert(index, action)
+    result = evaluator.evaluate(save_trace(tmp_path, trace))
+    assert result['checks']['communication']['status'] == 'failed'
+    assert 'material_report_delayed' in codes(result)
+
+
 @pytest.mark.parametrize('premature', [False, True])
 def test_ci_cadence_restarts_with_each_waiter_session(tmp_path, premature):
     trace = fixture_trace()
