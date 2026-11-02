@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[2]
@@ -256,8 +257,15 @@ class PreparedDeliveryTests(unittest.TestCase):
         p=self.package;prepared=self.prepare()
         path=p.root/'cancelled-session.json'
         session=Session(p.context,prepared,[self.name],path=path)
+        def cancelled(*args, **kwargs):
+            deadline = time.monotonic() + 5
+            while session.cached(self.name) is None:
+                if time.monotonic() >= deadline:
+                    raise AssertionError('configured checkpoint did not finish')
+                time.sleep(.005)
+            raise ProviderCancelled('Review interrupted')
         with self.assertRaises(KeyboardInterrupt),session.execution(), \
-                patch.object(architecture,'analyze',side_effect=ProviderCancelled('Review interrupted')):
+                patch.object(architecture,'analyze',side_effect=cancelled):
             result=runner.review(p.context,[self.provider],'',p.decisions,'',prepared,session=session)
             session.finish(result)
         saved=json.loads(path.read_text())

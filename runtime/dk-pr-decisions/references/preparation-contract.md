@@ -148,7 +148,7 @@ before retaining the current snapshot. A concurrent change blocks that snapshot.
 
 ## Stored artifact and verification
 
-Immutable `preparation_version:3` artifacts retain `analysis`, graph/retired IDs,
+Immutable `preparation_version:4` artifacts retain `analysis`, graph/retired IDs,
 input fingerprints, reviewer descriptors, readiness, PR/base/head/body/Decisions
 identity, parent path/ID/hash and migration provenance. Snapshots are fingerprinted
 and read-only outside the repo. Historical validation checks retained integrity and

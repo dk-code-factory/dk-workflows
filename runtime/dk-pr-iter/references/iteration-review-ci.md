@@ -12,7 +12,7 @@ architecture_packet, and follow [delivery](../../dk-architect/procedure.md), inc
 nested handoffs, scope expansion and exception requests before a breach.
 
 Within each cycle the shared runner executes independent configured reviewers
-concurrently with separate immutable handoffs and telemetry, then aggregates in
+concurrently with the independent architecture role, using separate immutable handoffs, checkpoints and telemetry, then aggregates configured reviewers in
 configured order. Interruption aborts this invocation's in-flight provider
 transport and prevents later provider or correction launches, then waits for
 actual reviewer cleanup and checkpoint work before releasing session ownership.
@@ -25,40 +25,28 @@ After initial fixes, perform at most **five** sequential review-and-fix cycles. 
 
 A final-cycle code or test fix without subsequent review leaves the final tree unreviewed. Report that limitation and the exhausted cap; passing CI or coordinator verification cannot supply configured-reviewer coverage. Do not start a sixth cycle or reset the run to bypass this limit. A tree-equivalent regroup may retain coverage when scope, Decisions, base and reviewer instructions match. After mandatory cleanup, equivalent preparation wording can instead use the independent reconciliation gate described in [series cleanup](iteration-series-cleanup.md); substantive scope changes still require review within the existing budget.
 
-For a failure before reviewer dispatch, inspect `run_state.py cycle-status` and
-use `cycle-recover --head CURRENT_HEAD [--scope-file FILE] [--rules-file FILE]`
-after restoring ready preparation. Supply the intended complete scope/rules text,
-including the original files for an unchanged-evidence resume. Allocation reserves
-the session before delegation. Mandatory session evidence records dispatch intent
-before configured or architecture reviewer invocation and marks execution drained
-only after worker cleanup. Missing/legacy evidence, an undrained invocation,
-contradictory checkpoints/results, an active owner or any dispatch intent denies
-this recovery. Intent is conservative: a crash after intent cannot prove whether
-the provider actually started.
+Use `run-state cycle-status` and `cycle-recover --head CURRENT_HEAD
+[--scope-file FILE] [--rules-file FILE]` after a drained infrastructure failure.
+Allow one infrastructure recovery per cycle and two per run, shared between
+prelaunch and postdispatch recovery. Allocation reserves the session before
+handoff; dispatch intents and worker draining are mandatory evidence. Prelaunch
+recovery requires zero dispatch across the cycle. Postdispatch recovery requires
+identical head/base/tree, computed engineering scope, Decisions, reviewer order,
+effective instructions, runtime bindings and intact checkpoints for every role.
+Only structured helper/transport failures qualify. Free-form incomplete messages,
+malformed responses, semantic rejection, changed evidence, corruption and uncertain
+ownership cannot grant an attempt. Reuse completed configured and architecture
+checkpoints; rerun only eligible failed roles in the same session. Response slots
+and the sole correction remain consumed. Keep every original result/failure,
+recovery charge and activation receipt. Follow returned session_file and resume.
+Usage recovery retains its separate allowance; a usage-retried cycle cannot use
+this infrastructure recovery. Neither path grants another code-review cycle or a
+sixth cycle. Report allocations, dispatched/reused roles, architecture accounting,
+infrastructure recoveries and unresolved launch states separately.
 
-An untouched reservation or initialized session with no execution receives normal
-initial-launch guidance, including the fifth allocated cycle. Reading `next` never
-consumes recovery. If delegation was interrupted before initialization and its
-abandonment is established, explicitly use `cycle-recover` to fence that unused
-reservation. A drained zero-dispatch failure receives recovery guidance only when
-the entire cycle and both allowances are eligible. Exhausted or ineligible recovery
-reports a limitation and the next permitted allocation, or the five-cycle stop.
-
-Allow at most **one prelaunch recovery per cycle and two per run**. The command
-retains the original allocation, failure results and an immutable session snapshot;
-it consumes a separate infrastructure recovery allowance and keeps the same cycle
-number. Follow its returned `session_file` and `resume`: an initialized session with
-identical head/base/tree, engineering scope, reviewer order and scope/rules text
-resumes with `--resume`; changed evidence or an unused reservation gets a fresh
-session while the old path is fenced. A repeated prelaunch failure requires a
-visible limitation when that allowance is exhausted; do not silently resume it or
-reset counters. Exact-evidence interruption after dispatch still follows ordinary
-session resume. Usage retries remain separately bounded. A usage-retried cycle is
-ineligible for prelaunch recovery because its earlier exhausted attempt dispatched,
-even if the replacement attempt did not. Preserve that failure and use the next
-allowed cycle, or report the exhausted allocation cap. Neither path supplies final-tree
-coverage or permits a sixth cycle. Report allocated cycles, cycles with dispatch
-intent, uncertain launch states and infrastructure recoveries separately.
+An untouched reservation receives ordinary initial launch guidance. A pending
+recovery activation requires reconciliation. Interruption closes launches and
+drains every worker; completed checkpoints survive exact-evidence resume.
 
 Recovered sessions and replacement reservations require an immutable activation
 receipt written only after the recovery charge and replacement binding are durable.
@@ -88,8 +76,7 @@ Record generated review-slot/worker/CI-wait scheduling, draft/ready transitions 
 publication receipts through `run_state.py operational` using [typed run history](run-record.md).
 Do not append those generated status notes to governing instruction files. Retain
 all original user instructions and any new engineering constraints as governing.
-Before refreshing preparation, export a new `preparation-history` capture and
-recollect live PR metadata. Operational refresh uses zero preparation model calls
+Before refreshing preparation, recollect live PR metadata and use the owned [refresh helper](operational-refresh.md), which captures typed run history itself. Operational refresh uses zero preparation model calls
 when governing evidence is unchanged; all review, publication and CI gates still apply.
 
 After each push, start exactly one `python3 PLUGIN_ROOT/runtime/dk-pr-iter/scripts/ci_wait.py --pr PR_URL --head EXACT_SHA` process and save its final JSON outside the repository. Use the same waiter for CI observation on resume or at completion when no push occurred in the current turn. In `exec_command`, yield after about 30 seconds. If it returns a process `session_id`, keep that process running and call `write_stdin` with empty input and `yield_time_ms` near 60000 until it exits; a tool yield is not a CI timeout. The waiter prints compact progress to stderr and polls GitHub internally. Do not run `gh pr checks`, Actions run queries, a second waiter, or a browser search to monitor that head while it is running. Read the saved JSON after exit; it reports `success`, `known_flakes`, `accepted_exceptions`, `failure`, `timeout`, `no_checks`, or `head_changed`, retaining `raw_result` for terminal CI decisions. It settles pending checks before classifying red CI. The shared policy refreshes issue state and verifies every failed test and step against exact head/attempt evidence; unknown failures trigger bounded `$dk-flaky-tests` discovery once per unchanged head/failure fingerprint and are reevaluated. Accept `success` or freshly verified `known_flakes` / `accepted_exceptions`. Report automatic-only acceptance as “CI red; accepted known flakes” with issue links, and configured acceptance as “CI red; accepted configured exceptions” with matcher IDs, reasons, scopes and config evidence. Read its `blockers`, discovery limits, and missing evidence. The waiter never reruns checks or starts a review cycle. Treat timeout and no-checks as unresolved CI evidence, not success. Query individual jobs only after a terminal result requires diagnosis or rerun eligibility. On failure, give diagnosis and any PR-related repair to a **separate agent**. Allow at most five targeted repair attempts per review cycle, each followed by a push and fresh CI wait. Use cycle zero for CI after initial thread fixes. CI repairs do not consume review cycles.
@@ -97,3 +84,14 @@ After each push, start exactly one `python3 PLUGIN_ROOT/runtime/dk-pr-iter/scrip
 For a likely unrelated transient Actions failure, use `dk.py --invocation INVOCATION_FILE --pr PR_URL publication-actions ci-rerun prepare --head SHA --run-record RUN_RECORD --cycle N --run-id ID --attempt ATTEMPT`, then `publication-actions ci-rerun publish --operation FILE`. The helper validates the failed attempt and unchanged head, reserves the existing three-per-head budget, and requires observation of the new attempt. Follow its typed diagnostic action if blocked, then run the existing CI waiter. Engineering diagnosis still determines whether a failure is eligible; never rerun broad workflows as a fallback.
 
 Use [dk-flaky-tests](../../dk-flaky-tests/procedure.md) for shared discovery, listing, synchronization, and issue-backed CI policy. Automatic acceptance requires verified entries linked to currently open issues. Explicit test or pipeline exceptions configured with [dk-config](../../dk-config/references/ci-exceptions.md) provide a separate user-authorized path without issue proof. Explicit matching issue proof or matching issue plus same-commit/job named-test fail→pass evidence can activate an entry. Absent a matching explicit exception, closed or inaccessible issues, unsupported providers/output, missing logs, mixed unknown failures, and changed signatures remain blocking. An automatic known flake cannot exempt an entire job; only an explicit matching pipeline exception can do so. Recheck linked issues at every CI decision and completion gate; reopening requires fresh verification. Legacy `run_state.py flaky` commands remain evidence only. See [run record details](run-record.md) for compatibility and recovery.
+
+CI observation persists one identity/deadline for the exact head and check-attempt
+set. The default window is 30 minutes, with one automatic 30-minute extension
+while checks remain pending and a visible ci_deadline_extended event. Interruption,
+restart and completion checks preserve remaining time and extension usage. After
+the extension expires, report the exact pending checks and stop dependent work.
+A new head or a verified rerun may open a new window; pass the verified
+ci-rerun publication file with `ci_wait.py --rerun-operation FILE`. Existing rerun
+limits remain. Permission failures surface immediately and persist; repair access
+before explicitly using --retry-denied. Never start duplicate observers or treat
+pending/inaccessible checks as success.

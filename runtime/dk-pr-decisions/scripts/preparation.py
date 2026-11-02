@@ -23,7 +23,7 @@ from shared import architecture
 from shared.preparation_views import model_view
 from shared import agreement_binding
 
-VERSION = 3
+VERSION = 4
 DIMENSIONS = ('correctness', 'remediation_depth', 'performance', 'compatibility', 'complexity')
 EVIDENCE = ('issues', 'feedback', 'choices', 'user_instructions', 'run_history',
             'questions', 'prior_preparation', 'rules', 'production', 'tests', 'ci', 'reviewers')
@@ -133,6 +133,9 @@ def collect(manifest_path, *, on_call=None):
                     or category in {'reviewers', 'prior_preparation', 'architecture', 'architecture-exceptions'}
                     or category in {'production', 'tests'} and
                     Path(source['path']).is_relative_to(Path(context['checkout'])))
+        if category == 'run_history':
+            value = read(source['path'])
+            captured |= isinstance(value, dict) and value.get('preparation_history_version') == 1
         if category == 'feedback':
             value = read(source['path'])
             captured |= value.get('complete') is True
@@ -363,6 +366,9 @@ def policy():
         architecture.PROCEDURE.parent.parent / 'dk-architecture-review/procedure.md',
         architecture.PROCEDURE.parent.parent / 'dk-architecture-enforcer/procedure.md',
         Path(agreement_binding.__file__),
+        Path(__file__).resolve().parents[2] / 'shared/cleanup_history.py',
+        architecture.PROCEDURE.parent.parent / 'dk-architecture-review/evaluator.md',
+        architecture.PROCEDURE.parent.parent / 'dk-architecture-enforcer/evaluator.md',
         Path(__file__).with_name('decision_storage.py'), Path(__file__).with_name('decisions.py'),
         Path(__file__).resolve().parents[1] / 'references/preparation.md',
         Path(__file__).resolve().parents[1] / 'references/preparation-contract.md',
@@ -414,6 +420,20 @@ def reassessment_prompt(prompt, parent_path, parent, paths, changed_sources, sel
 
 
 def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=None, full_analysis=False):
+    from shared.workflow_timings import span
+    manifest = read(manifest_path)
+    context = read(Path(manifest_path).resolve().parent / manifest['context'])
+    with span(context['url'], 'preparation') as timing:
+        result = _prepare(manifest_path, output_dir, analyzer,
+                          previous_preparation=previous_preparation, full_analysis=full_analysis)
+        timing['reused'] = result['refresh']['model_call_count'] == 0
+        # Injected offline analyzers bypass transport accounting.
+        if analyzer is not None:
+            timing['model_calls'] = result['refresh']['model_call_count']
+        return result
+
+
+def _prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=None, full_analysis=False):
     calls = 0
     def count():
         nonlocal calls
@@ -705,7 +725,7 @@ def prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=No
 def validate(artifact, context, decisions, *, require_ready=True, check_sources=True):
     if check_sources:
         agreement_binding.check(decisions)
-    if not isinstance(artifact, dict) or artifact.get('preparation_version') not in {1, 2, VERSION}:
+    if not isinstance(artifact, dict) or artifact.get('preparation_version') not in {1, 2, 3, VERSION}:
         raise ValueError('unsupported preparation artifact')
     if check_sources and artifact['preparation_version'] < VERSION:
         raise ValueError('historical preparation cannot authorize current work; refresh preparation')

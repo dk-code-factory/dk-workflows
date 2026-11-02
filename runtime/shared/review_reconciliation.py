@@ -66,9 +66,12 @@ def reviewer_order(sources, prepared, preparation_api, *, reviewed_order=None):
     return order
 
 
-def snapshot(record, head, assessment_path, api, *, live=False, version=2, precheck=None):
+def snapshot(record, head, assessment_path, api, *, live=False, version=None, precheck=None):
     prepared = api.work_gate(record, head)
     reference, result = api.current_review(record, prepared)
+    if version is None:
+        version = 3 if prepared.get('preparation_version', 1) >= 4 else 2
+    exact = version == 3 and engineering_id(prepared) == result.get('engineering_id')
     legacy = result['version'] == 1
     if legacy and precheck is None:
         raise ValueError('cleanup reconciliation requires version-2 review provenance')
@@ -108,7 +111,7 @@ def snapshot(record, head, assessment_path, api, *, live=False, version=2, prech
     strict_old, strict_current = strict_sources(old_sources), strict_sources(sources)
     restatements, targets = {}, []
     decisions_equal = without_head(old_decisions) == without_head(decisions)
-    if version == 2:
+    if version >= 2:
         try:
             restatements, targets = decision_restatements.index(
                 old_decisions, decisions, sources, original['analysis'])
@@ -124,8 +127,9 @@ def snapshot(record, head, assessment_path, api, *, live=False, version=2, prech
                    if original['identity'][key] != current['identity'][key]]
     if not decisions_equal: differences.append('Decisions')
     if old_order != order: differences.append('ordered reviewers')
-    if original['reviewers'] != current['reviewers']: differences.append('reviewer bindings')
-    if strict_old != strict_current: differences.append('issue/choice/instruction/rule fingerprints')
+    if not exact:
+        if original['reviewers'] != current['reviewers']: differences.append('reviewer bindings')
+        if strict_old != strict_current: differences.append('issue/choice/instruction/rule fingerprints')
     if differences:
         raise NotEquivalent('cleanup reconciliation requires unchanged identities; changed: ' + ', '.join(differences))
     checkout = context['checkout']
@@ -177,8 +181,18 @@ def snapshot(record, head, assessment_path, api, *, live=False, version=2, prech
                'evidence': index, 'fields': fields, 'changed_sources': changed}
     if not legacy:
         binding.update(attempt=registered['attempt'], session_file=registered['session_file'])
-    if version == 2:
-        binding.update(comparison_version=2, decision_additions=restatements, decision_targets=targets)
+    if version >= 2:
+        binding.update(comparison_version=version, decision_additions=restatements, decision_targets=targets)
+    if version == 3:
+        binding.update(proof_kind='exact_identity' if exact else 'semantic_judgment',
+            engineering_identity={'original': engineering_id(original), 'current': engineering_id(current)})
+        from shared import architecture
+        binding['architecture_identity'] = {
+            'tree': tree, 'baseline': binding['base'], 'catalog': current['architecture']['catalog'],
+            'approvals': current['architecture']['exceptions'],
+            'scope': architecture.load(current['architecture']['packet'])['scope'],
+            'governing': {key: ref['fingerprint'] for key, ref in current['architecture']['governing'].items()},
+            'engineering_id': engineering_id(current)}
     if precheck is not None:
         binding['purpose'] = 'cleanup_precheck'
     return binding, original, current, context
@@ -186,7 +200,7 @@ def snapshot(record, head, assessment_path, api, *, live=False, version=2, prech
 
 def validate_comparison(value, binding):
     categories = [('fields', binding['fields']), ('sources', binding['changed_sources'])]
-    if binding.get('comparison_version') == 2:
+    if binding.get('comparison_version', 1) >= 2:
         categories.append(('decisions', list(binding['decision_additions'])))
     if (not isinstance(value, dict) or set(value) != {'equivalent', 'rationale'} | {key for key, _ in categories}
             or type(value['equivalent']) is not bool
@@ -243,11 +257,25 @@ def validate_comparison(value, binding):
 def load(item, binding, *, require_equivalent=True):
     value = read(Path(item['path']), {})
     if (not isinstance(value, dict) or coverage.digest(value) != item['sha256']
-            or value.get('reconciliation_version') not in {1, 2}
+            or value.get('reconciliation_version') not in {1, 2, 3}
             or value.get('reconciliation_version') != binding.get('comparison_version', 1)
             or value.get('binding') != binding):
         raise ValueError('reconciliation evidence changed or its run/cycle/preparation binding is stale')
     validate_comparison(value.get('comparison'), binding)
+    if binding.get('comparison_version') == 3:
+        proof = binding.get('engineering_identity', {})
+        if binding.get('proof_kind') == 'exact_identity':
+            if proof.get('original') != proof.get('current') or value['comparison'] != exact_comparison(binding):
+                raise ValueError('deterministic reconciliation proof differs')
+        elif binding.get('proof_kind') != 'semantic_judgment':
+            raise ValueError('unknown reconciliation proof kind')
+        if value.get('architecture_review'):
+            original_review = coverage.load(binding['review_artifact'])['result'].get('architecture_review')
+            if value['architecture_review'] == original_review:
+                expected = {'kind': 'validated_coverage', 'review': original_review, **binding['architecture_identity']}
+                if (value.get('architecture_attestation') != expected
+                        or proof.get('original') != proof.get('current')):
+                    raise ValueError('architecture reuse attestation differs from exact governing evidence')
     if require_equivalent and not value['comparison']['equivalent']:
         raise ValueError('preparations are not semantically equivalent: ' + value['comparison']['rationale'])
     return value
@@ -265,7 +293,8 @@ def receipt(item, result, *, reused):
     return {'status': 'reconciled', 'reconciliation': item, 'reused_reconciliation': reused,
             'reviewed_head': result['head'], 'reviewed_tree': result['tree'],
             'executed_reviewers': [],
-            'retained_reviewers': result['result']['executed_reviewers'] + result['result']['reused_reviewers']}
+            'retained_reviewers': result['result']['executed_reviewers'] + result['result']['reused_reviewers'],
+            'proof_kind': read(Path(item['path']), {}).get('binding', {}).get('proof_kind', 'semantic_judgment')}
 
 
 def comparison_identity(binding):
@@ -279,7 +308,7 @@ def comparison_identity(binding):
     evidence = {key: {field: value for field, value in source.items() if field != 'path'}
                 for key, source in binding['evidence'].items()}
     identity = {key: value for key, value in binding.items()
-                if key not in {'comparison_version', 'decision_additions', 'decision_targets'}}
+                if key not in {'comparison_version', 'decision_additions', 'decision_targets', 'proof_kind', 'engineering_identity', 'architecture_identity'}}
     return coverage.digest({**identity, 'assessment': assessment, 'evidence': evidence})
 
 
@@ -288,12 +317,19 @@ def retained_comparison(record, binding, *, collection='review_reconciliations')
     selected = None
     for item in record.get(collection, []):
         if item.get('current_preparation_id') != binding['current_preparation_id']:
-            continue
+            prior = next((p for p in record.get('preparations', [])
+                          if p['id'] == item.get('current_preparation_id')), {})
+            if prior.get('engineering_id') != binding.get('engineering_identity', {}).get('current'):
+                continue
         saved = read(Path(item['path']), {})
         if not isinstance(saved, dict) or not isinstance(saved.get('binding'), dict):
             raise ValueError('reconciliation evidence is missing or malformed')
         saved = load(item, saved['binding'], require_equivalent=False)
-        if comparison_identity(saved['binding']) != comparison_identity(binding):
+        same_engineering = (binding.get('engineering_identity') is not None
+            and saved['binding'].get('engineering_identity') == binding['engineering_identity']
+            and all(saved['binding'].get(key) == binding.get(key) for key in
+                ('iteration_run_id', 'cycle', 'attempt', 'review_artifact', 'purpose', 'final_head')))
+        if comparison_identity(saved['binding']) != comparison_identity(binding) and not same_engineering:
             continue
         if (not saved['comparison']['equivalent']
                 or (selected is None and saved['binding'] == binding)):
@@ -311,6 +347,26 @@ def diagnostic_identity(binding, original, current):
                             'purpose': binding.get('purpose', 'review_reconciliation'),
                             'review_artifact': binding['review_artifact']['sha256'],
                             'original': engineering_id(original), 'current': engineering_id(current)})
+
+
+def exact_comparison(binding):
+    proof = binding.get('engineering_identity', {})
+    if binding.get('proof_kind') != 'exact_identity' or not proof.get('original') or proof['original'] != proof.get('current'):
+        raise ValueError('exact cleanup proof requires equal computed engineering identities')
+    def verdict(key, category):
+        refs = (['original/' + key, 'current/' + key] if category == 'sources'
+                else ['original/analysis', 'current/analysis'])
+        refs = [ref for ref in refs if ref in binding['evidence']]
+        return {'verdict': 'equivalent', 'rationale': 'Computed engineering identity is unchanged.',
+                'evidence': refs}
+    value = {'equivalent': True, 'rationale': 'Exact engineering identity and deterministic guards verified.',
+             'fields': {key: verdict(key, 'fields') for key in binding['fields']},
+             'sources': {key: verdict(key, 'sources') for key in binding['changed_sources']},
+             'decisions': {}}
+    if binding.get('decision_additions'):
+        raise ValueError('exact identity cannot include new Decisions')
+    validate_comparison(value, binding)
+    return value
 
 
 def reconcile(record_path, head, assessment_path, api, *, precheck=None):
@@ -358,10 +414,10 @@ def reconcile(record_path, head, assessment_path, api, *, precheck=None):
         json.dumps({'binding': binding,
                     'required_keys': {'fields': binding['fields'], 'sources': binding['changed_sources'],
                                       **({'decisions': list(binding['decision_additions'])}
-                                         if binding.get('comparison_version') == 2 else {})},
+                                         if binding.get('comparison_version', 1) >= 2 else {})},
                     'original_analysis': original['analysis'],
                     'current_analysis': current['analysis']}, ensure_ascii=True))
-    if binding.get('comparison_version') == 2:
+    if binding.get('comparison_version', 1) >= 2:
         prompt += ('\nAlso return decisions:{ADDITION:VERDICT} for every indexed decision_additions entry. '
                    'Each decision verdict additionally requires maps_to (one exact decision_targets reference) '
                    'and discussion_sources (all source URLs for the addition). Include maps_to, '
@@ -371,7 +427,9 @@ def reconcile(record_path, head, assessment_path, api, *, precheck=None):
                    'Assess worker instructions and completion criteria independently for unchanged engineering meaning. '
                    'Decisions-backed choices may change head only when their content is that preparation context. '
                    'Raw fingerprints remain provenance and must not be rewritten.')
-    comparison = execute_json(prompt, context['checkout'],
+    from shared.workflow_timings import span
+    with span(context['url'], 'cleanup-comparison', reused=binding.get('proof_kind') == 'exact_identity'):
+        comparison = exact_comparison(binding) if binding.get('proof_kind') == 'exact_identity' else execute_json(prompt, context['checkout'],
                               validate=lambda value: validate_comparison(value, binding),
                               diagnostic_scope={'operation': 'cleanup-comparison',
                                                 'evidence': diagnostic_identity(binding, original, current)},
@@ -381,8 +439,17 @@ def reconcile(record_path, head, assessment_path, api, *, precheck=None):
         from shared import architecture
         raw = api.preparation_api.read(api.preparation_api.source_path(current, 'decisions'))
         decisions = raw.get('data', raw)
-        architecture_review = architecture.review(current['architecture'], context, decisions)
-        architecture.verify_review(architecture_review, current['architecture'], context, decisions)
+        original_review = coverage.load(binding['review_artifact'])['result'].get('architecture_review', {})
+        try:
+            if engineering_id(original) != engineering_id(current):
+                raise ValueError('Architecture governing evidence requires fresh judgment')
+            architecture.verify_review(original_review, current['architecture'], context, decisions)
+            architecture_review = original_review
+        except (ValueError, OSError, KeyError):
+            if binding.get('proof_kind') == 'exact_identity':
+                raise ValueError('exact cleanup identity lacks intact architecture coverage')
+            architecture_review = architecture.review(current['architecture'], context, decisions)
+            architecture.verify_review(architecture_review, current['architecture'], context, decisions)
     # No state lock is held during the model call. Recheck live and retained
     # evidence, then recheck again under the state lock before registration.
     after, _, _, _ = capture(read(record_path, {}), live=True)
@@ -392,6 +459,10 @@ def reconcile(record_path, head, assessment_path, api, *, precheck=None):
              'binding': binding, 'comparison': comparison}
     if architecture_review:
         value['architecture_review'] = architecture_review
+        if (binding.get('comparison_version') == 3 and
+                architecture_review == coverage.load(binding['review_artifact'])['result'].get('architecture_review')):
+            value['architecture_attestation'] = {'kind': 'validated_coverage', 'review': architecture_review,
+                                                  **binding['architecture_identity']}
     fingerprint = coverage.digest(value)
     directory = 'cleanup-prechecks' if precheck else 'review-reconciliations'
     path = coverage.storage_path(record_path.parent / directory / (fingerprint + '.json'), context)
@@ -462,7 +533,7 @@ def coverage_for(record, prepared, api, *, assessment=None, assessment_path=None
     # covers them, so an unchanged-head operational refresh can retain coverage.
     from shared.engineering_identity import compatible_reference
     if (compatible_reference(result, prepared)
-            and (result.get('version') != 3 or result['head'] == prepared['identity']['head_sha'])
+            and (result.get('version', 1) < 3 or result['head'] == prepared['identity']['head_sha'])
             and result['scope'] == coverage.scope(prepared)):
         return None
     raise ValueError('final tree or scope lacks review coverage; reconcile after cleanup or review within the existing budget')

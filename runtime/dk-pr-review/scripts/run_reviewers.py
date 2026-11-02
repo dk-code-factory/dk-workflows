@@ -25,6 +25,7 @@ from validate_result import added_lines, validate as validate_findings, validate
 from reviewer_prompts import preparation_instructions, source_files
 from stats_capture import for_iteration
 from shared.reviewer_telemetry import capture, transport
+from shared.role_failures import role_failure
 from shared import bindings, architecture
 from shared.runtime_bundles import retained_binding, retain
 from shared.review_sessions import Session
@@ -52,7 +53,9 @@ def build_skill_prompt(skill, handoff_path, contract='git-diff-v1'):
     prompt = (f'Apply the installed skill at {procedure} to the pinned PR diff. '
               f'Read the {contract} handoff at {handoff_path}, including its patch, scope, '
               'decisions, rules, and architecture_packet reference/fingerprint when supplied. '
-              'Pass architecture delivery requirements to any nested agents. '
+              'Use nested_architecture_packets for each declared nested role; read its recipient-specific packet. '
+              'Undeclared recipients or expanded scope require fresh delivery from the coordinator. '
+              'Never substitute a parent packet or run packet creation inside the sandbox. '
               'Follow decision_instructions: use active entries in the '
               'unified decisions array; superseded entries are history, not current constraints. '
               'For a legacy record without that array, use its live, discussion, and local choices. '
@@ -87,26 +90,17 @@ def run_skill_reviewer(name, skill, handoff_path, checkout):
         output = Path(temp)/'result.json'
         contract = bindings.normalize(name).get('handoff_contract', 'git-diff-v1')
         prompt = build_skill_prompt(skill, handoff_path, contract)
-        original_prompt = prompt
-        changed = added_lines(Path(json.loads(Path(handoff_path).read_text())['patch']).read_text())
-        for attempt in range(2):
-            output.unlink(missing_ok=True)
-            try:
-                raw = invoke(name, handoff_path, checkout, prompt, attempt=attempt)
-            except ProviderExhausted as exc:
-                return {'status': 'tokens_exhausted', 'findings': [], 'message': str(exc)}
-            try:
-                result = json.loads(raw)
-                return validate_response(result, changed)
-            except (json.JSONDecodeError, ValueError) as exc:
-                if attempt:
-                    raise ValueError(f'{name} reviewer output failed validation after correction: {exc}') from exc
-                prompt = original_prompt + '\n\nCorrection:\n' + (f'Correct your review output for the same pinned handoff at {handoff_path}. '
-                          f'The validator rejected your previous response: {exc}. '
-                          f'Previous response: {raw[:12000]}. '
-                          'Recheck the patch and findings. Return the full corrected JSON object '
-                          'with only a findings array; withdraw unsupported findings. '
-                          'If you cannot complete the review, return status incomplete with a reason.')
+        handoff = json.loads(Path(handoff_path).read_text())
+        changed = added_lines(Path(handoff['patch']).read_text())
+        from shared.executors import execute_json
+        try:
+            return execute_json(prompt, checkout, validate=lambda value: validate_response(value, changed),
+                executor=lambda text, root, attempt=0: invoke(name, handoff_path, root, text, attempt=attempt),
+                diagnostic_scope={'operation': 'configured-review',
+                    'evidence': handoff.get('response_budget', str(handoff_path))},
+                inherit_architecture=False)
+        except ProviderExhausted as exc:
+            return {'status': 'tokens_exhausted', 'findings': [], 'message': str(exc)}
 
 
 def run(args, cwd=None):
@@ -233,6 +227,10 @@ def validate_descriptor(value):
     if (value.get('execution') and contract !=
             value['execution']['binding'].get('handoff_contract', 'git-diff-v1')):
         raise ValueError('reviewer descriptor handoff contract disagrees with its binding')
+    if 'nested_review_roles' in value:
+        bindings.validate_nested_roles(value['nested_review_roles'])
+    if value.get('execution') and value.get('nested_review_roles', []) != bindings.nested_roles(value['execution']['binding']):
+        raise ValueError('reviewer nested role declarations differ from binding')
     for source in value['sources']:
         if (not isinstance(source, dict) or not Path(source.get('path', '')).is_file()
                 or hashlib.sha256(Path(source['path']).read_bytes()).hexdigest() != source.get('sha256')):
@@ -285,6 +283,7 @@ def describe_reviewer(name):
         'execution': resolved if 'bundle_digest' in resolved or resolved.get('bundles') else None,
         'effective_prompt': json.dumps(resolved, sort_keys=True) + '\n' + prompt,
         'aspects': ['selected provider procedures'],
+        **({'nested_review_roles': bindings.nested_roles(name)} if bindings.nested_roles(name) else {}),
         **({'handoff_contract': contract} if contract != 'git-diff-v1' else {})})
 
 
@@ -346,14 +345,18 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
     executed, reused = [], []
     architecture_result = None
     architecture_findings = []
+    architecture_accounting = {'executed': [], 'reused': [], 'failed': [], 'exhausted': []}
+    role_failures = []
     handoff_references = []
+    delivery_checkouts = set()
     def outcome(value):
         typed = ('completed' if value.get('complete') else 'guard_failed' if value.get('guard_failure')
-                 else 'provider_failed' if failed_reviewers else 'usage_exhausted')
+                 else 'provider_failed' if failed_reviewers or architecture_accounting['failed'] else 'usage_exhausted')
         return {**value, 'outcome': typed, **({'failed_reviewers': failed_reviewers} if failed_reviewers else {}),
                 **({'architecture_review': architecture_result} if architecture_result else {}),
                 **({'architecture_findings': architecture_findings} if architecture_findings else {}),
-                'executed_reviewers': executed, 'reused_reviewers': reused}
+                'executed_reviewers': executed, 'reused_reviewers': reused,
+                'architecture_accounting': architecture_accounting, 'role_failures': role_failures}
 
     def unchanged():
         preparation_api.validate(preparation, context, decisions)
@@ -363,6 +366,10 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
         if (run(['git', 'rev-parse', 'HEAD'], checkout).strip() != context['head_sha']
                 or run(['git', 'status', '--porcelain=v1'], checkout).strip()):
             raise RuntimeError('reviewer changed isolated checkout')
+        for delivered_checkout in delivery_checkouts:
+            if (run(['git', 'rev-parse', 'HEAD'], delivered_checkout).strip() != context['head_sha']
+                    or run(['git', 'status', '--porcelain=v1'], delivered_checkout).strip()):
+                raise RuntimeError('retained reviewer delivery checkout changed')
 
     # Validate the entire cohort before any launch, including cached findings.
     # A bad later checkpoint must never permit an earlier missing provider to run.
@@ -381,6 +388,9 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             if cached is not None:
                 validate_findings(cached, lines)
                 results[name] = (cached, None)
+                from shared.workflow_timings import span
+                with span(context['url'], 'reviewer:' + name, reused=True):
+                    pass
             else:
                 jobs[name] = {'skill': skill, 'handoff': {**handoff,
                     'reviewer_addendum': preparation['analysis']['reviewer_addenda'][name]}}
@@ -390,12 +400,36 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                     jobs[name]['handoff']['architecture_packet'] = architecture.handoff(
                         preparation['architecture'], context, name,
                         architecture.load(preparation['architecture']['packet'])['paths'])
+                    jobs[name]['handoff']['nested_architecture_packets'] = {
+                        role: architecture.handoff(preparation['architecture'], context, role,
+                            architecture.load(preparation['architecture']['packet'])['paths'])
+                        for role in preparation['reviewers'][name].get('nested_review_roles', [])}
             unchanged()
         except Exception as exc:
             if stats and cached is None:
                 stats.safe(stats.failure, name, str(exc))
             return outcome({'complete': False, 'failed_reviewer': name, 'reason': str(exc),
                             'guard_failure': True, 'findings': [], 'skipped_reviewers': []})
+
+    if preparation.get('preparation_version', 1) >= 4:
+        try:
+            cached = session.cached('architecture-review') if session else None
+            if cached is not None:
+                architecture.verify_review(cached, preparation['architecture'], context, decisions)
+                results['architecture-review'] = (cached, None)
+                from shared.workflow_timings import span
+                with span(context['url'], 'architecture', reused=True):
+                    pass
+            else:
+                packet = architecture.handoff(preparation['architecture'], context, 'dk-architecture-review',
+                    architecture.load(preparation['architecture']['packet'])['paths'])
+                jobs['architecture-review'] = {'handoff': {
+                    'contract': 'architecture-evaluator-v1', 'architecture_packet': packet,
+                    'architecture': preparation['architecture'], 'context': context, 'decisions': decisions}}
+            unchanged()
+        except Exception as exc:
+            return outcome({'complete': False, 'guard_failure': True, 'reason': str(exc),
+                            'findings': [], 'skipped_reviewers': []})
 
     # Keep these immutable files with the private evidence, including on interruption.
     if jobs:
@@ -412,8 +446,26 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             if job['handoff']['contract'] == 'git-diff-v2':
                 job['handoff'].update(references)
             job['path'] = directory / f'{index}.json'
-            write(job['path'], job['handoff'])
-            job['stats'] = stats.fork() if stats else None
+            if session:
+                job['handoff']['response_budget'] = session.id + ':' + name
+                job['path'] = session.delivery(name, job['path'], job['handoff'])
+                job['handoff'] = preparation_api.read(job['path'])
+                if job['handoff']['contract'] == 'git-diff-v2':
+                    for field in ('full_preparation', 'full_decisions'):
+                        handoff_references.append(job['handoff'][field])
+                if preparation.get('architecture'):
+                    architecture.validate_packet(job['handoff']['architecture_packet'], checkout,
+                        agent='dk-architecture-review' if name == 'architecture-review' else name)
+                    for role, packet in job['handoff'].get('nested_architecture_packets', {}).items():
+                        architecture.validate_packet(packet, checkout, agent=role)
+            else:
+                write(job['path'], job['handoff'])
+                job['path'].chmod(0o400)
+            handoff_references.append({'path': str(job['path']), 'sha256': preparation_api.file_hash(job['path'])})
+            job['checkout'] = Path(job['handoff']['context']['checkout'] if name == 'architecture-review'
+                                   else job['handoff']['checkout'])
+            delivery_checkouts.add(job['checkout'])
+            job['stats'] = stats.fork() if stats and name != 'architecture-review' else None
             job['finished'] = Event()
             if session:
                 session.record(name, 'running')
@@ -438,7 +490,11 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                         checking = True
                         session.launch(name)
                         checking = False
-                    result = run_skill_reviewer(provider_map[name], job['skill'], job['path'], checkout)
+                    if name == 'architecture-review':
+                        result = architecture.review(job['handoff']['architecture'], job['handoff']['context'],
+                            job['handoff']['decisions'], recipient_packet=job['handoff']['architecture_packet'])
+                    else:
+                        result = run_skill_reviewer(provider_map[name], job['skill'], job['path'], job['checkout'])
                 finally:
                     if worker_stats:
                         job['duration_seconds'] = time.monotonic() - worker_stats.start
@@ -451,7 +507,12 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                 unchanged()
                 checking = False
                 shared_guard = False
-                validate_response(result, lines)
+                if name == 'architecture-review':
+                    data = architecture.load(result)['result']
+                    if not data['complete']:
+                        raise ValueError('Architecture review incomplete: ' + data['reason'])
+                else:
+                    validate_response(result, lines)
                 status = {'tokens_exhausted': 'exhausted', 'incomplete': 'incomplete'}.get(
                     result.get('status'), 'completed')
                 if session:
@@ -462,6 +523,14 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                     worker_stats.safe(worker_stats.finish, status, result, result.get('message'),
                                       duration_seconds=job['duration_seconds'])
             return result, None
+        except ProviderCancelled as exc:
+            raise KeyboardInterrupt() from exc
+        except ProviderExhausted as exc:
+            if name != 'architecture-review':
+                raise
+            if session:
+                session.record(name, 'exhausted', reason=str(exc))
+            return {'status': 'tokens_exhausted', 'message': str(exc)}, None
         except Exception as exc:
             with checkpoint_lock:
                 guard_failure = checking
@@ -480,7 +549,8 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                     worker_stats.safe(worker_stats.finish, 'failed', reason=str(exc),
                                       duration_seconds=job['duration_seconds'])
             return None, {'reviewer': name, 'status': 'failed', 'reason': str(exc),
-                          'guard_failure': guard_failure, 'shared_guard': shared_guard}
+                          'guard_failure': guard_failure, 'shared_guard': shared_guard,
+                          'diagnostic': role_failure(exc, guard_failure or shared_guard)}
 
     def execute(name):
         job = jobs[name]
@@ -489,7 +559,10 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                 return None, None
             job['started'] = True
         try:
-            return run_reviewer(name)
+            from shared.workflow_timings import span
+            with span(context['url'], 'architecture' if name == 'architecture-review' else 'reviewer:' + name,
+                      retry=bool(session and session.invocation > 1)):
+                return run_reviewer(name)
         finally:
             job['finished'].set()
 
@@ -526,7 +599,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                             # Workers finalize known reviewer-specific storage statistics;
                             # interrupted unfinished provider attempts remain unknown.
                             if session:
-                                session.record(name, 'failed', reason=failure['reason'])
+                                session.record(name, 'failed', reason=failure['reason'], diagnostic=failure['diagnostic'])
                             worker_stats = jobs[name]['stats']
                             if worker_stats and not failure['guard_failure']:
                                 worker_stats.safe(worker_stats.finish, 'failed', reason=failure['reason'],
@@ -561,6 +634,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
     for name in reviewers:
         result, failure = results[name]
         if failure:
+            role_failures.append({'role': name, **failure})
             if failure['guard_failure']:
                 guard_failures.append(failure)
             else:
@@ -583,26 +657,21 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
         (executed if name in jobs else reused).append(name)
 
     preparation_api.validate(preparation, context, decisions)
-    if preparation.get('preparation_version', 1) >= 3 and not guard_failures:
-        try:
-            if session:
-                session.launch('architecture-review')
-            architecture_result = architecture.review(preparation['architecture'], context, decisions)
-            architecture_data = architecture.load(architecture_result)['result']
-            if not architecture_data['complete']:
-                return outcome({'complete': False, 'guard_failure': True,
-                    'reason': 'Architecture review incomplete: ' + architecture_data['reason'],
-                    'findings': findings, 'skipped_reviewers': skipped_reviewers})
-            architecture_findings = [r for r in architecture_data['coverage'] if r['status'] == 'violation']
-        except ProviderExhausted as exc:
-            return outcome({'complete': False, 'reason': 'Architecture review usage exhausted: ' + str(exc),
+    if preparation.get('preparation_version', 1) >= 4:
+        result, failure = results['architecture-review']
+        if failure:
+            architecture_accounting['failed'].append('architecture-review')
+            role_failures.append({'role': 'architecture-review', **failure})
+            guard_failures.append(failure)
+        elif result.get('status') == 'tokens_exhausted':
+            architecture_accounting['exhausted'].append('architecture-review')
+            return outcome({'complete': False, 'reason': 'Architecture review usage exhausted: ' + result['message'],
                 'findings': findings, 'skipped_reviewers': skipped_reviewers})
-        except ProviderCancelled as exc:
-            raise KeyboardInterrupt() from exc
-        except Exception as exc:
-            return outcome({'complete': False, 'guard_failure': True,
-                'reason': 'Architecture gate failed: ' + str(exc),
-                'findings': findings, 'skipped_reviewers': skipped_reviewers})
+        else:
+            architecture_result = result
+            architecture_findings = [r for r in architecture.load(result)['result']['coverage']
+                                     if r['status'] == 'violation']
+            architecture_accounting['executed' if 'architecture-review' in jobs else 'reused'].append('architecture-review')
     findings.sort(key=lambda x: (('Major', 'Minor', 'Nit').index(x['severity']), x['path'], x['line']))
     if guard_failures or failed_reviewers:
         first = (guard_failures or failed_reviewers)[0]

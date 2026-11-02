@@ -22,3 +22,5 @@ Retain its immutable result in review-session and completion evidence. Unresolve
 violations and missing architecture reviews cannot be waived by accepting a
 configured reviewer's provider failure. Existing publication authorization remains
 unchanged; this role never posts reviews unless separately authorized.
+
+The read-only model receives [the evaluator contract](evaluator.md), not this coordinator procedure. The coordinator owns lifecycle, packet creation, validation and immutable result storage; evaluators must not recursively invoke this workflow.

@@ -39,7 +39,7 @@ _spec.loader.exec_module(preparation_api)
 def preparation_history(record):
     """Export dedicated typed bookkeeping; arbitrary event text still governs."""
     history = copy.deepcopy(record.get('preparation_history', {
-        'preparation_history_version': 1, 'governing': {}, 'operational': {}}))
+        'preparation_history_version': 1, 'source_id': 'iteration-history', 'governing': {}, 'operational': {}}))
     if (not isinstance(history, dict) or type(history.get('preparation_history_version')) is not int
             or history['preparation_history_version'] != 1
             or not isinstance(history.get('governing'), dict)
@@ -63,13 +63,65 @@ def preparation_history(record):
     return history
 
 
+def retain_cleanup(record, value):
+    from shared.cleanup_history import verify
+    from shared import series_assessment
+    verify(value, retained=False)
+    active = record.get('iteration_run', {})
+    prepared = work_gate(record, value['head_sha'], require_ready=False)
+    if (value['run_id'] != active.get('id') or value['preparation_id'] != prepared['preparation_id']
+            or value['engineering_id'] != engineering_id(prepared)):
+        raise ValueError('cleanup record differs from active run and preparation')
+    source = value['artifacts']['preparation']['path']
+    if preparation_api.historical(source) != prepared:
+        raise ValueError('cleanup preparation reference differs')
+    prior = preparation_history(record)['operational'].get('cleanup', [])
+    if any(item['run_id'] == value['run_id'] and item['worker'] != value['worker'] for item in prior):
+        raise ValueError('cleanup worker ownership changed')
+    if value['kind'] != 'handoff':
+        guard = preparation_api.read(value['artifacts']['guard']['path'])
+        if (guard.get('mode') != 'regroup' or guard.get('pr_url') != prepared['identity']['pr_url']
+                or guard.get('base') != prepared['identity']['base_sha']
+                or not guard.get('recovery_ref') or not guard.get('original_tree')):
+            raise ValueError('cleanup prepared guard identity is incomplete')
+        if value['kind'] == 'assessment':
+            assessment = series_assessment.load(value['artifacts']['assessment']['path'],
+                                                preparation_api.context_for(prepared)['checkout'])
+            if (assessment['pr_url'] != prepared['identity']['pr_url']
+                    or value['head_sha'] not in {assessment['reviewed_head'], assessment['final_head']}
+                    or assessment['reviewed_head'] != guard.get('original_head')
+                    or assessment['reviewed_tree'] != guard.get('original_tree')
+                    or assessment['target_tip'] != guard.get('target_tip')):
+                raise ValueError('cleanup assessment differs from guard and preparation')
+        elif guard.get('original_head') != value['head_sha']:
+            raise ValueError('cleanup guard differs from reviewed head')
+    # Mutable guard paths are captured, never made live governing sources.
+    directory = owned(active['workflow_dir']) / 'operational-evidence'
+    directory.mkdir(mode=0o700, exist_ok=True)
+    value = copy.deepcopy(value)
+    for ref in value['artifacts'].values():
+        raw = Path(ref['path']).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != ref['sha256']:
+            raise ValueError('cleanup artifact changed while capturing')
+        target = directory / (ref['sha256'] + '.source')
+        if target.exists() and (target.is_symlink() or target.read_bytes() != raw):
+            raise ValueError('cleanup retained source changed')
+        if not target.exists():
+            atomic_bytes(target, raw)
+            target.chmod(0o400)
+        ref['path'] = str(target)
+    return value
+
+
 def record_operational(record, field, path):
     """Retain one strict operational record and its exact original bytes."""
-    if field not in {'readiness_transitions', 'scheduling', 'publication_receipts'}:
+    if field not in {'readiness_transitions', 'scheduling', 'publication_receipts', 'cleanup'}:
         raise ValueError('unsupported operational record kind')
     raw = Path(path).read_bytes()
     value = json.loads(raw)
-    if not isinstance(value, dict) or preparation_graph.operational_unknown({field: [value]}):
+    from shared.cleanup_history import shape
+    if not isinstance(value, dict) or (not shape(value) if field == 'cleanup' else
+            preparation_graph.operational_unknown({field: [value]})):
         raise ValueError('unknown or malformed operational record; keep it as governing evidence')
     if not isinstance(value.get('head_sha'), str) or not SHA.fullmatch(value['head_sha']):
         raise ValueError('operational record requires a pinned head_sha')
@@ -80,8 +132,19 @@ def record_operational(record, field, path):
             or value.get('outcome') not in {'pending', 'verified', 'not_applied', 'uncertain', 'failed'}):
         raise ValueError('publication receipt requires a supported kind and typed outcome')
     active = record.get('iteration_run', {})
-    if active.get('status') != 'active' or active.get('contract_version') != 2:
+    if active.get('status') != 'active' or active.get('contract_version') != 3:
         raise ValueError('operational record requires an active current-contract run')
+    if field == 'cleanup':
+        original_directory = owned(active['workflow_dir']) / 'operational-evidence'
+        original_directory.mkdir(mode=0o700, exist_ok=True)
+        original = original_directory / (hashlib.sha256(raw).hexdigest() + '.input.json')
+        if original.exists() and (original.is_symlink() or original.read_bytes() != raw):
+            raise ValueError('cleanup input evidence changed')
+        if not original.exists():
+            atomic_bytes(original, raw)
+            original.chmod(0o400)
+        value = retain_cleanup(record, value)
+        raw = json.dumps(value, sort_keys=True).encode()
     history = preparation_history(record)
     fingerprint = hashlib.sha256(raw).hexdigest()
     directory = owned(active['workflow_dir']) / 'operational-evidence'
@@ -109,7 +172,7 @@ def start_run(record, *, resume=False):
     if resume:
         if not active or active['status'] != 'active':
             raise ValueError('no active iteration run to resume')
-        if active.get('contract_version') != 2:
+        if active.get('contract_version') != 3:
             raise ValueError('legacy active run; resume through its retained runtime')
         return active
     if active and active['status'] == 'active':
@@ -123,7 +186,7 @@ def start_run(record, *, resume=False):
         record[field] = []
     record.pop('preparation', None)
     record['iteration_run'] = {'id': uuid.uuid4().hex, 'status': 'active',
-                               'contract_version': 2, 'workflow_dir': str(allocate())}
+                               'contract_version': 3, 'workflow_dir': str(allocate())}
     return record['iteration_run']
 
 
@@ -146,11 +209,11 @@ def finish_run(record, status, reason):
 
 def attach_preparation(record, path, pr_url, head, *, expected_parent=None):
     run = record.get('iteration_run', {})
-    if run and run.get('contract_version') != 2:
+    if run and run.get('contract_version') != 3:
         raise ValueError('legacy active run; use its retained runtime')
     artifact = preparation_api.gate(path, pr_url=pr_url, head_sha=head, require_ready=False)
-    if run.get('contract_version') == 2 and artifact.get('preparation_version') != 3:
-        raise ValueError('fresh runs require preparation v3; legacy runs use their retained runtime')
+    if run.get('contract_version') == 3 and artifact.get('preparation_version') != 4:
+        raise ValueError('fresh runs require preparation v4; legacy runs use their retained runtime')
     parent = artifact.get('parent')
     expected = parent['preparation_id'] if parent else None
     active = record.get('preparation', {}).get('id')
@@ -184,7 +247,7 @@ def attach_preparation(record, path, pr_url, head, *, expected_parent=None):
 
 def work_gate(record, head, *, require_ready=True):
     active = record.get('iteration_run', {})
-    if active and active.get('contract_version') != 2:
+    if active and active.get('contract_version') != 3:
         raise ValueError('legacy active run; use its retained runtime')
     if record.get('iteration_run') and record['iteration_run']['status'] != 'active':
         raise ValueError('iteration run is finished; start a new run')
@@ -288,7 +351,7 @@ def next_cycle(record, head):
         raise ValueError("five review cycles exhausted")
     item = append_unique(record, "cycles", {"number": number, "head": head}, "number")
     run = record.get('iteration_run', {})
-    if run.get('contract_version') == 2:
+    if run.get('contract_version') == 3:
         # Reserve before returning the allocation: a later preparation failure
         # must not leave an unprovable gap before session delegation.
         review_session(record, head, Path(run['workflow_dir']) / 'iteration-record.json')
@@ -332,7 +395,7 @@ def recover_cycle(record, head, record_path, *, scope='', rules=''):
     require_head(head)
     prepared = work_gate(record, head)
     run = record.get('iteration_run', {})
-    if run.get('contract_version') != 2 or run.get('status') != 'active':
+    if run.get('contract_version') != 3 or run.get('status') != 'active':
         raise ValueError('prelaunch recovery requires an active current-contract run')
     cycles = record.get('cycles', [])
     if not cycles:
@@ -359,8 +422,10 @@ def recover_cycle(record, head, record_path, *, scope='', rules=''):
     current = review_sessions.identity(context, prepared, prepared['reviewer_order'], scope, rules)
     replacement = {**prior, 'attempt': prior['attempt'] + 1, 'head': head,
         'session_file': str((Path(binding['session_file']).parent / (uuid.uuid4().hex + '.json')).resolve())}
+    saved = read(Path(binding['session_file']), {})
+    after_dispatch = any(item.get('launch_intents') for item in saved.get('execution_history', []))
     evidence = review_sessions.recover_unlaunched(Path(binding['session_file']), context, current,
-                                                 binding, replacement)
+                                                 binding, replacement, after_dispatch=after_dispatch)
     replacement = evidence['activation']['payload']['binding']
     item = {'number': number, 'attempt': prior['attempt'] + 1,
             'prior_head': binding['head'], 'head': head, 'prior_session_file': binding['session_file'],
@@ -378,7 +443,7 @@ def reconcile_recovery(record, head, *, scope='', rules=''):
     """Restore only the exact pending charge; never repeat session recovery."""
     prepared = work_gate(record, head)
     run = record.get('iteration_run', {})
-    if run.get('contract_version') != 2 or run.get('status') != 'active' or not record.get('cycles'):
+    if run.get('contract_version') != 3 or run.get('status') != 'active' or not record.get('cycles'):
         raise ValueError('recovery reconciliation requires an active current-contract cycle')
     number = record['cycles'][-1]['number']
     bindings_for_cycle = [item for item in record.get('review_sessions', [])
@@ -400,7 +465,7 @@ def reconcile_recovery(record, head, *, scope='', rules=''):
     if (review_coverage.digest(proof) != plan['proof']['sha256']
             or proof.get('iteration_allocation') != plan['prior_allocation']):
         raise ValueError('pending recovery proof changed')
-    review_sessions.unlaunched(proof)
+    review_sessions.validate_recovery_proof(proof, plan)
     activation = saved['recovery_activation']
     target = Path(plan['binding']['session_file'])
     review_sessions.validate_storage(target, context)
@@ -426,7 +491,10 @@ def reconcile_recovery(record, head, *, scope='', rules=''):
             or target_data.get('iteration_allocation') != plan['allocation']):
         raise ValueError('pending recovery target changed')
     if not Path(activation['path']).exists():
-        review_sessions.unlaunched(target_data)
+        if plan.get('kind') == 'role_infrastructure':
+            review_sessions.recoverable_roles(target_data)
+        else:
+            review_sessions.unlaunched(target_data)
     if not existing:
         recoveries.append(item)
         record['review_sessions'].append(plan['binding'])
@@ -475,7 +543,7 @@ def cycle_status(record):
                     if (review_coverage.digest(saved) != reference['sha256']
                             or saved.get('iteration_allocation') != allocation):
                         raise ValueError('historical recovery proof changed')
-                    review_sessions.unlaunched(saved)
+                    review_sessions.validate_recovery_proof(saved, recovery['activation']['payload'])
                 else:
                     saved = read(Path(binding['session_file']), {})
                 if (not isinstance(saved, dict)
@@ -497,7 +565,7 @@ def cycle_status(record):
                               and any(item.get('status') in {'failed', 'incomplete', 'exhausted'}
                               for item in saved.get('reviews', {}).values()) else
                           'interrupted' if saved.get('status') in {'active', 'incomplete'} and history
-                              and saved.get('session_version') in {1, 2} and isinstance(saved.get('identity'), dict)
+                              and saved.get('session_version') in {1, 2, 3} and isinstance(saved.get('identity'), dict)
                               and any(item.get('status') == 'active' for item in history) else
                           'launched' if launched else 'allocated')
                 try:
@@ -506,7 +574,8 @@ def cycle_status(record):
                 except ValueError:
                     zero = False
                 if recovery:
-                    status = 'recovered_unlaunched'
+                    status = ('recovered_roles' if recovery['activation']['payload'].get('kind') == 'role_infrastructure'
+                              else 'recovered_unlaunched')
                 if saved.get('status') == 'superseded' and saved.get('prelaunch_recovery'):
                     reference = saved['prelaunch_recovery']
                     proof = read(Path(reference['path']), {})
@@ -523,7 +592,29 @@ def cycle_status(record):
                                  'state': 'unknown', 'launch_intent': False, 'proved_unlaunched': False})
         cycles.append({'number': cycle['number'], 'head': cycle['head'], 'sessions': sessions})
     substantive = sum(any(s['launch_intent'] for s in c['sessions']) for c in cycles)
-    return {'allocated': len(cycles), 'substantive': substantive,
+    accounting = {'dispatched_roles': [], 'reused_roles': [], 'unresolved_launch_states': []}
+    seen_dispatch, seen_results = set(), set()
+    for cycle in cycles:
+        for session in cycle['sessions']:
+            try:
+                if session['state'] == 'unknown':
+                    raise ValueError('unknown launch state')
+                saved = read(Path(session['session_file']), {})
+                for execution in saved.get('execution_history', []):
+                    for index, role in enumerate(execution.get('launch_intents', [])):
+                        key = (session['session_file'], execution['number'], index)
+                        if key not in seen_dispatch:
+                            seen_dispatch.add(key)
+                            accounting['dispatched_roles'].append(role)
+                for reference in saved.get('results', []):
+                    if reference['sha256'] not in seen_results:
+                        seen_results.add(reference['sha256'])
+                        result = review_coverage.load(reference)['result']
+                        accounting['reused_roles'].extend(result.get('reused_reviewers', []) +
+                            result.get('architecture_accounting', {}).get('reused', []))
+            except (OSError, ValueError, KeyError, TypeError):
+                accounting['unresolved_launch_states'].append(session.get('session_file'))
+    return {**accounting, 'allocated': len(cycles), 'substantive': substantive,
             'remaining_allocations': max(0, 5 - len(cycles)), 'cap': 5,
             'infrastructure_attempts': len(record.get('infrastructure_recoveries', [])),
             'infrastructure_cap': 2, 'cycles': cycles}
@@ -586,7 +677,8 @@ def current_review(record, prepared):
 
 
 def reconciliation_api():
-    return SimpleNamespace(work_gate=work_gate, current_review=current_review, preparation_api=preparation_api, verify_findings=verify_findings, review_acceptances=review_acceptances)
+    return SimpleNamespace(work_gate=work_gate, current_review=current_review, preparation_api=preparation_api, verify_findings=verify_findings, review_acceptances=review_acceptances,
+                           preparation_history=preparation_history, attach_preparation=attach_preparation)
 
 
 def accept_review_failures(record, head, reviewers, source, reason):
@@ -650,7 +742,7 @@ def verify_findings(record, artifact):
         assessment = next((a for a in record.get('assessments', [])
                            if a['reference'] == ref and a['head'] == artifact['head']
                            and (a.get('engineering_id') == artifact.get('engineering_id')
-                                if artifact.get('version') == 3 else
+                                if artifact.get('version', 1) >= 3 else
                                 a['preparation_id'] == artifact['preparation_id'])), None)
         if not classification or not assessment:
             raise ValueError('review finding lacks validity and scope assessment: ' + ref)
@@ -689,7 +781,7 @@ def legacy_review_options(record_path, context, prepared, reviewers, scope, rule
             result['reused_reviewers'] = result['executed_reviewers'] + result['reused_reviewers']
             result['executed_reviewers'] = []
             result.update(review_session={'id': session['id'], 'path': str(path)}, review_artifact=item)
-            if artifact.get('version') == 3:
+            if artifact.get('version', 1) >= 3:
                 result.update(preparation_id=artifact['preparation_id'], engineering_id=artifact['engineering_id'])
             options['result'] = result
     return options
@@ -756,14 +848,14 @@ def next_stage(record, head, record_path, *, verification=None, assessment=None)
     record_path = Path(record_path).resolve()
     base = [sys.executable, str(Path(__file__).resolve()), '--repo', record.get('_repo', ''),
             '--pr', str(record.get('pr', ''))]
-    def stage(name, artifacts, action, message):
+    def stage(name, artifacts, action, message, **details):
         return {'stage': name, 'head': head, 'required_artifacts': [str(p) for p in artifacts],
-                'message': message, 'action': action}
+                'message': message, 'action': action, **details}
     active = record.get('iteration_run')
     if not active:
         return stage('entry', [record_path], recovery_command([*base, 'start-run'], record_path),
                      'Start a distinct iteration run.')
-    if active.get('contract_version') != 2:
+    if active.get('contract_version') != 3:
         return stage('legacy_runtime', [record_path], task('Resume through the legacy run’s retained runtime.', record_path),
                      'This runtime cannot adopt a legacy active run.')
     if active.get('status') != 'active':
@@ -817,6 +909,36 @@ def next_stage(record, head, record_path, *, verification=None, assessment=None)
         prepared = work_gate(record, head)
     except (ValueError, OSError, RuntimeError) as exc:
         return stage('preparation', [record_path], task('Refresh Decisions and engineering preparation, then register it.', record_path), str(exc))
+    # A drained typed role failure uses the same bounded infrastructure ledger.
+    latest_binding = next((item for item in reversed(record.get('review_sessions', []))
+        if record.get('cycles') and item.get('cycle') == record['cycles'][-1]['number']
+        and item.get('iteration_run_id') == active['id']), None)
+    if latest_binding:
+        try:
+            saved = read(Path(latest_binding['session_file']), {})
+            failed_roles = review_sessions.recoverable_roles(saved)
+            current_identity = review_sessions.identity(preparation_api.context_for(prepared), prepared,
+                prepared['reviewer_order'])
+            current_identity.update({key: saved['identity'][key] for key in ('scope_text', 'rules_text')})
+            if current_identity != saved['identity']:
+                raise ValueError('role recovery evidence changed')
+            unused = saved.get('role_resume_authorized') == saved.get('invocations', 0) + 1
+            if unused:
+                review_sessions.require_activation(saved, Path(latest_binding['session_file']))
+                return stage('review', [record_path, latest_binding['session_file']],
+                    task('Resume the charged session; reuse completed checkpoints and rerun only failed roles.', record_path),
+                    'Infrastructure recovery is activated.', session_file=latest_binding['session_file'], resume=True)
+            recoveries = record.get('infrastructure_recoveries', [])
+            if (any(item['number'] == latest_binding['cycle'] for item in recoveries) or len(recoveries) >= 2
+                    or any(item['number'] == latest_binding['cycle'] for item in record.get('cycle_retries', []))):
+                return stage('infrastructure_limitation', [record_path, latest_binding['session_file']],
+                    task('Use the next permitted review cycle or report the five-cycle limit; preserve failed evidence.', record_path),
+                    'Infrastructure recovery allowance exhausted or ineligible.')
+            return stage('infrastructure_recovery', [record_path, latest_binding['session_file']],
+                task('Run cycle-recover with the exact head and original scope/rules; rerun only typed failed roles.', record_path),
+                'Eligible drained infrastructure failures: ' + ', '.join(failed_roles))
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
     try:
         _, reviewed = current_review(record, prepared)
         if reviewed['result'].get('guard_failure'):
@@ -1025,11 +1147,16 @@ def main():
     p.add_argument("--pr", type=int)
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("show")
+    sub.add_parser('timings', help='Diagnostic elapsed/overlapping activity, model dispatches, retries, reuse and unknown intervals')
     sub.add_parser('cycle-status', help='Report allocations, launch evidence and infrastructure recovery budget')
     sub.add_parser('preparation-history', help='Export typed preparation evidence; retain the full run separately')
-    operational = sub.add_parser('operational', help='Retain typed readiness, scheduling or publication bookkeeping')
-    operational.add_argument('--field', choices=('readiness_transitions', 'scheduling', 'publication_receipts'), required=True)
+    operational = sub.add_parser('operational', help='Retain typed cleanup, readiness, scheduling or publication bookkeeping')
+    operational.add_argument('--field', choices=('readiness_transitions', 'scheduling', 'publication_receipts', 'cleanup'), required=True)
     operational.add_argument('--file', required=True)
+    refresh = sub.add_parser('refresh-preparation', help='Reconstruct and attach one incremental preparation from retained sources')
+    for flag in ('previous-preparation', 'context', 'decisions-file', 'inline-file', 'conversation-file'):
+        refresh.add_argument('--' + flag, required=True)
+    refresh.add_argument('--replacements-file', help='JSON existing source IDs to replacement paths; structural changes need a manifest')
     nxt = sub.add_parser('next', help='Describe the current stage and recovery action without consuming budgets')
     nxt.add_argument('--head', required=True)
     nxt.add_argument('--verification-file')
@@ -1067,7 +1194,7 @@ def main():
         e.add_argument("--" + arg, required=True)
     c = sub.add_parser("cycle"); c.add_argument("--head", required=True)
     cr = sub.add_parser("cycle-retry"); cr.add_argument("--head", required=True)
-    recovery = sub.add_parser('cycle-recover', help='Recover the last cycle only with mandatory proof of zero reviewer launch')
+    recovery = sub.add_parser('cycle-recover', help='Recover drained typed infrastructure failures or proved zero launch; one per cycle, two per run')
     recovery.add_argument('--reconcile', action='store_true', help='Reconcile the exact pending recovery charge and activation')
     recovery.add_argument('--head', required=True)
     recovery.add_argument('--scope-file')
@@ -1107,10 +1234,19 @@ def main():
             path = base / f"pr-{a.pr}.json"
             default = {"pr": a.pr, "threads": {}, "events": [], "cycles": [], "cycle_retries": [], "repairs": [], "reruns": [], "local_decisions": []}
             if a.command == "show": result = read(path, default)
+            elif a.command == 'timings':
+                from shared.workflow_timings import query
+                saved = read(path, default)
+                result = query(saved.get('preparation', {}).get('pr_url', 'https://' + a.repo + '/pull/' + str(a.pr)))
             elif a.command == 'cycle-status': result = cycle_status(read(path, default))
             elif a.command == 'preparation-history': result = preparation_history(read(path, default))
             elif a.command == 'operational':
                 result = mutate(path, default, lambda d: record_operational(d, a.field, a.file))
+            elif a.command == 'refresh-preparation':
+                from shared.preparation_refresh import refresh
+                result = refresh(path, a.previous_preparation, a.context, a.decisions_file,
+                    a.inline_file, a.conversation_file, reconciliation_api(),
+                    replacements=json.loads(Path(a.replacements_file).read_text()) if a.replacements_file else None)
             elif a.command == 'next':
                 result = next_stage({**read(path, default), '_repo': a.repo}, a.head, path,
                                     verification=a.verification_file, assessment=a.series_assessment)

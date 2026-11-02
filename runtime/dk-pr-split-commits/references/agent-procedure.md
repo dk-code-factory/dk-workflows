@@ -38,3 +38,5 @@ For iteration cleanup, after either a coherent no-op or a verified publication, 
 If the same request also asks to update the PR description, finish and review this local split first, then use [dk-pr-description](../../dk-pr-description/procedure.md) to draft and review the title/body. Keep unpublished commit grouping out of the remote description unless a push was requested. If both remote actions were requested, push the verified commits first and edit the PR second.
 
 Report the original and rewritten commit SHAs, proof that the final tree matches, tests run, and whether the requested push or PR description edit completed. If stopped, give the exact blocker and leave the recovery branch or patch files intact.
+
+For iteration cleanup, record handoff, prepared guard/recovery state and assessment using the strict typed records in [operational refresh](../../dk-pr-iter/references/operational-refresh.md). Use the coordinator’s owned refresh helper; never append generated cleanup events to governing evidence. Consume the exact-identity precheck receipt when available and retain the same worker ownership through publication.

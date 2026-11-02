@@ -804,8 +804,49 @@ def test_numbered_waiter_reuses_observed_url_and_defers_legacy_import(monkeypatc
     monkeypatch.setattr(ci, 'pr_repository', repository)
     monkeypatch.setattr(ci, 'Registry', registry)
     monkeypatch.setattr(ci, 'decide', lambda *a, **k: raw)
+    monkeypatch.setattr(ci, 'github_run', lambda *a, **k: pytest.fail('unexpected identity lookup'))
+    monkeypatch.setattr('shared.flaky_actions.github_run', lambda *a, **k: pytest.fail('unexpected identity lookup'))
     ci.main()
     assert 'success' in capsys.readouterr().out
+
+
+def test_numbered_observation_binds_metadata_before_checks_without_extra_reads(monkeypatch):
+    from shared.ci_observation import for_pr
+    calls = []
+    url = 'https://github.com/acme/project/pull/70'
+    def reader(args):
+        calls.append(args)
+        if args[1] == 'checks':
+            return [{'name': 'test', 'bucket': 'pass'}]
+        return {'headRefOid': SHA, 'url': url}
+    monkeypatch.setattr(ci, 'gh_json', reader)
+    monkeypatch.setattr(ci, 'github_run', lambda *a, **k: pytest.fail('unexpected identity lookup'))
+    monkeypatch.setattr('shared.flaky_actions.github_run', lambda *a, **k: pytest.fail('unexpected identity lookup'))
+    with for_pr('70', SHA) as observation:
+        result = ci.wait('70', SHA, observation=observation)
+        assert result['result'] == 'success' and observation.pr == url
+        with pytest.raises(BlockingIOError), for_pr(url, SHA):
+            pytest.fail('duplicate canonical observer entered')
+    assert len(calls) == 3
+
+
+def test_numbered_metadata_denial_blocks_another_read_until_explicit_retry(monkeypatch):
+    from shared.ci_observation import for_pr, PermissionDenied
+    calls = []
+    def reader(*args):
+        calls.append(True)
+        raise PermissionDenied('HTTP 403')
+    monkeypatch.setattr(ci, 'gh_json', reader)
+    with for_pr('70', SHA) as observation:
+        with pytest.raises(PermissionDenied):
+            ci.wait('70', SHA, observation=observation)
+    with pytest.raises(PermissionDenied), for_pr('70', SHA):
+        pytest.fail('denied metadata observer restarted')
+    with for_pr('70', SHA, retry_denied=True):
+        pass
+    with for_pr('70', SHA):
+        pass
+    assert calls == [True]
 
 
 @pytest.mark.parametrize('timeout', ['0', '-1'])

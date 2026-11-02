@@ -156,9 +156,9 @@ def test_worker_prelaunch_guard_retains_incomplete_session_without_provider_stat
         def __init__(self, *args, **kwargs):
             # Cohort validation and every handoff/checkpoint write have finished;
             # no worker exists yet. Only the per-worker launch guard can catch this.
-            assert [item['status'] for item in json.loads(session.path.read_text())['reviews'].values()] == ['running'] * 2
+            assert [item['status'] for item in json.loads(session.path.read_text())['reviews'].values()] == ['running'] * 3
             handoffs = list(Path(context['patch']).parent.glob('review-handoffs-*/*.json'))
-            assert len(handoffs) == 2
+            assert len(handoffs) == 3
             (Path(context['checkout']) / 'provider-cache').write_text('changed before launch')
             super().__init__(*args, **kwargs)
     with session.execution(), patch.object(runner, 'ThreadPoolExecutor', Pool), \
@@ -175,7 +175,7 @@ def test_worker_prelaunch_guard_retains_incomplete_session_without_provider_stat
     assert result['skipped_reviewers'] == [] and 'failed_reviewers' not in result
     retained = json.loads(session.path.read_text())
     assert retained['status'] == 'incomplete' and retained['results'] == [item]
-    assert [entry['status'] for entry in retained['review_history']] == ['running'] * 2
+    assert [entry['status'] for entry in retained['review_history']] == ['running'] * 3
     assert all(session.cached(name) is None for name in names)
     assert result_artifact(session.path, item)['result'] == result
     reviews = api.ledger(stats.repo)['runs'][stats.run_id]['reviews']
@@ -374,7 +374,7 @@ time.sleep(60)
             process.join(timeout=5)
         outcome.close()
     history = json.loads(session.path.read_text())
-    assert all(review['status'] == 'running' for review in history['reviews'].values())
+    assert all(history['reviews'][name]['status'] == 'running' for name in names)
     assert all(session.cached(name) is None for name in names)
     reviews = api.ledger(stats.repo)['runs'][stats.run_id]['reviews']
     assert all(review['status'] == 'running' for review in reviews.values())
@@ -504,7 +504,7 @@ def test_reverse_completion_preserves_failure_skip_order_and_guard_precedence(pi
         for future in completed(futures, **kwargs):
             name = futures[future]
             order.append(name)
-            if not release.is_set():
+            if name != 'architecture-review' and not release.is_set():
                 assert name == names[1]
                 release.set()
             yield future
@@ -512,7 +512,7 @@ def test_reverse_completion_preserves_failure_skip_order_and_guard_precedence(pi
             patch.object(runner, 'as_completed', side_effect=reverse), \
             patch.object(runner, 'run_skill_reviewer', side_effect=provider):
         result = runner.review(context, names, '', decisions, '', prep, session=session)
-    assert order == names[::-1]
+    assert [name for name in order if name != 'architecture-review'] == names[::-1]
     if outcome == 'exhausted':
         assert [entry['reviewer'] for entry in result['skipped_reviewers']] == names
         assert [entry['reason'] for entry in result['skipped_reviewers']] == ['limit ' + name for name in names]

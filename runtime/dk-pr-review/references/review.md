@@ -34,7 +34,7 @@ thresholds, read-only restrictions and output contract. A fix direction names th
 required outcome without authorizing more architecture or stronger guarantees.
 Direct standalone reviewer skills remain outside this required preparation runner.
 
-Configured reviewers execute concurrently, one worker per missing reviewer. Each
+Configured reviewers and architecture execute concurrently, one worker per missing role. Architecture has its own immutable checkpoint and separate accounting; it never satisfies configured reviewer requirements. Each
 worker inherits the pinned binding and registry context and receives a separate
 immutable handoff, reused through its bounded correction attempt. Its normal or
 fallback capture and execution trace belong to that worker; optional statistics

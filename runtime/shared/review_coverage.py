@@ -73,7 +73,7 @@ def retain(session_path, context, prepared, result, session_id):
     session_path = storage_path(session_path, context)
     directory = outside(session_path.resolve().parent / 'review-results', context)
     session = read(session_path, {})
-    version = 3 if prepared.get('preparation_version', 1) >= 3 else 2
+    version = 4 if prepared.get('preparation_version', 1) >= 4 else 3 if prepared.get('preparation_version', 1) >= 3 else 2
     if session.get('id') != session_id or session.get('session_version') != version - 1:
         raise ValueError('review result requires its originating session')
     artifact = {'version': version, 'session_id': session_id,
@@ -82,7 +82,7 @@ def retain(session_path, context, prepared, result, session_id):
                 'tree': git(context['checkout'], 'rev-parse', f"{context['head_sha']}^{{tree}}"),
                 'scope': scope(prepared), 'preparation_id': prepared['preparation_id'],
                 'result': result}
-    if version == 3:
+    if version >= 3:
         artifact['engineering_id'] = engineering_id(prepared)
     validate_session_identity(artifact)
     fingerprint = digest(artifact)
@@ -98,7 +98,7 @@ def validate_session_identity(artifact):
     identity = artifact.get('session_identity')
     fields = {'pr_url', 'head', 'base', 'preparation_id', 'tree', 'scope',
               'scope_text', 'rules_text', 'reviewers'}
-    reference = 'engineering_id' if artifact.get('version') == 3 else 'preparation_id'
+    reference = 'engineering_id' if artifact.get('version', 1) >= 3 else 'preparation_id'
     fields = (fields - {'preparation_id'}) | {reference}
     if (not isinstance(identity, dict) or set(identity) != fields
             or any(not isinstance(identity[key], str) or not identity[key]
@@ -114,7 +114,7 @@ def validate_session_identity(artifact):
 
 def load(item):
     artifact = read(Path(item['path']), {})
-    if digest(artifact) != item['sha256'] or artifact.get('version') not in {1, 2, 3}:
+    if digest(artifact) != item['sha256'] or artifact.get('version') not in {1, 2, 3, 4}:
         raise ValueError('review result artifact changed or has an unsupported version')
     if artifact['version'] >= 2:
         validate_session_identity(artifact)
@@ -157,12 +157,12 @@ def verify(item, prepared, *, accepted_failures=(), reconciliation=None, checkou
         context = read(Path(prepared['sources']['context']['path']), {})
     tree = git(checkout or context['checkout'], 'rev-parse', f"{prepared['identity']['head_sha']}^{{tree}}")
     current_scope = scope(prepared)
-    changed_head = artifact.get('version') == 3 and artifact['head'] != prepared['identity']['head_sha']
+    changed_head = artifact.get('version', 1) >= 3 and artifact['head'] != prepared['identity']['head_sha']
     if (artifact['scope'] != current_scope or changed_head) and reconciliation is not None:
         from shared import review_reconciliation
         binding = reconciliation['binding']
         review_reconciliation.load(reconciliation['artifact'], binding)
-        if (artifact['version'] not in {2, 3} or binding['review_artifact'] != {k: item[k] for k in ('path', 'sha256')}
+        if (artifact['version'] not in {2, 3, 4} or binding['review_artifact'] != {k: item[k] for k in ('path', 'sha256')}
                 or binding['original_scope'] != artifact['scope']
                 or binding['original_preparation_id'] != artifact['preparation_id']
                 or binding['current_preparation_id'] != prepared['preparation_id']

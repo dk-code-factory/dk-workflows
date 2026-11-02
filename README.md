@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.6.19.
+Independent MIT plugin for Claude Code and Codex. Version 1.7.0.
 
 ## Install
 
@@ -412,3 +412,5 @@ evidence contract][ci-evidence] for progress, retained diagnostics and
 explicit discovery recovery.
 
 [ci-evidence]: runtime/dk-flaky-tests/references/evidence.md
+
+Version 1.7.0 adds [owned preparation refresh and typed cleanup evidence](runtime/dk-pr-iter/references/operational-refresh.md), concurrent architecture checkpoints, bounded same-cycle infrastructure recovery, persistent CI deadlines and private timing diagnostics. Fresh invocations use the new contracts; active older runs retain their original runtime. Update through the supported host plugin commands above. Reviewer installations, model selection and private configuration are unchanged.

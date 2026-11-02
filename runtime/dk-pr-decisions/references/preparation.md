@@ -100,7 +100,7 @@ or unverifiable selected parents block; old source paths use verified retained c
   identity and gates. The view cannot authorize a gate. Affected values are not
   duplicated.
 - `--full-analysis`, changed base/mode/policy or missing prior Git objects require
-  full reassessment. Version 1 migrates through fresh analysis into separate v3 storage.
+  full reassessment. Version 1 migrates through fresh analysis into separate v4 storage.
   Old-policy parents retain integrity/structural checks before current-policy analysis.
 - Unbounded impact may request one full fallback. Each model phase allows one
   correction; another invalid response blocks. No per-conclusion calls or scheduler.
@@ -187,7 +187,7 @@ exact-head CI. Preserve the existing run, cycle count and five-cycle limit.
 
 ## Fresh workflow storage and compatibility
 
-Preparation v3 writes new versions beneath a private workflow directory under
+Preparation v4 writes new versions beneath a private workflow directory under
 `${XDG_STATE_HOME:-~/.local/state}/dk-code-factory/workflows/`. The context collector
 returns `workflow_dir` and a durable `context_file`. Use these paths for exports,
 manifests, scope/rule handoffs, validation reports and verification files. `prepare`
@@ -321,6 +321,8 @@ calls, migration or writes. Changed agreements, missing/corrupt records, changed
 selection and pending publication block. Reconcile as needed, then refresh context
 and preparation. Routine cache scans do not invalidate review evidence. GitHub refreshes
 remain at the existing workflow stages; local freshness does not assert live discussion
-freshness. API v2 and preparation v3 are unchanged. Unbound older artifacts remain
+freshness. The API envelope remains v2; fresh preparations use v4. Unbound older artifacts remain
 readable as history or preparation parents, but need refreshed context/preparation
 for current execution. Interrupted older workflows use their retained runtime.
+
+Iteration coordinators use [owned preparation refresh](../../dk-pr-iter/references/operational-refresh.md) for existing source sets. Keep the explicit manifest workflow for source additions/removals and role changes.

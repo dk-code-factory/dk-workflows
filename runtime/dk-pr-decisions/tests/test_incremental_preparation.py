@@ -753,7 +753,7 @@ class IncrementalPreparationTests(unittest.TestCase):
         self.assertIn('"preparation_version": 1', prompts[0])
         self.assertEqual(result['refresh']['mode'], 'migration')
         self.assertEqual(result['refresh']['model_call_count'], 1)
-        self.assertEqual(migrated['preparation_version'], 3)
+        self.assertEqual(migrated['preparation_version'], 4)
         self.assertEqual(migrated['analysis'], fresh_analysis)
         self.assertTrue(migrated['parent']['migration'])
         self.assertEqual(migrated['parent']['preparation_id'], old['preparation_id'])
@@ -872,7 +872,8 @@ class IncrementalPreparationTests(unittest.TestCase):
             receipt = review_reconciliation.reconcile(record_path, package.head, assessment_path,
                                                        state.reconciliation_api())
         model.assert_not_called()
-        self.assertEqual(comparisons, [0])
+        self.assertEqual(comparisons, [])
+        self.assertEqual(receipt['proof_kind'], 'exact_identity')
         self.assertEqual(receipt['status'], 'reconciled')
         self.assertEqual(receipt['executed_reviewers'], [])
         self.assertEqual(receipt['retained_reviewers'], ['example'])

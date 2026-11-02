@@ -58,7 +58,7 @@ All former top-level command results now live under `data`; publication results 
 `prepare --input-manifest FILE --output-dir PRIVATE_DIR [--previous-preparation FILE] [--full-analysis]` delegates to
 `scripts/preparation.py` without a discussion scan or any publication. It preserves
 this API v2 envelope; `data` contains `artifact`, `preparation_id`, `engineering_id`, `readiness` and a `refresh` report.
-The artifact has its own `preparation_version: 3`; read
+The artifact has its own `preparation_version: 4`; read
 [the preparation contract](preparation.md) for complete evidence, semantic analysis,
 question retention, placement, proportionate tests, and downstream gates.
 `verified: true` retains its original provenance/freshness meaning.

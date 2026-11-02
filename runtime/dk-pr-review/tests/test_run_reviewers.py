@@ -105,6 +105,9 @@ class RunnerTests(unittest.TestCase):
         for checkpoint_status, response in outcomes:
             with self.subTest(checkpoint_status=checkpoint_status):
                 session = Mock()
+                session.id = 'fixture-session'
+                session.invocation = 1
+                session.delivery.side_effect = lambda name, path, data: (mod.write(path, data), path)[1]
                 session.cached.return_value = None
                 def record(name, status, **kwargs):
                     if status == checkpoint_status:
@@ -137,7 +140,7 @@ class RunnerTests(unittest.TestCase):
             result=mod.run_skill_reviewer(self.providers[0],Path(self.tmp.name),handoff,Path(self.tmp.name))
         self.assertEqual(result,{'findings':[self.finding]});self.assertEqual(invoke.call_count,2)
         with patch.object(mod,'invoke',return_value=bad) as invoke:
-            with self.assertRaisesRegex(ValueError,'after correction'):mod.run_skill_reviewer(self.providers[0],Path(self.tmp.name),handoff,Path(self.tmp.name))
+            with self.assertRaisesRegex(ValueError,'after one correction'):mod.run_skill_reviewer(self.providers[0],Path(self.tmp.name),handoff,Path(self.tmp.name))
         self.assertEqual(invoke.call_count,2)
     def test_invalid_decisions_block_before_reviewer_launch(self):
         for changed in ({'pr_url': 'https://github.com/o/r/pull/3'},

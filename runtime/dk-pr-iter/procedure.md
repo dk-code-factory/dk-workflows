@@ -88,6 +88,8 @@ Apply this contract to feedback classification, fixes, replies and publication. 
 
 Apply the review budgets, evidence requirements and CI policy in this contract. Read [the full stage contract](references/iteration-review-ci.md) before its first action.
 
+Read [operational refresh and cleanup evidence](references/operational-refresh.md) before refreshing preparation or recording cleanup bookkeeping.
+
 ## Commit-series cleanup
 
 Run this mandatory cleanup after review and CI converge, before completion. Read [the full stage contract](references/iteration-series-cleanup.md) before its first action.

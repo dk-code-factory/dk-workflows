@@ -20,3 +20,5 @@ including proposed code becoming committed code. Do not silently carry an
 exception to another task, revision, path or changed scope. Pin both approvals and
 rejections; neither grants publication authority. Return approval reference and
 fingerprint to the worker, coordinator and architecture reviewer.
+
+The read-only model receives [the evaluator contract](evaluator.md), not this coordinator procedure. The coordinator owns lifecycle, packet creation, validation and immutable result storage; evaluators must not recursively invoke this workflow.

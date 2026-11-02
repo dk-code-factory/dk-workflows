@@ -97,7 +97,7 @@ def classification(command, code, data):
     elif command == 'reviewers' and value.get('complete') is False:
         reason = 'review_incomplete'
     elif command == 'run-state' and value.get('status') == 'blocked':
-        reason = 'review_reconciliation_blocked'
+        reason = value.get('readiness') or 'review_reconciliation_blocked'
     elif command == 'update' and value.get('action') == 'stop':
         return 'error', 'runtime_unavailable', 'Restore the runtime before continuing.'
     if reason and code in (0, 1):

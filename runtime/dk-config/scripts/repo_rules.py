@@ -335,7 +335,7 @@ def main():
     p = sub.add_parser('resolve'); p.add_argument('text'); p.add_argument('--private', required=True); p.add_argument('--source', required=True); p.add_argument('--source-rule')
     p = sub.add_parser('reviewers'); p.add_argument('action', choices=['list', 'set', 'reset']); p.add_argument('names', nargs='*'); p.add_argument('--scope', choices=['effective', 'repo', 'upstream', 'user'], default='effective')
     p.add_argument('--host', choices=['current', 'codex', 'claude'], default='current')
-    p.add_argument('--bindings-file', help='JSON ordered list of SkillBinding or CommandBinding objects')
+    p.add_argument('--bindings-file', help='JSON ordered reviewer bindings; optional handoff_contract and nested_review_roles (recipient identities)')
     draft = sub.add_parser('drafting')
     draft.add_argument('action', choices=['list', 'set', 'reset'])
     draft.add_argument('role', nargs='?', choices=['commit_message', 'pr_description', 'issue_description'])
