@@ -1,0 +1,134 @@
+[
+  {
+    "name": "timeout-driven-stage",
+    "event": "e15",
+    "set": {
+      "cause": "e1"
+    },
+    "code": "transition_without_notification"
+  },
+  {
+    "name": "unstable-host-update",
+    "event": "e6",
+    "set": {
+      "text": "I am still reconciling preparation and will next start the many remaining stages."
+    },
+    "code": "unstable_pending_update"
+  },
+  {
+    "name": "late-host-update",
+    "event": "e5",
+    "set": {
+      "deadline_ms": 60000
+    },
+    "code": "missed_host_update"
+  },
+  {
+    "name": "delayed-failure-report",
+    "event": "e11",
+    "set": {
+      "cause": "e2"
+    },
+    "code": "material_report_delayed"
+  },
+  {
+    "name": "heartbeat",
+    "event": "e16",
+    "set": {
+      "type": "heartbeat"
+    },
+    "code": "routine_heartbeat"
+  },
+  {
+    "name": "fast-ci",
+    "event": "e20",
+    "set": {
+      "at_ms": 150401
+    },
+    "code": "ci_cadence_accelerated"
+  },
+  {
+    "name": "inherited-parent-context",
+    "event": "e22",
+    "set": {
+      "fork_turns": "all"
+    },
+    "code": "worker_context_or_role"
+  },
+  {
+    "name": "broad-context",
+    "event": "e22",
+    "set": {
+      "handoff": {
+        "task": "Execute fixer stage from pinned evidence.",
+        "permitted_actions": "Read evidence and return a diagnostic artifact.",
+        "pins": {
+          "runtime": "capture",
+          "decisions": "capture",
+          "preparation": "capture",
+          "architecture": "capture",
+          "invocation": "capture",
+          "cli_reference": "capture",
+          "waiting_policy": "capture",
+          "contract": "capture",
+          "head": "head-a",
+          "base": "base-a",
+          "preparation_id": "prep-a",
+          "engineering_id": "eng-a"
+        },
+        "inline_context": "Complete parent conversation / diff dump"
+      }
+    },
+    "code": "handoff_not_narrow_or_pinned"
+  },
+  {
+    "name": "reviewer-reuse",
+    "event": "e26",
+    "set": {
+      "agent": "reviewer-1",
+      "role": "reviewer",
+      "stage": "review"
+    },
+    "code": "forbidden_worker_reuse"
+  },
+  {
+    "name": "full-dump",
+    "event": "e28",
+    "set": {
+      "mode": "full_diff"
+    },
+    "code": "unjustified_full_or_repeated_output"
+  },
+  {
+    "name": "governing-reuse",
+    "event": "e35",
+    "set": {
+      "reused": true
+    },
+    "code": "changed_governing_evidence_reused"
+  },
+  {
+    "name": "operational-reanalysis",
+    "event": "e33",
+    "set": {
+      "model_calls": 1
+    },
+    "code": "operational_refresh_repeated_analysis"
+  },
+  {
+    "name": "wrong-head-resume",
+    "event": "e38",
+    "set": {
+      "head": "head-b"
+    },
+    "code": "unsafe_checkpoint_resume"
+  },
+  {
+    "name": "unfinished-resume",
+    "event": "e40",
+    "set": {
+      "action": "reuse"
+    },
+    "code": "unsafe_checkpoint_resume"
+  }
+]
