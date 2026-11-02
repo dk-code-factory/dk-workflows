@@ -35,6 +35,8 @@ def test_complete_downstream_contract_rejects_analyst_directives(field):
     'Return exactly `dispositions`/`additions`/`impacts` for all17 sources.',
     'Return exactly {"dispositions":[],"additions":[],"impacts":[]}.',
     'Return only the initial analysis-and-graph JSON.',
+    'Return `{"analysis": ANALYSIS, "graph": NODES}`.',
+    'Return {"analysis": {}, "graph": []}.',
     'Return the reassessment protocol.',
     'Perform only `read-only Decisions reassessment`.',
     'Act as the preparation analyst.',
@@ -57,6 +59,9 @@ def test_analyst_directive_is_rejected_without_other_role_or_implementation_word
     'Perform Decisions preparation refresh before any separately authorized edits.',
     'Do not perform read-only Decisions reassessment. Never return the reassessment protocol.',
     "Don't return the reassessment protocol. Inspect transform.py read-only.",
+    'Do not ever return the reassessment protocol. Once authorized, implement transform.py.',
+    'Do not ever act as the preparation analyst. Inspect transform.py read-only.',
+    'Never ever automatically return the reassessment protocol. Inspect transform.py read-only.',
     'Inspect the recorded error: "Return exactly dispositions/additions/impacts". '
     'Once authorized, repair transform.py while preserving the user choice.',
     'Inspect the recorded role: `Perform only read-only Decisions reassessment`. '
@@ -65,6 +70,12 @@ def test_analyst_directive_is_rejected_without_other_role_or_implementation_word
     '> Return exactly dispositions/additions/impacts.\nInspect transform.py read-only.',
     'Evidence excerpt:\n```text\nReturn exactly dispositions/additions/impacts.\n```\n'
     'Once authorized, repair transform.py and verify its supported values.',
+    'Evidence excerpt:\n```text\nReturn exactly dispositions/additions/impacts.\n````\n'
+    'Once authorized, repair transform.py.',
+    'Evidence excerpt:\n  ~~~text\nReturn exactly dispositions/additions/impacts.\n ~~~~\n'
+    'Inspect transform.py read-only.',
+    'Evidence excerpt: `Return {"analysis": ANALYSIS, "graph": NODES}.` '
+    'Once authorized, repair transform.py.',
 ])
 def test_read_only_tasks_authorization_and_quoted_protocol_evidence_remain_usable(tmp_path, guidance):
     package = Package(tmp_path)
@@ -81,6 +92,20 @@ def test_quotes_elsewhere_do_not_hide_active_directives():
     value = analysis()
     value['worker_instructions'] = ('Inspect "original evidence". Return exactly '
                                    '`dispositions`/`additions`/`impacts`. Preserve "authorization".')
+    with pytest.raises(FieldError, match='worker_instructions'):
+        prep.validate_analysis(value, {'production/0': {}}, ['example'])
+
+
+@pytest.mark.parametrize('guidance', [
+    '~~~text\nEvidence.\n~~~~\nPerform only read-only Decisions reassessment.\n~~~\nNotes.\n~~~',
+    '```text\nEvidence.\n ````\nReturn the reassessment protocol.\n```\nNotes.\n```',
+    '~~~text\nReturn exactly dispositions/additions/impacts.',
+    'Do not edit transform.py. Return the reassessment protocol.',
+    'Do not edit transform.py; return the reassessment protocol.',
+])
+def test_evidence_boundaries_and_prior_negation_do_not_hide_active_directives(guidance):
+    value = analysis()
+    value['worker_instructions'] = guidance
     with pytest.raises(FieldError, match='worker_instructions'):
         prep.validate_analysis(value, {'production/0': {}}, ['example'])
 

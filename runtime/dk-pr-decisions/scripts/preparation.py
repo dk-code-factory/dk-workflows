@@ -288,8 +288,22 @@ def guidance_prose(value):
     """Locate quoted evidence without hiding active verbs outside its quotes."""
     # Only complete Markdown fences and same-line quoted spans are evidence.
     # An unmatched quote/fence must not hide the rest of the contract from checks.
-    value = re.sub(r'(?ms)^([ \t]*)(`{3,}|~{3,})[^\n]*\n.*?^\1\2[ \t]*$',
-                   lambda match: ' ' * len(match[0]), value)
+    chars = list(value)
+    opened = None
+    offset = 0
+    for line in value.splitlines(keepends=True):
+        content = line.rstrip('\r\n')
+        if opened is not None:
+            start, marker, length = opened
+            if re.fullmatch(r' {0,3}' + re.escape(marker) + '{' + str(length) + r',}[ \t]*', content):
+                chars[start:offset + len(line)] = ' ' * (offset + len(line) - start)
+                opened = None
+        else:
+            fence = re.fullmatch(r' {0,3}(`{3,}|~{3,})([^\r\n]*)', content)
+            if fence and not (fence[1][0] == '`' and '`' in fence[2]):
+                opened = (offset, fence[1][0], len(fence[1]))
+        offset += len(line)
+    value = ''.join(chars)
     value = re.sub(r'(?m)^[ \t]*>[^\n]*$', lambda match: ' ' * len(match[0]), value)
     quoted = list(re.finditer(r'`[^`\n]+`|"[^"\n]+"|“[^”\n]+”', value))
     chars = list(value)
@@ -320,6 +334,7 @@ def validate_guidance(analysis):
         r'\breturn\s+(?:only\s+|exactly\s+|the\s+)*(?:'
         r'(?:initial\s+)?analysis[ -]and[ -]graph\s+json|'
         r'reassessment\s+(?:response|protocol)|'
+        r'\{\s*["\']?\s*analysis\s*["\']?\s*:[^.\n]*\bgraph\s*["\']?\s*:|'
         r'[\[{]?\s*["\']?dispositions\b[^.\n]*\badditions\b[^.\n]*\bimpacts\b)', re.I)
     scratch = re.compile(
         r'\bI\s+(?:am\s+|will\s+|must\s+|need\s+to\s+)'
@@ -339,8 +354,10 @@ def validate_guidance(analysis):
                     continue
                 # A prohibition preserves the separation; it does not assign the
                 # prohibited analyst role to this downstream recipient.
-                before = prose[max(0, match.start() - 16):match.start()]
-                if re.search(r'\b(?:not|never|don[\'’]t)\s+$', before, re.I):
+                before = prose[:match.start()]
+                if re.search(r'\b(?:not|never|don[\'’]t)\s+'
+                             r'(?:(?:ever|again|also|instead|simply|just|directly|actually|automatically)\s+)*$',
+                             before, re.I):
                     continue
                 raise FieldError(field,
                     'contains an analyst-only preparation role, response protocol or scratch narration; '
