@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.7.4",
+      "description": "Verify required independent reviewer passes from retained native execution evidence before accepting complete coverage; bind evidence to the reviewer and pinned session and preserve incomplete execution diagnostics."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.7.2",
       "description": "Separate preparation analyst instructions from downstream worker guidance and validate worker contracts through existing bounded preparation correction, preserving read-only authorization and immutable evidence."
     },

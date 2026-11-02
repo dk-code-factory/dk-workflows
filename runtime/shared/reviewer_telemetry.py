@@ -39,10 +39,20 @@ def provider_metadata(result, provider):
     """Read inclusive CLI totals once; never sum nested model or agent usage."""
     model, usage = getattr(result, 'model', None), getattr(result, 'usage', None)
     if provider in ('claude', 'anthropic'):
+        stdout = output_text(getattr(result, 'stdout', None)) or ''
         try:
-            envelope = json.loads(output_text(getattr(result, 'stdout', None)) or '')
+            envelope = json.loads(stdout)
         except (ValueError, TypeError):
             envelope = None
+            # Required native-pass evidence uses verbose stream JSON. Only the
+            # root result carries the inclusive totals; never sum child events.
+            try:
+                rows = [json.loads(line) for line in stdout.splitlines() if line.strip()]
+                results = [row for row in rows if isinstance(row, dict) and row.get('type') == 'result']
+                if len(results) == 1:
+                    envelope = results[0]
+            except (ValueError, TypeError, AttributeError):
+                pass
         if isinstance(envelope, dict) and isinstance(envelope.get('usage'), dict):
             if usage is None:
                 usage = dict(envelope['usage'])
@@ -60,6 +70,21 @@ def provider_metadata(result, provider):
             if usage is None and totals:
                 usage = {'total_tokens': int(totals[-1].replace(',', '')),
                          'source': 'codex_cli_summary'}
+            if usage is None:
+                try:
+                    stdout = output_text(getattr(result, 'stdout', None)) or ''
+                    rows = [json.loads(line) for line in stdout.splitlines() if line.strip()]
+                    roots = [row for row in rows if isinstance(row, dict) and row.get('type') == 'thread.started']
+                    turns = [row for row in rows if isinstance(row, dict) and row.get('type') == 'turn.completed']
+                    if len(roots) == 1 and isinstance(roots[0].get('thread_id'), str) and roots[0]['thread_id'] and turns:
+                        measured = turns[-1].get('usage', {})
+                        values = [measured.get(key) for key in ('input_tokens', 'output_tokens')]
+                        if all(type(value) is int and value >= 0 for value in values):
+                            # These native totals are cumulative. Cached input
+                            # is already included in input_tokens.
+                            usage = {'total_tokens': sum(values), 'source': 'codex_cli_events'}
+                except (ValueError, TypeError, AttributeError):
+                    pass
             header = stderr.split('\nuser\n', 1)[0]
             match = re.search(r'(?m)^model: (\S+)\s*$', header)
             if model is None and match:

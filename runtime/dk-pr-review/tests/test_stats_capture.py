@@ -55,7 +55,9 @@ def pinned(tmp_path, monkeypatch):
                    head_sha=sha, base_sha='b' * 40, patch=str(patchfile), metadata=str(metadata))
     decisions = dict(pr_url=context['url'], head_sha=sha, body_hash=runner.hashlib.sha256(b'').hexdigest(),
                      live_decisions='', discussion_decisions=[], local_decisions=[], verified=True)
-    names = ['code-review-ad', 'code-review-matpocock']
+    # These mocked providers exercise orchestration/analytics, without claiming
+    # execution of a real installed reviewer's independent specialist method.
+    names = ['fixture-reviewer-one', 'fixture-reviewer-two']
     prep = artifact(context, decisions, {'production/0': {
         'path': str(metadata), 'sha256': runner.hashlib.sha256(metadata.read_bytes()).hexdigest()}}, names)
     prepare_current(context, decisions, prep)
@@ -122,7 +124,8 @@ def test_partial_failure_retains_completed_and_later_reviewers(pinned, monkeypat
         result = runner.review(context, names, '', decisions, '', prep, stats=stats)
     assert not result['complete']
     reviews = api.ledger(stats.repo)['runs'][stats.run_id]['reviews']
-    assert [r['status'] for r in reviews.values()] == ['completed', 'failed', 'completed']
+    assert {name: reviews[name]['status'] for name in names} == dict(zip(
+        names, ['completed', 'failed', 'completed']))
     assert len(result['findings']) == 1
     assert api.summary()['total']['rejected']['total'] == 0
     assert api.summary()['total']['reviews']['failures'] == 1

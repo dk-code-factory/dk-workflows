@@ -71,3 +71,8 @@ packet; undeclared recipients or expanded paths require fresh coordinator delive
 Never substitute the parent packet or create private state inside a sandbox.
 Architecture executes concurrently and checkpoints independently; configured result
 fields and output order remain unchanged.
+
+Known methods and explicit nested-role obligations require retained native launch
+and completion evidence before successful coverage or checkpoint reuse. See
+[execution evidence](execution-evidence.md) for supported host streams, independent
+conditional applicability assessments, private provenance and failure states.

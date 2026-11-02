@@ -478,15 +478,50 @@ class Session:
                     or saved.get('status') != 'completed' or saved.get('session_id') != self.id
                     or saved.get('session_identity') != self.identity):
                 raise ValueError('review checkpoint does not match this session and reviewer')
+            if reviewer != 'architecture-review':
+                from shared import review_execution
+                descriptor = self.prepared['reviewers'][reviewer]
+                binding = (descriptor.get('execution') or {}).get('binding', reviewer)
+                if review_execution.requirements(binding, {}):
+                    delivery = data.get('deliveries', {}).get(reviewer, {})
+                    import hashlib
+                    path = delivery.get('path')
+                    if not path or hashlib.sha256(Path(path).read_bytes()).hexdigest() != delivery.get('sha256'):
+                        raise ValueError('required specialist delivery changed or unavailable')
+                    evidence = saved.get('execution_evidence', {})
+                    if evidence.get('handoff') != path:
+                        raise ValueError('required specialist checkpoint delivery mismatch')
+                    review_execution.verify(evidence.get('reference'), binding, descriptor, path, saved['result'])
             return saved['result']
         return self.update(lookup)
 
-    def record(self, reviewer, status, result=None, reason=None, diagnostic=None):
+    def execution_evidence(self, reviewer):
+        def lookup(data):
+            item = data['reviews'].get(reviewer, {})
+            saved = read(Path(item['checkpoint']['path']), {})
+            if coverage.digest(saved) != item['checkpoint']['sha256']:
+                raise ValueError('review checkpoint changed')
+            return saved.get('execution_evidence', {}).get('reference')
+        return self.update(lookup)
+
+    def delivery_reference(self, reviewer):
+        def lookup(data):
+            reference = data.get('deliveries', {}).get(reviewer)
+            if not isinstance(reference, dict):
+                raise ValueError('required specialist delivery unavailable')
+            import hashlib
+            if hashlib.sha256(Path(reference['path']).read_bytes()).hexdigest() != reference['sha256']:
+                raise ValueError('required specialist delivery changed')
+            return reference['path']
+        return self.update(lookup)
+
+    def record(self, reviewer, status, result=None, reason=None, diagnostic=None, execution_evidence=None):
         self.validate_storage()
         if reviewer not in [*self.identity['reviewers'], *(['architecture-review'] if self.prepared.get('preparation_version', 1) >= 4 else [])]:
             raise ValueError('reviewer is outside this session')
         saved = {'checkpoint_version': 2 if self.prepared.get('preparation_version', 1) >= 4 else 1, 'session_id': self.id, 'session_identity': self.identity,
                  'reviewer': reviewer, 'status': status, 'result': result, 'reason': reason,
+                 **({'execution_evidence': execution_evidence} if execution_evidence is not None else {}),
                  **({'diagnostic': diagnostic} if diagnostic is not None else {})}
         fingerprint = coverage.digest(saved)
         path = coverage.storage_path(
