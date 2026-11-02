@@ -251,6 +251,7 @@ def describe_reviewer(name):
                Path(__file__).with_name('review-result.schema.json'),
                ROOT/'shared/bindings.py', ROOT/'shared/executors.py', ROOT/'shared/preparation_views.py',
                ROOT/'shared/review_execution.py',
+               ROOT/'shared/codex_profiles.py',
                Path(__file__).parents[1] / 'references/handoff-contracts.md']
     if 'procedure' in resolved:
         initial += [Path(resolved['procedure'])]
@@ -341,7 +342,7 @@ def review(context, reviewers, scope, decisions, rules, preparation, stats=None,
         context = preparation_api.context_for(preparation)
     decisions = validate_decisions(context, decisions)
     preparation = preparation_api.validate(preparation, context, decisions)
-    with bindings.pinned_bindings(preparation['reviewers']), provider_cancellation() as cancellation:
+    with bindings.pinned_bindings(preparation['reviewers'], cwd=context['checkout']), provider_cancellation() as cancellation:
         return _review(context, reviewers, scope, decisions, rules, preparation, stats, session, cancellation)
 
 
@@ -809,7 +810,8 @@ def _run_cli(args, parser):
     if not config['reviewers']:
         raise ValueError('no PR review agent is configured; use dk-config reviewers set SKILL')
     if args.describe:
-        print(json.dumps({'reviewers': [describe_reviewer(name) for name in config['reviewers']]}, ensure_ascii=True))
+        with bindings.execution_directory(context.get('checkout', context['repository'])):
+            print(json.dumps({'reviewers': [describe_reviewer(name) for name in config['reviewers']]}, ensure_ascii=True))
         return
     decisions = validate_decisions(context, preparation_api.read(preparation_api.source_path(preparation, 'decisions'))
                                   if fresh else json.loads(Path(args.decisions_file).read_text()))
@@ -839,7 +841,7 @@ def _run_cli(args, parser):
         options = legacy.legacy_review_options(args.run_record, context, preparation, names,
                                              scope, rules, args.stats_cycle)
         if 'result' in options:
-            with bindings.pinned_bindings(preparation['reviewers']):
+            with bindings.pinned_bindings(preparation['reviewers'], cwd=context['checkout']):
                 for provider, name in zip(config['reviewers'], names):
                     if describe_reviewer(provider) != preparation['reviewers'][name]:
                         raise ValueError('effective reviewer instructions changed; refresh preparation')

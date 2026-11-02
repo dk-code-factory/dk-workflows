@@ -102,6 +102,37 @@ This is an overview of the effective model; private files store reviewers and dr
 
 Skill bindings use the selected host's registry and manifest. Commands receive a `git-diff-v1` handoff through an argument vector, without a shell. No DK-specific provider manifest is required. Missing or ambiguous selected installations fail with diagnostics; unused plugins do not affect lookup. Legacy wrapper identities normalize in memory to the corresponding native skill and `host: claude`. Existing private-state and telemetry paths remain unchanged; aliases are recorded in `runtime/shared/bindings.py` without rewriting past observations.
 
+Native Codex skill bindings may select a named execution profile through the same
+binding files, for example:
+
+```json
+{"skill": "my-plugin:review", "host": "codex", "codex_profile": "review"}
+```
+
+`codex_profile` must be a nonempty name. `host: current` is checked against the
+resolved executor; Claude and command bindings reject profile selection. Omission
+preserves existing provider identities and execution arguments. Selection requires
+Codex 0.134+ and a readable modern profile-v2 file at
+`$CODEX_HOME/review.config.toml` (default home: `~/.codex`); legacy `[profiles]`
+tables are not supported. Profile definitions, model choices and context thresholds
+stay in private Codex configuration and are not distributed with this plugin.
+
+Preparation records the selected file hash, Codex version, governing model,
+reasoning and context settings, and their sources. Resolution reads native
+`config/read` layers from the pinned checkout and applies the documented profile
+precedence between base user and enabled project/session layers. It fails on
+unsupported layer shapes or precedence, and on profile settings that change
+project trust or layer discovery (`projects`, `project_root_markers`, `profile`,
+`profiles`). Governing `model_catalog_json` and `model_instructions_file` references
+require readable absolute paths; their contents are fingerprinted too. Relative
+references fail until their native path semantics can be verified. Unspecified CLI/model defaults remain explicitly unresolved rather
+than guessed. Execution passes `codex exec --profile`, retains available native
+header observations in telemetry, and rejects observed model, effort or context
+mismatches. Missing files and changed governing settings require fresh preparation,
+including before completed checkpoints can be reused under the same profile name.
+Profile metadata remains outside compact reviewer prompts. Offline tests cover
+these guards; no authenticated profile-review trial is required by the test suite.
+
 Review bindings can explicitly select `"handoff_contract": "git-diff-v2"` for a
 provider that supports compact input. It carries shared guidance, active Decisions,
 the assigned addendum and hashed references to complete originals. Existing bindings

@@ -1120,7 +1120,7 @@ def validate(artifact, context, decisions, *, require_ready=True, check_sources=
             raise ValueError('preparation source requires capture/live classification')
         if check_sources:
             from shared.bindings import pinned_bindings
-            with pinned_bindings(artifact['reviewers']):
+            with pinned_bindings(artifact['reviewers'], cwd=artifact.get('workspace', context['checkout'])):
                 pass
     return artifact
 

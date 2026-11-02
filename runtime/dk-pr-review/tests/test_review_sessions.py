@@ -226,3 +226,53 @@ def test_sessions_stay_outside_reviewed_repository(pinned):
         Session(context, prep, names, path=Path(context['checkout']) / 'session.json')
     with pytest.raises(ValueError, match='session-file'):
         Session(context, prep, names, resume=True)
+
+
+@pytest.mark.parametrize('changed', [False, True])
+def test_resumed_profile_checkpoint_requires_same_effective_settings(pinned, tmp_path, monkeypatch, changed):
+    from shared import bindings, codex_profiles
+    from shared.runtime_bundles import retained_binding
+    context, decisions, prep, names, git = pinned
+    monkeypatch.setenv('DK_HOST', 'codex')
+    root = tmp_path / 'native-provider'
+    (root / '.codex-plugin').mkdir(parents=True)
+    (root / 'skills/review').mkdir(parents=True)
+    procedure = root / 'skills/review/SKILL.md'
+    procedure.write_text('Review pinned changes read-only.')
+    (root / '.codex-plugin/plugin.json').write_text(json.dumps({
+        'name': 'provider', 'version': '1.0.0', 'skills': './skills/'}))
+    binding = {'skill': 'provider:review', 'host': 'codex', 'codex_profile': 'review'}
+    selected = {'profile': 'review', 'settings': {'model': 'fixture-model',
+                'model_reasoning_effort': 'high', 'model_context_window': 10000}}
+    # Configuration parsing/native transport have independent offline coverage;
+    # exercise the real retained-binding, preparation and checkpoint gates here.
+    monkeypatch.setattr(codex_profiles, 'resolve_profile', lambda *args: dict(selected))
+    execution = retained_binding({'binding': binding, 'identity': bindings.key(binding),
+        'executor': 'codex', 'root': str(root), 'procedure': str(procedure),
+        'version': '1.0.0', 'codex_execution': json.loads(json.dumps(selected))})
+    old = names[0]
+    names[0] = bindings.key(binding)
+    descriptor = prep['reviewers'].pop(old)
+    prep['reviewers'][names[0]] = {**descriptor, 'reviewer': names[0], 'execution': execution,
+        'effective_prompt': json.dumps(execution, sort_keys=True)}
+    prep['reviewers'] = {name: prep['reviewers'][name] for name in names}
+    prep['analysis']['reviewer_addenda'][names[0]] = prep['analysis']['reviewer_addenda'].pop(old)
+    prepare_current(context, decisions, prep)
+    session = Session(context, prep, names)
+    session.record(names[0], 'completed', {'findings': []})
+    checkpoint = Path(json.loads(session.path.read_text())['reviews'][names[0]]['checkpoint']['path'])
+    before = checkpoint.read_bytes()
+    resumed = Session(context, prep, names, path=session.path, resume=True)
+    if changed:
+        selected['settings'] = {**selected['settings'], 'model_context_window': 20000}
+        with resumed.execution(), patch.object(runner, 'run_skill_reviewer') as provider:
+            with pytest.raises(ValueError, match='execution settings changed'):
+                runner.review(context, [binding, names[1]], '', decisions, '', prep, session=resumed)
+        provider.assert_not_called()
+        assert resumed.cached(names[0]) == {'findings': []}
+        assert checkpoint.read_bytes() == before
+    else:
+        with resumed.execution(), patch.object(runner, 'run_skill_reviewer', return_value={'findings': []}) as provider:
+            result = runner.review(context, [binding, names[1]], '', decisions, '', prep, session=resumed)
+        assert result['complete'] and result['reused_reviewers'] == names[:1]
+        assert provider.call_count == 1 and provider.call_args.args[0] == names[1]

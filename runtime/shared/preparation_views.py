@@ -1,5 +1,6 @@
 """Model-facing projections; the complete preparation still owns every gate."""
 import copy
+from shared.codex_profiles import SETTINGS
 
 
 def strings(value):
@@ -59,7 +60,30 @@ def reviewer_view(prepared, reviewer):
     descriptor_fields = {'descriptor_version', 'reviewer', 'complete', 'missing',
                          'sources', 'execution', 'effective_prompt', 'aspects', 'handoff_contract'}
     execution_fields = {'binding', 'identity', 'executor', 'plugin_id', 'root', 'procedure', 'version',
-                        'origin_root', 'bundle_digest', 'argv', 'bundles'}
+                        'origin_root', 'bundle_digest', 'argv', 'bundles', 'codex_execution'}
+    def known_profile(value):
+        if value is None:
+            return True
+        def source(item):
+            return (item is None or isinstance(item, dict)
+                and set(item) <= {'name', 'version'} and isinstance(item.get('name'), dict)
+                and set(item['name']) <= {'type', 'file', 'profile', 'dotCodexFolder',
+                                         'domain', 'key', 'id', 'name'}
+                and all(value is None or isinstance(value, str) for value in item['name'].values())
+                and isinstance(item.get('version'), str))
+        return (isinstance(value, dict) and set(value) <= {
+            'profile', 'profile_source', 'codex_version', 'settings', 'origins', 'setting_sources', 'unresolved_defaults'}
+            and isinstance(value.get('profile'), str) and isinstance(value.get('codex_version'), str)
+            and isinstance(value.get('settings'), dict) and set(value['settings']) <= set(SETTINGS)
+            and all(item is None or type(item) in (str, int, bool) for item in value['settings'].values())
+            and isinstance(value.get('origins'), dict) and set(value['origins']) <= set(SETTINGS)
+            and all(source(item) for item in value['origins'].values())
+            and isinstance(value.get('setting_sources'), dict)
+            and set(value['setting_sources']) <= {'model_catalog_json', 'model_instructions_file'}
+            and all(isinstance(item, dict) and set(item) <= {'path', 'resolved_path', 'sha256'}
+                    and all(isinstance(field, str) for field in item.values())
+                    for item in value['setting_sources'].values())
+            and source(value.get('profile_source')) and strings(value.get('unresolved_defaults')))
     def known_descriptor(descriptor):
         execution = descriptor.get('execution') or {}
         return (set(descriptor) <= descriptor_fields and strings(descriptor.get('aspects'))
@@ -67,7 +91,8 @@ def reviewer_view(prepared, reviewer):
                         for source in descriptor['sources'])
                 and isinstance(execution, dict)
                 and set(execution) <= execution_fields
-                and set(execution.get('binding', {})) <= {'skill', 'host', 'command', 'handoff_contract'}
+                and known_profile(execution.get('codex_execution'))
+                and set(execution.get('binding', {})) <= {'skill', 'host', 'command', 'handoff_contract', 'codex_profile'}
                 and all(isinstance(bundle, dict) and set(bundle) <= {'root', 'digest'}
                         for bundle in execution.get('bundles', [])))
     result['reviewers'] = {name: descriptor for name, descriptor in result['reviewers'].items()

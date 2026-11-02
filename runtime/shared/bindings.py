@@ -79,6 +79,16 @@ def codex_plugins():
 
 
 _PINNED_BINDINGS = ContextVar('dk_pinned_bindings', default={})
+_EXECUTION_DIRECTORY = ContextVar('dk_execution_directory', default=None)
+
+
+@contextmanager
+def execution_directory(cwd):
+    token = _EXECUTION_DIRECTORY.set(str(Path(cwd).resolve()))
+    try:
+        yield
+    finally:
+        _EXECUTION_DIRECTORY.reset(token)
 
 
 def validate_version(registry_version, manifest):
@@ -89,7 +99,14 @@ def validate_version(registry_version, manifest):
 
 
 @contextmanager
-def pinned_bindings(descriptors):
+def pinned_bindings(descriptors, *, cwd=None):
+    with execution_directory(cwd or _EXECUTION_DIRECTORY.get() or Path.cwd()):
+        with _pinned_bindings(descriptors):
+            yield
+
+
+@contextmanager
+def _pinned_bindings(descriptors):
     from shared.runtime_bundles import verify, verify_binding
     pinned = {}
     for name, descriptor in descriptors.items():
@@ -108,6 +125,9 @@ def pinned_bindings(descriptors):
         if (value.get('executor') != host or (name != canonical and not alias)
                 or value.get('identity') != canonical or verify(value['root']) != value.get('bundle_digest')):
             raise ValueError('invalid retained reviewer binding')
+        if 'codex_profile' in value['binding']:
+            from shared.codex_profiles import verify_profile
+            verify_profile(value, _EXECUTION_DIRECTORY.get())
         procedure, manifest = manifest_skill(Path(value['root']), value['executor'],
                                              *value['binding']['skill'].split(':'))
         validate_version(value.get('version'), manifest)
@@ -149,6 +169,13 @@ def normalize(value, *, drafting=False):
     extra = {'handoff_contract': contract} if contract != 'git-diff-v1' else {}
     if nested is not None:
         extra['nested_review_roles'] = list(nested)
+    profile = value.get('codex_profile')
+    if 'codex_profile' in value:
+        if not isinstance(profile, str) or not profile.strip() or '\0' in profile:
+            raise ValueError('codex_profile must be a nonempty profile name')
+        if 'command' in value or value.get('host', 'current') == 'claude':
+            raise ValueError('codex_profile requires a native Codex executor')
+        extra['codex_profile'] = profile
     if set(value) - {'handoff_contract', 'nested_review_roles'} == {'command'}:
         argv = value['command']
         if not isinstance(argv, list) or not argv or any(not isinstance(s, str) or not s or '\0' in s for s in argv):
@@ -156,7 +183,7 @@ def normalize(value, *, drafting=False):
         if not any('{handoff}' in arg for arg in argv):
             raise ValueError('command must receive the handoff through a {handoff} argument')
         return {'command': list(argv), **extra}
-    if set(value) - {'skill', 'host', 'handoff_contract', 'nested_review_roles'} or not re.fullmatch(NAME + ':' + NAME, str(value.get('skill', ''))):
+    if set(value) - {'skill', 'host', 'handoff_contract', 'nested_review_roles', 'codex_profile'} or not re.fullmatch(NAME + ':' + NAME, str(value.get('skill', ''))):
         raise ValueError('skill must be plugin-name:skill-name')
     if value['skill'].split(':')[1] in FORBIDDEN:
         raise ValueError('Recursive review orchestration cannot be a provider')
@@ -175,7 +202,10 @@ def key(value):
         return legacy
     if 'command' in value:
         return 'command-' + hashlib.sha256(json.dumps(value['command']).encode()).hexdigest()[:20]
-    return value['skill'] + '@' + value['host']
+    identity = value['skill'] + '@' + value['host']
+    if 'codex_profile' in value:
+        identity += '#codex-profile-' + hashlib.sha256(value['codex_profile'].encode()).hexdigest()[:20]
+    return identity
 
 
 def selection(values):
@@ -219,6 +249,9 @@ def resolve(value):
             raise ValueError('Reviewer handoff contract changed; refresh preparation')
         from shared.runtime_bundles import verify_binding
         verify_binding(selected)
+        if 'codex_profile' in selected['binding']:
+            from shared.codex_profiles import verify_profile
+            verify_profile(selected, _EXECUTION_DIRECTORY.get())
         return dict(selected)
     binding = normalize(value)
     if 'command' in binding:
@@ -227,6 +260,8 @@ def resolve(value):
             raise ValueError(f'Missing selected command executable: {exe}')
         return {'binding': binding, 'identity': key(binding), 'executor': 'command'}
     host = current_host() if binding['host'] == 'current' else binding['host']
+    if 'codex_profile' in binding and host != 'codex':
+        raise ValueError('codex_profile requires a native Codex executor (resolved host: ' + host + ')')
     namespace, name = binding['skill'].split(':')
     if not shutil.which(host):
         raise ValueError(f'Missing selected host executable: {host}')
@@ -251,8 +286,12 @@ def resolve(value):
     identity, root, record = matches[0]
     procedure, manifest = manifest_skill(root, host, namespace, name)
     validate_version(record.get('version'), manifest)
-    return {'binding': binding, 'identity': key(binding), 'executor': host, 'plugin_id': identity,
-            'root': str(root.resolve()), 'procedure': str(procedure), 'version': record.get('version')}
+    result = {'binding': binding, 'identity': key(binding), 'executor': host, 'plugin_id': identity,
+              'root': str(root.resolve()), 'procedure': str(procedure), 'version': record.get('version')}
+    if 'codex_profile' in binding:
+        from shared.codex_profiles import resolve_profile
+        result['codex_execution'] = resolve_profile(binding['codex_profile'], _EXECUTION_DIRECTORY.get())
+    return result
 
 
 def diagnose(value, source=None):
