@@ -131,8 +131,10 @@ copying a synthetic event or asserting that a policy passed.
 self-reported `passed` labels, are rejected. `IDENTITY_FIELDS` requires nonblank
 event, worker and stage identifiers, CI heads/waiters, preparation identities and
 their required references. Source IDs must also be nonblank. These remain opaque
-labels; no SHA format is imposed. Optional diagnostic fields, message results and
-output helper names retain their existing mode-specific checks. Output text/need
+labels; no SHA format is imposed. `automatic_completion` and `completion` messages
+require a nonblank `result` identity, and `help` output requires a nonblank `helper`
+identity. Other message/output modes permit those placeholders to be empty.
+Optional diagnostic fields retain their existing checks. Output text/need
 and handoff inline context retain their permitted empty values.
 `ROLES`, `PINS` and `GOVERNING` declare
 the supported handoff and reuse model. Event timestamps measure recorded ordering;

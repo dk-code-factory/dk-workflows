@@ -197,6 +197,7 @@ def evaluate(path):
             if event['type'] == 'heartbeat':
                 problem(family, event, 'routine_heartbeat')
             if event['type'] in ('automatic_completion', 'completion'):
+                require(identity(event['result']), 'invalid completion result identity')
                 key = (event['agent'], event['result'])
                 if key in completions:
                     problem(family, event, 'duplicate_completion')
@@ -253,6 +254,8 @@ def evaluate(path):
                 problem(family, event, 'forbidden_worker_reuse')
         elif kind == 'output':
             require(event['mode'] in ('receipt', 'page', 'help', 'full_conversation', 'full_diff', 'full_log'), 'invalid output mode')
+            if event['mode'] == 'help':
+                require(identity(event['helper']), 'invalid help helper identity')
             if not source_ok(event['artifact']):
                 problem(family, event, 'missing_complete_output')
             if event['mode'] in ('receipt', 'page') and len(event['text'].encode()) > 4096:

@@ -157,6 +157,50 @@ def test_noncompletion_messages_allow_empty_result(tmp_path, message_type):
     assert codes(report) == ({'routine_heartbeat'} if message_type == 'heartbeat' else set())
 
 
+@pytest.mark.parametrize('message_type', ['automatic_completion', 'completion'])
+@pytest.mark.parametrize('result', ['', ' \t\n ', 'opaque result:42', 'preparation-result'])
+@pytest.mark.parametrize('duplicate', [False, True])
+def test_completion_result_identity_and_duplicate_controls(tmp_path, message_type, result, duplicate):
+    trace = fixture_trace()
+    original = next(e for e in trace['events'] if e['kind'] == 'message')
+    original['type'] = message_type
+    event = copy.deepcopy(original) if duplicate else original
+    if duplicate:
+        event['id'] = 'completion-copy'
+        trace['events'].insert(trace['events'].index(original) + 1, event)
+    event['result'] = result
+    path = save_trace(tmp_path, trace)
+    if result in ('', ' \t\n '):
+        with pytest.raises(evaluator.InvalidTrace, match='invalid completion result identity'):
+            evaluator.evaluate(path)
+    else:
+        report = evaluator.evaluate(path)
+        repeated = duplicate and result == 'preparation-result'
+        assert report['status'] == ('failed' if repeated else 'passed')
+        assert codes(report) == ({'duplicate_completion'} if repeated else set())
+
+
+@pytest.mark.parametrize('helper', ['', ' \t\n ', 'opaque helper:42', 'run-state'])
+@pytest.mark.parametrize('duplicate', [False, True])
+def test_help_helper_identity_and_repeated_discovery_controls(tmp_path, helper, duplicate):
+    trace = fixture_trace()
+    original = next(e for e in trace['events'] if e['kind'] == 'output' and e['mode'] == 'help')
+    event = copy.deepcopy(original) if duplicate else original
+    if duplicate:
+        event['id'] = 'help-copy'
+        trace['events'].insert(trace['events'].index(original) + 1, event)
+    event['helper'] = helper
+    path = save_trace(tmp_path, trace)
+    if helper in ('', ' \t\n '):
+        with pytest.raises(evaluator.InvalidTrace, match='invalid help helper identity'):
+            evaluator.evaluate(path)
+    else:
+        report = evaluator.evaluate(path)
+        repeated = duplicate and helper == 'run-state'
+        assert report['status'] == ('failed' if repeated else 'passed')
+        assert codes(report) == ({'unjustified_full_or_repeated_output'} if repeated else set())
+
+
 @pytest.mark.parametrize('mode', ['receipt', 'page', 'full_log', 'full_diff', 'full_conversation'])
 def test_nonhelp_output_allows_empty_helper(tmp_path, mode):
     trace = fixture_trace()
