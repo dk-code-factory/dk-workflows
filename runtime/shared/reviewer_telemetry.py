@@ -6,6 +6,8 @@ import re
 import sys
 import time
 import subprocess
+import uuid
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -35,6 +37,33 @@ def output_text(value):
     return value.decode('utf-8', errors='replace') if isinstance(value, bytes) else value
 
 
+def codex_usage(stdout):
+    """Read the fresh exec root turn only, never tool output or inherited usage.
+
+    --json emits turn.completed usage alongside tool/agent events. A fresh exec
+    has one requested root turn; duplicate deliveries replace that observation.
+    Older CLIs can omit optional reasoning/cache fields without inventing zeros.
+    """
+    root, found = None, None
+    for line in (output_text(stdout) or '').splitlines():
+        try:
+            event = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(event, dict) or event.get('inherited'):
+            continue
+        if event.get('type') == 'thread.started' and root is None:
+            root = event.get('thread_id')
+        if event.get('type') != 'turn.completed' or event.get('parent_thread_id'):
+            continue
+        if event.get('thread_id') and root and event['thread_id'] != root:
+            continue
+        raw = event.get('usage')
+        if isinstance(raw, dict) and any(type(raw.get(k)) is int for k in ('input_tokens', 'output_tokens', 'total_tokens')):
+            found = {**raw, 'source': 'codex_cli_json'}
+    return found
+
+
 def provider_metadata(result, provider):
     """Read inclusive CLI totals once; never sum nested model or agent usage."""
     model, usage = getattr(result, 'model', None), getattr(result, 'usage', None)
@@ -53,6 +82,8 @@ def provider_metadata(result, provider):
             if model is None and isinstance(envelope.get('modelUsage'), dict):
                 model = ', '.join(sorted(envelope['modelUsage'])) or None
     elif provider in ('codex', 'openai'):
+        if usage is None:
+            usage = codex_usage(getattr(result, 'stdout', None))
         stderr = output_text(getattr(result, 'stderr', None)) or ''
         if isinstance(stderr, str):
             # The summary has no input/output/cache breakdown. Do not invent one.
@@ -89,6 +120,8 @@ def capture(function, *args, telemetry_prompt, telemetry_attempt, telemetry_prov
     if not path:
         return function(*args, **kwargs)
     start = time.monotonic()
+    started_at = datetime.now(timezone.utc).isoformat()
+    execution_id = str(uuid.uuid4())
     result = None
     error = None
     failure = None
@@ -98,14 +131,19 @@ def capture(function, *args, telemetry_prompt, telemetry_attempt, telemetry_prov
     try:
         result = function(*args, **kwargs)
         return result
-    except Exception as exc:
+    except BaseException as exc:
         error = str(exc)
         failure = exc
         raise
     finally:
         _TRACE.reset(token)
         evidence = result if result is not None else failure
-        event = {'attempt': telemetry_attempt, 'duration_seconds': time.monotonic() - start,
+        event = {'attempt': telemetry_attempt, 'execution_id': execution_id,
+                 'started_at': started_at, 'stage': 'review', 'role': 'root',
+                 'observed_at': datetime.now(timezone.utc).isoformat(),
+                 'scope': 'execution', 'inclusive': True,
+                 'prompt_bytes': len(telemetry_prompt.encode('utf-8', errors='replace')),
+                 'duration_seconds': time.monotonic() - start,
                  'prompt_fingerprint': hashlib.sha256(telemetry_prompt.encode()).hexdigest(),
                  'prompt': telemetry_prompt, 'provider': telemetry_provider,
                  'model': getattr(result, 'model', None), 'usage': getattr(result, 'usage', None),
@@ -116,6 +154,23 @@ def capture(function, *args, telemetry_prompt, telemetry_attempt, telemetry_prov
                  'timeout_seconds': getattr(failure, 'timeout', None)}
         try:
             event['model'], event['usage'] = provider_metadata(evidence, telemetry_provider)
+            event['effort'] = getattr(evidence, 'effort', None)
+            for key in ('response_id', 'tool_call_id', 'parent_execution_id'):
+                value = getattr(evidence, key, None)
+                if isinstance(value, str) and value:
+                    event[key] = value
+            if telemetry_provider in ('claude', 'anthropic'):
+                try:
+                    envelope = json.loads(event['stdout'] or '')
+                except (ValueError, TypeError):
+                    envelope = None
+                if isinstance(envelope, dict) and isinstance(envelope.get('uuid'), str):
+                    event['response_id'] = envelope['uuid']
+            if event['effort'] is None and telemetry_provider in ('codex', 'openai'):
+                header = (event['stderr'] or '').split('\nuser\n', 1)[0]
+                match = re.search(r'(?m)^reasoning effort: (\S+)\s*$', header)
+                if match:
+                    event['effort'] = match[1]
             if telemetry_output and Path(telemetry_output).exists():
                 event['output'] = Path(telemetry_output).read_text(encoding='utf-8', errors='replace')
             mutate(Path(path), {'attempts': []}, lambda d: d['attempts'].append(event))

@@ -8,6 +8,7 @@ import sys
 import time
 from copy import copy
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 
@@ -15,6 +16,7 @@ ROOT = next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir
 sys.path.insert(0, str(ROOT))
 from shared.private_state import read, mutate
 from shared.reviewer_telemetry import select_trace
+from shared.usage import execution_records
 
 spec = importlib.util.spec_from_file_location('review_stats_v1', ROOT / 'dk-pr-iter/scripts/review_stats.py')
 api = importlib.util.module_from_spec(spec)
@@ -92,7 +94,7 @@ class Capture:
         self.prompt_fingerprint = api.digest({'descriptor': descriptor, 'handoff': handoff})
         self.artifact = self.safe(self.retain_sources, handoff, descriptor)
         self.safe(api.record_review, self.repo, self.run_id, name, status='running',
-                  prompt_fingerprint=self.prompt_fingerprint)
+                  prompt_fingerprint=self.prompt_fingerprint, artifacts=[str(trace)])
         with select_trace(str(trace)):
             yield
 
@@ -123,7 +125,9 @@ class Capture:
                     'correction_retries': max(a['attempt'] for a in attempts) if attempts else None,
                     'provider': attempts[-1]['provider'] if attempts else None,
                     'model': attempts[-1]['model'] if attempts else None,
-                    'usage': [a['usage'] for a in attempts] if attempts and all(a['usage'] is not None for a in attempts) else None,
+                    'effort': attempts[-1].get('effort') if attempts else None,
+                    'usage': [a.get('usage') for a in attempts] if attempts else None,
+                    'executions': execution_records(attempts),
                     'reason': reason}
         result = self.safe(api.record_review, self.repo, self.run_id, self.name, status=status,
                            findings=result['findings'] if status == 'completed' else [], **metadata)
@@ -160,6 +164,7 @@ class OfflineCapture:
                          'reviewers': reviewers, 'attempt': attempt or '1'}
         self.run_id = 'r-' + api.digest(self.identity)
         self.identity['run_id'] = self.run_id
+        self.identity['started_at'] = datetime.now(timezone.utc).isoformat()
         self.safe(self.save, 'begin', self.identity)
 
     def safe(self, function, *args, **kwargs):
@@ -193,9 +198,12 @@ class OfflineCapture:
         self.save('raw', {'run_id': self.run_id, 'reviewer': self.name, 'stdout': value})
 
     def finish(self, status, result=None, reason=None, duration_seconds=None):
+        attempts = read(self.trace, {'attempts': []})['attempts']
         self.save('record-review', {'run_id': self.run_id, 'reviewer': self.name, 'status': status,
             'findings': result['findings'] if status == 'completed' else [],
             'duration_seconds': time.monotonic() - self.start if duration_seconds is None else duration_seconds,
+            'usage': [a.get('usage') for a in attempts] if attempts else None,
+            'executions': execution_records(attempts),
             'reason': reason,
             'artifacts': [str(self.trace)] if self.trace.exists() else []})
 

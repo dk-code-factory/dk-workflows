@@ -10,6 +10,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'runtime'))
 from shared.reviewer_telemetry import ENV, capture, provider_metadata
 
 
+def test_codex_json_root_usage_is_not_added_to_nested_or_duplicate_events():
+    usage = {'input_tokens': 100, 'cached_input_tokens': 70, 'output_tokens': 20,
+             'reasoning_output_tokens': 5}
+    events = [{'type': 'thread.started', 'thread_id': 'root'},
+              {'type': 'item.completed', 'item': {'type': 'tool_call', 'usage': {'total_tokens': 900}}},
+              {'type': 'turn.completed', 'usage': {'total_tokens': 900}, 'inherited': True},
+              {'type': 'turn.completed', 'thread_id': 'child', 'usage': {'total_tokens': 900}},
+              {'type': 'turn.completed', 'usage': usage},
+              {'type': 'turn.completed', 'usage': usage}]
+    stdout = '\n'.join(map(json.dumps, events))
+    process = subprocess.CompletedProcess([], 0, stdout, 'tokens used\n900\n')
+    assert provider_metadata(process, 'codex')[1] == {**usage, 'source': 'codex_cli_json'}
+    assert process.stdout == stdout
+
+
+def test_json_output_failure_keeps_partial_usage_and_raw_stream(tmp_path, monkeypatch):
+    trace = tmp_path / 'trace.json'
+    monkeypatch.setenv(ENV, str(trace))
+    stdout = '{"type":"turn.completed","usage":{"input_tokens":0,"output_tokens":7}}\npartial'
+    def fail():
+        raise subprocess.TimeoutExpired('codex', 1, output=stdout.encode(), stderr=b'partial')
+    with pytest.raises(subprocess.TimeoutExpired):
+        capture(fail, telemetry_prompt='\u00e9', telemetry_attempt=1, telemetry_provider='codex')
+    attempt, = json.loads(trace.read_text())['attempts']
+    assert attempt['usage']['output_tokens'] == 7
+    assert attempt['stdout'] == stdout
+    assert attempt['execution_id'] and attempt['started_at']
+    assert attempt['prompt_bytes'] == 2
+
+
 def test_claude_totals_preserve_cache_and_model_fields_without_double_counting():
     envelope = {'subtype': 'success', 'result': '{"findings": []}',
                 'usage': {'input_tokens': 10, 'output_tokens': 5,
