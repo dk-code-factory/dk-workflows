@@ -87,6 +87,30 @@ available after host cache deletion. Resource or descriptor changes still block
 coverage acceptance. Legacy descriptors continue to use their original checks;
 missing legacy resources require fresh preparation rather than a version switch.
 
+To inspect the exact retained reviewers in a current ready preparation, use:
+
+```sh
+python3 PLUGIN_ROOT/scripts/dk.py --host HOST reviewers \
+  --context CONTEXT.json --preparation-file PREPARATION.json --describe-prepared
+```
+
+This optional inspection validates preparation/context and retained Decisions,
+current configured bindings and order, the pinned checkout, live evidence,
+retained package/resources and complete descriptor equality. A supplied
+`--decisions-file` must match the retained Decisions. All reviewers must have
+retained execution bindings. Changed or missing evidence requires preparation
+refresh or repair of the retained resources; there is no registry fallback.
+The command launches no model or review session, consumes no review cycle, and
+returns only descriptors, never coverage or publication authority. It does not
+replace the normal review or work gates and is not a required preflight.
+
+`--describe` remains installed-reviewer discovery, including when given a
+preparation. It uses the ordinary registry diagnostics and is the mode for
+fresh preparation and legacy descriptions. `--describe-prepared` requires a
+current preparation; historical artifacts require refresh. The two modes are
+mutually exclusive. Fresh preparation and configuration changes still discover
+their selected providers normally.
+
 Command descriptors retain package resources and standalone entrypoints as well.
 They execute a pinned argument vector while preserving ordinary data/output paths.
 Both explicit session execution and the completed iteration compatibility path
