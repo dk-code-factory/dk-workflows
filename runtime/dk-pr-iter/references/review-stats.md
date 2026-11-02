@@ -44,6 +44,8 @@ If private initialization fails, `review-stats-recovery` beside the external pin
 patch retains `begin` and `record-review` payloads and execution evidence. Replay
 them once storage recovers; an unknown cycle must first be supplied from the saved
 iteration handoff. The saved explicit run ID keeps review replay attribution stable.
+Recovery payloads retain the capture start time so delayed replay keeps the
+original date attribution in bounded comparisons.
 Collection refuses destinations inside the source repository or review checkout.
 
 ## Coordinator assessment

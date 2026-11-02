@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
@@ -236,6 +237,32 @@ def test_private_initialization_failure_retains_replayable_results(pinned, monke
     assert all(r['run_id'] == begin['run_id'] for r in reviews)
     assert all(r['status'] == 'completed' and r['findings'] == [finding()] for r in reviews)
     assert 'missing data' in capsys.readouterr().err
+    assert not git('status', '--porcelain')
+
+
+def test_offline_replay_preserves_capture_date_for_bounded_queries(pinned):
+    context, decisions, prep, names, git = pinned
+    captured_at = datetime(2026, 11, 1, 12, tzinfo=timezone.utc)
+    replayed_at = datetime(2026, 11, 3, 12, tzinfo=timezone.utc)
+    with patch('stats_capture.datetime', wraps=datetime) as clock:
+        clock.now.return_value = captured_at
+        with patch.object(api, 'begin_review', side_effect=OSError('storage unavailable')):
+            stats = for_iteration(context, prep, names, cycle=1)
+    stats.failure(names[0], 'interrupted while storage unavailable')
+    recovery = Path(context['patch']).parent / 'review-stats-recovery'
+    begin = json.loads(next(recovery.glob('begin-*.json')).read_text())
+    review = json.loads(next(recovery.glob('record-review-*.json')).read_text())
+    assert begin['started_at'] == captured_at.isoformat()
+    with patch.object(api, 'datetime', wraps=datetime) as clock:
+        clock.now.return_value = replayed_at
+        run = api.begin_review(**begin)
+        api.record_review(run['repository'], **review)
+    assert run['id'] == stats.run_id
+    assert run['started_at'] == captured_at.isoformat()
+    original = api.summary(since='2026-11-01', until='2026-11-02')
+    replay = api.summary(since='2026-11-03', until='2026-11-04')
+    assert original['review_runs']['failed'] == 1
+    assert replay['review_runs']['failed'] == 0
     assert not git('status', '--porcelain')
 
 

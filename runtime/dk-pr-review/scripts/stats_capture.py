@@ -8,6 +8,7 @@ import sys
 import time
 from copy import copy
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 
@@ -163,6 +164,7 @@ class OfflineCapture:
                          'reviewers': reviewers, 'attempt': attempt or '1'}
         self.run_id = 'r-' + api.digest(self.identity)
         self.identity['run_id'] = self.run_id
+        self.identity['started_at'] = datetime.now(timezone.utc).isoformat()
         self.safe(self.save, 'begin', self.identity)
 
     def safe(self, function, *args, **kwargs):
