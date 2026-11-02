@@ -348,3 +348,20 @@ def test_recorded_nullable_source_metadata_remains_queryable_and_renderable():
     assert 'Token totals disagree with available input/output components in 1 executions.' in text
     assert 'Total sources: provider_reported.' in text
     assert stats.ledger(REPO)['runs'][r['id']]['reviews']['a']['executions'][0]['usage']['sources'] is None
+
+
+def test_inclusive_token_coverage_with_child_cost_renders_without_missing_usage():
+    r = run(reviewers=('a',))
+    stats.record_review(REPO, r['id'], 'a', status='completed', executions=[{
+        'execution_id': 'root', 'provider': 'codex', 'inclusive': True,
+        'usage': {'input_tokens': 100, 'cached_input_tokens': 70,
+                  'output_tokens': 20, 'reasoning_output_tokens': 5}}, {
+        'execution_id': 'child', 'parent_execution_id': 'root', 'provider': 'codex',
+        'usage': {'total_cost_usd': .25}}])
+    result = stats.summary(REPO)['usage']
+    assert result['complete'] and result['missing_attempts'] == 0
+    assert result['tokens']['total_tokens']['known_subtotal'] == 120
+    assert result['cost']['known_subtotal'] == .25 and not result['cost']['complete']
+    reports = stats.render_reports()
+    assert ('Executions: 2; with usage: 2; missing usage: 0; reviews without execution '
+            'evidence: 0. Complete: True.') in Path(reports['user']).read_text()

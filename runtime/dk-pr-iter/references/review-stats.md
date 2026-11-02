@@ -191,6 +191,7 @@ from known input plus output. Coverage completeness does not imply consistency.
 Every token and cost component returns `known_subtotal` (null with no measured
 evidence), `measured_attempts`, `missing_attempts`, and `complete`. The top-level
 usage completeness describes coverage of observed attempts by any token usage,
+including coverage supplied by an inclusive ancestor before component suppression,
 not availability of every breakdown component. `reviews_without_execution_evidence`
 and `unfinished_reviews` prevent missing or running reviews from implying full
 coverage; an unknown attempt count is not fabricated. `not_run` reviewers have

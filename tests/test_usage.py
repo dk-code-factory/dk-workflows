@@ -263,11 +263,15 @@ def test_inclusive_parent_covers_only_measured_components_without_double_countin
     assert child['usage'] == {'input_tokens': 30, 'output_tokens': 1, 'total_cost_usd': .25}
 
 
-def test_inclusive_token_measurement_does_not_discard_child_cost():
+@pytest.mark.parametrize('child_tokens', [
+    {}, {'input_tokens': 100, 'cached_input_tokens': 70, 'output_tokens': 20,
+         'reasoning_output_tokens': 5}])
+def test_inclusive_token_measurement_does_not_discard_child_cost(child_tokens):
     result = usage.report([record('root', inclusive=True),
         record('child', parent_execution_id='root', raw={
-            'input_tokens': 100, 'cached_input_tokens': 70, 'output_tokens': 20,
-            'reasoning_output_tokens': 5, 'total_cost_usd': .25})])
+            **child_tokens, 'total_cost_usd': .25})])
+    assert result['executions'] == result['attempts_with_usage'] == 2
+    assert result['missing_attempts'] == 0 and result['complete']
     assert result['tokens']['total_tokens'] == dict(
         known_subtotal=120, measured_attempts=1, missing_attempts=0, complete=True)
     assert result['tokens']['cached_input_tokens']['known_subtotal'] == 70

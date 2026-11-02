@@ -197,11 +197,14 @@ def distribution(values):
 def measurements(records, requests):
     """Known subtotals always carry their denominator and missing count."""
     usages = [normalize(r.get('usage'), r.get('provider')) for r in records]
+    attempts_with_usage = sum(value is not None and any(
+        value[key] is not None or key in record.get('_covered_usage_fields', ())
+        for key in TOKEN_FIELDS) for record, value in zip(records, usages))
     for record, value in zip(records, usages):
         if value is not None:
             for key in record.get('_covered_usage_fields', ()):
                 value[key] = None
-    result = {'executions': len(records), 'attempts_with_usage': sum(u is not None and any(u[k] is not None for k in TOKEN_FIELDS) for u in usages)}
+    result = {'executions': len(records), 'attempts_with_usage': attempts_with_usage}
     result['inconsistent_token_totals'] = sum(u is not None and u['total_tokens_consistent'] is False for u in usages)
     result['total_token_sources'] = sorted({u['total_tokens_source'] for u in usages
         if u is not None and u['total_tokens'] is not None and u['total_tokens_source'] is not None})
