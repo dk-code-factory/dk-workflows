@@ -109,29 +109,45 @@ binding files, for example:
 {"skill": "my-plugin:review", "host": "codex", "codex_profile": "review"}
 ```
 
-`codex_profile` must be a nonempty name. `host: current` is checked against the
-resolved executor; Claude and command bindings reject profile selection. Omission
-preserves existing provider identities and execution arguments. Selection requires
-Codex 0.134+ and a readable modern profile-v2 file at
-`$CODEX_HOME/review.config.toml` (default home: `~/.codex`); legacy `[profiles]`
-tables are not supported. Profile definitions, model choices and context thresholds
-stay in private Codex configuration and are not distributed with this plugin.
+`codex_profile` must be a native name containing letters, numbers, hyphens or
+underscores. `host: current` is checked against the resolved executor; Claude and
+command bindings reject profile selection. Omission preserves existing provider
+identities and execution arguments and performs no profile metadata discovery.
+A readable profile-v2 file is required at `$CODEX_HOME/review.config.toml`
+(default home: `~/.codex`). This format was introduced in Codex 0.134; native
+selection rejects matching legacy selectors or tables in base `config.toml`.
+Definitions, model choices and user context thresholds stay in private Codex
+configuration.
 
-Preparation records the selected file hash, Codex version, governing model,
-reasoning and context settings, and their sources. Resolution reads native
-`config/read` layers from the pinned checkout and applies the documented profile
-precedence between base user and enabled project/session layers. It fails on
-unsupported layer shapes or precedence, and on profile settings that change
-project trust or layer discovery (`projects`, `project_root_markers`, `profile`,
-`profiles`). Governing `model_catalog_json` and `model_instructions_file` references
-require readable absolute paths; their contents are fingerprinted too. Relative
-references fail until their native path semantics can be verified. Unspecified CLI/model defaults remain explicitly unresolved rather
-than guessed. Execution passes `codex exec --profile`, retains available native
-header observations in telemetry, and rejects observed model, effort or context
-mismatches. Missing files and changed governing settings require fresh preparation,
-including before completed checkpoints can be reused under the same profile name.
-Profile metadata remains outside compact reviewer prompts. Offline tests cover
-these guards; no authenticated profile-review trial is required by the test suite.
+Resolution uses native no-turn validation and configuration discovery, including
+profile-controlled project trust/root markers and managed precedence. Relative
+`model_catalog_json` and `model_instructions_file` references use the selected
+file's lexical parent; inherited references keep their native origins. Contents
+and canonical targets are fingerprinted separately. Required facilities include
+native configuration/requirements reads, model listing, active catalogue discovery
+and `debug prompt-input`. The adapter was validated with Codex 0.164.1; unavailable
+facilities or unsupported metadata fail visibly, and native version changes
+invalidate preparation.
+
+Preparation and telemetry distinguish configured values, effective request
+settings and CLI header observations. Native catalogue defaults, effort aliases,
+context maximum/headroom and compaction scope determine effective settings;
+a native proven absence remains distinct from an unknown value. Provider
+definitions and governing layers/catalogues are fingerprinted without retaining
+credential/header values. The metadata helper selects from a private immutable
+catalogue capture; actual execution continues through `codex exec --profile`
+without a catalogue override. Bounded input/catalogue rereads reject observed
+drift before launch, checkpoint reuse and result acceptance; they do not promise
+an atomic snapshot against transient changes between observations.
+
+The native raw-catalogue facility cannot address the special internal Work/Chat
+originator partitions used by some first-party hosts. Verification fails clearly
+for those dynamic routes; use an ordinary CLI environment or an explicitly
+configured native catalogue snapshot. An explicit static catalogue does not use
+those partitions. Missing profiles/files, unverifiable metadata and applicable
+observed-setting mismatches also stop execution. Known profile metadata stays
+outside compact reviewer prompts. Validation starts no model turn; offline
+regressions cover the adapter and retained-checkpoint guards.
 
 Review bindings can explicitly select `"handoff_contract": "git-diff-v2"` for a
 provider that supports compact input. It carries shared guidance, active Decisions,

@@ -639,7 +639,8 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
             if required_execution or trace_path() or workflow_usage.context(env) is not None:
                 argv.insert(2, '--json')
             if profile:
-                argv[2:2] = ['--profile', resolved['binding']['codex_profile']]
+                from shared.codex_profiles import profile_flags
+                argv[2:2] = profile_flags(resolved['binding']['codex_profile'])
         else:
             argv = ['claude', '--permission-mode', 'plan', '--no-session-persistence',
                     '--output-format', 'json', '--disallowedTools', 'Edit,Write,NotebookEdit', '-p']

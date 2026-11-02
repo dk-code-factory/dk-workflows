@@ -228,7 +228,7 @@ def test_sessions_stay_outside_reviewed_repository(pinned):
         Session(context, prep, names, resume=True)
 
 
-@pytest.mark.parametrize('changed', [False, True])
+@pytest.mark.parametrize('changed', [False, 'context', 'catalog', 'provider', 'default'])
 def test_resumed_profile_checkpoint_requires_same_effective_settings(pinned, tmp_path, monkeypatch, changed):
     from shared import bindings, codex_profiles
     from shared.runtime_bundles import retained_binding
@@ -264,7 +264,14 @@ def test_resumed_profile_checkpoint_requires_same_effective_settings(pinned, tmp
     before = checkpoint.read_bytes()
     resumed = Session(context, prep, names, path=session.path, resume=True)
     if changed:
-        selected['settings'] = {**selected['settings'], 'model_context_window': 20000}
+        if changed == 'context':
+            selected['settings'] = {**selected['settings'], 'model_context_window': 20000}
+        elif changed == 'catalog':
+            selected['catalog'] = {'sha256': 'changed-active-catalog'}
+        elif changed == 'provider':
+            selected['provider'] = {'definition_sha256': 'changed-selected-provider'}
+        else:
+            selected['effective_settings'] = {'model': 'changed-native-default'}
         with resumed.execution(), patch.object(runner, 'run_skill_reviewer') as provider:
             with pytest.raises(ValueError, match='execution settings changed'):
                 runner.review(context, [binding, names[1]], '', decisions, '', prep, session=resumed)

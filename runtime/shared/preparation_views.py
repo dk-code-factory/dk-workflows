@@ -1,6 +1,6 @@
 """Model-facing projections; the complete preparation still owns every gate."""
 import copy
-from shared.codex_profiles import SETTINGS
+from shared.codex_profiles import SETTINGS, MODEL_FIELDS
 
 
 def strings(value):
@@ -72,7 +72,8 @@ def reviewer_view(prepared, reviewer):
                 and all(value is None or isinstance(value, str) for value in item['name'].values())
                 and isinstance(item.get('version'), str))
         return (isinstance(value, dict) and set(value) <= {
-            'profile', 'profile_source', 'codex_version', 'settings', 'origins', 'setting_sources', 'unresolved_defaults'}
+            'profile', 'profile_source', 'codex_version', 'settings', 'origins', 'setting_sources',
+            'effective_settings', 'expected_observations', 'catalog', 'provider', 'layers', 'requirements_sha256'}
             and isinstance(value.get('profile'), str) and isinstance(value.get('codex_version'), str)
             and isinstance(value.get('settings'), dict) and set(value['settings']) <= set(SETTINGS)
             and all(item is None or type(item) in (str, int, bool) for item in value['settings'].values())
@@ -83,7 +84,28 @@ def reviewer_view(prepared, reviewer):
             and all(isinstance(item, dict) and set(item) <= {'path', 'resolved_path', 'sha256'}
                     and all(isinstance(field, str) for field in item.values())
                     for item in value['setting_sources'].values())
-            and source(value.get('profile_source')) and strings(value.get('unresolved_defaults')))
+            and source(value.get('profile_source'))
+            and all(isinstance(value.get(key), dict) and set(value[key]) <= set(SETTINGS) | {'model_usable_context_window'}
+                    and all(item is None or type(item) in (str, int, bool) for item in value[key].values())
+                    for key in ('effective_settings', 'expected_observations'))
+            and isinstance(value.get('layers'), list)
+            and all(isinstance(item, dict) and set(item) <= {'name', 'version', 'disabled'}
+                    and source({k: v for k, v in item.items() if k != 'disabled'})
+                    and isinstance(item.get('disabled'), bool) for item in value['layers'])
+            and isinstance(value.get('requirements_sha256'), str)
+            and isinstance(value.get('provider', {}), dict)
+            and set(value.get('provider', {})) <= {'id', 'definition_sha256', 'environment_sha256'}
+            and all(isinstance(item, str) for item in value.get('provider', {}).values())
+            and isinstance(value.get('catalog'), dict)
+            and set(value['catalog']) <= {'sha256', 'selected_row_sha256', 'metadata', 'origin', 'route', 'selection'}
+            and isinstance(value['catalog'].get('metadata', {}), dict)
+            and set(value['catalog'].get('metadata', {})) <= set(MODEL_FIELDS)
+            and all(key == 'metadata' or isinstance(item, str) for key, item in value['catalog'].items())
+            and all(key == 'supported_reasoning_levels' or item is None or type(item) in (str, int)
+                    for key, item in value['catalog'].get('metadata', {}).items())
+            and all(isinstance(item, dict) and set(item) <= {'effort', 'description'}
+                    and all(isinstance(field, str) for field in item.values())
+                    for item in value['catalog'].get('metadata', {}).get('supported_reasoning_levels') or []))
     def known_descriptor(descriptor):
         execution = descriptor.get('execution') or {}
         return (set(descriptor) <= descriptor_fields and strings(descriptor.get('aspects'))
