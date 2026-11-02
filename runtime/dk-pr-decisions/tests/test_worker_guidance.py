@@ -37,6 +37,13 @@ def test_complete_downstream_contract_rejects_analyst_directives(field):
     'Return only the initial analysis-and-graph JSON.',
     'Return `{"analysis": ANALYSIS, "graph": NODES}`.',
     'Return {"analysis": {}, "graph": []}.',
+    'Return exactly dispositions,\nadditions,\nimpacts.',
+    'Return {\n"dispositions": [],\n"additions": [],\n"impacts": []\n}.',
+    'Return {\n"analysis": {},\n"graph": []\n}.',
+    'Return exactly dispositions,\r\nadditions,\r\nimpacts.',
+    'You must `Return` exactly dispositions/additions/impacts.',
+    'You must "Return exactly dispositions"/additions/impacts.',
+    'You must `Act` as the preparation analyst.',
     'Return the reassessment protocol.',
     'Perform only `read-only Decisions reassessment`.',
     'Act as the preparation analyst.',
@@ -64,6 +71,9 @@ def test_analyst_directive_is_rejected_without_other_role_or_implementation_word
     'Never ever automatically return the reassessment protocol. Inspect transform.py read-only.',
     'Inspect the recorded error: "Return exactly dispositions/additions/impacts". '
     'Once authorized, repair transform.py while preserving the user choice.',
+    'Inspect the recorded error: "Return exactly dispositions/additions/impacts"; '
+    'report additions and impacts for the supported transform.',
+    'Inspect `Return {"analysis": ANALYSIS, "graph": NODES}`; record graph: [] as evidence.',
     'Inspect the recorded role: `Perform only read-only Decisions reassessment`. '
     'Return the requested defect findings without edits.',
     'Evidence excerpt:\n> Perform only read-only Decisions reassessment.\n'
@@ -76,6 +86,17 @@ def test_analyst_directive_is_rejected_without_other_role_or_implementation_word
     'Inspect transform.py read-only.',
     'Evidence excerpt: `Return {"analysis": ANALYSIS, "graph": NODES}.` '
     'Once authorized, repair transform.py.',
+    'Quoted failure:\n> Recorded protocol:\nReturn the reassessment protocol.\n\n'
+    'Inspect transform.py read-only and report defects.',
+    'Quoted failure:\n> - Recorded protocol:\nReturn the reassessment protocol.\n\n'
+    'Inspect transform.py read-only.',
+    'Quoted failure:\n>> Recorded protocol:\nReturn the reassessment protocol.\n\n'
+    'Inspect transform.py read-only.',
+    'Quoted failure:\n> Recorded protocol:\n<span>\nReturn the reassessment protocol.\n\n'
+    'Inspect transform.py read-only.',
+    '> ```not`a`fence\nReturn the reassessment protocol.\n\nInspect transform.py read-only.',
+    '> <script>\n> </script>\n> Recorded protocol:\nReturn the reassessment protocol.\n\n'
+    'Inspect transform.py read-only.',
 ])
 def test_read_only_tasks_authorization_and_quoted_protocol_evidence_remain_usable(tmp_path, guidance):
     package = Package(tmp_path)
@@ -102,12 +123,36 @@ def test_quotes_elsewhere_do_not_hide_active_directives():
     '~~~text\nReturn exactly dispositions/additions/impacts.',
     'Do not edit transform.py. Return the reassessment protocol.',
     'Do not edit transform.py; return the reassessment protocol.',
+    '> Recorded protocol:\n\nReturn the reassessment protocol.',
+    '> Recorded protocol:\n# Worker assignment\nReturn the reassessment protocol.',
+    '> Recorded protocol:\n- Return the reassessment protocol.',
+    '> Recorded protocol:\n---\nReturn the reassessment protocol.',
+    '> # Recorded protocol\nReturn the reassessment protocol.',
+    '> ```text\nReturn the reassessment protocol.',
+    '> Recorded protocol:\n<div>\nReturn the reassessment protocol.',
+    '> <div>\n> Recorded protocol:\nReturn the reassessment protocol.',
+    '> <custom>\n> Recorded protocol:\nReturn the reassessment protocol.',
+    '> - ```text\n> Recorded protocol:\nReturn the reassessment protocol.',
+    '> - - -\nReturn the reassessment protocol.',
 ])
 def test_evidence_boundaries_and_prior_negation_do_not_hide_active_directives(guidance):
     value = analysis()
     value['worker_instructions'] = guidance
     with pytest.raises(FieldError, match='worker_instructions'):
         prep.validate_analysis(value, {'production/0': {}}, ['example'])
+
+
+@pytest.mark.parametrize('guidance', [
+    'Return dispositions to the user. Record additions and impacts in the report.',
+    'Return dispositions to the user\n\nRecord additions and impacts in the report.',
+    'Return dispositions to the user\r\n \t\r\nRecord additions and impacts in the report.',
+    'Return {"analysis": {}}. Record graph: [] in the evidence.',
+    'Return {"analysis": {}}\n\nRecord graph: [] in the evidence.',
+])
+def test_response_fields_in_separate_sentences_or_paragraphs_are_not_one_protocol(guidance):
+    value = analysis()
+    value['worker_instructions'] = guidance
+    assert prep.validate_analysis(value, {'production/0': {}}, ['example']) == value
 
 
 def test_clean_provider_and_unchanged_handoff_need_no_cleanup_model_call(tmp_path, monkeypatch):
@@ -129,7 +174,13 @@ def test_clean_provider_and_unchanged_handoff_need_no_cleanup_model_call(tmp_pat
 
 
 @pytest.mark.parametrize('corrected', [True, False])
-def test_existing_bounded_correction_repairs_or_blocks_contract(tmp_path, monkeypatch, corrected):
+@pytest.mark.parametrize('bad_guidance', [
+    CONTAMINATED,
+    'Once authorized, implement transform.py. Return {\n'
+    '"dispositions": [],\n"additions": [],\n"impacts": []\n}.',
+    'Once authorized, implement transform.py. You must `Return` exactly dispositions/additions/impacts.',
+])
+def test_existing_bounded_correction_repairs_or_blocks_contract(tmp_path, monkeypatch, corrected, bad_guidance):
     monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
     monkeypatch.setattr(model_diagnostics.tempfile, 'tempdir', str(tmp_path))
     package = Package(tmp_path)
@@ -137,7 +188,7 @@ def test_existing_bounded_correction_repairs_or_blocks_contract(tmp_path, monkey
     package.write('user.json', {'instruction': 'When authorized, repair the local transform.',
                               'quoted_bad_output': CONTAMINATED})
     bad = response()
-    bad['analysis']['worker_instructions'] = CONTAMINATED
+    bad['analysis']['worker_instructions'] = bad_guidance
     calls = []
     def provider(prompt, checkout, **kwargs):
         calls.append(prompt)

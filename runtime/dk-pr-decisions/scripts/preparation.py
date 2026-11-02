@@ -286,7 +286,7 @@ def text(value):
 
 def guidance_prose(value):
     """Locate quoted evidence without hiding active verbs outside its quotes."""
-    # Only complete Markdown fences and same-line quoted spans are evidence.
+    # A fence must be complete; inline quoted spans stay on one line.
     # An unmatched quote/fence must not hide the rest of the contract from checks.
     chars = list(value)
     opened = None
@@ -296,7 +296,8 @@ def guidance_prose(value):
         if opened is not None:
             start, marker, length = opened
             if re.fullmatch(r' {0,3}' + re.escape(marker) + '{' + str(length) + r',}[ \t]*', content):
-                chars[start:offset + len(line)] = ' ' * (offset + len(line) - start)
+                chars[start:offset + len(line)] = [c if c in '\r\n' else ' '
+                                                  for c in value[start:offset + len(line)]]
                 opened = None
         else:
             fence = re.fullmatch(r' {0,3}(`{3,}|~{3,})([^\r\n]*)', content)
@@ -304,12 +305,98 @@ def guidance_prose(value):
                 opened = (offset, fence[1][0], len(fence[1]))
         offset += len(line)
     value = ''.join(chars)
-    value = re.sub(r'(?m)^[ \t]*>[^\n]*$', lambda match: ' ' * len(match[0]), value)
+    paragraph = False
+    quote_fence = None
+    quote_html = None
+    offset = 0
+    for line in value.splitlines(keepends=True):
+        content = line.rstrip('\r\n')
+        quoted = False
+        while marker := re.match(r' {0,3}>[ \t]?', content):
+            quoted = True
+            content = content[marker.end():]
+        if quoted:
+            if quote_html is not None:
+                if re.search(quote_html, content, re.I):
+                    quote_html = None
+                paragraph = False
+            elif quote_fence:
+                marker, length = quote_fence
+                if re.fullmatch(r' {0,3}' + re.escape(marker) + '{' + str(length) + r',}[ \t]*', content):
+                    quote_fence = None
+                paragraph = False
+            else:
+                # A list item can end in a paragraph with lazy continuation.
+                if not re.fullmatch(r' {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})', content):
+                    content = re.sub(r'^(?: {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+)+', '', content)
+                fence = re.fullmatch(r' {0,3}(`{3,}|~{3,})([^\r\n]*)', content)
+                if fence and not (fence[1][0] == '`' and '`' in fence[2]):
+                    quote_fence = (fence[1][0], len(fence[1]))
+                    paragraph = False
+                else:
+                    html_end = guidance_html_end(content, paragraph)
+                    if html_end is not None:
+                        if not re.search(html_end, content, re.I):
+                            quote_html = html_end
+                        paragraph = False
+                    else:
+                        paragraph = guidance_paragraph(content, paragraph)
+        else:
+            quote_fence = None
+            quote_html = None
+            quoted = paragraph and guidance_paragraph(content, True)
+            paragraph = quoted
+        if quoted:
+            chars[offset:offset + len(line)] = [c if c in '\r\n' else ' ' for c in line]
+        offset += len(line)
+    value = ''.join(chars)
     quoted = list(re.finditer(r'`[^`\n]+`|"[^"\n]+"|“[^”\n]+”', value))
     chars = list(value)
     for match in quoted:
         chars[match.start()] = chars[match.end() - 1] = ' '
     return ''.join(chars), [(match.start(), match.end()) for match in quoted]
+
+
+def guidance_paragraph(content, continuing=False):
+    """Recognize paragraph continuations, excluding Markdown block boundaries."""
+    if not content.strip():
+        return False
+    if re.match(r' {0,3}(?:#{1,6}(?:[ \t]|$)|'
+                r'(?:[-+*]|1[.)])[ \t]+\S)', content):
+        return False
+    fence = re.fullmatch(r' {0,3}(`{3,}|~{3,})([^\r\n]*)', content)
+    if fence and not (fence[1][0] == '`' and '`' in fence[2]):
+        return False
+    if guidance_html_end(content, continuing) is not None:
+        return False
+    if re.fullmatch(r' {0,3}(?:=+|-+|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})[ \t]*', content):
+        return False
+    if not continuing and (content.startswith(('    ', '\t')) or
+                           re.match(r' {0,3}\[[^\]]+\]:', content)):
+        return False
+    return True
+
+
+def guidance_html_end(content, continuing=False):
+    """Return the terminator of an HTML block, or None for paragraph text."""
+    for opener, closer in ((r'<(script|pre|style|textarea)(?:[ \t>]|$)', None),
+                           (r'<!--', '-->'), (r'<\?', r'\?>'),
+                           (r'<!\[CDATA\[', r'\]\]>'), (r'<![A-Z]', '>')):
+        if match := re.match(r' {0,3}' + opener, content, re.I):
+            return closer if closer is not None else '</' + match[1] + '>'
+    if re.match(r' {0,3}</?(?:'
+                r'address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|'
+                r'dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|'
+                r'h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|'
+                r'ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|'
+                r'title|tr|track|ul)(?:[ \t/>]|$)', content, re.I):
+        return r'^[ \t]*$'
+    if not continuing and re.fullmatch(
+            r' {0,3}(?:</[A-Za-z][A-Za-z0-9-]*[ \t]*>|'
+            r'<[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z_:][A-Za-z0-9_.:-]*'
+            r'(?:[ \t]*=[ \t]*(?:[^ \t"\'=<>`]+|"[^"]*"|\'[^\']*\'))?)*[ \t]*/?>)[ \t]*', content):
+        return r'^[ \t]*$'
+    return None
 
 
 def validate_guidance(analysis):
@@ -330,27 +417,28 @@ def validate_guidance(analysis):
         r'(?:preparation|reassessment)\s+analyst\b|'
         r'\byou\s+are\s+(?:the\s+|a\s+)?(?:read[ -]only\s+)?'
         r'(?:preparation|reassessment)\s+analyst\b', re.I)
+    schema_gap = r'(?:(?!\r?\n[ \t]*\r?\n)[^.])*?'
     protocol = re.compile(
         r'\breturn\s+(?:only\s+|exactly\s+|the\s+)*(?:'
         r'(?:initial\s+)?analysis[ -]and[ -]graph\s+json|'
         r'reassessment\s+(?:response|protocol)|'
-        r'\{\s*["\']?\s*analysis\s*["\']?\s*:[^.\n]*\bgraph\s*["\']?\s*:|'
-        r'[\[{]?\s*["\']?dispositions\b[^.\n]*\badditions\b[^.\n]*\bimpacts\b)', re.I)
+        r'\{\s*["\']?\s*analysis\s*["\']?\s*:' + schema_gap + r'\bgraph\s*["\']?\s*:|'
+        r'[\[{]?\s*["\']?dispositions\b' + schema_gap + r'\badditions\b' + schema_gap + r'\bimpacts\b)', re.I)
     scratch = re.compile(
         r'\bI\s+(?:am\s+|will\s+|must\s+|need\s+to\s+)'
         r'(?:now\s+)?(?:perform\s+|conduct\s+)?(?:the\s+)?'
         r'(?:Decisions\s+(?:engineering\s+)?(?:reassess\w*|prepar\w*|analy[sz]\w*)|'
         r'reassess\w*\s+(?:the\s+)?preparation|'
-        r'(?:prepar\w*|analy[sz]\w*)[^.\n]*(?:reassessment\s+(?:response|protocol)|'
+        r'(?:prepar\w*|analy[sz]\w*)[^.\n]*?(?:reassessment\s+(?:response|protocol)|'
         r'analysis[ -]and[ -]graph|JSON\s+response))\b', re.I)
     for field, value in assignments:
         prose, quotations = guidance_prose(value)
         for pattern in (role, protocol, scratch):
             for match in pattern.finditer(prose):
                 # Quoting field names after an active "Return" does not quote
-                # that directive. A directive quoted as evidence starts inside
-                # its quoted span instead.
-                if any(start < match.start() < end for start, end in quotations):
+                # that directive. Evidence must contain the whole directive,
+                # rather than only a formatted verb such as `Return`.
+                if any(start < match.start() and match.end() < end for start, end in quotations):
                     continue
                 # A prohibition preserves the separation; it does not assign the
                 # prohibited analyst role to this downstream recipient.
