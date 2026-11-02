@@ -165,6 +165,78 @@ def test_response_fields_in_separate_sentences_or_paragraphs_are_not_one_protoco
     assert prep.validate_analysis(value, {'production/0': {}}, ['example']) == value
 
 
+@pytest.mark.parametrize('field', ['worker_instructions', 'completion_criteria', 'reviewer_addenda'])
+@pytest.mark.parametrize('guidance', [
+    'Evidence:\n- ```text\n  Return the reassessment protocol.\n  ```\n\n'
+    'Inspect transform.py read-only.',
+    'Evidence:\n1. ~~~text\n   Return the reassessment protocol.\n    ~~~~\n\n'
+    'Inspect transform.py read-only.',
+    '- Evidence:\n  - Recorded failure:\n\n    ```text\n'
+    '    Return the reassessment protocol.\n    ```\n\nInspect transform.py read-only.',
+    '1. Evidence:\n\n   2. Recorded failure:\n\n      ~~~text\n'
+    '      Return the reassessment protocol.\n        ~~~~\n\nInspect transform.py read-only.',
+    '- Evidence:\n  1. ```text\n     Return the reassessment protocol.\n     ```\n\n'
+    'Inspect transform.py read-only.',
+    '- - ```text\n    Return the reassessment protocol.\n    ```\n\n'
+    'Inspect transform.py read-only.',
+    '-\n  ```text\n  Return the reassessment protocol.\n  ```\n\nInspect transform.py read-only.',
+    '- Evidence:\n\n\t```text\n\tReturn the reassessment protocol.\n\t```\n\n'
+    'Inspect transform.py read-only.',
+    '2. ```text\n   Return the reassessment protocol.\n   ```\n\nInspect transform.py read-only.',
+    'Evidence:\n\n2. ```text\n   Return the reassessment protocol.\n   ```\n\n'
+    'Inspect transform.py read-only.',
+    '- Evidence:\n\n  2. ```text\n     Return the reassessment protocol.\n     ```\n\n'
+    'Inspect transform.py read-only.',
+    'Inspect dependencies read-only. Return {"analysis": {"graph": []}}.',
+    'Return {"graph": {"analysis": {}}}.',
+    'Return {"dispositions": {"additions": [], "impacts": []}}.',
+    'Return {"dispositions": [], "details": {"additions": [], "impacts": []}}.',
+    'Return {"impacts": [], "additions": [], "details": {"dispositions": []}}.',
+    'Return {"analysis": {"graph": []}}; record graph: [] separately.',
+])
+def test_list_fenced_evidence_and_nested_report_keys_remain_usable(tmp_path, field, guidance):
+    package = Package(tmp_path)
+    value = analysis()
+    if field == 'reviewer_addenda':
+        value[field]['example'] = guidance
+    else:
+        value[field] = guidance
+    result = package.prepare(value)
+    assert prep.load(result['artifact'], package.context, package.decisions)['analysis'] == value
+    assert result['readiness'] == 'ready'
+    assert result['refresh']['model_call_count'] == 1
+
+
+@pytest.mark.parametrize('guidance', [
+    '- ```text\n  Recorded evidence.\n  ```\nReturn the reassessment protocol.',
+    '- Evidence:\n  - ```text\n    Recorded evidence.\n    ```\n\n'
+    'Return the reassessment protocol.',
+    '1. ~~~text\n   Recorded evidence.\n   ~~~\nReturn the reassessment protocol.',
+    '- ```text\nReturn the reassessment protocol.\n  ```',
+    '- Evidence:\n  - ```text\n  Return the reassessment protocol.\n    ```',
+    '- ```text\n  Return the reassessment protocol.',
+    '- ```text\n  Return the reassessment protocol.\n  ~~~',
+    '- ```text\n  Return the reassessment protocol.\n  ``',
+    '- ```text\n  Return the reassessment protocol.\n      ```',
+    '- ```text\n  Recorded evidence.\n- Return the reassessment protocol.\n  ```',
+    'Inspect transform.py read-only.\n2. ```text\n   Return the reassessment protocol.\n   ```',
+    '- Inspect transform.py read-only.\n  2. ```text\n     Return the reassessment protocol.\n     ```',
+    'Return {"analysis": {"graph": []}, "graph": []}.',
+    'Return {"graph": [], "analysis": {"graph": []}}.',
+    'Return {"impacts": [], "additions": [], "dispositions": [{"graph": []}]}.',
+    'Return {"dispositions": [{"additions": []}], "additions": [], "impacts": []}.',
+    'Return {"analysis": ANALYSIS, "graph": NODES}.',
+    'Return {"dispositions": DISPOSITIONS, "additions": ADDITIONS, "impacts": IMPACTS}.',
+    'Return {"analysis": {"graph": []}}. Return the reassessment protocol.',
+    'Return {"analysis": {"graph": []}}. Act as the preparation analyst.',
+])
+def test_list_container_boundaries_and_true_schemas_still_reject_contamination(guidance):
+    value = analysis()
+    value['worker_instructions'] = guidance
+    with pytest.raises(FieldError, match='worker_instructions'):
+        prep.validate_analysis(value, {'production/0': {}}, ['example'])
+
+
 def test_clean_provider_and_unchanged_handoff_need_no_cleanup_model_call(tmp_path, monkeypatch):
     monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
     package = Package(tmp_path)

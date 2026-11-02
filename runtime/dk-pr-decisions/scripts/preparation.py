@@ -290,19 +290,54 @@ def guidance_prose(value):
     # An unmatched quote/fence must not hide the rest of the contract from checks.
     chars = list(value)
     opened = None
+    list_indents = []
+    list_paragraph = False
     offset = 0
     for line in value.splitlines(keepends=True):
-        content = line.rstrip('\r\n')
+        content = line.rstrip('\r\n').expandtabs(4)
         if opened is not None:
-            start, marker, length = opened
-            if re.fullmatch(r' {0,3}' + re.escape(marker) + '{' + str(length) + r',}[ \t]*', content):
+            start, marker, length, container_indent = opened
+            if content.strip() and not content.startswith(' ' * container_indent):
+                opened = None
+                list_paragraph = False
+            elif re.fullmatch(r' {0,3}' + re.escape(marker) + '{' + str(length) + r',}[ \t]*',
+                              content[container_indent:]):
                 chars[start:offset + len(line)] = [c if c in '\r\n' else ' '
                                                   for c in value[start:offset + len(line)]]
                 opened = None
-        else:
+                offset += len(line)
+                continue
+            else:
+                offset += len(line)
+                continue
+        if content.strip():
+            indent = len(content) - len(content.lstrip(' '))
+            while list_indents and indent < list_indents[-1]:
+                list_indents.pop()
+                list_paragraph = False
+            container_indent = list_indents[-1] if list_indents else 0
+            content = content[container_indent:]
+            while not re.fullmatch(r' {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})', content):
+                item = re.match(r' {0,3}(?:[-+*]|(?P<number>\d{1,9})[.)])(?P<pad> +|$)', content)
+                if item is None:
+                    break
+                # An ordered list can interrupt paragraph text only when it starts at one.
+                if list_paragraph and item['number'] is not None and int(item['number']) != 1:
+                    break
+                padding = len(item['pad'])
+                width = item.end() - padding + (padding if 1 <= padding <= 4 else 1)
+                container_indent += width
+                list_indents.append(container_indent)
+                content = content[width:]
+                list_paragraph = False
             fence = re.fullmatch(r' {0,3}(`{3,}|~{3,})([^\r\n]*)', content)
             if fence and not (fence[1][0] == '`' and '`' in fence[2]):
-                opened = (offset, fence[1][0], len(fence[1]))
+                opened = (offset, fence[1][0], len(fence[1]), container_indent)
+                list_paragraph = False
+            else:
+                list_paragraph = guidance_paragraph(content, list_paragraph)
+        else:
+            list_paragraph = False
         offset += len(line)
     value = ''.join(chars)
     paragraph = False
@@ -439,16 +474,21 @@ def validate_guidance(analysis):
         r'analysis[ -]and[ -]graph|JSON\s+response))\b', re.I)
     for field, value in assignments:
         prose, quotations = guidance_prose(value)
-        matches = [(match.start(), match.end()) for pattern in (role, protocol, scratch)
-                   for match in pattern.finditer(prose)]
+        matches = []
+        decoded_protocols = set()
         for match in json_protocol.finditer(prose):
             try:
                 payload, end = decoder.raw_decode(value, match.end() - 1)
             except (ValueError, RecursionError):
                 continue
+            # Valid JSON uses top-level keys; textual patterns cover non-JSON templates.
+            decoded_protocols.add(match.start())
             if isinstance(payload, dict) and ({'analysis', 'graph'} <= payload.keys() or
                     {'dispositions', 'additions', 'impacts'} <= payload.keys()):
                 matches.append((match.start(), end))
+        matches += [(match.start(), match.end()) for pattern in (role, protocol, scratch)
+                    for match in pattern.finditer(prose)
+                    if pattern is not protocol or match.start() not in decoded_protocols]
         for start, end in matches:
             # Quoting field names after an active "Return" does not quote
             # that directive. Evidence must contain the whole directive,
