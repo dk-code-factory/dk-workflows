@@ -100,3 +100,69 @@ def test_executor_owns_one_entry_and_completion_with_managed_begin(tmp_path, mon
     assert executors.execute('Review', tmp_path, resolved=resolved) == '{"findings":[]}'
     retained = api.inspect_lifecycle(ROOT, observed[0]['token'])
     assert len(retained['invocations']) == 1 and retained['invocations'][0]['complete']
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+def test_managed_executor_preserves_dispatch_and_pinned_evidence(tmp_path, monkeypatch, host):
+    from shared import executors, runtime_bundles, workflow_usage
+    config = tmp_path / 'config/dk-code-factory/updates.json'
+    config.parent.mkdir(parents=True)
+    config.write_text('{"mode":"off"}')
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'config'))
+    monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
+    monkeypatch.setenv('DK_HOST', host)
+    for key in ('DK_BINDING_STACK', 'DK_UPDATE_PARENT', 'DK_MANAGED_INVOCATION',
+                'DK_UPDATE_MANAGED_RECEIPT', workflow_usage.ENV):
+        monkeypatch.delenv(key, raising=False)
+    api = runtime_bundles.updater()
+    installed = api.installed
+    monkeypatch.setattr(api, 'installed', lambda root, selected: installed(
+        root if (root / api.BUNDLE_MARKER).exists() else runtime_bundles.retain(root), selected))
+    root = invocations.begin(ROOT, {}, host, 'dk-pr-review', tmp_path)
+    scope = {'head_sha': 'a' * 40, 'base_sha': 'b' * 40, 'session_id': 'review-session'}
+    seen = []
+
+    def provider(argv, **kwargs):
+        receipt = invocations.load(kwargs['env']['DK_MANAGED_INVOCATION'])
+        seen.append(receipt)
+        if host == 'codex':
+            Path(argv[argv.index('-o') + 1]).write_text('{}')
+            stdout = json.dumps({'type': 'turn.completed', 'usage': {'input_tokens': 10, 'output_tokens': 2}})
+        else:
+            stdout = json.dumps({'subtype': 'success', 'result': '{}', 'usage': {'input_tokens': 10,
+                'output_tokens': 2, 'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 0}})
+        return subprocess.CompletedProcess(argv, 0, stdout, '')
+
+    monkeypatch.setattr(executors, 'run_provider', provider)
+    resolved = {'root': str(ROOT),
+                'procedure': str(ROOT / host / 'skills/dk-architecture-review/SKILL.md'),
+                'executor': host, 'binding': {'skill': 'dk-workflows:dk-architecture-review'}}
+    try:
+        monkeypatch.setenv('DK_UPDATE_PARENT', root['token'])
+        monkeypatch.setenv(workflow_usage.ENV, json.dumps(root['workflow_usage']))
+        with workflow_usage.helper('reviewers', [], tmp_path, dict(os.environ)) as dispatch:
+            caller = json.loads(dispatch['env'][workflow_usage.ENV])
+            monkeypatch.setenv(workflow_usage.ENV, json.dumps(caller))
+            with workflow_usage.role('architecture-review', evidence=scope):
+                assert executors.execute('Review architecture.', tmp_path, resolved=resolved) == '{}'
+        assert len(seen) == 1
+        child = seen[0]
+        assert child['token'] != root['token']
+        context = child['workflow_usage']
+        assert context['invocation_id'] == child['token']
+        assert context['parent_invocation_id'] == root['token']
+        assert context['role'] == 'dk-architecture-review'
+        assert context['helper_id'] == caller['helper_id']
+        assert context['pinned_evidence'] == scope
+        assert context['parent_execution_id'] is None
+        report = workflow_usage.query(root['workflow_usage']['path'])
+        executions = [event for event in report['events'] if event['kind'] == 'execution']
+        assert [event['status'] for event in executions] == ['running', 'returned']
+        for event in executions:
+            assert event['invocation_id'] == child['token']
+            assert event['role'] == 'dk-architecture-review'
+            assert event['helper_id'] == caller['helper_id']
+            assert event['evidence']['pinned'] == scope
+        assert report['usage']['tokens']['total_tokens']['known_subtotal'] == 12
+    finally:
+        invocations.end(root['invocation'])

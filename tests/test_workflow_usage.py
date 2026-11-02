@@ -62,6 +62,24 @@ def test_children_share_observed_root_without_merging_unrelated_workflows(lifecy
     assert {item['invocation_id'] for item in records(ctx['path'], 'invocation')} == {root['token'], child['token']}
 
 
+def test_repository_group_keeps_unmeasured_host_with_its_measured_provider(lifecycle):
+    _, ctx = lifecycle()
+    assert ctx['repository'] is not None
+    telemetry.execution(ctx, {'execution_id': 'measured-provider', 'status': 'returned',
+        'provider': 'codex', 'inclusive': True, 'scope': 'execution',
+        'usage': {'input_tokens': 90, 'output_tokens': 10, 'total_tokens': 100}})
+    report = telemetry.query(ctx['path'], groups=('repository',))
+    assert len(report['usage']['groups']) == 1
+    group = report['usage']['groups'][0]
+    assert group['key'] == {'repository': ctx['repository']}
+    assert group['complete'] is False
+    assert group['missing_attempts'] == 1
+    total = group['tokens']['total_tokens']
+    assert total['known_subtotal'] == 100
+    assert total['measured_attempts'] == total['missing_attempts'] == 1
+    assert total['complete'] is False
+
+
 def test_inclusive_parent_and_nested_child_preserve_known_partial_usage(lifecycle, monkeypatch):
     _, ctx = lifecycle()
     telemetry.execution(ctx, {'execution_id': 'parent', 'status': 'returned',

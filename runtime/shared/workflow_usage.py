@@ -155,6 +155,11 @@ def register(invocation, cwd, parent=None):
                'parent_invocation_id': parent or (previous['invocation_id'] if previous else None),
                'parent_execution_id': (inherited or {}).get('parent_execution_id'),
                'stage': stage, 'role': invocation['skill']}
+        caller = inherited if (inherited is not None and previous is not None
+            and inherited['workflow_id'] == previous['workflow_id']
+            and inherited['invocation_id'] == previous['invocation_id']) else previous
+        if caller is not None:
+            ctx.update({key: caller[key] for key in ('helper_id', 'pinned_evidence') if key in caller})
         identity = invocation['lifecycle'].get('identity', {})
         repository = None
         try:
@@ -339,6 +344,7 @@ def query(path, groups=()):
     hosts = [{'execution_id': 'host-' + item['invocation_id'],
               'parent_execution_id': item.get('parent_execution_id'),
               'provider': item.get('host'), 'usage': item.get('host_usage'),
+              'repository': item.get('repository'),
               'stage': item['stage'], 'role': item['role'], 'scope': 'execution'}
              for item in invocations]
     runs = [item for item in events if item['kind'] == 'run' and item.get('source') == 'run_state']
