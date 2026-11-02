@@ -249,7 +249,9 @@ def _role(prompt):
     if not isinstance(prompt, str):
         return None
     markers = re.findall(r'^DK_REVIEW_PASS=([A-Za-z0-9_.:-]+)\s*$', prompt, re.M)
-    return markers[0] if len(markers) == 1 else None
+    if len(markers) > 1:
+        raise ValueError('ambiguous specialist pass markers')
+    return markers[0] if markers else None
 
 
 def codex_passes(raw):
@@ -351,7 +353,9 @@ def claude_passes(raw):
                 if isinstance(args, dict) and args.get('resume'):
                     if role or args['resume'] in identities:
                         raise ValueError('unsupported Claude specialist resume evidence')
-                if role and isinstance(call, str) and call:
+                if role:
+                    if not isinstance(call, str) or not call:
+                        raise ValueError('unsupported Claude specialist call identity')
                     if call in launched:
                         raise ValueError('duplicate Claude specialist call')
                     launched[call] = role

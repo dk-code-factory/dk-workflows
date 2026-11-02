@@ -267,7 +267,73 @@ def test_unsupported_marked_codex_spawn_is_unavailable_after_completed_roles(pro
 def test_multiple_roles_in_one_native_child_are_not_independent_passes():
     rows = codex_rows(['Toolkit'])
     rows[2]['item']['prompt'] += '\nDK_REVIEW_PASS=Standards\nDK_REVIEW_PASS=Spec'
-    assert execution.codex_passes(stream(rows))['launched'] == []
+    with pytest.raises(ValueError, match='ambiguous specialist pass markers'):
+        execution.codex_passes(stream(rows))
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+@pytest.mark.parametrize('markers', ['Audit\nDK_REVIEW_PASS=Other', 'Audit\nDK_REVIEW_PASS=Audit'])
+@pytest.mark.parametrize('correction_attempt', [False, True])
+def test_ambiguous_marked_launch_is_unavailable_after_completed_roles(proof, host, markers, correction_attempt):
+    repository, path, descriptor = proof
+    binding = {'skill': 'fixture:review', 'host': host, 'nested_review_roles': ['Audit']}
+    descriptor['execution']['executor'] = host
+    make_rows = codex_rows if host == 'codex' else claude_rows
+    rows = make_rows(['Audit'])
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        execution.record(host, stream(rows), '', 0, 0)
+        reference = execution.finish(collector, {'findings': []})
+    execution.verify(reference, binding, descriptor, path)
+
+    extra = copy.deepcopy(rows[2 if host == 'codex' else 1])
+    if host == 'codex':
+        extra['item'].update(receiver_thread_ids=['extra-child'], prompt='DK_REVIEW_PASS=' + markers,
+                             agents_states={'extra-child': {'status': 'running'}})
+    else:
+        extra['message']['content'][0].update(id='extra-call', input={'prompt': 'DK_REVIEW_PASS=' + markers})
+    if correction_attempt:
+        correction = make_rows([])
+        correction.insert(-1, extra)
+    else:
+        rows.insert(-1, extra)
+    original = {'findings': [{'message': 'Original finding retained.'}]}
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        execution.record(host, stream(rows), '', 0, 0)
+        if correction_attempt:
+            execution.record(host, stream(correction), '', 0, 1)
+        reference = execution.finish(collector, original)
+    with pytest.raises(ValueError, match='execution unavailable'):
+        execution.verify(reference, binding, descriptor, path, original)
+    evidence = json.loads(Path(reference['path']).read_text())
+    assert evidence['original_result'] == original
+    assert 'ambiguous specialist pass markers' in evidence['assessment']['unknown']
+
+
+@pytest.mark.parametrize('tool', ['Task', 'Agent'])
+@pytest.mark.parametrize('identity', [{}, {'id': None}, {'id': ''}, {'id': 0},
+                                      {'id': False}, {'id': []}, {'id': {}}])
+def test_unsupported_marked_claude_launch_is_unavailable_after_completed_roles(proof, tool, identity):
+    repository, path, descriptor = proof
+    binding = {'skill': 'fixture:review', 'host': 'claude', 'nested_review_roles': ['Audit']}
+    descriptor['execution']['executor'] = 'claude'
+    rows = claude_rows(['Audit'], tool=tool)
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        execution.record('claude', stream(rows), '', 0, 0)
+        reference = execution.finish(collector, {'findings': []})
+    execution.verify(reference, binding, descriptor, path)
+
+    extra = copy.deepcopy(rows[1])
+    block = extra['message']['content'][0]
+    del block['id']
+    block.update(identity)
+    rows.insert(-1, extra)
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        execution.record('claude', stream(rows), '', 0, 0)
+        reference = execution.finish(collector, {'findings': []})
+    with pytest.raises(ValueError, match='execution unavailable'):
+        execution.verify(reference, binding, descriptor, path)
+    assessment = json.loads(Path(reference['path']).read_text())['assessment']
+    assert 'unsupported Claude specialist call identity' in assessment['unknown']
 
 
 def test_retained_valid_proof_binds_findings_and_private_transport(proof):

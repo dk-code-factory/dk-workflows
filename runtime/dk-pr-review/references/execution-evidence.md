@@ -50,7 +50,9 @@ Every observed marked child must finish, including repeated roles and correction
 
 Optional telemetry continues reading Claude's unique final result envelope and
 Codex's final cumulative root-turn usage without summing children or earlier
-cumulative events. Native cached input is already included in input tokens.
+cumulative events. Codex input tokens include cached input. Claude reports ordinary
+input, cache-read input and cache-creation input separately; normalization combines
+those components once.
 Codex JSON mode does not expose the text-mode model header; absent another
 explicit observation, model remains unknown. No provider calls or configuration
 guesses are added to recover that measurement.
