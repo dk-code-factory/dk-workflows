@@ -1,4 +1,5 @@
 """Deterministic accounting: no provider calls or reconstructed billed cost."""
+import copy
 import sys
 from pathlib import Path
 
@@ -285,3 +286,22 @@ def test_optional_source_labels_cannot_poison_usage_reports(labels):
     assert result['tokens']['total_tokens']['known_subtotal'] == 10
     assert result['usage_sources'] == (['provider_metadata', 'valid'] if isinstance(labels, list)
                                       else ['provider_metadata'])
+
+
+@pytest.mark.parametrize('label', [None, '', {'source': 'provider'}, ['provider'], 7, 0, False, 'custom'])
+@pytest.mark.parametrize('cost', [None, .25])
+def test_optional_cost_source_preserves_measurements_and_raw_evidence(label, cost):
+    raw = {'total_tokens': 10, 'cost_source': label, 'total_cost_usd': cost}
+    original = copy.deepcopy(raw)
+    result = usage.report([record('first', raw=raw), record('second', raw={
+        'total_tokens': 20, 'total_cost_usd': .5, 'cost_source': 'recorded'})])
+    assert result['tokens']['total_tokens']['known_subtotal'] == 30
+    assert result['cost']['known_subtotal'] == .5 + (cost or 0)
+    assert result['cost']['complete'] == (cost is not None)
+    expected = {'recorded'}
+    if label == 'custom':
+        expected.add('custom')
+    elif cost is not None:
+        expected.add('provider_reported' if label is None else 'unknown')
+    assert result['cost']['sources'] == sorted(expected)
+    assert raw == original

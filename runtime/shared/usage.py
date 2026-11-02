@@ -60,7 +60,13 @@ def normalize(raw, provider):
             result[child] = None
     cost = raw.get('total_cost_usd')
     result['cost_usd'] = cost if number(cost, integer=False) else None
-    result['cost_source'] = raw.get('cost_source') or ('provider_reported' if result['cost_usd'] is not None else None)
+    cost_source = raw.get('cost_source')
+    if isinstance(cost_source, str) and cost_source:
+        result['cost_source'] = cost_source
+    elif result['cost_usd'] is not None:
+        result['cost_source'] = 'provider_reported' if cost_source is None else 'unknown'
+    else:
+        result['cost_source'] = None
     # No rate table, subscription allocation, or billed-cost inference.
     return result
 

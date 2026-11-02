@@ -350,6 +350,22 @@ def test_recorded_nullable_source_metadata_remains_queryable_and_renderable():
     assert stats.ledger(REPO)['runs'][r['id']]['reviews']['a']['executions'][0]['usage']['sources'] is None
 
 
+@pytest.mark.parametrize('evidence_field', ['usage', 'executions'])
+def test_recorded_malformed_cost_source_remains_queryable_and_renderable(evidence_field):
+    r = run(reviewers=('a',))
+    raw = {'total_tokens': 10, 'total_cost_usd': .25, 'cost_source': {'name': 'provider'}}
+    evidence = [raw] if evidence_field == 'usage' else [{'execution_id': 'one', 'usage': raw}]
+    stats.record_review(REPO, r['id'], 'a', status='completed', **{evidence_field: evidence})
+    for result in (stats.summary(REPO)['usage'], stats.summary()['usage']):
+        assert result['tokens']['total_tokens']['known_subtotal'] == 10
+        assert result['cost']['known_subtotal'] == .25
+        assert result['cost']['sources'] == ['unknown']
+    reports = stats.render_reports()
+    assert Path(reports['user']).is_file()
+    saved = stats.ledger(REPO)['runs'][r['id']]['reviews']['a'][evidence_field][0]
+    assert (saved if evidence_field == 'usage' else saved['usage']) == raw
+
+
 def test_inclusive_token_coverage_with_child_cost_renders_without_missing_usage():
     r = run(reviewers=('a',))
     stats.record_review(REPO, r['id'], 'a', status='completed', executions=[{
