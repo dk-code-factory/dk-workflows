@@ -190,6 +190,13 @@ def analysis_prompt(manifest, context, decisions, sources, descriptors):
         'Inputs are already collected; analyze them under the procedure below. '
         'Inspect complete original evidence; summaries are navigation, not replacements. '
         'Missing required procedures or evidence block preparation. '
+        'Your read-only analyst role and JSON response protocol apply only to this preparation call. '
+        'Write worker_instructions for the downstream worker, completion_criteria for its verifier, '
+        'and reviewer_addenda for the named reviewers. Keep analyst role directives, response schemas '
+        'and scratch narration out of all three. Preserve the actual downstream authorization '
+        'prerequisites, including read-only tasks; readiness grants no permission to edit, publish, '
+        'allocate reviews, complete or merge. Check the complete downstream guidance before responding, '
+        'including any inherited guidance. '
         'Before constructing the response, read the relevant fields in '
         'the data contract at this absolute path:\nRESPONSE CONTRACT: ' +
         str(references / 'preparation-contract.md') +
@@ -265,14 +272,243 @@ def analyze(prompt, checkout, *, validate=None, on_call=None, diagnostic_scope='
                         retain_accepted=(lambda value: isinstance(value, dict) and value.get('full_reassessment') is True)
                             if isinstance(diagnostic_scope, dict) and diagnostic_scope.get('phase') == 'incremental'
                             else None,
-                        correction_instructions='worker_instructions and completion_criteria must be nonempty strings.')
+                        correction_instructions=(
+                            'worker_instructions and completion_criteria must be nonempty strings. '
+                            'Keep downstream worker, verifier and reviewer guidance separate from this '
+                            'analyst role and response protocol. Replace contradictory analyst directives '
+                            'without removing legitimate read-only limits, authorization prerequisites, '
+                            'evidence, Decisions, stopping criteria or implementation/verification obligations.'))
 
 
 def text(value):
     return isinstance(value, str) and bool(value.strip())
 
 
-def validate_analysis(analysis, sources, reviewers, prior=()):
+def guidance_prose(value):
+    """Locate quoted evidence without hiding active verbs outside its quotes."""
+    # A fence must be complete; inline quoted spans stay on one line.
+    # An unmatched quote/fence must not hide the rest of the contract from checks.
+    chars = list(value)
+    opened = None
+    list_indents = []
+    list_paragraph = False
+    offset = 0
+    for line in value.splitlines(keepends=True):
+        content = line.rstrip('\r\n').expandtabs(4)
+        if opened is not None:
+            start, marker, length, container_indent = opened
+            if content.strip() and not content.startswith(' ' * container_indent):
+                opened = None
+                list_paragraph = False
+            elif re.fullmatch(r' {0,3}' + re.escape(marker) + '{' + str(length) + r',}[ \t]*',
+                              content[container_indent:]):
+                chars[start:offset + len(line)] = [c if c in '\r\n' else ' '
+                                                  for c in value[start:offset + len(line)]]
+                opened = None
+                offset += len(line)
+                continue
+            else:
+                offset += len(line)
+                continue
+        if content.strip():
+            indent = len(content) - len(content.lstrip(' '))
+            while list_indents and indent < list_indents[-1]:
+                list_indents.pop()
+                list_paragraph = False
+            container_indent = list_indents[-1] if list_indents else 0
+            content = content[container_indent:]
+            while not re.fullmatch(r' {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})', content):
+                item = re.match(r' {0,3}(?:[-+*]|(?P<number>\d{1,9})[.)])(?P<pad> +|$)', content)
+                if item is None:
+                    break
+                # An ordered list can interrupt paragraph text only when it starts at one.
+                if list_paragraph and item['number'] is not None and int(item['number']) != 1:
+                    break
+                padding = len(item['pad'])
+                width = item.end() - padding + (padding if 1 <= padding <= 4 else 1)
+                container_indent += width
+                list_indents.append(container_indent)
+                content = content[width:]
+                list_paragraph = False
+            fence = re.fullmatch(r' {0,3}(`{3,}|~{3,})([^\r\n]*)', content)
+            if fence and not (fence[1][0] == '`' and '`' in fence[2]):
+                opened = (offset, fence[1][0], len(fence[1]), container_indent)
+                list_paragraph = False
+            else:
+                list_paragraph = guidance_paragraph(content, list_paragraph)
+        else:
+            list_paragraph = False
+        offset += len(line)
+    value = ''.join(chars)
+    paragraph = False
+    quote_fence = None
+    quote_html = None
+    offset = 0
+    for line in value.splitlines(keepends=True):
+        content = line.rstrip('\r\n')
+        quoted = False
+        while marker := re.match(r' {0,3}>[ \t]?', content):
+            quoted = True
+            content = content[marker.end():]
+        if quoted:
+            if quote_html is not None:
+                if re.search(quote_html, content, re.I):
+                    quote_html = None
+                paragraph = False
+            elif quote_fence:
+                marker, length = quote_fence
+                if re.fullmatch(r' {0,3}' + re.escape(marker) + '{' + str(length) + r',}[ \t]*', content):
+                    quote_fence = None
+                paragraph = False
+            else:
+                # A list item can end in a paragraph with lazy continuation.
+                if not re.fullmatch(r' {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})', content):
+                    content = re.sub(r'^(?: {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+)+', '', content)
+                fence = re.fullmatch(r' {0,3}(`{3,}|~{3,})([^\r\n]*)', content)
+                if fence and not (fence[1][0] == '`' and '`' in fence[2]):
+                    quote_fence = (fence[1][0], len(fence[1]))
+                    paragraph = False
+                else:
+                    html_end = guidance_html_end(content, paragraph)
+                    if html_end is not None:
+                        if not re.search(html_end, content, re.I):
+                            quote_html = html_end
+                        paragraph = False
+                    else:
+                        paragraph = guidance_paragraph(content, paragraph)
+        else:
+            quote_fence = None
+            quote_html = None
+            quoted = paragraph and guidance_paragraph(content, True)
+            paragraph = quoted
+        if quoted:
+            chars[offset:offset + len(line)] = [c if c in '\r\n' else ' ' for c in line]
+        offset += len(line)
+    value = ''.join(chars)
+    quoted = list(re.finditer(
+        r'(?<!`)(?P<ticks>`+)(?!`)[^\r\n]*?(?<!`)(?P=ticks)(?!`)|'
+        r'"[^"\r\n]+"|“[^”\r\n]+”', value))
+    chars = list(value)
+    for match in quoted:
+        width = len(match['ticks']) if match['ticks'] else 1
+        chars[match.start():match.start() + width] = ' ' * width
+        chars[match.end() - width:match.end()] = ' ' * width
+    return ''.join(chars), [(match.start(), match.end()) for match in quoted]
+
+
+def guidance_paragraph(content, continuing=False):
+    """Recognize paragraph continuations, excluding Markdown block boundaries."""
+    if not content.strip():
+        return False
+    if re.match(r' {0,3}(?:#{1,6}(?:[ \t]|$)|'
+                r'(?:[-+*]|1[.)])[ \t]+\S)', content):
+        return False
+    fence = re.fullmatch(r' {0,3}(`{3,}|~{3,})([^\r\n]*)', content)
+    if fence and not (fence[1][0] == '`' and '`' in fence[2]):
+        return False
+    if guidance_html_end(content, continuing) is not None:
+        return False
+    if re.fullmatch(r' {0,3}(?:=+|-+|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})[ \t]*', content):
+        return False
+    if not continuing and (content.startswith(('    ', '\t')) or
+                           re.match(r' {0,3}\[[^\]]+\]:', content)):
+        return False
+    return True
+
+
+def guidance_html_end(content, continuing=False):
+    """Return the terminator of an HTML block, or None for paragraph text."""
+    for opener, closer in ((r'<(script|pre|style|textarea)(?:[ \t>]|$)', None),
+                           (r'<!--', '-->'), (r'<\?', r'\?>'),
+                           (r'<!\[CDATA\[', r'\]\]>'), (r'<![A-Z]', '>')):
+        if match := re.match(r' {0,3}' + opener, content, re.I):
+            return closer if closer is not None else '</' + match[1] + '>'
+    if re.match(r' {0,3}</?(?:'
+                r'address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|'
+                r'dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|'
+                r'h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|'
+                r'ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|'
+                r'title|tr|track|ul)(?:[ \t/>]|$)', content, re.I):
+        return r'^[ \t]*$'
+    if not continuing and re.fullmatch(
+            r' {0,3}(?:</[A-Za-z][A-Za-z0-9-]*[ \t]*>|'
+            r'<[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z_:][A-Za-z0-9_.:-]*'
+            r'(?:[ \t]*=[ \t]*(?:[^ \t"\'=<>`]+|"[^"]*"|\'[^\']*\'))?)*[ \t]*/?>)[ \t]*', content):
+        return r'^[ \t]*$'
+    return None
+
+
+def validate_guidance(analysis):
+    """Reject known active preparation protocols in every downstream assignment.
+
+    This is a bounded protocol guard, not a general semantic proof. The analyst
+    must still check the whole assignment against the original authorized task.
+    """
+    assignments = [('worker_instructions', analysis['worker_instructions']),
+                   ('completion_criteria', analysis['completion_criteria'])]
+    assignments += [('reviewer_addenda.' + name, value)
+                    for name, value in analysis['reviewer_addenda'].items()]
+    role = re.compile(
+        r'\b(?:perform|conduct|do|undertake)\s+(?:only\s+)?(?:a\s+)?(?:'
+        r'read[ -]only\s+(?:decisions\s+(?:engineering\s+)?|engineering\s+)(?:preparation|reassessment)|'
+        r'decisions\s+(?:engineering\s+)?(?:preparation|reassessment)\s*,\s*read[ -]only)\b|'
+        r'\b(?:act|serve)\s+as\s+(?:the\s+|a\s+)?(?:read[ -]only\s+)?'
+        r'(?:preparation|reassessment)\s+analyst\b|'
+        r'\byou\s+are\s+(?:the\s+|a\s+)?(?:read[ -]only\s+)?'
+        r'(?:preparation|reassessment)\s+analyst\b', re.I)
+    schema_gap = r'(?:(?!\r?\n[ \t]*\r?\n)[^.])*?'
+    protocol = re.compile(
+        r'\breturn\s+(?:only\s+|exactly\s+|the\s+)*(?:'
+        r'(?:initial\s+)?analysis[ -]and[ -]graph\s+json|'
+        r'reassessment\s+(?:response|protocol)|'
+        r'\{\s*["\']?\s*analysis\s*["\']?\s*:' + schema_gap + r'\bgraph\s*["\']?\s*:|'
+        r'[\[{]?\s*["\']?dispositions\b' + schema_gap + r'\badditions\b' + schema_gap + r'\bimpacts\b)', re.I)
+    json_protocol = re.compile(r'\breturn\s+(?:only\s+|exactly\s+|the\s+)*\{', re.I)
+    decoder = json.JSONDecoder()
+    scratch = re.compile(
+        r'\bI\s+(?:am\s+|will\s+|must\s+|need\s+to\s+)'
+        r'(?:now\s+)?(?:perform\s+|conduct\s+)?(?:the\s+)?'
+        r'(?:Decisions\s+(?:engineering\s+)?(?:reassess\w*|prepar\w*|analy[sz]\w*)|'
+        r'reassess\w*\s+(?:the\s+)?preparation|'
+        r'(?:prepar\w*|analy[sz]\w*)[^.\n]*?(?:reassessment\s+(?:response|protocol)|'
+        r'analysis[ -]and[ -]graph|JSON\s+response))\b', re.I)
+    for field, value in assignments:
+        prose, quotations = guidance_prose(value)
+        matches = []
+        decoded_protocols = set()
+        for match in json_protocol.finditer(prose):
+            try:
+                payload, end = decoder.raw_decode(value, match.end() - 1)
+            except (ValueError, RecursionError):
+                continue
+            # Valid JSON uses top-level keys; textual patterns cover non-JSON templates.
+            decoded_protocols.add(match.start())
+            if isinstance(payload, dict) and ({'analysis', 'graph'} <= payload.keys() or
+                    {'dispositions', 'additions', 'impacts'} <= payload.keys()):
+                matches.append((match.start(), end))
+        matches += [(match.start(), match.end()) for pattern in (role, protocol, scratch)
+                    for match in pattern.finditer(prose)
+                    if pattern is not protocol or match.start() not in decoded_protocols]
+        for start, end in matches:
+            # Quoting field names after an active "Return" does not quote
+            # that directive. Evidence must contain the whole directive,
+            # rather than only a formatted verb such as `Return`.
+            if any(left < start and end < right for left, right in quotations):
+                continue
+            # A prohibition preserves the separation; it does not assign the
+            # prohibited analyst role to this downstream recipient.
+            before = prose[:start]
+            if re.search(r'\b(?:not|never|don[\'’]t)\s+'
+                         r'(?:(?:ever|again|also|instead|simply|just|directly|actually|automatically)\s+)*$',
+                         before, re.I):
+                continue
+            raise FieldError(field,
+                'contains an analyst-only preparation role, response protocol or scratch narration; '
+                'refresh downstream guidance for its actual recipient and authorized phase, '
+                'preserving read-only limits, authorization prerequisites and governing obligations')
+
+
+def validate_analysis(analysis, sources, reviewers, prior=(), *, check_guidance=True):
     if not isinstance(analysis, dict):
         raise ValueError('preparation analysis must be an object')
     def evidence(item):
@@ -340,6 +576,8 @@ def validate_analysis(analysis, sources, reviewers, prior=()):
         raise ValueError('each configured reviewer requires a tailored addendum')
     if not text(analysis.get('worker_instructions')) or not text(analysis.get('completion_criteria')):
         raise ValueError('worker instructions and completion criteria required')
+    if check_guidance:
+        validate_guidance(analysis)
     if type(analysis.get('sync_required')) is not bool:
         raise ValueError('explicit synchronization assessment required')
     if analysis['sync_required'] and not text(analysis.get('sync_reason')):
@@ -411,6 +649,9 @@ def reassessment_prompt(prompt, parent_path, parent, paths, changed_sources, sel
             'retains omitted transport and recovery bookkeeping; the view cannot authorize a gate. '
             'Address every affected conclusion and every unmapped change explicitly. Identify additional '
             'affected conclusions and their dependents. Retain unchanged values exactly. '
+            'Inspect inherited worker, completion and reviewer guidance for analyst role/protocol '
+            'contamination. Replace contaminated guidance through dispositions; do not retain it merely '
+            'because it appeared in a ready parent. Preserve stable IDs and all governing obligations. '
             'Use addition:N in watches.depends_on to reference the zero-based additions array index N '
             '(canonical decimal, no leading zeros). Existing updated nodes may use these references too; '
             'forward references and cycles are allowed. Runtime assigns all fresh stable IDs and resolves '
@@ -753,7 +994,9 @@ def validate(artifact, context, decisions, *, require_ready=True, check_sources=
     for name, descriptor in artifact['reviewers'].items():
         if not isinstance(descriptor, dict) or descriptor.get('reviewer') != name or descriptor.get('complete') is not True:
             raise ValueError('preparation reviewer adaptation is incomplete')
-    validate_analysis(artifact['analysis'], artifact['sources'], artifact['reviewers'])
+    inputs = artifact.get('inputs')
+    validate_analysis(artifact['analysis'], artifact['sources'], artifact['reviewers'],
+                      check_guidance=check_sources or isinstance(inputs, dict) and inputs.get('policy') == policy())
     if artifact['preparation_version'] >= 2:
         if 'reviewer_paths' in artifact:
             paths = artifact['reviewer_paths']

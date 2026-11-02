@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.7.2",
+      "description": "Separate preparation analyst instructions from downstream worker guidance and validate worker contracts through existing bounded preparation correction, preserving read-only authorization and immutable evidence."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.7.0",
       "description": "Typed cleanup evidence, owned preparation refresh, read-only architecture evaluator contracts, recipient-specific nested packets, concurrent role checkpoints, bounded same-cycle infrastructure recovery, exact-identity cleanup proofs, persistent CI deadlines and diagnostic timing spans."
     },
