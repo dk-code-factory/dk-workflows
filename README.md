@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.7.3.
+Independent MIT plugin for Claude Code and Codex. Version 1.7.4.
 
 ## Install
 
@@ -70,6 +70,12 @@ Run `python3 scripts/check.py` and `python3 scripts/test.py` (development depend
 The offline [workflow behavior evaluation](docs/workflow-behavior-evaluation.md) checks synthetic trace controls and documents real-trace normalization and isolated version comparisons.
 
 Owned source provenance is recorded in `PROVENANCE.json`. No installed system skills, external plugins, credentials, private rules/state, caches, or benchmark results are distributed.
+
+Private [workflow usage attribution](docs/workflow-usage.md) observes lifecycle,
+helper stages, provider attempts and actual review/completion outcomes across
+standalone and iteration workflows. It preserves unknown host measurements and
+checkpoint reuse separately from execution, without changing workflow gates or
+the reviewer quality ledger.
 
 ## Plugin configuration and guards
 

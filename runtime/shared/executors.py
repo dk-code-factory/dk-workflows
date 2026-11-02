@@ -18,6 +18,7 @@ from shared.diagnostics import Diagnostic, task
 from shared.private_state import write
 from shared.reviewer_telemetry import capture, trace_path
 from shared.workflow_storage import allocate
+from shared import workflow_usage
 
 
 class ProviderExhausted(RuntimeError):
@@ -417,6 +418,9 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, archite
         raise ValueError('DK_ANALYSIS_HOST must be codex or claude' if internal_analysis else
                          'Model execution requires a native host')
     env = dict(os.environ, DK_HOST=calling_host)
+    workflow = workflow_usage.context(env)
+    if workflow is not None:
+        env[workflow_usage.ENV] = json.dumps(workflow)
     if not internal_analysis:
         env.pop('DK_ANALYSIS_HOST', None)
     if not inherit_architecture:
@@ -476,6 +480,7 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, archite
     if token:
         managed_context = ('The host executor has called this plugin\'s lifecycle entry and will call completion '
                            'after your final response. Use DK_UPDATE_MANAGED_RECEIPT; do not duplicate those calls.\n')
+    managed_entry = None
     try:
         if token and resolved and receipt.get('identity', {}).get('name') == 'dk-workflows':
             # The read-only provider can reuse this complete begin receipt without
@@ -488,7 +493,10 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, archite
             spec.loader.exec_module(cli)
             entry = begin(root, cli.ROUTES, host, resolved['binding']['skill'].split(':')[-1],
                           checkout, managed_receipt=receipt)
+            managed_entry = entry
             env['DK_MANAGED_INVOCATION'] = entry['invocation']
+            if entry.get('workflow_usage'):
+                env[workflow_usage.ENV] = json.dumps(entry['workflow_usage'])
             managed_context = (
                 'The host executor owns lifecycle entry and completion for this DK workflow. '
                 f'DK_MANAGED_INVOCATION is {entry["invocation"]}; use that path as INVOCATION_FILE '
@@ -505,6 +513,8 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, archite
             original = sys.exception()
             try:
                 managed_update(resolved, env, 'complete', token)
+                if managed_entry is not None:
+                    workflow_usage.close(managed_entry)
             except Exception as exc:
                 if not isinstance(original, Diagnostic) or original.code != 'provider_output_failed':
                     raise
@@ -619,7 +629,7 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
         if host == 'codex':
             argv = ['codex', 'exec', '--ephemeral', '--sandbox', 'read-only', '--skip-git-repo-check',
                     '-C', str(checkout), '-o', str(output), '-']
-            if trace_path():
+            if trace_path() or workflow_usage.context(env) is not None:
                 argv.insert(2, '--json')
         else:
             argv = ['claude', '--permission-mode', 'plan', '--no-session-persistence',

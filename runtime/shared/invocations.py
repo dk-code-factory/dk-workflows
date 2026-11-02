@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-from shared import workflow_storage, cli_reference
+from shared import workflow_storage, cli_reference, workflow_usage
 from shared.private_state import write
 from shared.runtime_bundles import updater, verify
 from shared.diagnostics import Diagnostic, command
@@ -61,6 +61,9 @@ def begin(root, routes, host, skill, cwd, parent=None, *, managed_receipt=None):
     # Keep the token recoverable even if reference creation fails.
     path = directory / 'invocation.json'
     value.update(reference=None, invocation=str(path))
+    telemetry = workflow_usage.register(value, cwd, parent)
+    if telemetry:
+        value['workflow_usage'] = telemetry
     try:
         write(path, value)
         reference = cli_reference.create(retained, routes, cwd, entry['token'])
@@ -78,5 +81,7 @@ def end(path, reason=None):
     if value['managed']:
         return {'status': 'executor_managed', 'token': value['token'],
                 'message': 'The host executor owns lifecycle completion.'}
-    return updater().lifecycle(Path(value['runtime_root']), value['host'], 'complete',
-                               token=value['token'], reason=reason)
+    result = updater().lifecycle(Path(value['runtime_root']), value['host'], 'complete',
+                                 token=value['token'], reason=reason)
+    workflow_usage.close(value, reason)
+    return result
