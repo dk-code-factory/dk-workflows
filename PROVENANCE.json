@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.6.19",
+      "description": "Keep oversized JSON correction requests within the serialized transport budget using complete private evidence files, preserving one correction, validation and diagnostic recovery."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.6.18",
       "description": "Handle ordinary text choice evidence conservatively during review reconciliation while retaining exact Decisions duplicate checks, protected-source fingerprints and file errors."
     },

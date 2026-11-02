@@ -255,6 +255,9 @@ def analyze(prompt, checkout, *, validate=None, on_call=None, diagnostic_scope='
             on_call()
         return execute(request, directory, inherit_architecture=False, **kwargs)
     return execute_json(prompt, checkout, validate=validate, executor=counted,
+                        # counted retains and verifies the entire assembled
+                        # request, including corrections, before dispatch.
+                        bound_correction=False,
                         diagnostic_scope=diagnostic_scope,
                         retain_accepted=(lambda value: isinstance(value, dict) and value.get('full_reassessment') is True)
                             if isinstance(diagnostic_scope, dict) and diagnostic_scope.get('phase') == 'incremental'
