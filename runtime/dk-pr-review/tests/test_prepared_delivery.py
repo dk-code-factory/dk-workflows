@@ -202,6 +202,70 @@ class PreparedDeliveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'does not cover'):
             self.prepare()
 
+    def test_runner_preexports_ad_passes_with_parent_obligations(self):
+        self.assert_nested_delivery(['Toolkit','Standards','Spec','Performance'])
+
+    def test_runner_preexports_matpocock_passes_with_parent_obligations(self):
+        self.assert_nested_delivery(['Standards','Spec'])
+
+    def assert_nested_delivery(self, roles):
+        # Real Git/preparation and command transport; semantic providers remain mocked.
+        self.provider['nested_review_roles']=roles
+        self.name=runner.bindings.key(self.provider)
+        p=self.package
+        for suffix,agents in [('parent',[self.name]),('spec',['Spec'])]:
+            rule={'id':'arch-'+suffix,'revision':1,'text':'Inspect transform boundaries.',
+                  'origin':'user-created','sources':[],'agents':agents,'patterns':[]}
+            architecture.edit(p.repo,rule,user={'actor':'user','instruction':'Fixture rule',
+                'source':'fixture'},expected=architecture.current(p.repo,baseline=p.context['base_sha'])['fingerprint'])
+        artifact=self.prepare()
+        seen=[]
+        original=runner.invoke
+        def invoke(binding,handoff_path,checkout,*args,**kwargs):
+            handoff=json.loads(Path(handoff_path).read_text())
+            parent=handoff['architecture_packet']
+            self.assertEqual(set(handoff['nested_architecture_packets']),set(self.provider['nested_review_roles']))
+            for role,reference in handoff['nested_architecture_packets'].items():
+                packet=architecture.provider_packet(reference,checkout,role,parent=parent)
+                child=architecture.load(packet)
+                self.assertEqual(child['parent'],parent)
+                self.assertEqual([r['id'] for r in child['rules']],
+                    ['arch-parent','arch-spec'] if role=='Spec' else ['arch-parent'])
+                seen.append(role)
+            return original(binding,handoff_path,checkout,*args,**kwargs)
+        verdict={'complete':True,'reason':'','coverage':[{'rule_id':'arch-'+suffix,'revision':1,
+            'status':'compliant','rationale':'Inspected transform.',
+            'evidence':[{'path':'transform.py','start':1,'end':2}]} for suffix in ('parent','spec')]}
+        with patch.object(runner,'invoke',side_effect=invoke),patch.object(architecture,'analyze',return_value=verdict):
+            result=runner.review(p.context,[self.provider],'',p.decisions,'',artifact)
+        self.assertTrue(result['complete'],result)
+        self.assertEqual(set(seen),set(self.provider['nested_review_roles']))
+        self.assertEqual(prep.git(p.repo,'status','--porcelain=v1'),'')
+
+    def test_resumed_delivery_rejects_nested_packet_without_original_parent_before_launch(self):
+        from types import SimpleNamespace
+        self.provider['nested_review_roles']=['Standards','Spec']
+        self.name=runner.bindings.key(self.provider)
+        artifact=self.prepare()
+        def delivery(name,path,handoff):
+            if name==self.name:
+                value=architecture.load(handoff['nested_architecture_packets']['Spec'])
+                value.pop('parent')
+                value['schema_version']=1
+                value=architecture.seal({k:v for k,v in value.items() if k!='fingerprint'})
+                reference=architecture.retain(Path(handoff['architecture_packet']['path']).with_name(
+                    value['fingerprint']+'.json'),value)
+                handoff['nested_architecture_packets']['Spec']=reference
+            Path(path).write_text(json.dumps(handoff))
+            return path
+        session=SimpleNamespace(id='fixture-resume',cached=lambda _:None,delivery=delivery)
+        with patch.object(runner,'invoke') as launch,patch.object(architecture,'analyze') as semantic:
+            result=runner.review(self.package.context,[self.provider],'',self.package.decisions,'',artifact,session=session)
+        self.assertFalse(result['complete'],result)
+        self.assertTrue(result['guard_failure'],result)
+        self.assertIn('parent linkage',result['reason'])
+        launch.assert_not_called();semantic.assert_not_called()
+
     def test_architecture_provider_failure_keeps_configured_success_incomplete(self):
         prepared=self.prepare()
         with patch.object(architecture,'analyze',side_effect=RuntimeError('Architecture provider unavailable')):

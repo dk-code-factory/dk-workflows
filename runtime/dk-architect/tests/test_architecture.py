@@ -284,13 +284,15 @@ def test_worker_expansion_and_nested_identity_require_fresh_delivery(repo):
     before = set(directory.glob('*.json'))
     with pytest.raises(ValueError, match='recipient'):
         a.provider_packet(packet, repo, 'ci-repair')
-    refreshed = a.handoff({'packet': packet}, {'checkout': str(repo)}, 'ci-repair')
+    with pytest.raises(ValueError, match='scope expanded'):
+        a.handoff({'packet': packet}, {'checkout': str(repo)}, 'ci-repair')
+    refreshed = a.handoff({'packet': packet}, {'checkout': str(repo)}, 'ci-repair', ['src/core.py'])
     after = set(directory.glob('*.json'))
     assert after - before == {Path(refreshed['path'])}
     assert a.provider_packet(refreshed, repo, 'ci-repair') == refreshed
     assert set(directory.glob('*.json')) == after
-    assert [r['id'] for r in a.load(refreshed)['rules']] == ['arch-ci']
-    assert a.load(refreshed)['paths'] is None
+    assert [r['id'] for r in a.load(refreshed)['rules']] == ['arch-core']
+    assert a.load(refreshed)['paths'] == ['src/core.py']
     for field in ('scope', 'scope_contents', 'governing_sources', 'head', 'tree', 'task', 'catalog'):
         assert a.load(refreshed)[field] == a.load(packet)[field]
 
@@ -1588,6 +1590,7 @@ def test_malformed_model_evidence_gets_one_counted_correction(repo, tmp_path, mo
         prompts.append((prompt, kwargs['attempt']))
         return json.dumps(next(responses))
     monkeypatch.setattr(executors, 'execute', execute)
+    monkeypatch.setattr(executors, 'execute_architecture_role', execute)
     result = invoke()
     assert result and len(calls) == 2
     assert [attempt for _, attempt in prompts] == [0, 1]
@@ -1627,11 +1630,17 @@ def test_native_execution_preserves_role_packet_and_redelivers_nested_scope(repo
                          if environment.get('DK_ARCHITECTURE_PACKET') else None))
         return '{}'
     monkeypatch.setattr(executors, 'execute_process', process)
+    monkeypatch.setattr(executors, 'execute_architecture_role',
+        lambda prompt, checkout, role, architecture_packet, **kw: executors.execute(
+            prompt, checkout, architecture_packet=architecture_packet, inherit_architecture=False, **kw))
     executors.execute('Inspect code.', repo, architecture_packet=worker)
     delivered = a.load(captured[-1][2])
     assert captured[-1][1] == host
     assert delivered['agent'] == 'worker' and delivered['paths'] == ['src/core.py']
     assert [r['id'] for r in delivered['rules']] == ['arch-core']
+    nested = a.handoff({'packet': worker}, {'checkout': str(repo)}, 'ci-repair', ['src/core.py'])
+    roles = {role: a.handoff({'packet': worker}, {'checkout': str(repo)}, role, ['src/core.py'])
+             for role in ('dk-architecture-review', 'dk-architecture-enforcer')}
     monkeypatch.setenv('DK_ARCHITECTURE_PACKET', json.dumps(worker))
     monkeypatch.delenv('DK_ARCHITECTURE_AGENT', raising=False)
     with pytest.raises(ValueError, match='explicit recipient identity'):
@@ -1640,13 +1649,13 @@ def test_native_execution_preserves_role_packet_and_redelivers_nested_scope(repo
     monkeypatch.setenv('DK_ARCHITECTURE_AGENT', 'ci-repair')
     with pytest.raises(ValueError, match='Undeclared'):
         executors.execute('Nested CI repair.', repo)
-    nested = a.handoff({'packet': worker}, {'checkout': str(repo)}, 'ci-repair')
-    monkeypatch.setenv('DK_ARCHITECTURE_PACKETS', json.dumps({'ci-repair': nested}))
+    monkeypatch.setenv('DK_ARCHITECTURE_PACKETS', json.dumps({'ci-repair': nested, **roles}))
     executors.execute('Nested CI repair.', repo)
     child = a.load(captured[-1][2])
-    assert child['agent'] == 'ci-repair' and child['paths'] is None
-    assert [r['id'] for r in child['rules']] == ['arch-ci']
-    with pytest.raises(ValueError, match='scope became known'):
+    assert child['agent'] == 'ci-repair' and child['paths'] == ['src/core.py']
+    assert [r['id'] for r in child['rules']] == ['arch-core']
+    assert child['parent'] == worker
+    with pytest.raises(ValueError, match='scope expanded'):
         a.validate_packet(captured[-1][2], repo, paths=['tests/test.py'])
     monkeypatch.delenv('DK_ARCHITECTURE_AGENT')
     alternate = 'claude' if host == 'codex' else 'codex'
@@ -1714,3 +1723,93 @@ def test_resolved_native_invoke_delivers_binding_recipient_scope(repo, monkeypat
     for key in ('paths', 'scope', 'task', 'head', 'baseline', 'catalog'):
         assert delivered[key] == original[key]
     a.validate_packet(reference, repo, paths=['src/core.py'])
+
+
+def test_nested_delivery_unions_rules_and_reuses_without_any_state_writes(repo, monkeypatch):
+    initialize(repo, [obligation(), obligation('child', agents=['Spec']),
+                      obligation('unrelated', agents=['other'])])
+    parent = deliver(repo, paths=['src/core.py'])
+    child = a.handoff({'packet': parent}, {'checkout': str(repo)}, 'Spec', ['src/core.py'])
+    assert [r['id'] for r in a.load(child)['rules']] == ['arch-core', 'arch-child']
+    assert a.load(child)['parent'] == parent
+    monkeypatch.setenv('DK_ARCHITECTURE_PACKET', json.dumps(parent))
+    monkeypatch.setenv('DK_ARCHITECTURE_PACKETS', json.dumps({'Spec': child}))
+    def forbidden(*_args, **_kwargs):
+        pytest.fail('Immutable delivery attempted a filesystem mutation')
+    monkeypatch.setattr(Path, 'mkdir', forbidden)
+    monkeypatch.setattr(Path, 'chmod', forbidden)
+    monkeypatch.setattr(a, 'locked', forbidden)
+    monkeypatch.setattr(a, 'write', forbidden)
+    assert a.retain(Path(child['path']), a.load(child)) == child
+    assert a.handoff({'packet': parent}, {'checkout': str(repo)}, 'Spec', ['src/core.py']) == child
+    assert a.provider_packet(child, repo, 'Spec', ['src/core.py'], parent=parent) == child
+    with pytest.raises(ValueError, match='Undeclared'):
+        a.handoff({'packet': parent}, {'checkout': str(repo)}, 'Unknown', ['src/core.py'])
+    with pytest.raises(ValueError, match='scope expanded'):
+        a.handoff({'packet': parent}, {'checkout': str(repo)}, 'Spec', ['old.py'])
+    with pytest.raises(ValueError, match='delivery changed'):
+        a.handoff({'packet': parent}, {'checkout': str(repo)}, 'Spec', [])
+    # The nested recipient can reconstruct its own exact schema-2 packet, too.
+    monkeypatch.setenv('DK_ARCHITECTURE_PACKET', json.dumps(child))
+    own = a.load(child)
+    assert a.packet(repo, 'Spec', own['paths'], task=own['task'], baseline=own['baseline'],
+                    head=own['head'], scope=own['scope_contents']) == child
+    with pytest.raises(ValueError, match='parent linkage'):
+        a.packet(repo, 'Spec', own['paths'], task=own['task'], baseline=own['baseline'],
+                 head=own['head'], scope=own['scope_contents'], parent=child)
+    monkeypatch.setenv('DK_ARCHITECTURE_PACKET', json.dumps(parent))
+    Path(child['path']).unlink()
+    with pytest.raises(ValueError, match='fingerprint'):
+        a.handoff({'packet': parent}, {'checkout': str(repo)}, 'Spec', ['src/core.py'])
+
+
+@pytest.mark.parametrize('field', ['repository', 'catalog', 'baseline', 'head', 'tree', 'task',
+                                 'scope', 'scope_contents', 'governing_sources', 'paths', 'parent', 'rules'])
+def test_nested_delivery_rejects_resealed_scope_and_inheritance_changes(repo, field):
+    initialize(repo, [obligation(), obligation('child', agents=['Spec'])])
+    parent = deliver(repo, paths=['src/core.py'])
+    child = a.handoff({'packet': parent}, {'checkout': str(repo)}, 'Spec', ['src/core.py'])
+    value = a.load(child)
+    replacements = {'repository': 'path:/other', 'catalog': '0' * 64, 'baseline': '0' * 40,
+        'head': '0' * 40, 'tree': '0' * 40, 'task': 'different', 'scope': '0' * 64,
+        'scope_contents': {}, 'governing_sources': {'issues': {}}, 'paths': None,
+        'parent': deliver(repo, 'other', paths=['src/core.py']), 'rules': [a.load(child)['rules'][1]]}
+    value[field] = replacements[field]
+    invalid = a.seal({k: v for k, v in value.items() if k != 'fingerprint'})
+    reference = a.retain(Path(child['path']).with_name(invalid['fingerprint'] + '.json'), invalid)
+    with pytest.raises((ValueError, KeyError)):
+        a.provider_packet(reference, repo, 'Spec', ['src/core.py'], parent=parent)
+
+
+def test_delivery_rejects_same_commits_from_unrelated_repository(repo, tmp_path):
+    initialize(repo, [obligation()])
+    packet = deliver(repo, paths=['src/core.py'])
+    other = tmp_path / 'other'
+    run(repo, 'clone', '-q', str(repo), str(other))
+    assert a.provider_packet(packet, other, 'worker') == packet
+    run(other, 'remote', 'remove', 'origin')
+    with pytest.raises(ValueError, match='different repository'):
+        a.provider_packet(packet, other, 'worker')
+
+
+def test_conditional_nested_obligations_keep_scoped_deferrals(repo):
+    result = model_result(rules=[obligation(agents=['Parent'])])
+    result['conflicts'] = [{'text': 'Legacy choice remains pending', 'sources': ['old.py'],
+                            'patterns': ['legacy/**']}]
+    catalog = a.ensure(repo, analyzer=lambda *_: result)
+    parent = a.packet(repo, 'Parent', ['src/core.py'], baseline='HEAD',
+                      task='Inspect core', scope={'issue': 86})
+    context = {'checkout': str(repo), 'base_sha': catalog['baseline'],
+               'head_sha': run(repo, 'rev-parse', 'HEAD'), 'url': 'Inspect core'}
+    child = a.handoff({'packet': parent}, context, 'Spec', ['src/core.py'])
+    value = a.validate_packet(child, repo, agent='Spec', paths=['src/core.py'])
+    assert value['parent'] == parent
+    assert value['rules'] == catalog['conditional_rules']
+    assert value['deferred_obligations'] == a.load(parent)['deferred_obligations']
+    assert value['deferred_obligations']['conflicts'] == catalog['conflicts']
+    changed = deepcopy(value)
+    changed['deferred_obligations'] = {'conflicts': [], 'stale_rules': []}
+    changed = a.seal({k: v for k, v in changed.items() if k != 'fingerprint'})
+    reference = a.retain(Path(child['path']).with_name(changed['fingerprint'] + '.json'), changed)
+    with pytest.raises(ValueError, match='deferred obligations differ'):
+        a.validate_packet(reference, repo)

@@ -79,3 +79,19 @@ Known methods and explicit nested-role obligations require retained native launc
 and completion evidence before successful coverage or checkpoint reuse. See
 [execution evidence](execution-evidence.md) for supported host streams, independent
 conditional applicability assessments, private provenance and failure states.
+
+Declared nested reviewers receive `nested_architecture_packets`, keyed by the exact
+pass identity. AD declares Toolkit, Standards, Spec and conditional Performance;
+Mat Pocock declares Standards and Spec. The coordinator exports these before
+launch from the top-level reviewer packet. Each child retains its parent reference,
+repository/catalog, baseline/head/tree, task, governing scope and path budget, and
+receives both inherited and child-selected obligations. Delivery and resume check
+this linkage before any provider launches. Read-only providers consume exact
+immutable packets; they cannot create or broaden delivery. A missing, changed or
+undeclared packet leaves review incomplete. Independent passes and the mandatory
+full-catalog architecture review remain required.
+
+Internal architecture evaluators run the owned reviewer or enforcer role from the
+caller's retained package. Their actual lifecycle entry and completion run outside
+the provider sandbox, which receives the managed invocation. They do not discover
+a replacement installed version or start another lifecycle inside the sandbox.

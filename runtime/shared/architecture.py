@@ -99,6 +99,11 @@ def unseal(value):
 
 
 def retain(path, value):
+    # Immutable reuse must be possible inside a physical read-only sandbox.
+    if path.exists():
+        if read(path, {}) != value:
+            raise ValueError('Immutable architecture evidence changed')
+        return {'path': str(path.resolve()), 'fingerprint': value['fingerprint']}
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with locked(path.parent):
         if path.exists() and read(path, {}) != value:
@@ -167,7 +172,7 @@ def rule(value):
 
 
 def analyze(prompt, checkout, validate, *, on_call=None):
-    from shared.executors import execute_json, execute
+    from shared.executors import execute_json, execute, execute_architecture_role
     packet = _PACKET.get()
     def counted(prompt, checkout, **kwargs):
         scope = _CATALOG_SCOPE.get()
@@ -177,7 +182,8 @@ def analyze(prompt, checkout, validate, *, on_call=None):
         if on_call:
             on_call()
         if packet is not None:
-            kwargs['architecture_packet'] = packet
+            return execute_architecture_role(prompt, checkout, role=load(packet)['agent'],
+                                             architecture_packet=packet, **kwargs)
         return execute(prompt, checkout, inherit_architecture=False, **kwargs)
     return execute_json(prompt, checkout, validate=validate, executor=counted,
                         diagnostic_scope=_CATALOG_SCOPE.get() if packet is None else {
@@ -644,7 +650,28 @@ def scoped_obligations(catalog, paths):
     return deferred
 
 
-def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, governing=None, identity=None, catalog=None):
+def inherited_rules(catalog, agent, paths, parent):
+    selected_rules = selected(catalog, agent, paths)
+    if parent is None:
+        return selected_rules
+    by_id = {r['id']: r for r in parent['rules'] + selected_rules}
+    return [deepcopy(by_id[r['id']]) for r in catalog['rules'] + catalog.get('conditional_rules', []) if r['id'] in by_id]
+
+
+def validate_child(child, parent, reference):
+    if child.get('parent') != reference:
+        raise ValueError('Architecture child packet parent linkage differs')
+    if any(child[key] != parent[key] for key in (
+            'repository', 'catalog', 'baseline', 'head', 'tree', 'task', 'scope',
+            'scope_contents', 'governing_sources')):
+        raise ValueError('Architecture child packet scope differs from parent')
+    if parent['paths'] is not None and (child['paths'] is None
+            or not set(child['paths']).issubset(parent['paths'])):
+        raise ValueError('Architecture child packet path scope expanded')
+
+
+def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, governing=None,
+           identity=None, catalog=None, parent=None):
     if not agent or not task:
         raise ValueError('Agent identity and task/PR scope required')
     if paths is not None:
@@ -657,32 +684,92 @@ def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, go
                           catalog=supplied['fingerprint'])
     else:
         catalog = current(root, identity, baseline=baseline)
-    rules = selected(catalog, agent, paths)
     deferred = scoped_obligations(catalog, paths)
     head = git(root, 'rev-parse', '--verify', (head or 'HEAD') + '^{commit}').strip()
-    value = seal({'schema_version': 1, 'kind': 'architecture-packet', 'repository': catalog['repository'],
+    provider_parent = os.environ.get('DK_ARCHITECTURE_PACKET')
+    if provider_parent:
+        own = json.loads(provider_parent)
+        own_packet = validate_packet(own, root)
+        expected_parent = own if own_packet['agent'] != agent else own_packet.get('parent')
+        if parent is None:
+            parent = expected_parent
+        elif parent != expected_parent:
+            raise ValueError('Architecture provider delivery parent linkage differs')
+    inherited = validate_packet(parent, root) if parent else None
+    if inherited is not None and governing is None:
+        governing = inherited.get('governing_sources', {})
+    value = seal({'schema_version': 2 if parent else 1, 'kind': 'architecture-packet', 'repository': catalog['repository'],
                   'catalog': catalog['fingerprint'], 'baseline': catalog['baseline'],
                   'agent': agent, 'paths': paths, 'task': task, 'head': head,
                   'tree': git(root, 'rev-parse', head + '^{tree}').strip(), 'scope': digest(scope),
                   'scope_contents': scope, 'governing_sources': governing or {},
-                  'rules': rules, 'deferred_obligations': deferred})
+                  'rules': inherited_rules(catalog, agent, paths, inherited),
+                  'deferred_obligations': deferred,
+                  **({'parent': parent} if parent else {})})
+    if parent:
+        validate_child(value, inherited, parent)
+    if provider_parent:
+        # Providers can only consume the coordinator's declared immutable delivery.
+        own = json.loads(provider_parent)
+        declared = json.loads(os.environ.get('DK_ARCHITECTURE_PACKETS', '{}'))
+        reference = own if load(own)['agent'] == agent else declared.get(agent)
+        if reference is None:
+            raise ValueError('Undeclared architecture recipient; request fresh delivery from the coordinator')
+        reused = validate_packet(reference, root, agent=agent)
+        if reused != value:
+            raise ValueError('Architecture delivery changed; request fresh delivery from the coordinator')
+        return reference
     directory, _ = folder(root, catalog['repository'])
     return retain(directory / 'packets' / (value['fingerprint'] + '.json'), value)
 
 
+def checkout_identities(root):
+    """Retained review clones may have a local origin pointing to their source."""
+    identities, seen = set(), set()
+    root = Path(root).resolve()
+    while root not in seen:
+        seen.add(root)
+        identities.add('path:' + str(root))
+        identities.add(repository_scope.repository(root))
+        origin = repository_scope.git_remote(root, 'origin')
+        if not origin:
+            break
+        candidate = Path(origin.removeprefix('file://'))
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        if not candidate.is_dir() or repository_scope.normalize_remote(origin):
+            break
+        root = candidate.resolve()
+    return identities
+
+
 def validate_packet(reference, root, *, agent=None, paths=None, current_catalog=True, live=True):
     value = load(reference)
+    if live and value.get('repository') not in checkout_identities(root):
+        raise ValueError('Architecture packet belongs to a different repository')
+    if (value.get('kind') != 'architecture-packet'
+            or value.get('schema_version') not in (1, 2)
+            or (value['schema_version'] == 2) != ('parent' in value)):
+        raise ValueError('Expected valid architecture packet schema and parent provenance')
     catalog = load({'path': str(folder(root, value['repository'])[0] / 'catalogs' / (value['catalog'] + '.json')),
                     'fingerprint': value['catalog']})
     if catalog['repository'] != value['repository'] or catalog['baseline'] != value['baseline']:
         raise ValueError('Architecture packet catalog identity differs')
     if live and current_catalog and current(root, value['repository'], baseline=value['baseline'])['fingerprint'] != catalog['fingerprint']:
         raise ValueError('Architecture catalog changed; refresh rule packet')
-    if value['rules'] != selected(catalog, value['agent'], value['paths']):
+    inherited = None
+    if value.get('parent'):
+        inherited = validate_packet(value['parent'], root, current_catalog=current_catalog, live=live)
+        validate_child(value, inherited, value['parent'])
+    if value['rules'] != inherited_rules(catalog, value['agent'], value['paths'], inherited):
         raise ValueError('Architecture packet rule coverage differs')
     deferred = scoped_obligations(catalog, value['paths'])
     if value.get('deferred_obligations', {'conflicts': [], 'stale_rules': []}) != deferred:
         raise ValueError('Architecture packet deferred obligations differ')
+    if live and (git(root, 'rev-parse', '--verify', value['baseline'] + '^{commit}').strip() != value['baseline']
+            or git(root, 'rev-parse', '--verify', value['head'] + '^{commit}').strip() != value['head']
+            or git(root, 'rev-parse', value['head'] + '^{tree}').strip() != value['tree']):
+        raise ValueError('Architecture packet revision or tree differs')
     if digest(value.get('scope_contents')) != value['scope']:
         raise ValueError('Architecture packet scope evidence differs')
     governing = value.get('governing_sources', {})
@@ -767,18 +854,31 @@ def validate_preparation(value, context, decisions, *, live=True):
 
 def handoff(value, context, agent, paths=None):
     coordinator = validate_packet(value['packet'], context['checkout'])
+    for key, field in (('base_sha', 'baseline'), ('head_sha', 'head'), ('url', 'task'),
+                       ('repository_identity', 'repository')):
+        if key in context and context[key] != coordinator[field]:
+            raise ValueError('Architecture handoff differs from pinned context')
+    governing = value.get('governing', coordinator.get('governing_sources', {}))
+    # A preparation stores governing references separately in the original format.
+    if coordinator['agent'] != 'coordinator' and governing != coordinator.get('governing_sources', {}):
+        raise ValueError('Architecture handoff governing scope differs from parent')
     catalog = current(context['checkout'], coordinator['repository'], baseline=coordinator['baseline'],
                       catalog=coordinator['catalog'])
     # Keep exactly the coordinator's governing scope, rather than hashing a hash.
     return packet(context['checkout'], agent, paths, task=coordinator['task'],
                   head=coordinator['head'], identity=coordinator['repository'], catalog=catalog,
                   scope=coordinator['scope_contents'],
-                  governing=value.get('governing', coordinator.get('governing_sources', {})))
+                  governing=governing,
+                  parent=value['packet'] if coordinator['agent'] != 'coordinator' else None)
 
 
-def provider_packet(reference, root, agent, paths=None):
-    """Nested execution never mistakes its parent's recipient for its own."""
-    validate_packet(reference, root, agent=agent, paths=paths)
+def provider_packet(reference, root, agent, paths=None, *, parent=None):
+    """Read exact delivery without retaining evidence or taking a write lock."""
+    delivered = validate_packet(reference, root, agent=agent, paths=paths)
+    if parent is not None:
+        validate_child(delivered, validate_packet(parent, root), parent)
+    if git(root, 'rev-parse', 'HEAD').strip() != delivered['head']:
+        raise ValueError('Architecture provider checkout differs from packet head')
     return reference
 
 

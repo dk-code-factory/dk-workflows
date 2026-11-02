@@ -74,7 +74,14 @@ fingerprint in the handoff. Unknown paths omit --paths-file and receive every
 audience-matching rule; an explicit [] means no file work. Include old/new rename
 paths and deletions. Validate with `architecture validate-packet --packet FILE
 --agent ID --paths-file FILE` before edits. Expansion requires a fresh packet.
-Nested agents repeat delivery using their own identity and paths. Workers request
+The coordinator pre-exports declared nested review packets before read-only
+provider launch. Nested packets retain their exact parent reference and the union
+of inherited obligations and recipient-selected rules; their paths cannot exceed
+the parent budget. Top-level coordinator delivery retains recipient filtering.
+Providers read their declared packet map. An exact unchanged delivery can be
+reused without directory, permission or lock writes. Missing packets, undeclared
+recipients, changed evidence and expanded scope require fresh coordinator delivery
+and leave review incomplete. Workers request
 authorization before breaching a delivered rule; silence grants no permission.
 
 Packet creation checks conflict and stale-rule impact against the declared paths,

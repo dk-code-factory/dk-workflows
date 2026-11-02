@@ -470,7 +470,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                         preparation['architecture'], context, name,
                         architecture.load(preparation['architecture']['packet'])['paths'])
                     jobs[name]['handoff']['nested_architecture_packets'] = {
-                        role: architecture.handoff(preparation['architecture'], context, role,
+                        role: architecture.handoff({'packet': jobs[name]['handoff']['architecture_packet']}, context, role,
                             architecture.load(preparation['architecture']['packet'])['paths'])
                         for role in preparation['reviewers'][name].get('nested_review_roles', [])}
             unchanged()
@@ -518,6 +518,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
         for index, (name, job) in enumerate(jobs.items()):
             if job['handoff']['contract'] == 'git-diff-v2':
                 job['handoff'].update(references)
+            expected_packet = job['handoff'].get('architecture_packet')
             job['path'] = directory / f'{index}.json'
             if session:
                 job['handoff']['response_budget'] = session.id + ':' + name
@@ -528,14 +529,28 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                 if job['handoff']['contract'] == 'git-diff-v2':
                     for field in ('full_preparation', 'full_decisions'):
                         handoff_references.append(job['handoff'][field])
-                if preparation.get('architecture'):
-                    architecture.validate_packet(job['handoff']['architecture_packet'], checkout,
-                        agent='dk-architecture-review' if name == 'architecture-review' else name)
-                    for role, packet in job['handoff'].get('nested_architecture_packets', {}).items():
-                        architecture.validate_packet(packet, checkout, agent=role)
             else:
                 write(job['path'], job['handoff'])
                 job['path'].chmod(0o400)
+            try:
+                if preparation.get('architecture'):
+                    parent = job['handoff']['architecture_packet']
+                    if parent != expected_packet:
+                        raise ValueError('Retained architecture delivery differs from expected recipient packet')
+                    delivered = architecture.validate_packet(parent, checkout,
+                        agent='dk-architecture-review' if name == 'architecture-review' else name)
+                    prepared_packet = architecture.load(preparation['architecture']['packet'])
+                    if any(delivered[key] != prepared_packet[key] for key in (
+                            'repository', 'catalog', 'baseline', 'head', 'tree', 'task', 'scope', 'paths')):
+                        raise ValueError('Retained architecture delivery differs from preparation')
+                    declared = preparation['reviewers'][name].get('nested_review_roles', []) if name != 'architecture-review' else []
+                    if set(job['handoff'].get('nested_architecture_packets', {})) != set(declared):
+                        raise ValueError('Retained nested architecture recipient declarations differ')
+                    for role, packet in job['handoff'].get('nested_architecture_packets', {}).items():
+                        architecture.provider_packet(packet, checkout, role, delivered['paths'], parent=parent)
+            except (ValueError, OSError, KeyError, TypeError) as exc:
+                return outcome({'complete': False, 'guard_failure': True, 'reason': str(exc),
+                                'findings': [], 'skipped_reviewers': []})
             handoff_references.append({'path': str(job['path']), 'sha256': preparation_api.file_hash(job['path'])})
             job['checkout'] = Path(job['handoff']['context']['checkout'] if name == 'architecture-review'
                                    else job['handoff']['checkout'])

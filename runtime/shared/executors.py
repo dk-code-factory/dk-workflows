@@ -407,6 +407,40 @@ def update_process(resolved, env, phase, token=None):
     return receipt
 
 
+_ARCHITECTURE_ROLES = {
+    'dk-architecture-review': 'runtime/dk-architecture-review/evaluator.md',
+    'dk-architecture-enforcer': 'runtime/dk-architecture-enforcer/evaluator.md',
+}
+
+
+def execute_architecture_role(prompt, checkout, *, role, architecture_packet, attempt=0, timeout=None):
+    """Run an owned evaluator from this caller's package, with managed lifecycle."""
+    from shared import architecture, bindings, runtime_bundles
+    if not isinstance(role, str) or role not in _ARCHITECTURE_ROLES:
+        raise ValueError('Unknown architecture evaluator role: ' + str(role))
+    if not architecture_packet:
+        raise ValueError('Architecture evaluator requires an explicit recipient packet')
+    architecture.validate_packet(architecture_packet, checkout, agent=role)
+    host = current_host()
+    # Never resolve this internal role through the current host registry. The
+    # calling module is the authority for its package, including on resume.
+    origin = Path(__file__).resolve().parents[2]
+    root = runtime_bundles.retain(origin)
+    fingerprint = runtime_bundles.verify(root)
+    _, manifest = bindings.manifest_skill(root, host, 'dk-workflows', role)
+    if manifest.get('repository') != 'https://github.com/dk-code-factory/dk-workflows':
+        raise ValueError('Architecture evaluator requires the owned dk-workflows package')
+    procedure = root / _ARCHITECTURE_ROLES[role]
+    if not procedure.is_file() or not procedure.resolve().is_relative_to(root.resolve()):
+        raise ValueError('Architecture evaluator procedure is missing or outside its package')
+    binding = {'skill': 'dk-workflows:' + role, 'host': host}
+    resolved = {'binding': binding, 'identity': bindings.key(binding), 'executor': host,
+                'root': str(root), 'origin_root': str(origin), 'procedure': str(procedure),
+                'version': manifest.get('version'), 'bundle_digest': fingerprint}
+    return execute(prompt, checkout, resolved=resolved, attempt=attempt, timeout=timeout,
+                   architecture_packet=architecture_packet, inherit_architecture=False)
+
+
 def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, architecture_packet=None,
             inherit_architecture=True, architecture_packets=None):
     if _CANCELLATION.get() is not None:
@@ -439,20 +473,24 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, archite
         if resolved:
             skill = resolved['binding']['skill']
             recipient = resolved['identity']
-            if architecture_packet and parent_packet['agent'] in (skill, recipient, skill + '@' + host):
+            owned_role = skill.removeprefix('dk-workflows:') if skill.startswith('dk-workflows:') else None
+            if architecture_packet and (parent_packet['agent'] in (skill, recipient, skill + '@' + host)
+                    or (owned_role in _ARCHITECTURE_ROLES and parent_packet['agent'] == owned_role)):
                 recipient = parent_packet['agent']
         else:
             recipient = parent_packet['agent'] if architecture_packet else env.get('DK_ARCHITECTURE_AGENT')
         if not recipient:
             raise ValueError('Inherited architecture packet requires an explicit recipient identity')
+        parent_reference = None
         if parent_packet['agent'] != recipient:
             declared = json.loads(env.get('DK_ARCHITECTURE_PACKETS', '{}'))
             if recipient not in declared:
                 raise ValueError('Undeclared architecture recipient; request fresh delivery from the coordinator')
-            inherited = declared[recipient]
+            parent_reference, inherited = inherited, declared[recipient]
             parent_packet = architecture.load(inherited)
         delivered = architecture.provider_packet(inherited, checkout, recipient,
-            parent_packet['paths'] if architecture_packet else None)
+            parent_packet['paths'] if architecture_packet else None,
+            **({'parent': parent_reference} if parent_reference is not None else {}))
         env['DK_ARCHITECTURE_PACKET'] = json.dumps(delivered)
         prompt = ('Read your architecture packet and fingerprint at ' + delivered['path'] + '. '
                   'Before coding, declare intended paths and refresh this packet; request authorization '
