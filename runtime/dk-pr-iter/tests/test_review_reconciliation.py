@@ -1746,3 +1746,29 @@ def test_choice_envelope_is_not_an_exact_decisions_copy(tmp_path, monkeypatch):
     p.write('manifest.json', p.manifest)
     s.prepare(analysis())
     assert s.run()['status'] == 'blocked' and s.calls == []
+
+
+@pytest.mark.parametrize('changed', [False, True])
+def test_native_reconciliation_keeps_plain_text_fingerprints(tmp_path, monkeypatch, changed):
+    package = Package
+
+    def with_plain_choice(root):
+        result = package(root)
+        (result.root / 'coordinator.txt').write_text('Preserve agreed workshop behavior.\n')
+        result.manifest['evidence']['choices'] = ['coordinator.txt']
+        return result
+
+    monkeypatch.setattr(sys.modules[__name__], 'Package', with_plain_choice)
+    scenario = Scenario(tmp_path, monkeypatch)
+    if changed:
+        (scenario.package.root / 'coordinator.txt').write_text('Change agreed workshop behavior.\n')
+    scenario.refresh()
+    result = scenario.run()
+    if changed:
+        assert result['status'] == 'blocked'
+        assert 'issue/choice/instruction/rule fingerprints' in result['reason']
+        assert scenario.calls == []
+    else:
+        assert result['status'] == 'reconciled'
+        assert scenario.calls == [0]
+    assert all(path.read_bytes() == before for path, before in scenario.retained_bytes.items())
