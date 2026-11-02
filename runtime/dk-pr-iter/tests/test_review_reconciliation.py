@@ -128,7 +128,7 @@ class Scenario:
                     'evidence': [binding['decision_targets'][0], 'current/decisions#' + key]
                         + [refs[0] for refs in item['discussion_sources'].values()]}
                     for key, item in binding['decision_additions'].items()}}
-                   if binding.get('comparison_version') == 2 else {})}
+                   if binding.get('comparison_version', 1) >= 2 else {})}
 
     def feedback(self, status, items=()):
         items = list(items)
@@ -904,12 +904,25 @@ def test_concurrent_opposite_verdicts_remain_terminally_blocked(scenario, monkey
     assert Path(s.reference['path']).read_bytes() == s.original_bytes
 
 
+def retain_prior_semantic_disagreement(s):
+    # A previous runtime can have judged even exact evidence. Fresh exact proof
+    # must preserve that retained rejection without another model call.
+    binding, _, _, _ = reconcile.snapshot(read(s.path, {}), s.head, s.assessment_path,
+                                         state.reconciliation_api(), version=2)
+    value = {'reconciliation_version': 2, 'binding': binding, 'comparison': s.comparison(binding)}
+    path = s.package.write('prior-disagreement.json', value)
+    item = {'path': str(path), 'sha256': coverage.digest(value),
+            'binding_hash': coverage.digest(binding), 'current_preparation_id': binding['current_preparation_id']}
+    state.mutate(s.path, {}, lambda r: r.setdefault('review_reconciliations', []).append(item))
+
+
 def test_exact_reviewed_preparation_honors_its_own_blocked_comparison(scenario):
     s = scenario
     s.head = s.reviewed_head
     s.assess_series(published=False)
     assert state.verify_review(s.path, s.original)['preparation_id'] == s.original['preparation_id']
     s.different = ('fields', '/completion_criteria')
+    retain_prior_semantic_disagreement(s)
     assert s.run()['status'] == 'blocked'
     with pytest.raises(ValueError, match='not semantically equivalent'):
         state.verify_review(s.path, s.original)
@@ -933,6 +946,8 @@ def test_identical_preparation_in_new_directory_preserves_disagreement(scenario,
         s.current, s.current_path, s.head = s.original, s.original_path, s.reviewed_head
         s.assess_series(published=False)
     s.different = ('fields', '/completion_criteria')
+    if not refreshed:
+        retain_prior_semantic_disagreement(s)
     first = s.run()
     assert first['status'] == 'blocked'
     before = Path(s.current_path)
@@ -947,7 +962,7 @@ def test_identical_preparation_in_new_directory_preserves_disagreement(scenario,
     s.different = None
     second = s.run()
     assert second['status'] == 'blocked' and second['comparison'] == first['comparison']
-    assert s.calls == [0]
+    assert s.calls == ([0] if refreshed else [])
     with pytest.raises(ValueError):
         state.verify_review(s.path, s.current, assessment_path=s.assessment_path)
     assert len(read(s.path, {})['cycles']) == 5
@@ -1064,7 +1079,7 @@ def test_original_nonempty_coverage_survives_refresh_but_current_review_stays_li
     path = s.package.write('invalid-current-architecture.json', current_receipt)
     invalid = {**selected, 'artifact': {**selected['artifact'], 'path': str(path),
                                        'sha256': coverage.digest(current_receipt)}}
-    with pytest.raises(ValueError, match='architecture evidence|catalog changed|violations|does not cover'):
+    with pytest.raises(ValueError, match='architecture evidence|catalog changed|violations|does not cover|architecture reuse attestation'):
         coverage.verify(reference, s.current, accepted_failures=['example'], reconciliation=invalid,
                         checkout=checkout)
     architecture.edit(s.package.repo, rule, expected=s.current['architecture']['catalog'],
@@ -1161,7 +1176,7 @@ def test_discussion_restatements_retain_fifth_cycle_coverage(scenario):
     receipt = s.run()
     assert receipt['status'] == 'reconciled' and receipt['executed_reviewers'] == []
     saved = read(Path(receipt['reconciliation']['path']), {})
-    assert saved['reconciliation_version'] == 2 and len(saved['comparison']['decisions']) == 1
+    assert saved['reconciliation_version'] == 3 and len(saved['comparison']['decisions']) == 1
     assert state.verify_review(s.path, s.current)['head'] == s.reviewed_head
     assert Path(s.reference['path']).read_bytes() == s.original_bytes
     assert len(read(s.path, {})['cycles']) == 5
@@ -1628,7 +1643,7 @@ def test_version_one_disagreement_survives_attestation_upgrade(scenario, verdict
     # A later valid v2 approval for the same evidence cannot supply coverage.
     upgraded, _, _, _ = reconcile.snapshot(read(s.path, {}), s.head, s.assessment_path,
                                           state.reconciliation_api())
-    approval = {'reconciliation_version': 2, 'binding': upgraded, 'comparison': s.comparison(upgraded)}
+    approval = {'reconciliation_version': upgraded.get('comparison_version', 1), 'binding': upgraded, 'comparison': s.comparison(upgraded)}
     path = s.package.write('later-approval.json', approval)
     later = {'path': str(path), 'sha256': coverage.digest(approval), 'binding_hash': coverage.digest(upgraded),
              'current_preparation_id': s.current['preparation_id']}
@@ -1657,7 +1672,7 @@ def test_version_one_attestations_keep_original_restrictions(scenario):
     receipt = s.run()
     assert receipt['status'] == 'reconciled' and not receipt['reused_reconciliation']
     assert s.calls == [0]
-    assert read(Path(receipt['reconciliation']['path']), {})['reconciliation_version'] == 2
+    assert read(Path(receipt['reconciliation']['path']), {})['reconciliation_version'] == 3
     restatement_refresh(s, published=False)
     with pytest.raises(reconcile.NotEquivalent, match='Decisions'):
         reconcile.snapshot(read(s.path, {}), s.head, s.assessment_path, state.reconciliation_api(), version=1)

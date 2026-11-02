@@ -15,6 +15,7 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 
 from shared.flaky_tests import Registry
 from shared.flaky_actions import GitHub, pr_repository
 from shared.ci_policy import decide
+from shared.ci_observation import PermissionDenied, for_pr
 from shared.github_reads import run as github_run
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -22,6 +23,8 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 
 def gh_json(args):
     result = github_run(["gh", *args], capture_output=True, text=True, check=False)
+    if result.returncode == 4 or result.returncode and re.search(r'HTTP 40[13]|permission denied|not authenticated|authentication failed|Resource not accessible', result.stderr, re.I):
+        raise PermissionDenied(result.stderr.strip())
     if not result.stdout.strip():
         # gh v2.86.0 reports absent checks as an error before exporting JSON.
         # Accept its exit 1 and the pending exit 8 required by the CI contract.
@@ -63,7 +66,7 @@ def observe(pr, head, repo=None):
 
 
 def wait(pr, head, repo=None, timeout=1800, interval=30, no_checks_grace=60,
-         clock=time.monotonic, sleep=time.sleep, observer=observe, on_progress=None):
+         clock=time.monotonic, sleep=time.sleep, observer=observe, on_progress=None, observation=None):
     require_head(head)
     if timeout < 0 or interval <= 0 or no_checks_grace < 0:
         raise ValueError("invalid wait duration")
@@ -71,21 +74,31 @@ def wait(pr, head, repo=None, timeout=1800, interval=30, no_checks_grace=60,
     last_reported_elapsed = 0
     last_reported_state = None
     while True:
-        result = observer(pr, head, repo)
+        try:
+            result = observer(pr, head, repo)
+        except (PermissionDenied, PermissionError) as exc:
+            if observation:
+                observation.denied(exc)
+            raise
         elapsed = clock() - start
+        budget = observation.update(result, on_progress) if observation else {}
+        if observation:
+            elapsed = budget['elapsed_seconds']
+        remaining = budget.get('remaining_seconds', max(0, timeout - elapsed))
         if result["result"] in {"head_changed", "failure", "success"}:
-            return result | {"elapsed_seconds": round(elapsed, 1)}
+            return result | budget | {"elapsed_seconds": round(elapsed, 1)}
         if result["result"] == "no_checks" and elapsed >= no_checks_grace:
-            return result | {"elapsed_seconds": round(elapsed, 1)}
-        if elapsed >= timeout:
-            return result | {"result": "timeout", "last_state": result["result"], "elapsed_seconds": round(elapsed, 1)}
+            return result | budget | {"elapsed_seconds": round(elapsed, 1)}
+        if remaining <= 0:
+            return result | budget | {"result": "timeout", "last_state": result["result"], "elapsed_seconds": round(elapsed, 1),
+                "pending_checks": [c for c in result["checks"] if c.get("bucket") == "pending"]}
         if on_progress and (result["result"] != last_reported_state or
                             elapsed - last_reported_elapsed >= 60):
             on_progress({"result": result["result"], "head": head,
                          "elapsed_seconds": round(elapsed, 1), "check_count": len(result["checks"])})
             last_reported_elapsed = elapsed
             last_reported_state = result["result"]
-        sleep(min(interval, timeout - elapsed))
+        sleep(min(interval, remaining))
 
 
 def require_head(head):
@@ -102,14 +115,20 @@ def main():
     parser.add_argument("--interval", type=int, default=30)
     parser.add_argument("--classification-timeout", type=int, default=60)
     parser.add_argument("--no-checks-grace", type=int, default=60)
+    parser.add_argument('--rerun-operation', help='Verified ci-rerun publication operation authorizing one new attempt window')
+    parser.add_argument('--retry-denied', action='store_true', help='Explicitly retry observation after repairing denied read access')
     args = parser.parse_args()
     if args.classification_timeout <= 0:
         parser.error("classification timeout must be positive")
     try:
-        result = wait(args.pr, args.head, args.repo, args.timeout, args.interval,
-                      args.no_checks_grace,
-                      on_progress=lambda update: print(json.dumps(update, sort_keys=True),
-                                                       file=sys.stderr, flush=True))
+        from shared.workflow_timings import span
+        with for_pr(args.pr, args.head, args.repo, timeout=args.timeout,
+                    rerun=args.rerun_operation, retry_denied=args.retry_denied) as observation, \
+                span(observation.pr, 'ci'):
+            result = wait(args.pr, args.head, args.repo, args.timeout, args.interval,
+                          args.no_checks_grace, observation=observation,
+                          on_progress=lambda update: print(json.dumps(update, sort_keys=True),
+                                                           file=sys.stderr, flush=True))
         if result["result"] in {"success", "failure"}:
             print(json.dumps({"phase": "terminal", "raw_result": result["result"],
                               "head": result["head"], "elapsed_seconds": result.get("elapsed_seconds"),

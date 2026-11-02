@@ -17,7 +17,7 @@ input artifacts on interruption. New requests and iteration cycles start fresh;
 finished sessions cannot be resumed. Changed evidence requires a fresh session,
 within the caller's existing budget. Never reset iteration counters to obtain one.
 Iteration uses its next allowed cycle for changed evidence, except for
-[bounded proved-zero-launch recovery](../../dk-pr-iter/references/run-record.md).
+[bounded infrastructure recovery](../../dk-pr-iter/references/run-record.md).
 That recovery retains the original attempt and allocates a separate infrastructure
 attempt within the same cycle; it never replaces history or resets the cycle cap.
 
@@ -28,8 +28,7 @@ name, move only its JSON to a nonreserved filename in the same external director
 preserve its checkpoint and result files, then explicitly resume with identical evidence.
 
 The session checkpoints each completed reviewer in immutable private storage before
-continuing. Resume reuses only completed checkpoints; failed, incomplete, exhausted
-or interrupted reviewers execute again. A per-session execution lock rejects
+continuing. Resume reuses only completed checkpoints; interrupted reviewers execute again. Iteration failures require bounded cycle-recover for typed infrastructure failures, or the existing quota allowance; arbitrary incomplete responses cannot authorize another attempt. A per-session execution lock rejects
 concurrent coordinators. Missing, changed or unwritable session evidence blocks
 review; analytics failure merely warns and retains replay inputs.
 
@@ -117,7 +116,7 @@ version-1 attestations retain their original restrictions. Final-head refresh an
 reconciliation against the published assessment are still required.
 
 
-Fresh preparation v3 uses session v2 and review-result v3. The session compatibility
+Fresh preparation v4 uses session v3, review-result v4 and role-checkpoint v2. The session compatibility
 identity contains the runtime-computed engineering ID, exact head, base/tree, scope,
 caller scope/rules text and ordered reviewers. Each result retains its exact
 preparation ID plus engineering ID; session provenance records each preparation
@@ -135,3 +134,5 @@ are accepted on either side; declared registry and manifest versions must match.
 Package hashes and exact procedure identity remain mandatory even without a version.
 Invalid retained bindings block cycle allocation before counters advance; consumed
 cycles are never refunded or reset.
+
+Architecture executes concurrently with configured reviewers and checkpoints independently. The result retains separate architecture_accounting and structured role_failures diagnostics. Same-cycle recovery reuses completed roles and immutable deliveries, preserving response slots and correction budgets across operational refreshes. Reconciliation v3 distinguishes exact_identity proof from semantic_judgment; unchanged-head coverage skips reconciliation when the current gate passes.

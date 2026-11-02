@@ -269,8 +269,8 @@ def test_full_workflow_operational_refresh_resume_and_completion(tmp_path, monke
     assert read(session.path, {})['review_history'][:len(old['review_history'])] == old['review_history']
     state_api.register_review(record, {'review_artifact': item}, package.head)
     write(record_path, record)
-    assert review_coverage.load(item)['version'] == 3
-    assert read(session.path, {})['session_version'] == 2
+    assert review_coverage.load(item)['version'] == 4
+    assert read(session.path, {})['session_version'] == 3
     assert prep.verify_completion(verification, prepared)['preparation_id'] == first['preparation_id']
     assert completion.completion_gate(package.head, package.head, package.head, True, False, 'success',
         stage='review', preparation=fresh['artifact'], run_record=record_path,
@@ -452,7 +452,7 @@ def test_legacy_active_runs_are_untouched_and_terminal_history_survives(tmp_path
     assert record == before
     record['iteration_run']['status'] = 'completed'
     state_api.start_run(record)
-    assert record['iteration_run']['contract_version'] == 2
+    assert record['iteration_run']['contract_version'] == 3
     assert record['run_history'][0]['cycles'] == before['cycles']
     assert record['local_decisions'] == before['local_decisions']
     assert record['events'] == before['events']

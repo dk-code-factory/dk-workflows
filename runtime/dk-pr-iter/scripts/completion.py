@@ -214,7 +214,7 @@ def reviewer_candidates(reviews, pending, pr_author, final_head, requested_at_he
     return [entry["login"] for key, entry in submitted.items() if key not in blocked and not entry["on_final_head"]]
 
 
-def main():
+def _main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cwd", default=".")
     parser.add_argument("--pr", help="PR URL for fork then upstream completion settings")
@@ -264,7 +264,18 @@ def main():
                     cwd, 'git', 'rev-parse', f"{assessment['reviewed_head']}^{{tree}}")
                 if reviewed_tree != assessment['reviewed_tree']:
                     raise ValueError('series assessment reviewed tree is incorrect')
-            snapshot = observe(args.pr, args.final_head)
+            from shared.ci_observation import for_pr, PermissionDenied
+            with for_pr(args.pr, args.final_head) as observation:
+                try:
+                    snapshot = observe(args.pr, args.final_head)
+                except (PermissionDenied, PermissionError) as exc:
+                    observation.denied(exc)
+                    raise
+                budget = observation.update(snapshot, lambda update: print(
+                    json.dumps(update, sort_keys=True), file=sys.stderr, flush=True))
+                if snapshot['result'] == 'pending' and budget['remaining_seconds'] <= 0:
+                    snapshot = {**snapshot, **budget, 'result': 'timeout',
+                        'pending_checks': [c for c in snapshot['checks'] if c.get('bucket') == 'pending']}
             repo = pr_repository(args.pr)
             def progress(update):
                 print(json.dumps(update, sort_keys=True), file=sys.stderr, flush=True)
@@ -329,6 +340,14 @@ def main():
         print(json.dumps({"source": scope, "prompt": prompt}, ensure_ascii=False))
     except (OSError, UnicodeError, ValueError, RuntimeError, KeyError, TypeError, subprocess.SubprocessError) as exc:
         parser.exit(2, f"completion: {exc}\n")
+
+
+def main():
+    from shared.workflow_timings import span
+    if 'gate' in sys.argv and '--pr' in sys.argv:
+        with span(sys.argv[sys.argv.index('--pr') + 1], 'completion'):
+            return _main()
+    return _main()
 
 
 if __name__ == "__main__":

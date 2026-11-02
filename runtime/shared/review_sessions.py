@@ -134,6 +134,106 @@ def unlaunched(data):
             raise ValueError('review results contradict zero launch; prelaunch recovery denied')
 
 
+def recoverable_roles(data):
+    """All workers drained, successful evidence intact, failed transports typed."""
+    from shared.role_failures import eligible
+    if not isinstance(data, dict):
+        raise ValueError('role recovery session is malformed')
+    history = data.get('execution_history')
+    identity = data.get('identity')
+    if (not isinstance(identity, dict) or not isinstance(identity.get('reviewers'), list)
+            or not isinstance(data.get('reviews'), dict)):
+        raise ValueError('role recovery identity or checkpoint ownership is uncertain')
+    if (data.get('session_version') != 3 or data.get('status') != 'incomplete'
+            or data.get('launch_tracking_version') != 1 or not isinstance(history, list) or not history
+            or data.get('invocations') != len(history)
+            or any(not isinstance(item, dict) or item.get('number') != index or item.get('status') != 'drained'
+                   or not isinstance(item.get('launch_intents'), list)
+                   for index, item in enumerate(history, 1))):
+        raise ValueError('role recovery launch intent requires drained execution; ownership is uncertain')
+    roles = [*data['identity']['reviewers'], 'architecture-review']
+    if set(data.get('reviews', {})) != set(roles) or not data.get('results'):
+        raise ValueError('role recovery requires every role and its terminal result')
+    artifact = coverage.load(data['results'][-1])
+    if (artifact.get('session_id') != data.get('id') or artifact.get('session_identity') != data['identity']
+            or artifact['result'].get('complete') is not False):
+        raise ValueError('role recovery result identity changed')
+    failures = {item['role']: item for item in artifact['result'].get('role_failures', [])}
+    # Validate original deliveries before charging, including the successful
+    # roles that recovery will never dispatch again.
+    import hashlib
+    import importlib.util
+    validator_path = Path(__file__).resolve().parents[1] / 'dk-pr-review/scripts/validate_result.py'
+    spec = importlib.util.spec_from_file_location('recovery_findings_validator', validator_path)
+    validator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(validator)
+    deliveries = {}
+    for role in roles:
+        ref = data.get('deliveries', {}).get(role)
+        if not isinstance(ref, dict):
+            raise ValueError('role recovery delivery missing')
+        raw = Path(ref['path']).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != ref.get('sha256'):
+            raise ValueError('role recovery delivery changed')
+        import json
+        deliveries[role] = json.loads(raw)
+        handoff = deliveries[role]
+        delivered_checkout = handoff.get('context', {}).get('checkout') if role == 'architecture-review' else handoff.get('checkout')
+        if (not delivered_checkout or coverage.git(delivered_checkout, 'rev-parse', 'HEAD') != data['identity']['head']
+                or coverage.git(delivered_checkout, 'status', '--porcelain=v1')):
+            raise ValueError('role recovery delivery checkout changed')
+        if handoff.get('response_budget') != data['id'] + ':' + role:
+            raise ValueError('role recovery response-slot ownership changed')
+        from shared import architecture
+        if role == 'architecture-review':
+            architecture.validate_preparation(handoff['architecture'], handoff['context'], handoff['decisions'])
+        else:
+            for field in ('full_preparation', 'full_decisions'):
+                if field in handoff:
+                    full = handoff[field]
+                    if hashlib.sha256(Path(full['path']).read_bytes()).hexdigest() != full['sha256']:
+                        raise ValueError('role recovery full delivery changed')
+    architecture_delivery = deliveries['architecture-review']
+    failed = []
+    for role in roles:
+        item = data['reviews'][role]
+        checkpoint = read(Path(item['checkpoint']['path']), {})
+        if (coverage.digest(checkpoint) != item['checkpoint']['sha256']
+                or checkpoint.get('checkpoint_version') != 2 or checkpoint.get('reviewer') != role
+                or checkpoint.get('session_id') != data['id'] or checkpoint.get('session_identity') != data['identity']
+                or checkpoint.get('status') != item.get('status')):
+            raise ValueError('role recovery checkpoint changed')
+        if item['status'] == 'completed':
+            if not isinstance(checkpoint.get('result'), dict):
+                raise ValueError('completed role result missing')
+            if role == 'architecture-review':
+                from shared import architecture
+                architecture.verify_review(checkpoint['result'], architecture_delivery['architecture'],
+                    architecture_delivery['context'], architecture_delivery['decisions'])
+            else:
+                handoff = deliveries[role]
+                validator.validate(checkpoint['result'], validator.added_lines(Path(handoff['patch']).read_text()))
+            continue
+        if (item['status'] != 'failed' or not eligible(checkpoint.get('diagnostic'))
+                or role not in failures or failures[role].get('diagnostic') != checkpoint['diagnostic']):
+            raise ValueError('launch intent has no eligible structured infrastructure failure')
+        if role not in history[-1]['launch_intents']:
+            raise ValueError('failed role dispatch ownership is uncertain')
+        failed.append(role)
+    if not failed or set(failures) != set(failed):
+        raise ValueError('role recovery requires only eligible failed roles')
+    return failed
+
+
+def validate_recovery_proof(data, payload):
+    if payload.get('kind') == 'role_infrastructure':
+        if (recoverable_roles(data) != payload.get('failed_roles')
+                or data.get('identity') != payload['identity']):
+            raise ValueError('role recovery evidence changed')
+    else:
+        unlaunched(data)
+
+
 def activation_plan(data):
     """Validate pending evidence without treating it as activation authority."""
     activation = data.get('recovery_activation')
@@ -173,7 +273,7 @@ def activate(path, context, activation):
         if (coverage.digest(proof) != payload['proof']['sha256']
                 or proof.get('iteration_allocation') != payload['prior_allocation']):
             raise ValueError('recovery proof changed')
-        unlaunched(proof)
+        validate_recovery_proof(proof, payload)
         if (saved.get('iteration_allocation') != payload['allocation']
                 or saved.get('generation', 0) != payload['generation']
                 or ('identity' in saved and saved['identity'] != payload['identity'])
@@ -186,7 +286,7 @@ def activate(path, context, activation):
         require_activation(saved, path)
 
 
-def recover_unlaunched(path, context, current_identity, prior_binding, replacement_binding):
+def recover_unlaunched(path, context, current_identity, prior_binding, replacement_binding, *, after_dispatch=False):
     """Freeze or authorize a proved-unlaunched session while excluding workers."""
     path = validate_storage(path, context)
     with ownership(path):
@@ -194,7 +294,11 @@ def recover_unlaunched(path, context, current_identity, prior_binding, replaceme
             prior = {key: prior_binding[key] for key in ('iteration_run_id', 'cycle', 'attempt')}
             if data.get('iteration_allocation') != prior:
                 raise ValueError('review allocation evidence is missing or changed')
-            unlaunched(data)
+            failed_roles = recoverable_roles(data) if after_dispatch else []
+            if after_dispatch and data.get('identity') != current_identity:
+                raise ValueError('role recovery requires identical evidence and bindings')
+            if not after_dispatch:
+                unlaunched(data)
             if data.get('prelaunch_recovery'):
                 raise ValueError('prelaunch recovery already recorded for this session')
             proof = dict(data)
@@ -212,6 +316,8 @@ def recover_unlaunched(path, context, current_identity, prior_binding, replaceme
                 'prior_binding': prior_binding, 'prior_allocation': prior, 'binding': binding,
                 'allocation': allocation, 'identity': current_identity, 'resume': same,
                 'generation': data.get('generation', 0) + 1 if same else 0}
+            if after_dispatch:
+                payload.update(kind='role_infrastructure', failed_roles=failed_roles)
             digest = coverage.digest(payload)
             receipt = coverage.storage_path(path.parent / 'recovery-activations' / (digest + '.json'), context)
             activation = {'path': str(receipt), 'sha256': digest, 'payload': payload}
@@ -220,6 +326,8 @@ def recover_unlaunched(path, context, current_identity, prior_binding, replaceme
             if same:
                 data['iteration_allocation'] = allocation
                 data['prelaunch_resume_authorized'] = data.get('invocations', 0) + 1
+                if after_dispatch:
+                    data['role_resume_authorized'] = data.get('invocations', 0) + 1
             else:
                 # This also freezes an unused reservation: an old delegated
                 # worker cannot initialize it after a replacement is allocated.
@@ -230,8 +338,8 @@ def recover_unlaunched(path, context, current_identity, prior_binding, replaceme
 
 class Session:
     def __init__(self, context, prepared, reviewers, *, path=None, resume=False, scope='', rules=''):
-        version = 2 if prepared.get('preparation_version', 1) >= 3 else 1
-        if version == 2:
+        version = 3 if prepared.get('preparation_version', 1) >= 4 else 2 if prepared.get('preparation_version', 1) >= 3 else 1
+        if version >= 2:
             if (any(context[k] != prepared['identity'][field] for k, field in (
                     ('url', 'pr_url'), ('head_sha', 'head_sha'), ('base_sha', 'base_sha')))
                     or list(reviewers) != prepared['reviewer_order']):
@@ -240,7 +348,7 @@ class Session:
         self.context, self.prepared = context, prepared
         if resume and path is None:
             raise ValueError('resuming requires --session-file')
-        base = Path(prepared['workflow_dir']) / 'review-sessions' if version == 2 else directory(context['url'])
+        base = Path(prepared['workflow_dir']) / 'review-sessions' if version >= 2 else directory(context['url'])
         self.path = outside(path or base / (uuid.uuid4().hex + '.json'), context)
         self.validate_storage()
         self.identity = identity(context, prepared, reviewers, scope, rules)
@@ -271,7 +379,7 @@ class Session:
                     old['recovery_activation'] = activation
             elif old != default:
                 raise ValueError('session file already exists; explicitly resume interrupted work')
-            if version == 2:
+            if version >= 2:
                 reference = {'preparation_id': prepared['preparation_id'], 'engineering_id': engineering_id(prepared)}
                 if reference not in old.setdefault('preparations', []):
                     old['preparations'].append(reference)
@@ -305,6 +413,11 @@ class Session:
                         and all(h.get('status') == 'drained' and not h.get('launch_intents') for h in history)
                         and data.get('prelaunch_resume_authorized') != data.get('invocations', 0) + 1):
                     raise ValueError('unlaunched iteration session requires bounded cycle-recover')
+                if (data.get('iteration_allocation') and history and history[-1].get('status') == 'drained'
+                        and history[-1].get('launch_intents') and data.get('results')
+                        and coverage.load(data['results'][-1])['result'].get('role_failures')
+                        and data.get('role_resume_authorized') != data.get('invocations', 0) + 1):
+                    raise ValueError('failed iteration roles require bounded cycle-recover')
                 data['status'] = 'active'
                 data['invocations'] = data.get('invocations', 0) + 1
                 self.invocation = data['invocations']
@@ -330,6 +443,29 @@ class Session:
                 item['launch_intents'].append(reviewer)
         self.update(save)
 
+    def delivery(self, reviewer, path, handoff):
+        """Retain the original prompt paths across same-slot transport recovery."""
+        self.validate_storage()
+        path = coverage.storage_path(Path(path), self.context)
+        import hashlib
+        def select(data):
+            saved = data.setdefault('deliveries', {}).get(reviewer)
+            if saved:
+                raw = Path(saved['path']).read_bytes()
+                if hashlib.sha256(raw).hexdigest() != saved['sha256']:
+                    raise ValueError('review delivery changed')
+                return saved['path']
+            if path.exists():
+                raise ValueError('review delivery destination already exists')
+            from shared.private_state import write
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            write(path, handoff)
+            path.chmod(0o400)
+            saved = {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+            data['deliveries'][reviewer] = saved
+            return str(path)
+        return Path(self.update(select))
+
     def cached(self, reviewer):
         def lookup(data):
             item = data['reviews'].get(reviewer, {})
@@ -338,19 +474,20 @@ class Session:
             saved = read(Path(item['checkpoint']['path']), {})
             if coverage.digest(saved) != item['checkpoint']['sha256']:
                 raise ValueError('review checkpoint changed')
-            if (saved.get('checkpoint_version') != 1 or saved.get('reviewer') != reviewer
+            if (saved.get('checkpoint_version') != (2 if self.prepared.get('preparation_version', 1) >= 4 else 1) or saved.get('reviewer') != reviewer
                     or saved.get('status') != 'completed' or saved.get('session_id') != self.id
                     or saved.get('session_identity') != self.identity):
                 raise ValueError('review checkpoint does not match this session and reviewer')
             return saved['result']
         return self.update(lookup)
 
-    def record(self, reviewer, status, result=None, reason=None):
+    def record(self, reviewer, status, result=None, reason=None, diagnostic=None):
         self.validate_storage()
-        if reviewer not in self.identity['reviewers']:
+        if reviewer not in [*self.identity['reviewers'], *(['architecture-review'] if self.prepared.get('preparation_version', 1) >= 4 else [])]:
             raise ValueError('reviewer is outside this session')
-        saved = {'checkpoint_version': 1, 'session_id': self.id, 'session_identity': self.identity,
-                 'reviewer': reviewer, 'status': status, 'result': result, 'reason': reason}
+        saved = {'checkpoint_version': 2 if self.prepared.get('preparation_version', 1) >= 4 else 1, 'session_id': self.id, 'session_identity': self.identity,
+                 'reviewer': reviewer, 'status': status, 'result': result, 'reason': reason,
+                 **({'diagnostic': diagnostic} if diagnostic is not None else {})}
         fingerprint = coverage.digest(saved)
         path = coverage.storage_path(
             self.path.parent / 'review-checkpoints' / (fingerprint + '.json'), self.context)
@@ -387,7 +524,7 @@ class Session:
 def result_artifact(session_path, item):
     session = read(Path(session_path), {})
     require_activation(session, Path(session_path))
-    if (session.get('session_version') not in {1, 2} or not session.get('results')
+    if (session.get('session_version') not in {1, 2, 3} or not session.get('results')
             or session['results'][-1] != item):
         raise ValueError('result is not the latest registered result of this review session')
     artifact = coverage.load(item)

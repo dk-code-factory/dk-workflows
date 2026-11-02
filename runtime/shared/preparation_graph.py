@@ -57,6 +57,14 @@ def source_identity(key, source, checkout, content):
     if repo_path is not None:
         return category + ':repo:' + repo_path
     value = decode(content)
+    data = value.get('data', value) if isinstance(value, dict) else None
+    if (category == 'choices' and isinstance(data, dict) and data.get('verified') is True
+            and {'pr_url', 'head_sha', 'body_hash', 'decisions', 'live_decisions',
+                 'discussion_decisions', 'local_decisions'} <= data.keys()
+            and isinstance(data.get('agreement_binding'), dict)
+            and type(data['agreement_binding'].get('version')) is int
+            and data['agreement_binding']['version'] == 1):
+        return category + ':decisions:' + data['pr_url']
     if category == 'reviewers' and isinstance(value, dict) and isinstance(value.get('reviewer'), str):
         return category + ':' + value['reviewer']
     if category == 'feedback' and isinstance(value, dict) and value.get('complete') is True:
@@ -75,6 +83,14 @@ def source_identity(key, source, checkout, content):
 
 def operational_records(key, records):
     """Recognize exact operational shapes, without interpreting prose."""
+    if key == 'cleanup':
+        from shared.cleanup_history import verify
+        if not isinstance(records, list):
+            return False
+        try:
+            return all(verify(record) for record in records)
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
     common = {'head_sha', 'run_id', 'timestamp', 'artifact', 'sha256'}
     schemas = {
         'readiness_transitions': ({'phase', 'before', 'after', 'outcome'}, {
@@ -148,6 +164,7 @@ def semantic(key, content):
         if isinstance(binding, dict) and type(binding.get('version')) is int and binding['version'] == 1:
             data = {**data, 'agreement_binding': {k: v for k, v in binding.items() if k != 'store_root'}}
         if bound_copy:
+            data = {k: v for k, v in data.items() if k != 'head_sha'}
             return {**value, 'data': data} if 'data' in value else data
         if 'data' in value:
             return {**value, 'data': {k: v for k, v in data.items() if k != 'head_sha'}}

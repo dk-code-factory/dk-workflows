@@ -33,8 +33,8 @@ def allocated(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, 'describe_reviewer', lambda _: prepared['reviewers']['example'])
     monkeypatch.setattr(runner, 'skill_path', lambda _: Path('command'))
     actual_review = runner.architecture.review
-    monkeypatch.setattr(runner.architecture, 'review', lambda packet, context, decisions:
-        actual_review(packet, context, decisions, reviewer=lambda *_:
+    monkeypatch.setattr(runner.architecture, 'review', lambda packet, context, decisions, **kwargs:
+        actual_review(packet, context, decisions, **kwargs, reviewer=lambda *_:
             {'complete': True, 'reason': '', 'coverage': []}))
     return package, prepared, record, path, binding
 
@@ -88,7 +88,7 @@ def test_prelaunch_failure_resumes_same_session_and_preserves_failed_result(allo
     monkeypatch.setattr(runner, 'describe_reviewer', lambda _: prepared['reviewers']['example'])
     def provider(*_):
         saved = read(original.path, {})
-        assert saved['execution_history'][-1]['launch_intents'] == ['example']
+        assert 'example' in saved['execution_history'][-1]['launch_intents']
         return {'findings': []}
     monkeypatch.setattr(runner, 'run_skill_reviewer', provider)
     resumed = session_for(allocated, resume=True)
@@ -517,7 +517,7 @@ def test_malformed_session_has_unknown_accounting_and_restore_guidance(tmp_path,
             return read_original(path, default)
         monkeypatch.setattr(state, 'read', unavailable)
     head = 'a' * 40
-    record = {'iteration_run': {'id': 'run', 'contract_version': 2, 'status': 'active'},
+    record = {'iteration_run': {'id': 'run', 'contract_version': 3, 'status': 'active'},
         'cycles': [{'number': 1, 'head': head}], 'review_results': [],
         'preparation': {'path': 'prepared'}, 'review_sessions': [{
             'iteration_run_id': 'run', 'cycle': 1, 'attempt': 1, 'head': head, 'session_file': str(target)}]}
@@ -663,7 +663,7 @@ def test_missing_binding_fields_report_unknown_and_restore_without_invented_refe
     binding = {'iteration_run_id': 'run', 'cycle': 1, 'attempt': 1,
                'session_file': str(target), 'head': 'a' * 40}
     binding.pop(missing)
-    record = {'iteration_run': {'id': 'run', 'contract_version': 2, 'status': 'active'},
+    record = {'iteration_run': {'id': 'run', 'contract_version': 3, 'status': 'active'},
         'cycles': [{'number': 1, 'head': 'a' * 40}], 'review_sessions': [binding],
         'review_results': [], 'preparation': {'path': 'ready'}}
     monkeypatch.setattr(state, 'work_gate', lambda *_: {})

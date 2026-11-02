@@ -62,10 +62,12 @@ def pinned(tmp_path, monkeypatch):
     def git(*args):
         return subprocess.check_output(['git', *args], cwd=context['checkout'], text=True).strip()
     monkeypatch.setattr(runner, 'describe_reviewer', lambda name: prep['reviewers'][runner.bindings.key(name)])
-    procedure=tmp_path/'SKILL.md';procedure.write_text('Read-only review fixture')
+    provider_root = tmp_path / 'provider-package'
+    provider_root.mkdir()
+    procedure=provider_root/'SKILL.md';procedure.write_text('Read-only review fixture')
     monkeypatch.setattr(runner, 'skill_path', lambda name: procedure)
     from shared import executors
-    monkeypatch.setattr(executors, 'resolve', lambda name: {'binding':runner.bindings.normalize(name), 'identity':runner.bindings.key(name), 'executor':'codex', 'root':str(tmp_path), 'procedure':str(procedure)})
+    monkeypatch.setattr(executors, 'resolve', lambda name: {'binding':runner.bindings.normalize(name), 'identity':runner.bindings.key(name), 'executor':'codex', 'root':str(provider_root), 'procedure':str(procedure)})
     return context, decisions, prep, names, git
 
 
@@ -85,7 +87,7 @@ def test_capture_before_aggregation_and_independent_review_session(pinned):
         result = runner.review(context, names, '', decisions, '', prep, stats=stats)
     assert calls.call_count == 2
     assert runner.architecture.load(result['architecture_review'])['result']['complete']
-    assert {key: value for key, value in result.items() if key != 'architecture_review'} == {'complete': True, 'outcome': 'completed', 'findings': [{**finding(), 'reviewers': names}], 'skipped_reviewers': [], 'executed_reviewers': names, 'reused_reviewers': []}
+    assert {key: value for key, value in result.items() if key not in {'architecture_review', 'architecture_accounting', 'role_failures'}} == {'complete': True, 'outcome': 'completed', 'findings': [{**finding(), 'reviewers': names}], 'skipped_reviewers': [], 'executed_reviewers': names, 'reused_reviewers': []}
     data = api.ledger('github.com/o/r')
     reviews = data['runs'][stats.run_id]['reviews']
     assert len({rev['findings'][0]['id'] for rev in reviews.values()}) == 2

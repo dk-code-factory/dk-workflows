@@ -23,7 +23,7 @@ preparation; pinned execution cannot hide a changed selection.
 
 ## Compact input: git-diff-v2
 
-Fresh preparation v3 and unified Decisions are required. Retain the existing
+Fresh preparation v4 and unified Decisions are required. Retain the existing
 `checkout`, `base_sha`, `head_sha`, `patch`, `scope`, `rules`, `pr_url`,
 `decision_instructions`, `reviewer_addendum`, and role-specific `architecture_packet`
 when supplied. Input changes are:
@@ -61,3 +61,13 @@ correction. A provider must report incomplete when required evidence is unavaila
 Both input versions retain the existing findings JSON, location validator, one
 correction attempt, finding thresholds, role restrictions, architecture delivery
 and interruption behavior. Compact input grants no extra publication authority.
+
+Reviewer bindings optionally declare `nested_review_roles` as unique recipient
+identities. Bundled defaults cover AD Toolkit/Standards/Spec/Performance and
+Matpocock Standards/Spec. Preparation fingerprints the declarations. Before any
+dispatch the coordinator materializes recipient-specific packets and places them
+in `nested_architecture_packets` in each handoff. Nested roles read their own
+packet; undeclared recipients or expanded paths require fresh coordinator delivery.
+Never substitute the parent packet or create private state inside a sandbox.
+Architecture executes concurrently and checkpoints independently; configured result
+fields and output order remain unchanged.

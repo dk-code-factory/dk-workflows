@@ -133,7 +133,7 @@ def test_main_resumes_checkpoint_after_interrupt_before_aggregate_finish(
     interrupted = read(session_path, {})
     assert interrupted['status'] == 'active' and interrupted['invocations'] == 1
     assert interrupted['results'] == []
-    assert {name: item['status'] for name, item in interrupted['reviews'].items()} == {
+    assert {name: item['status'] for name, item in interrupted['reviews'].items() if name != 'architecture-review'} == {
         names[0]: 'completed', names[1]: 'running'}
     checkpoint = interrupted['reviews'][names[0]]['checkpoint']
     assert coverage.digest(read(Path(checkpoint['path']), {})) == checkpoint['sha256']
@@ -156,7 +156,7 @@ def test_main_resumes_checkpoint_after_interrupt_before_aggregate_finish(
     assert coverage.verify(result['review_artifact'], prepared) == artifact
     assert artifact['result'] == {key: value for key, value in result.items()
                                   if key not in {'review_session', 'review_artifact', 'preparation_id', 'engineering_id'}}
-    if artifact['version'] == 3:
+    if artifact['version'] >= 3:
         assert result['preparation_id'] == artifact['preparation_id']
         assert result['engineering_id'] == artifact['engineering_id']
     if route == 'legacy':

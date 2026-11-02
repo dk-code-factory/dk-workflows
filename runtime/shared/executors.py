@@ -58,7 +58,9 @@ def provider_cancellation():
 def run_provider(argv, **kwargs):
     """Abort only this invocation's owned transport, leaving lifecycle helpers alone."""
     scope = _CANCELLATION.get()
+    from shared.workflow_timings import model_call
     if scope is None:
+        model_call()
         return subprocess.run(argv, **kwargs)
     request = kwargs.pop('input', None)
     timeout = kwargs.pop('timeout', None)
@@ -69,6 +71,7 @@ def run_provider(argv, **kwargs):
     # Cancellation and spawn have one ordering; a late correction cannot escape.
     with scope.lock:
         scope.check()
+        model_call()
         process = subprocess.Popen(argv, **kwargs)
     buffers = {}
     error = None
@@ -403,7 +406,7 @@ def update_process(resolved, env, phase, token=None):
 
 
 def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, architecture_packet=None,
-            inherit_architecture=True):
+            inherit_architecture=True, architecture_packets=None):
     if _CANCELLATION.get() is not None:
         _CANCELLATION.get().check()
     timeout = provider_timeout() if timeout is None else timeout
@@ -420,6 +423,9 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, archite
         # Internal semantic helpers have no agent role in the caller's scope.
         env.pop('DK_ARCHITECTURE_PACKET', None)
         env.pop('DK_ARCHITECTURE_AGENT', None)
+        env.pop('DK_ARCHITECTURE_PACKETS', None)
+    if architecture_packets is not None:
+        env['DK_ARCHITECTURE_PACKETS'] = json.dumps(architecture_packets)
     inherited_architecture = architecture_packet or env.get('DK_ARCHITECTURE_PACKET')
     if inherited_architecture:
         from shared import architecture
@@ -434,6 +440,12 @@ def execute(prompt, checkout, *, resolved=None, attempt=0, timeout=None, archite
             recipient = parent_packet['agent'] if architecture_packet else env.get('DK_ARCHITECTURE_AGENT')
         if not recipient:
             raise ValueError('Inherited architecture packet requires an explicit recipient identity')
+        if parent_packet['agent'] != recipient:
+            declared = json.loads(env.get('DK_ARCHITECTURE_PACKETS', '{}'))
+            if recipient not in declared:
+                raise ValueError('Undeclared architecture recipient; request fresh delivery from the coordinator')
+            inherited = declared[recipient]
+            parent_packet = architecture.load(inherited)
         delivered = architecture.provider_packet(inherited, checkout, recipient,
             parent_packet['paths'] if architecture_packet else None)
         env['DK_ARCHITECTURE_PACKET'] = json.dumps(delivered)
@@ -712,6 +724,7 @@ def invoke(binding, handoff_path, checkout, prompt, *, attempt=0):
                    DK_PROVIDER_ATTEMPT=str(attempt))
         if architecture_packet:
             env['DK_ARCHITECTURE_PACKET'] = json.dumps(architecture_packet)
+            env['DK_ARCHITECTURE_PACKETS'] = json.dumps(handoff.get('nested_architecture_packets', {}))
         # The immutable evidence handoff stays in argv. stdin carries the output
         # instructions and, on retry, the validation error and prior response.
         proc = capture(run_provider, argv, input=prompt, cwd=checkout, text=True,
@@ -722,5 +735,7 @@ def invoke(binding, handoff_path, checkout, prompt, *, attempt=0):
             provider_failure('\n'.join(filter(None, (proc.stderr, proc.stdout))), prompt=prompt, fallback='Command provider failed')
         return proc.stdout
     if architecture_packet:
-        return execute(prompt, checkout, resolved=resolved, attempt=attempt, architecture_packet=architecture_packet)
+        return execute(prompt, checkout, resolved=resolved, attempt=attempt, architecture_packet=architecture_packet,
+                       **({'architecture_packets': handoff['nested_architecture_packets']}
+                          if handoff.get('nested_architecture_packets') else {}))
     return execute(prompt, checkout, resolved=resolved, attempt=attempt)

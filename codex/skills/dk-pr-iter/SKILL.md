@@ -9,8 +9,8 @@ Begin the lifecycle with `python3 PLUGIN_ROOT/scripts/dk.py --host codex begin -
 
 Read [the coordinator entry](../../../runtime/dk-pr-iter/procedure.md), then read each linked stage contract before acting in that stage. Give child agents only their assigned role contracts and pinned evidence paths. Resolve paths beginning with `PLUGIN_ROOT/` against this plugin's root. Preserve the shared procedure's validation and publication guards.
 
-On preparation refresh, select the active artifact with `prepare --previous-preparation FILE`; follow [the incremental preparation contract](../../../runtime/dk-pr-decisions/references/preparation.md). Preserve review budgets and exact session/coverage gates.
+On preparation refresh, use `run-state refresh-preparation` with the active previous preparation, current context, verified Decisions and both complete feedback snapshots. Follow [operational refresh](../../../runtime/dk-pr-iter/references/operational-refresh.md). Preserve review budgets and exact session/coverage gates.
 
-Fresh workflows use preparation v3, session v2, review-result v3 and completion-verification v2. Preserve both preparation and engineering IDs. Use returned private workflow paths for all generated evidence and child handoffs. Operational refresh may preserve engineering identity; validate current evidence and retained reviewer bindings before reuse. Resume legacy active runs only through their retained runtime.
+Fresh workflows use preparation v4, run contract v3, session v3, review-result v4, role-checkpoint v2 and reconciliation v3 and completion-verification v2. Preserve both preparation and engineering IDs. Use returned private workflow paths for all generated evidence and child handoffs. Operational refresh may preserve engineering identity; validate current evidence and retained reviewer bindings before reuse. Resume legacy active runs only through their retained runtime.
 
 Before coding or review, follow [architecture delivery](../../../runtime/dk-architect/procedure.md). Every child handoff includes its recipient/path packet reference and fingerprint; refresh before expanding scope.

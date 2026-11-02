@@ -282,10 +282,12 @@ def test_worker_expansion_and_nested_identity_require_fresh_delivery(repo):
         a.validate_packet(packet, repo, agent='ci-repair')
     directory = Path(packet['path']).parent
     before = set(directory.glob('*.json'))
-    refreshed = a.provider_packet(packet, repo, 'ci-repair')
+    with pytest.raises(ValueError, match='recipient'):
+        a.provider_packet(packet, repo, 'ci-repair')
+    refreshed = a.handoff({'packet': packet}, {'checkout': str(repo)}, 'ci-repair')
     after = set(directory.glob('*.json'))
     assert after - before == {Path(refreshed['path'])}
-    assert a.provider_packet(packet, repo, 'ci-repair') == refreshed
+    assert a.provider_packet(refreshed, repo, 'ci-repair') == refreshed
     assert set(directory.glob('*.json')) == after
     assert [r['id'] for r in a.load(refreshed)['rules']] == ['arch-ci']
     assert a.load(refreshed)['paths'] is None
@@ -1178,6 +1180,10 @@ def test_native_execution_preserves_role_packet_and_redelivers_nested_scope(repo
         executors.execute('Unknown nested role.', repo)
     assert len(captured) == 1
     monkeypatch.setenv('DK_ARCHITECTURE_AGENT', 'ci-repair')
+    with pytest.raises(ValueError, match='Undeclared'):
+        executors.execute('Nested CI repair.', repo)
+    nested = a.handoff({'packet': worker}, {'checkout': str(repo)}, 'ci-repair')
+    monkeypatch.setenv('DK_ARCHITECTURE_PACKETS', json.dumps({'ci-repair': nested}))
     executors.execute('Nested CI repair.', repo)
     child = a.load(captured[-1][2])
     assert child['agent'] == 'ci-repair' and child['paths'] is None
@@ -1191,7 +1197,7 @@ def test_native_execution_preserves_role_packet_and_redelivers_nested_scope(repo
     assert captured[-1][2] is None and captured[-1][1] == alternate
     assert json.loads(os.environ['DK_ARCHITECTURE_PACKET']) == worker
     for recipient in ('dk-architecture-review', 'dk-architecture-enforcer'):
-        explicit = a.provider_packet(worker, repo, recipient, ['src/core.py'])
+        explicit = a.handoff({'packet': worker}, {'checkout': str(repo)}, recipient, ['src/core.py'])
         a.role_analysis(a.analyze, 'Inspect explicit role evidence.', repo, lambda value: value, explicit)
         assert captured[-1][2] == explicit
         assert captured[-1][1] == host
@@ -1233,6 +1239,11 @@ def test_resolved_native_invoke_delivers_binding_recipient_scope(repo, monkeypat
         captured.append((selected_host, json.loads(environment['DK_ARCHITECTURE_PACKET'])))
         return '{}'
     monkeypatch.setattr(executors, 'execute_process', process)
+    if handoff_recipient == 'parent':
+        with pytest.raises(ValueError, match='Undeclared'):
+            executors.invoke(binding, handoff, repo, 'Inspect the handoff.')
+        assert captured == []
+        return
     executors.invoke(binding, handoff, repo, 'Inspect the handoff.')
     selected_host, reference = captured.pop()
     delivered = a.load(reference)

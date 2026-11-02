@@ -18,6 +18,25 @@ ALIASES = {
     'code-review-matpocock': {'skill': 'code-review-matpocock:code-review-matpocock', 'host': 'current'},
     'code-review-qodo': {'skill': 'code-review-qodo:code-review-qodo', 'host': 'current'},
 }
+NESTED_REVIEW_ROLES = {
+    'code-review-ad:code-review-ad': ['Toolkit', 'Standards', 'Spec', 'Performance'],
+    'code-review-matpocock:code-review-matpocock': ['Standards', 'Spec'],
+}
+
+
+def validate_nested_roles(value):
+    if (not isinstance(value, list)
+            or any(not isinstance(role, str) or not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.:-]*', role) for role in value)
+            or len(set(value)) != len(value)):
+        raise ValueError('nested_review_roles must be unique recipient identities')
+    return value
+
+
+def nested_roles(value):
+    binding = normalize(value)
+    return binding.get('nested_review_roles', NESTED_REVIEW_ROLES.get(binding.get('skill'), []))
+
+
 ROLES = ('commit_message', 'pr_description', 'issue_description')
 FORBIDDEN = {'dk-pr-review', 'dk-pr-iter'}
 
@@ -120,15 +139,22 @@ def normalize(value, *, drafting=False):
     if (contract not in ('git-diff-v1', 'git-diff-v2')
             or drafting and 'handoff_contract' in value):
         raise ValueError('Reviewer handoff_contract must be git-diff-v1 or git-diff-v2')
+    nested = value.get('nested_review_roles')
+    if nested is not None:
+        validate_nested_roles(nested)
+        if drafting:
+            raise ValueError('nested_review_roles is only available for reviewers')
     extra = {'handoff_contract': contract} if contract != 'git-diff-v1' else {}
-    if set(value) - {'handoff_contract'} == {'command'}:
+    if nested is not None:
+        extra['nested_review_roles'] = list(nested)
+    if set(value) - {'handoff_contract', 'nested_review_roles'} == {'command'}:
         argv = value['command']
         if not isinstance(argv, list) or not argv or any(not isinstance(s, str) or not s or '\0' in s for s in argv):
             raise ValueError('command must be a nonempty argument vector; shell text is not accepted')
         if not any('{handoff}' in arg for arg in argv):
             raise ValueError('command must receive the handoff through a {handoff} argument')
         return {'command': list(argv), **extra}
-    if set(value) - {'skill', 'host', 'handoff_contract'} or not re.fullmatch(NAME + ':' + NAME, str(value.get('skill', ''))):
+    if set(value) - {'skill', 'host', 'handoff_contract', 'nested_review_roles'} or not re.fullmatch(NAME + ':' + NAME, str(value.get('skill', ''))):
         raise ValueError('skill must be plugin-name:skill-name')
     if value['skill'].split(':')[1] in FORBIDDEN:
         raise ValueError('Recursive review orchestration cannot be a provider')

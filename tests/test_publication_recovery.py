@@ -363,7 +363,7 @@ def test_stage_adapter_never_allocates_review_budget(storage, monkeypatch):
     mod = module('recovery_next', 'runtime/dk-pr-iter/scripts/run_state.py')
     head = 'a' * 40
     record = {'pr': 42, '_repo': 'github.com/o/r', 'cycles': [], 'iteration_run': {
-        'id': 'run', 'status': 'active', 'contract_version': 2}}
+        'id': 'run', 'status': 'active', 'contract_version': 3}}
     original = copy.deepcopy(record)
     monkeypatch.setattr(mod, 'work_gate', lambda *a: (_ for _ in ()).throw(ValueError('preparation missing')))
     assert mod.next_stage(record, head, storage / 'run')['stage'] == 'preparation'

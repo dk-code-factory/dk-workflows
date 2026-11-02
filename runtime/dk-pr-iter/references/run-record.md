@@ -190,40 +190,12 @@ available; `next` does not infer abandonment from zero invocations. Drained fail
 receive eligible recovery or an explicit allowance/prior-dispatch limitation, with
 the next permitted cycle or exhausted-cap action.
 
-`cycle-recover` permits one prelaunch recovery of the latest cycle, at most two
-per active run. It requires ready current preparation, valid pinned bindings and
-mandatory proof of zero dispatch across the cycle's session history. It holds the
-same ownership lock as initialization/execution, retains a hashed original session
-snapshot, verifies the exact original run/cycle/attempt allocation under that lock,
-and fences stale workers before updating the attempt binding. Exact
-initialized session identity resumes the original session; changed head/base/tree,
-engineering scope, reviewer order or scope/rules text requires a fresh session.
-An unused reservation also gets a fresh session and leaves a tombstone at the old
-path. Pass the intended scope/rules files and follow the returned `resume` flag.
-An operational preparation refresh with the same engineering identity can resume.
-
-Missing/unreserved/legacy evidence, undrained executions, contradictory completed
-checkpoints/results and any configured or architecture dispatch intent deny this
-gate. A drained zero-dispatch failure cannot be silently resumed repeatedly:
-iteration session execution requires this bounded recovery grant. A subsequent
-prelaunch failure exhausts that cycle's infrastructure allowance. An interrupted
-multi-file recovery that retires/authorizes the session but fails to retain the
-run binding stays blocked for reconciliation. One immutable activation receipt is
-published only after the matching charge and replacement binding are durable;
-both resumed and replacement sessions require it for execution, finishing and
-result acceptance. `cycle-recover --reconcile --head SHA` with exact scope/rules
-validates the pending plan, current preparation, original proof and binding. It may
-restore that exact missing charge once before activation; an existing charge is
-preserved without another recovery or generation change. A failed receipt write
-after charging remains blocked until this explicit reconciliation succeeds.
-Missing, corrupt or conflicting proof/receipt and changed identity deny activation;
-never delete evidence or replay recovery to reset the budget. The original
-allocation, sessions, results and failures remain available. Usage retries have
-their existing independent bound; every usage-retried cycle is ineligible for
-prelaunch recovery because the earlier exhausted attempt dispatched. A later
-undispatched failure needs the next allowed allocation or a visible cap limitation.
-Ordinary exact-evidence
-interruption resume remains available. All existing completion checks still apply.
+`cycle-recover` permits one infrastructure recovery per cycle, at most two per
+active run. Follow the current [review/CI contract](iteration-review-ci.md) for
+proved prelaunch or drained typed role failures and activation reconciliation.
+Keep the same mandatory session ownership, immutable proof and durable-charge
+ordering. Successful configured and architecture checkpoints survive eligible
+recovery; the original response/correction budgets and all failures are retained.
 
 Both completion stages validate the latest registered result against the active
 run and current tree, base, scope/Decisions and reviewer instructions, and require
@@ -265,7 +237,7 @@ and stable guard identity. Pass its artifact path to the review-stage gate and
 the regroup push/no-op assessment. Persisted disagreement remains blocking; interrupted
 comparisons grant no coverage. No cycle or reviewer execution is added.
 
-After cleanup, refresh final-head evidence. Preparation v3 and review-result v3
+After cleanup, refresh final-head evidence. Preparation v4 and review-result v4
 can retain coverage across an operational refresh at the same head when the
 runtime-computed engineering ID is unchanged and current coverage gates pass.
 A different provenance ID alone does not require reconciliation. A changed head
@@ -278,7 +250,7 @@ Report review readiness separately from cleanup and completion readiness.
 
 ## Recovery into the repaired runtime
 
-Legacy active runs without `contract_version: 2` must continue through their original retained runtime. This recovery procedure applies to compatible contract-v2 runs only.
+Legacy active runs without `contract_version: 3` must continue through their original retained runtime. This recovery procedure applies to compatible contract-v3 runs only.
 
 First verify that the old invocation and all its children have stopped. Inspect
 their retained lifecycle records with `update.py inspect --host HOST`, and
@@ -287,7 +259,7 @@ explicitly complete each stopped child's token before its parent using the norma
 records; never delete them or infer liveness from age or a launcher PID alone.
 
 Enter the repaired installed package normally and use its returned retained
-`runtime_root`, `completion_script` and new lifecycle token. For a run already marked `contract_version: 2`, resume the existing
+`runtime_root`, `completion_script` and new lifecycle token. For a run already marked `contract_version: 3`, resume the existing
 active iteration with `resume-run`; do not start a replacement run or reset the
 five-cycle budget. Validate the retained reviewer packages, original session and
 result, original preparation and evidence copies, current preparation, candidate,
@@ -305,8 +277,8 @@ assessment, refresh engineering verification and exact-head CI, and run the
 complete gate. Retain the original artifacts and counters throughout recovery.
 
 
-New `iteration_run` records carry `contract_version: 2` and a private `workflow_dir`.
-Fresh runs require preparation v3. `resume-run`, work and preparation activation
+New `iteration_run` records carry `contract_version: 3` and a private `workflow_dir`.
+Fresh runs require preparation v4. `resume-run`, work and preparation activation
 reject legacy active runs with an instruction to use their retained runtime; they
 never rewrite those records. After a terminal legacy run, normal `start-run` archives
 history and preserves cross-run publication, choice and rerun records as before.
@@ -314,3 +286,5 @@ Before allocating a review cycle, validate retained reviewer bindings. A failed
 validation consumes no new cycle and never refunds previously consumed cycles.
 Operational preparation refresh preserves assessment/result/verification reuse by
 runtime-computed engineering ID while retaining original preparation references.
+
+Use the owned helper and strict cleanup schema in [operational refresh](operational-refresh.md). `run-state timings` is diagnostic only.
