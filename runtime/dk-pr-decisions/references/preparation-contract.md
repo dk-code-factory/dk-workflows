@@ -24,9 +24,26 @@ Return `{"analysis": ANALYSIS, "graph": NODES}`. Analysis contains:
 | `test_strategy` | Nonempty array: string fields `behavior`, `existing`, `missing`, `level`, `location`, `command`, `rationale`, `limitation`, plus `evidence`. Use `none` when applicable. Level: `inspection`, `unit`, `integration`, `system`, `performance`. |
 | `questions` | Open prior questions and resolved contradictions, using the shape below. Empty is valid. |
 | `reviewer_addenda` | Each configured reviewer name mapped to tailored instructions. |
-| `worker_instructions` | Boundaries, selected remedy, principal code/test locations, helpers, scenarios, commands and stopping criteria. |
-| `completion_criteria` | Required behavior, placement, sufficient validation, compatibility and cumulative complexity. |
+| `worker_instructions` | Downstream worker assignment: boundaries, selected remedy, principal code/test locations, helpers, scenarios, commands, actual authorization prerequisites and stopping criteria. |
+| `completion_criteria` | Downstream verifier's required behavior, placement, sufficient validation, compatibility and cumulative complexity. |
 | `sync_required`, `sync_reason` | Boolean and explanation; empty reason allowed only when false. |
+
+The analyst's read-only preparation role, scratch narration and initial/reassessment
+JSON response protocol belong only to this preparation call. Do not copy them into
+`worker_instructions`, `completion_criteria` or `reviewer_addenda`. Check each complete
+assignment against its recipient and authorized phase before returning it. Retain
+legitimate read-only downstream work and all authorization prerequisites. A ready
+preparation does not authorize edits, publication, review allocation, completion or
+merge. Quote protocol text only when it is needed as evidence, using Markdown
+blockquotes, complete fenced blocks or same-line double quotes/backticks; quoted
+evidence is not an instruction for its reader.
+
+The runtime rejects known active analyst role, response-protocol and scratch
+directives in these three fields through the existing bounded correction path.
+This protocol guard is not a complete semantic classifier: the analyst remains
+responsible for checking the complete assignment against original instructions,
+Decisions and evidence. Repeated invalid output blocks; do not strip text or
+request a separate model call solely to clean up role narration.
 
 A conclusion has `text`, `agreement`, boolean `material`, `rationale`, `evidence`.
 Agreement: `established` (explicitly agreed), `interpretation` (grounded routine choice),
@@ -69,6 +86,9 @@ Return exactly `dispositions`, `additions`, `impacts` arrays:
 - Each affected/additionally affected existing node and every dependent needs one
   disposition: `id`, `action`, `reason`. `retain` preserves its value exactly;
   `replace` requires `value`; `remove` retires the ID. Only replace supplies a value.
+- Inspect inherited worker, completion and reviewer guidance too. Use a replacement
+  disposition for analyst-only contamination while preserving governing obligations
+  and stable IDs. A ready parent does not make contradictory guidance usable.
 - Optional `watches` replaces all fields: `depends_on`, `paths`, `sources`, `decisions`.
   Existing edges use stable IDs. Dependents must explicitly rewire removed targets.
 - Additions require `location`, `value`, `watches`, `reason`. List locations append

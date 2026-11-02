@@ -73,6 +73,17 @@ Tailor addenda to each reviewer's assigned aspects while preserving shared bound
 Decisions, read-only role, finding thresholds and output contract. A fix names an
 outcome; it does not turn a defect reviewer into an implementation designer.
 
+Write worker instructions for the downstream worker and completion criteria for
+its verifier. Keep this analyst's read-only execution constraints, scratch narration
+and response schema out of those fields and reviewer addenda. Check the complete
+guidance against the authorized downstream task, including inherited text during
+refresh. Preserve legitimate read-only tasks, authorization prerequisites, source
+provenance, material choices, unresolved questions and actual work/verification
+obligations. Readiness alone grants no edits, publication, review allocation,
+completion or merge permission. A known active analyst protocol in downstream
+guidance uses the existing one-correction budget; a repeated contradiction blocks
+with the field and refresh action. Clean analysis needs no extra cleanup call.
+
 ## Refresh
 
 Select the active parent with `--previous-preparation FILE`, including after cleanup.
