@@ -231,10 +231,10 @@ def evaluate(path):
             pins = handoff['pins']
             if event['agent'] in workers or event['fork_turns'] != 'none' or event['stage'] not in ROLES[event['role']]:
                 problem(family, event, 'worker_context_or_role')
-            if not handoff['task'] or not handoff['permitted_actions'] or handoff['inline_context'] or set(pins) != PINS:
+            if not identity(handoff['task']) or not identity(handoff['permitted_actions']) or handoff['inline_context'] or set(pins) != PINS:
                 problem(family, event, 'handoff_not_narrow_or_pinned')
             for key, value in pins.items():
-                require(isinstance(value, str) and bool(value), f'invalid handoff pin: {key}')
+                require(identity(value), f'invalid handoff pin: {key}')
                 if key not in ('head', 'base', 'preparation_id', 'engineering_id') and not source_ok(value):
                     unknown[family] = True
             if event['role'] == 'reply' and any(w['role'] == 'reply' for w in workers.values()):

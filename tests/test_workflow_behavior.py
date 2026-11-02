@@ -87,6 +87,25 @@ def test_synthetic_negative_controls(tmp_path, control):
     assert control['code'] in codes(report)
 
 
+@pytest.mark.parametrize('pin', ['head', 'base', 'preparation_id', 'engineering_id'])
+@pytest.mark.parametrize('value', ['', ' \t\n '])
+def test_blank_handoff_identity_pins_are_invalid(tmp_path, pin, value):
+    trace = fixture_trace()
+    next(e for e in trace['events'] if e['kind'] == 'spawn')['handoff']['pins'][pin] = value
+    with pytest.raises(evaluator.InvalidTrace, match=f'invalid handoff pin: {pin}'):
+        evaluator.evaluate(save_trace(tmp_path, trace))
+
+
+@pytest.mark.parametrize('field', ['task', 'permitted_actions'])
+@pytest.mark.parametrize('value', ['', ' \t\n '])
+def test_blank_handoff_task_or_actions_are_rejected(tmp_path, field, value):
+    trace = fixture_trace()
+    next(e for e in trace['events'] if e['kind'] == 'spawn')['handoff'][field] = value
+    report = evaluator.evaluate(save_trace(tmp_path, trace))
+    assert report['checks']['handoffs']['status'] == 'failed'
+    assert 'handoff_not_narrow_or_pinned' in codes(report)
+
+
 @pytest.mark.parametrize('category', ['agent_status', 'file', 'git', 'github', 'provider', 'ci'])
 def test_every_timeout_driven_evidence_query_is_rejected(tmp_path, category):
     trace = fixture_trace()
