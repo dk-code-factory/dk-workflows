@@ -15,7 +15,7 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 
 from shared.flaky_tests import Registry
 from shared.flaky_actions import GitHub, pr_repository
 from shared.ci_policy import decide
-from shared.ci_observation import PermissionDenied, for_pr
+from shared.ci_observation import PermissionDenied, for_pr, bind_url
 from shared.github_reads import run as github_run
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -42,6 +42,7 @@ def gh_json(args):
 def observe(pr, head, repo=None):
     target = ["--repo", repo] if repo else []
     meta = gh_json(["pr", "view", pr, *target, "--json", "headRefOid,url"])
+    bind_url(meta.get("url"))
     actual = meta.get("headRefOid")
     if actual != head:
         return {"result": "head_changed", "head": head, "actual_head": actual, "checks": []}
@@ -121,10 +122,8 @@ def main():
     if args.classification_timeout <= 0:
         parser.error("classification timeout must be positive")
     try:
-        from shared.workflow_timings import span
         with for_pr(args.pr, args.head, args.repo, timeout=args.timeout,
-                    rerun=args.rerun_operation, retry_denied=args.retry_denied) as observation, \
-                span(observation.pr, 'ci'):
+                    rerun=args.rerun_operation, retry_denied=args.retry_denied) as observation:
             result = wait(args.pr, args.head, args.repo, args.timeout, args.interval,
                           args.no_checks_grace, observation=observation,
                           on_progress=lambda update: print(json.dumps(update, sort_keys=True),

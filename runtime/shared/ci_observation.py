@@ -2,12 +2,22 @@
 import fcntl
 import copy
 import math
+import os
 import time
+from contextvars import ContextVar
 from pathlib import Path
 
 from shared.private_state import read, write, root
 from shared.preparation_graph import digest
 from shared import publication
+
+ACTIVE = ContextVar('ci_observation', default=None)
+
+
+def bind_url(url):
+    observation = ACTIVE.get()
+    if observation is not None:
+        observation.bind(url)
 
 
 class PermissionDenied(RuntimeError):
@@ -91,13 +101,25 @@ class Observation:
             if self.retry_denied:
                 self.current.pop('permission_denied', None)
             self.persist()
+            self.token = ACTIVE.set(self)
+            from shared.workflow_timings import span
+            self.timing = span(self.pr, 'ci')
+            self.timing.__enter__()
             return self
         except BaseException:
             self.lock.close()
             raise
 
     def __exit__(self, *args):
-        self.lock.close()
+        try:
+            self.timing.__exit__(*args)
+        finally:
+            ACTIVE.reset(self.token)
+            self.lock.close()
+
+    def bind(self, url):
+        if url and canonical(url)[1] != self.pr:
+            raise ValueError('CI observation canonical PR identity changed')
 
     def persist(self):
         write(self.path, self.state)
@@ -135,12 +157,75 @@ class Observation:
                 'deadline': self.current['deadline']}
 
 
-def for_pr(pr, head, repo=None, **kwargs):
+def canonical(pr, repo=None):
     from shared.flaky_actions import pr_repository
     repository = pr_repository(pr, repo)
     number = pr.rstrip('/').split('/')[-1]
     if not number.isdigit():
         raise ValueError('CI observation needs a PR number or URL')
-    canonical = 'https://' + repository + '/pull/' + str(int(number))
+    return repository, 'https://' + repository + '/pull/' + str(int(number))
+
+
+class NumberedObservation:
+    """Resolve identity in the existing metadata read, before reading checks."""
+    def __init__(self, pr, head, repo, options):
+        self.pr, self.head, self.repo, self.options = pr, head, repo, options
+        self.bound = None
+        identity = [str(Path.cwd()), pr, repo, os.environ.get('GH_REPO'), os.environ.get('GH_HOST')]
+        self.alias = root('ci/aliases/local') / (digest(identity) + '.json')
+
+    def __enter__(self):
+        self.alias.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        self.lock = self.alias.with_suffix('.observer.lock').open('w')
+        try:
+            fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            saved = read(self.alias, {})
+            if saved.get('permission_denied') and not self.options.get('retry_denied'):
+                raise PermissionDenied('CI metadata access was denied; repair access and explicitly retry with --retry-denied')
+            if self.options.get('retry_denied') and saved.pop('permission_denied', None):
+                write(self.alias, saved)
+            self.token = ACTIVE.set(self)
+            return self
+        except BaseException:
+            self.lock.close()
+            raise
+
+    def __exit__(self, *args):
+        try:
+            if self.bound is not None:
+                self.bound.__exit__(*args)
+        finally:
+            ACTIVE.reset(self.token)
+            self.lock.close()
+
+    def bind(self, url):
+        if not url:
+            raise ValueError('numeric CI observation requires the metadata PR URL')
+        if self.bound is None:
+            _, resolved = canonical(url, self.repo)
+            if resolved.rstrip('/').split('/')[-1] != str(int(self.pr)):
+                raise ValueError('CI observation PR number differs from metadata')
+            bound = for_pr(resolved, self.head, self.repo, **self.options)
+            bound.__enter__()
+            self.bound, self.pr = bound, resolved
+        else:
+            self.bound.bind(url)
+
+    def update(self, result, progress=None):
+        if self.bound is None:
+            self.bind(result.get('url'))
+        return self.bound.update(result, progress)
+
+    def denied(self, exc):
+        write(self.alias, {'permission_denied': {'at': time.time(), 'reason': str(exc)}})
+        if self.bound is not None:
+            self.bound.denied(exc)
+
+
+def for_pr(pr, head, repo=None, **kwargs):
+    if pr.isdigit():
+        return NumberedObservation(pr, head, repo, kwargs)
+    repository, resolved = canonical(pr, repo)
+    number = resolved.rstrip('/').split('/')[-1]
     return Observation(root(repository) / 'ci-observations' / ('pr-' + number + '.json'),
-                       canonical, head, **kwargs)
+                       resolved, head, **kwargs)
