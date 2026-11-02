@@ -70,6 +70,11 @@
     },
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.6.18",
+      "description": "Handle ordinary text choice evidence conservatively during review reconciliation while retaining exact Decisions duplicate checks, protected-source fingerprints and file errors."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.6.16",
       "description": "Recognize narrowly matched empty GitHub CLI no-checks responses so existing exact-head CI grace and deadline handling can run; retain errors, retry policy and non-success absence outcomes with controlled regression coverage."
     },

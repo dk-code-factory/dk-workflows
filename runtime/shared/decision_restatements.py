@@ -95,7 +95,13 @@ def index(original, current, sources, original_analysis):
 
 
 def choices_match(key, old_sources, sources, api):
-    if key not in old_sources or key not in sources:
+    if any(name not in side for side in (old_sources, sources) for name in (key, 'decisions')):
         return False
-    return (api.read(old_sources[key]['path']) == api.read(old_sources['decisions']['path'])
-            and api.read(sources[key]['path']) == api.read(sources['decisions']['path']))
+    try:
+        old_choice = api.read(old_sources[key]['path'])
+        choice = api.read(sources[key]['path'])
+    except ValueError:
+        # Ordinary text choices retain the protected-source fingerprint check.
+        return False
+    return (old_choice == api.read(old_sources['decisions']['path'])
+            and choice == api.read(sources['decisions']['path']))
