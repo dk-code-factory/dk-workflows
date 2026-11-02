@@ -201,6 +201,29 @@ def _execute_json(prompt, checkout, validate, executor, correction_instructions,
                   inherit_architecture):
     from shared.model_diagnostics import StorageFailure, preserve_failure
     original_prompt = prompt
+    # Leave room below the backend's 1 MiB serialized-string limit for native
+    # execution context. This applies only to the single correction request.
+    correction_limit = 1024 * 1024 - 64 * 1024
+    correction_evidence = None
+    retained = {}
+
+    def retain(name, content):
+        import hashlib
+        from shared.private_state import atomic_text
+        digest = hashlib.sha256(content.encode('utf-8')).hexdigest()
+        path = correction_evidence / (name + '-' + digest + '.txt')
+        atomic_text(path, content)
+        retained[name] = {'path': str(path), 'sha256': digest,
+                          'characters': len(content), 'bytes': len(content.encode('utf-8'))}
+        return str(path)
+
+    def retain_index():
+        path = correction_evidence / 'json-correction-evidence.json'
+        write(path, {'attempt': 1, 'correction_limit_serialized_characters': correction_limit,
+                     'files': retained})
+        print('Model JSON correction retained evidence: ' + str(path), file=sys.stderr, flush=True)
+        return path
+
     start = 0
     if journal and journal.value['status'] == 'provider_failed':
         prior = journal.value['attempts'][-1]
@@ -233,6 +256,13 @@ def _execute_json(prompt, checkout, validate, executor, correction_instructions,
             if journal:
                 journal.rejected(exc)
             if attempt:
+                if correction_evidence is not None:
+                    retain('corrected-response', raw)
+                    retain('corrected-validation-error', str(exc))
+                    evidence = retain_index()
+                    if journal is None:
+                        raise ValueError('Model JSON invalid after one correction; retained evidence: ' +
+                                         str(evidence)) from None
                 if journal:
                     raise journal.failure() from exc
                 raise ValueError('Model JSON invalid after one correction: ' + str(exc)) from exc
@@ -241,6 +271,36 @@ def _execute_json(prompt, checkout, validate, executor, correction_instructions,
                       'Follow the declared field types and preserve the same evidence and constraints. '
                       'Do not invent missing evidence or grant publication authority. ' + correction_instructions +
                       '\nPrior response:\n' + raw)
+            if len(json.dumps(prompt, ensure_ascii=True)) > correction_limit:
+                correction_evidence = allocate(repository=checkout)
+                original_file = retain('original-request', original_prompt)
+                prior_file = retain('prior-response', raw)
+                error_file = retain('validation-error', str(exc))
+                instructions_file = retain('correction-instructions', correction_instructions)
+                # Keep complete source material private and readable. Referrals
+                # change transport only; the same validator still checks output.
+                referral = (
+                    '\n\nThis is the single JSON correction attempt. Before answering, read the ENTIRE '
+                    'original request and ALL evidence it requires, the ENTIRE prior response at '
+                    f'{json.dumps(prior_file)}, the exact validation error at {json.dumps(error_file)}, '
+                    f'and ALL correction instructions at {json.dumps(instructions_file)}. '
+                    'Read files in sequential chunks until every byte has been read; do not truncate, '
+                    'summarize, skip evidence, or omit constraints. If required evidence cannot be read '
+                    'completely, do not claim completion or invent missing evidence. '
+                    'Return the complete result as exactly one JSON object without Markdown fences. '
+                    'Follow the declared field types and preserve the same evidence and constraints. '
+                    'Do not invent missing evidence or grant publication authority. ')
+                prompt = original_prompt + referral + '\nThe complete original request is inline above.'
+                if len(json.dumps(prompt, ensure_ascii=True)) > correction_limit:
+                    prompt = ('The complete original request is in ' + json.dumps(original_file) +
+                              '; read that entire file first.' + referral)
+                if len(json.dumps(prompt, ensure_ascii=True)) > correction_limit:
+                    # Very long storage paths cannot justify an oversized retry.
+                    evidence = retain_index()
+                    raise ValueError('Model JSON correction referral exceeds transport limit; '
+                                     'retained evidence: ' + str(evidence)) from None
+                retain('correction-request', prompt)
+                retain_index()
         else:
             if journal:
                 journal.accepted()
