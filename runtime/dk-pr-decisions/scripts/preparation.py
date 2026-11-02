@@ -350,10 +350,14 @@ def guidance_prose(value):
             chars[offset:offset + len(line)] = [c if c in '\r\n' else ' ' for c in line]
         offset += len(line)
     value = ''.join(chars)
-    quoted = list(re.finditer(r'`[^`\n]+`|"[^"\n]+"|“[^”\n]+”', value))
+    quoted = list(re.finditer(
+        r'(?<!`)(?P<ticks>`+)(?!`)[^\r\n]*?(?<!`)(?P=ticks)(?!`)|'
+        r'"[^"\r\n]+"|“[^”\r\n]+”', value))
     chars = list(value)
     for match in quoted:
-        chars[match.start()] = chars[match.end() - 1] = ' '
+        width = len(match['ticks']) if match['ticks'] else 1
+        chars[match.start():match.start() + width] = ' ' * width
+        chars[match.end() - width:match.end()] = ' ' * width
     return ''.join(chars), [(match.start(), match.end()) for match in quoted]
 
 
@@ -424,6 +428,8 @@ def validate_guidance(analysis):
         r'reassessment\s+(?:response|protocol)|'
         r'\{\s*["\']?\s*analysis\s*["\']?\s*:' + schema_gap + r'\bgraph\s*["\']?\s*:|'
         r'[\[{]?\s*["\']?dispositions\b' + schema_gap + r'\badditions\b' + schema_gap + r'\bimpacts\b)', re.I)
+    json_protocol = re.compile(r'\breturn\s+(?:only\s+|exactly\s+|the\s+)*\{', re.I)
+    decoder = json.JSONDecoder()
     scratch = re.compile(
         r'\bI\s+(?:am\s+|will\s+|must\s+|need\s+to\s+)'
         r'(?:now\s+)?(?:perform\s+|conduct\s+)?(?:the\s+)?'
@@ -433,24 +439,33 @@ def validate_guidance(analysis):
         r'analysis[ -]and[ -]graph|JSON\s+response))\b', re.I)
     for field, value in assignments:
         prose, quotations = guidance_prose(value)
-        for pattern in (role, protocol, scratch):
-            for match in pattern.finditer(prose):
-                # Quoting field names after an active "Return" does not quote
-                # that directive. Evidence must contain the whole directive,
-                # rather than only a formatted verb such as `Return`.
-                if any(start < match.start() and match.end() < end for start, end in quotations):
-                    continue
-                # A prohibition preserves the separation; it does not assign the
-                # prohibited analyst role to this downstream recipient.
-                before = prose[:match.start()]
-                if re.search(r'\b(?:not|never|don[\'’]t)\s+'
-                             r'(?:(?:ever|again|also|instead|simply|just|directly|actually|automatically)\s+)*$',
-                             before, re.I):
-                    continue
-                raise FieldError(field,
-                    'contains an analyst-only preparation role, response protocol or scratch narration; '
-                    'refresh downstream guidance for its actual recipient and authorized phase, '
-                    'preserving read-only limits, authorization prerequisites and governing obligations')
+        matches = [(match.start(), match.end()) for pattern in (role, protocol, scratch)
+                   for match in pattern.finditer(prose)]
+        for match in json_protocol.finditer(prose):
+            try:
+                payload, end = decoder.raw_decode(value, match.end() - 1)
+            except (ValueError, RecursionError):
+                continue
+            if isinstance(payload, dict) and ({'analysis', 'graph'} <= payload.keys() or
+                    {'dispositions', 'additions', 'impacts'} <= payload.keys()):
+                matches.append((match.start(), end))
+        for start, end in matches:
+            # Quoting field names after an active "Return" does not quote
+            # that directive. Evidence must contain the whole directive,
+            # rather than only a formatted verb such as `Return`.
+            if any(left < start and end < right for left, right in quotations):
+                continue
+            # A prohibition preserves the separation; it does not assign the
+            # prohibited analyst role to this downstream recipient.
+            before = prose[:start]
+            if re.search(r'\b(?:not|never|don[\'’]t)\s+'
+                         r'(?:(?:ever|again|also|instead|simply|just|directly|actually|automatically)\s+)*$',
+                         before, re.I):
+                continue
+            raise FieldError(field,
+                'contains an analyst-only preparation role, response protocol or scratch narration; '
+                'refresh downstream guidance for its actual recipient and authorized phase, '
+                'preserving read-only limits, authorization prerequisites and governing obligations')
 
 
 def validate_analysis(analysis, sources, reviewers, prior=(), *, check_guidance=True):
@@ -939,8 +954,9 @@ def validate(artifact, context, decisions, *, require_ready=True, check_sources=
     for name, descriptor in artifact['reviewers'].items():
         if not isinstance(descriptor, dict) or descriptor.get('reviewer') != name or descriptor.get('complete') is not True:
             raise ValueError('preparation reviewer adaptation is incomplete')
+    inputs = artifact.get('inputs')
     validate_analysis(artifact['analysis'], artifact['sources'], artifact['reviewers'],
-                      check_guidance=check_sources or artifact.get('inputs', {}).get('policy') == policy())
+                      check_guidance=check_sources or isinstance(inputs, dict) and inputs.get('policy') == policy())
     if artifact['preparation_version'] >= 2:
         if 'reviewer_paths' in artifact:
             paths = artifact['reviewer_paths']

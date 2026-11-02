@@ -37,6 +37,8 @@ def test_complete_downstream_contract_rejects_analyst_directives(field):
     'Return only the initial analysis-and-graph JSON.',
     'Return `{"analysis": ANALYSIS, "graph": NODES}`.',
     'Return {"analysis": {}, "graph": []}.',
+    'Return {"analysis": {"worker_instructions": "Inspect transform.py"}, "graph": []}.',
+    'Return {"dispositions": [{"reason": "Done."}], "additions": [], "impacts": []}.',
     'Return exactly dispositions,\nadditions,\nimpacts.',
     'Return {\n"dispositions": [],\n"additions": [],\n"impacts": []\n}.',
     'Return {\n"analysis": {},\n"graph": []\n}.',
@@ -76,6 +78,10 @@ def test_analyst_directive_is_rejected_without_other_role_or_implementation_word
     'Inspect `Return {"analysis": ANALYSIS, "graph": NODES}`; record graph: [] as evidence.',
     'Inspect the recorded role: `Perform only read-only Decisions reassessment`. '
     'Return the requested defect findings without edits.',
+    'Inspect ``Return exactly `dispositions`/`additions`/`impacts`.`` as evidence.',
+    'Inspect ```Return exactly ``dispositions``/`additions`/`impacts`.``` as evidence.',
+    'Inspect ``Return {"analysis": {"worker_instructions": "Inspect transform.py"}, "graph": []}.`` '
+    'as evidence; preserve authorization.',
     'Evidence excerpt:\n> Perform only read-only Decisions reassessment.\n'
     '> Return exactly dispositions/additions/impacts.\nInspect transform.py read-only.',
     'Evidence excerpt:\n```text\nReturn exactly dispositions/additions/impacts.\n```\n'
@@ -134,6 +140,10 @@ def test_quotes_elsewhere_do_not_hide_active_directives():
     '> <custom>\n> Recorded protocol:\nReturn the reassessment protocol.',
     '> - ```text\n> Recorded protocol:\nReturn the reassessment protocol.',
     '> - - -\nReturn the reassessment protocol.',
+    'Evidence: "Recorded protocol:\rReturn the reassessment protocol."\rInspect transform.py read-only.',
+    'Evidence: “Recorded protocol:\rReturn the reassessment protocol.”\rInspect transform.py read-only.',
+    'Evidence: `Recorded protocol:\rReturn the reassessment protocol.`\rInspect transform.py read-only.',
+    'Evidence: ``Recorded protocol:\rReturn the reassessment protocol.``\rInspect transform.py read-only.',
 ])
 def test_evidence_boundaries_and_prior_negation_do_not_hide_active_directives(guidance):
     value = analysis()
@@ -179,6 +189,10 @@ def test_clean_provider_and_unchanged_handoff_need_no_cleanup_model_call(tmp_pat
     'Once authorized, implement transform.py. Return {\n'
     '"dispositions": [],\n"additions": [],\n"impacts": []\n}.',
     'Once authorized, implement transform.py. You must `Return` exactly dispositions/additions/impacts.',
+    'Once authorized, implement transform.py. Return {"analysis": '
+    '{"worker_instructions": "Inspect transform.py"}, "graph": []}.',
+    'Once authorized, implement transform.py. Return {"dispositions": '
+    '[{"reason": "Done."}], "additions": [], "impacts": []}.',
 ])
 def test_existing_bounded_correction_repairs_or_blocks_contract(tmp_path, monkeypatch, corrected, bad_guidance):
     monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
@@ -215,7 +229,9 @@ def test_existing_bounded_correction_repairs_or_blocks_contract(tmp_path, monkey
 
 
 @pytest.mark.parametrize('full', [False, True])
-def test_incremental_and_full_merge_validate_new_worker_guidance(tmp_path, full):
+@pytest.mark.parametrize('guidance', [CONTAMINATED,
+    'Return {"analysis": {"worker_instructions": "Inspect transform.py"}, "graph": []}.'])
+def test_incremental_and_full_merge_validate_new_worker_guidance(tmp_path, full, guidance):
     package = Package(tmp_path)
     first = package.prepare()
     parent = prep.read(first['artifact'])
@@ -225,7 +241,7 @@ def test_incremental_and_full_merge_validate_new_worker_guidance(tmp_path, full)
     worker_id = next(key for key, node in parent['graph'].items()
                      if node['location'] == '/worker_instructions')
     item = next(item for item in update['dispositions'] if item['id'] == worker_id)
-    item.update(action='replace', value=CONTAMINATED)
+    item.update(action='replace', value=guidance)
     with pytest.raises(FieldError, match='worker_instructions'):
         prep.prepare(package.manifest_path, package.versions, previous_preparation=first['artifact'],
                      full_analysis=full, analyzer=lambda *_: update)
@@ -281,3 +297,18 @@ def test_current_contamination_cannot_pass_operational_reuse_or_work_gate(tmp_pa
     with pytest.raises(ValueError, match='worker_instructions'):
         prep.load(parent_path, package.context, package.decisions)
     assert parent_path.read_bytes() == before
+
+
+@pytest.mark.parametrize('inputs', [None, []])
+def test_non_object_historical_inputs_keep_structured_diagnostic(tmp_path, inputs):
+    package = Package(tmp_path)
+    first = package.prepare()
+    parent = prep.read(first['artifact'])
+    parent['inputs'] = inputs
+    parent['preparation_id'] = prep.digest({key: value for key, value in parent.items()
+                                          if key != 'preparation_id'})
+    path = package.write('invalid-parent.json', parent)
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match='invalid selected parent preparation: invalid preparation input fingerprints'):
+        prep.historical(path)
+    assert path.read_bytes() == before
