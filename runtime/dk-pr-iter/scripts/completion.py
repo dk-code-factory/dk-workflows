@@ -45,6 +45,8 @@ def current_preparation(path, run_record, pr_url, head, body):
     if (preparation_api.engineering_id(current) != preparation_api.engineering_id(prepared)
             or current['identity']['pr_url'] != pr_url):
         raise ValueError('completion preparation differs from the active run record')
+    from shared import partition_gate
+    partition_gate.require(record, prepared, preparation_api.context_for(prepared))
     return prepared
 
 
@@ -129,7 +131,7 @@ def completion_gate(start_head, final_head, live_head, review_complete, actionab
         return 'run_record_missing'
     try:
         prepared = current_preparation(preparation, run_record, pr_url, final_head, body)
-    except (ValueError, KeyError, TypeError, OSError):
+    except (ValueError, KeyError, TypeError, OSError, RuntimeError, subprocess.SubprocessError):
         return 'preparation_invalid'
     if not verification:
         return 'engineering_verification_missing'

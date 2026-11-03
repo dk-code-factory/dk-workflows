@@ -1,5 +1,9 @@
 ## Initial feedback work
 
+Run [the PR size gate](iteration-partition.md) after preparation and every published
+code change, before starting CI, allocating a review or completing. Finish pending
+partition publication first; refresh original scope and preserve all existing budgets.
+
 Before coding, read [architecture delivery](../../dk-architect/procedure.md).
 Declare intended paths as `code-fixer` (or the selected stable skill ID), including
 rename old/new paths and deletions, and obtain work-gate's architecture_packet.

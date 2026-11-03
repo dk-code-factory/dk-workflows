@@ -1,5 +1,9 @@
 ## Commit-series cleanup
 
+Run [the PR size gate](iteration-partition.md) after preparation and every published
+code change, before starting CI, allocating a review or completing. Finish pending
+partition publication first; refresh original scope and preserve all existing budgets.
+
 Follow [waiting and communication](waiting-communication.md) during this stage.
 Include its retained runtime path in every handoff; recipients read it and pass
 it to their nested workers.

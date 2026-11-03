@@ -19,7 +19,7 @@ import fcntl
 
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 from shared.repository_scope import identities
-from shared import ci_exceptions
+from shared import ci_exceptions, pr_size, pr_partition_policy
 from shared.bindings import registry_snapshot, execution_directory
 
 DATA = Path(os.environ.get('XDG_DATA_HOME', str(Path.home()/'.local/share'))) / 'codex-repo-rules'
@@ -344,6 +344,20 @@ def main():
     draft.add_argument('--binding-file', help='JSON SkillBinding or CommandBinding')
     draft.add_argument('--scope', choices=['effective', 'repo', 'upstream', 'user'], default='effective')
     sub.add_parser('diagnose', help='Inspect effective sources, resolved providers and missing prerequisites')
+    pr_partition_policy.add_parser(sub)
+    size = sub.add_parser('pr-size', help='Configure additions threshold and independent partition modes')
+    sizes = size.add_subparsers(dest='action', required=True)
+    for action in ('list', 'set', 'reset'):
+        operation = sizes.add_parser(action)
+        operation.add_argument('--scope', choices=('effective', 'repo', 'upstream', 'user') if action == 'list'
+                               else ('repo', 'user'), default='effective' if action == 'list' else 'repo')
+        if action == 'set':
+            operation.add_argument('--added-lines-threshold', type=int)
+            operation.add_argument('--evacuate-unrelated', choices=pr_size.MODES)
+            operation.add_argument('--split-related', choices=pr_size.MODES)
+        if action == 'reset':
+            operation.add_argument('keys', nargs='*', metavar='SETTING',
+                                   help='Settings to reset: ' + ', '.join(pr_size.DEFAULTS) + ' (default: all)')
     exceptions = sub.add_parser('ci-exceptions', help='Manage explicit flaky-test and pipeline exceptions')
     operations = exceptions.add_subparsers(dest='action', required=True)
     for action in ('list', 'add', 'remove', 'reset'):
@@ -360,12 +374,17 @@ def main():
             operation.add_argument('--signature')
             operation.add_argument('--reason', required=True)
     args = parser.parse_args()
+    if args.command == 'pr-size' and args.action == 'reset' and set(args.keys) - pr_size.DEFAULTS.keys():
+        parser.error('unknown PR size setting')
     if args.command == 'architecture':
         import importlib.util
         spec = importlib.util.spec_from_file_location('architecture_cli', SKILLS_ROOT / 'dk-architect/scripts/architecture.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module.dispatch(args.arguments, cwd=args.cwd, pr=args.pr)
+    if args.command == 'pr-partition':
+        print(json.dumps(pr_partition_policy.dispatch(args, args.pr), ensure_ascii=False))
+        return
     root, local_key, index_folder = identity(args.cwd)
     if args.command == 'ci-exceptions':
         # CI is evaluated in the PR base repository, just like the issue-backed registry.
@@ -383,6 +402,18 @@ def main():
         print(json.dumps(result, ensure_ascii=False))
         return
     chain = identities(root, args.pr)
+    if args.command == 'pr-size':
+        if args.action == 'list':
+            result = pr_size.load(chain, args.scope)
+        else:
+            settings = {key: getattr(args, key) for key in pr_size.DEFAULTS
+                        if getattr(args, key, None) is not None}
+            result = pr_size.configure(chain, args.action, scope=args.scope,
+                                       settings=settings, keys=getattr(args, 'keys', None))
+        if args.pr:
+            result['pr_partition'] = pr_partition_policy.load(args.pr)
+        print(json.dumps(result, ensure_ascii=False))
+        return
     key = chain[0]
     if key != local_key:
         index_folder = index_folder/'pr-contexts'/hashlib.sha256(key.encode()).hexdigest()[:24]

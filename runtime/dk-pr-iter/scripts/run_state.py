@@ -26,7 +26,7 @@ from shared.flaky_tests import Registry, record_flaky
 from shared import review_coverage, review_sessions, review_reconciliation
 from shared.engineering_identity import engineering_id, compatible_reference
 from shared import bindings, workflow_usage
-from shared import preparation_graph
+from shared import preparation_graph, partition_gate, pr_partition_policy
 from shared.workflow_storage import allocate, owned
 from shared.diagnostics import Diagnostic, emit, command as recovery_command, task, human
 
@@ -186,6 +186,7 @@ def start_run(record, *, resume=False):
         record[field] = []
     record.pop('preparation', None)
     record.pop('architecture_stage', None)
+    record.pop('partition_assessment', None)
     record['iteration_run'] = {'id': uuid.uuid4().hex, 'status': 'active',
                                'contract_version': 3, 'workflow_dir': str(allocate()),
                                'architecture_review_mode': 'once_before_cycles'}
@@ -412,9 +413,14 @@ def run_architecture_review(record_path, head):
         raise
 
 
+def partition_ready(record, prepared):
+    return partition_gate.require(record, prepared, preparation_api.context_for(prepared))
+
+
 def next_cycle(record, head):
     require_head(head)
     prepared = work_gate(record, head)
+    partition_ready(record, prepared)
     architecture_stage(record, prepared)
     with bindings.pinned_bindings(prepared['reviewers'],
                                   cwd=prepared.get('workspace')):
@@ -452,6 +458,7 @@ def review_attempt(record, head):
 
 def review_session(record, head, record_path):
     prepared = work_gate(record, head)
+    partition_ready(record, prepared)
     architecture_stage(record, prepared)
     identity = review_attempt(record, head)
     entries = record.setdefault('review_sessions', [])
@@ -471,6 +478,7 @@ def recover_cycle(record, head, record_path, *, scope='', rules=''):
     """One proved-prelaunch retry per cycle, at most two per iteration run."""
     require_head(head)
     prepared = work_gate(record, head)
+    partition_ready(record, prepared)
     run = record.get('iteration_run', {})
     if run.get('contract_version') != 3 or run.get('status') != 'active':
         raise ValueError('prelaunch recovery requires an active current-contract run')
@@ -882,7 +890,8 @@ def legacy_register_review(record_path, result, head):
 def retry_exhausted_cycle(record, head):
     """Retry the last incomplete usage-limited review once without a sixth cycle."""
     require_head(head)
-    work_gate(record, head)
+    prepared = work_gate(record, head)
+    partition_ready(record, prepared)
     cycles = record.get("cycles", [])
     if not cycles:
         raise ValueError("no review cycle to retry")
@@ -993,6 +1002,12 @@ def next_stage(record, head, record_path, *, verification=None, assessment=None)
         prepared = work_gate(record, head)
     except (ValueError, OSError, RuntimeError) as exc:
         return stage('preparation', [record_path], task('Refresh Decisions and engineering preparation, then register it.', record_path), str(exc))
+    try:
+        partition_ready(record, prepared)
+    except (ValueError, OSError, RuntimeError) as exc:
+        return stage('partition', [record_path, record['preparation']['path']],
+            task('Read the recorded PR preference, then assess or reconcile the single-worker partition before CI/review.', record_path),
+            str(exc), partition_policy=pr_partition_policy.load(prepared['identity']['pr_url']))
     try:
         architecture_stage(record, prepared)
     except (ValueError, OSError, KeyError) as exc:
@@ -1266,6 +1281,11 @@ def main():
     prep.add_argument('--pr-url', required=True)
     prep.add_argument('--head', required=True)
     prep.add_argument('--expected-parent')
+    partition = sub.add_parser('partition-assessment')
+    partition.add_argument('--head', required=True)
+    partition.add_argument('--state', required=True)
+    partition = sub.add_parser('partition-gate')
+    partition.add_argument('--head', required=True)
     gate = sub.add_parser('work-gate')
     gate.add_argument('--head', required=True)
     gate.add_argument('--agent', default='coordinator')
@@ -1357,11 +1377,21 @@ def main():
             elif a.command == 'review-assess':
                 result = reviewer_assessments(read(path, default), a.repo, json.loads(Path(a.file).read_text()))
             elif a.command == 'preparation': result = mutate(path, default, lambda d: attach_preparation(d, a.file, a.pr_url, a.head, expected_parent=a.expected_parent))
+            elif a.command == 'partition-assessment':
+                def retain_partition(d):
+                    prepared = work_gate(d, a.head)
+                    return partition_gate.attach(d, prepared, preparation_api.context_for(prepared), a.state)
+                result = mutate(path, default, retain_partition)
+            elif a.command == 'partition-gate':
+                saved = read(path, default)
+                prepared = work_gate(saved, a.head)
+                result = partition_gate.require(saved, prepared, preparation_api.context_for(prepared))
             elif a.command == 'work-gate':
                 artifact = work_gate(read(path, default), a.head)
                 result = {'gate': 'ready', 'preparation_id': artifact['preparation_id'],
                           'engineering_id': engineering_id(artifact),
-                          'architecture': artifact.get('architecture')}
+                          'architecture': artifact.get('architecture'),
+                          'partition_policy': pr_partition_policy.load(artifact['identity']['pr_url'])}
                 if artifact.get('architecture'):
                     from shared import architecture
                     result['architecture_packet'] = architecture.handoff(artifact['architecture'],
