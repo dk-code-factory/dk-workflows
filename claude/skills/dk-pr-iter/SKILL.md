@@ -24,3 +24,7 @@ After preparation and every published code change, check the additions size gate
 before CI, review allocation or completion. At 1,000 added lines by default,
 follow [PR partitioning](../../../runtime/dk-pr-iter/references/iteration-partition.md).
 Use one split worker; preserve review budgets and refresh scope after publication.
+
+Read the recorded per-PR partition preference first. Honor a whole-PR opt-out
+until explicitly re-enabled; pass exact conditional instructions and their source
+to the partition worker, which records its evidence-backed partition/retain choice.

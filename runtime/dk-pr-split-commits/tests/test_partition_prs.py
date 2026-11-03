@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from shared import pr_partition as p, pr_size, pr_dependencies, partition_gate, publication
+from shared import pr_partition as p, pr_size, pr_dependencies, partition_gate, publication, pr_partition_policy as policy
 from shared.diagnostics import Diagnostic
 from shared.review_loop import encode
 
@@ -672,3 +672,329 @@ def test_decline_that_exposes_dependency_cycle_requires_a_new_decision(repo):
     with pytest.raises(ValueError, match='cyclic prerequisite graph'):
         p.selected_pieces({'plan': plan, 'decisions': {'evacuate_unrelated': 'declined'}})
     assert not state['writes']
+
+
+def policy_assessment(decision, *, reason='Applied the exact human conditions to the current scope.'):
+    return {'decision': decision, 'policy_fingerprint': policy.load(PR)['fingerprint'],
+            'reason': reason, 'evidence': ['partition_policy', 'scope', 'diff']}
+
+
+def test_pr_disable_skips_assessment_and_unpublished_candidates_across_heads(repo, monkeypatch):
+    cwd, remote, _, evidence, _, base, chain = repo
+    path = prepare(repo)
+    policy.configure(PR, 'disable', reason='Never partition this PR.', source='Keep this PR as one deliverable.')
+    def unexpected(*args, **kwargs):
+        raise AssertionError('disabled PR must not inspect remote metadata or line counts')
+    monkeypatch.setattr(p, 'metadata', unexpected)
+    monkeypatch.setattr(pr_size, 'additions', unexpected)
+    assert p.check(cwd, PR, None)['outcome'] == 'pr_disabled'
+    prepared = {'identity': {'pr_url': PR, 'head_sha': git(cwd, 'rev-parse', 'HEAD'), 'base_sha': base}}
+    record = {'partition_assessment': {'path': str(path)}, 'cycles': [{'number': 5}]}
+    context = {'checkout': str(cwd), 'repository_identity': chain[0]}
+    assert partition_gate.require(record, prepared, context)['outcome'] == 'pr_disabled'
+    git(cwd, 'commit', '--amend', '-qm', 'new history')
+    git(cwd, 'push', '-q', '--force', str(remote), 'topic')
+    prepared['identity']['head_sha'] = git(cwd, 'rev-parse', 'HEAD')
+    assert partition_gate.require(record, prepared, context)['outcome'] == 'pr_disabled'
+    assert record['cycles'] == [{'number': 5}]
+
+
+def test_reenabling_pr_discards_local_old_preference_assessment(repo):
+    cwd, _, _, evidence, _, base, chain = repo
+    path = prepare(repo)
+    old = p.load(path)
+    policy.configure(PR, 'disable', reason='Keep this PR together.')
+    policy.configure(PR, 'enable', reason='Partitioning is appropriate now.')
+    assert p.check(cwd, PR, evidence)['outcome'] == 'assessment_required'
+    prepared = {'identity': {'pr_url': PR, 'head_sha': old['snapshot']['head'], 'base_sha': base}}
+    with pytest.raises(ValueError, match='assessment required'):
+        partition_gate.require({'partition_assessment': {'path': str(path)}}, prepared,
+                               {'checkout': str(cwd), 'repository_identity': chain[0]})
+
+
+def test_conditions_reach_worker_unchanged_and_agent_can_retain_without_building(repo, monkeypatch):
+    cwd, _, state, evidence, _, base, chain = repo
+    instructions = 'Keep schema and adapters together.\nPartition only after their interaction is stable.'
+    policy.configure(PR, 'instructions', reason='Human conditions.', instructions=instructions)
+    result = p.check(cwd, PR, evidence)
+    assert result['outcome'] == 'assessment_required'
+    assert result['partition_policy']['instructions'] == instructions
+    assert result['binding']['partition_policy']['instructions'] == instructions
+    prepared = {'identity': {'pr_url': PR, 'head_sha': git(cwd, 'rev-parse', 'HEAD'), 'base_sha': base},
+                'engineering': 'prepared-engineering'}
+    context = {'checkout': str(cwd), 'repository_identity': chain[0]}
+    monkeypatch.setattr(partition_gate, 'engineering_id', lambda value: value['engineering'])
+    monkeypatch.setattr(p, 'preparation', lambda *_: prepared['engineering'])
+    assessment = policy_assessment('retain', reason='Adapters and schema still share an unstable integration boundary.')
+    recorded = p.assess_policy(cwd, PR, evidence, assessment, preparation_file=Path('/private/preparation'))
+    path = Path(recorded['state'])
+    repeated = p.assess_policy(cwd, PR, evidence, assessment, preparation_file=Path('/private/preparation'))
+    assert repeated['reused'] is True and repeated['state'] == str(path)
+    data = p.verify(path)
+    assert data['assessment'] == assessment and 'candidates' not in data
+    assert not state['writes']
+    record = {'cycles': [{'number': 5}]}
+    partition_gate.attach(record, prepared, context, path)
+    assert partition_gate.require(record, prepared, context)['outcome'] == 'no_op'
+    assert p.check(cwd, PR, evidence, preparation_file=Path('/private/preparation'))['state'] == str(path)
+    assert p.publish(path)['outcome'] == 'no_op' and not state['writes']
+    assert record['cycles'] == [{'number': 5}]
+
+
+def test_custom_conditions_can_trigger_partition_below_default_threshold(repo):
+    cwd, _, _, evidence, plan, _, chain = repo
+    pr_size.configure(chain, 'reset')
+    policy.configure(PR, 'instructions', reason='Split independently testable behavior.',
+                     instructions='Partition when there are more than two independently testable behaviors, regardless of line count.')
+    assert p.check(cwd, PR, evidence)['outcome'] == 'assessment_required'
+    with pytest.raises(ValueError, match='agent assessment'):
+        prepare(repo)
+    plan['policy_assessment'] = policy_assessment('partition', reason='Three independent behaviors have separate files and checks.')
+    path = prepare(repo)
+    assert p.load(path)['snapshot']['added_lines'] == 9
+    assert pr_size.load(chain)['pr_size']['added_lines_threshold'] == 1000
+    assert publish(path)['outcome'] == 'published'
+
+
+def test_changed_instructions_invalidate_cached_retention_and_stale_candidate_publication(repo):
+    cwd, _, state, evidence, plan, _, _ = repo
+    policy.configure(PR, 'instructions', reason='Initial conditions.', instructions='Keep the integrated feature together.')
+    retained = p.assess_policy(cwd, PR, evidence, policy_assessment('retain'))
+    policy.configure(PR, 'instructions', reason='New human conditions.', instructions='Split independently testable behavior.')
+    assert p.check(cwd, PR, evidence)['outcome'] == 'assessment_required'
+    with pytest.raises(ValueError, match='governing inputs changed'):
+        p.verify(retained['state'])
+    plan['policy_assessment'] = policy_assessment('partition')
+    path = prepare(repo)
+    policy.configure(PR, 'disable', reason='Do not partition this PR.')
+    with pytest.raises(ValueError, match='stale'):
+        publish(path)
+    assert not state['writes']
+
+
+def test_conditional_retention_cache_survives_history_only_rewrite_but_not_new_changes(repo):
+    cwd, remote, _, evidence, _, _, _ = repo
+    policy.configure(PR, 'instructions', reason='Human conditions.', instructions='Keep coupled work together.')
+    state = p.assess_policy(cwd, PR, evidence, policy_assessment('retain'))['state']
+    git(cwd, 'commit', '--amend', '-qm', 'equivalent history')
+    git(cwd, 'push', '-q', '--force', str(remote), 'topic')
+    assert p.check(cwd, PR, evidence)['state'] == state
+    assert p.verify(state)['status'] == 'no_op'
+    (cwd / 'new').write_text('new behavior\n')
+    git(cwd, 'add', 'new')
+    git(cwd, 'commit', '-qm', 'new behavior')
+    git(cwd, 'push', '-q', str(remote), 'topic')
+    assert p.check(cwd, PR, evidence)['outcome'] == 'assessment_required'
+
+
+def test_declining_an_action_is_recorded_outside_the_tree_bound_plan_cache(repo):
+    _, _, state, _, _, _, chain = repo
+    pr_size.configure(chain, 'set', settings={'split_related': 'manual'})
+    path = prepare(repo)
+    pending = publish(path)
+    before = policy.binding(PR)
+    decisions = {'split_related': {'action_id': pending['action_ids']['split_related'], 'decision': 'declined',
+                                  'reason': 'The current API and adapter belong together.',
+                                  'source': 'Keep these related changes together in this proposal.'}}
+    assert publish(path, decisions=decisions)['outcome'] == 'declined'
+    recorded = policy.load(PR)
+    assert recorded['enabled'] is True and len(recorded['declines']) == 1
+    assert recorded['declines'][0]['source'] == decisions['split_related']['source']
+    assert recorded['declines'][0]['action_id'] == decisions['split_related']['action_id']
+    assert recorded['declines'][0]['proposal']['state'] == str(path)
+    assert recorded['declines'][0]['proposal']['tree'] == p.load(path)['snapshot']['binding']['tree']
+    assert policy.binding(PR) == before and not state['writes']
+
+
+def test_disable_does_not_erase_uncertain_writes_and_reconcile_still_observes_them(repo):
+    cwd, _, state, _, _, base, chain = repo
+    path = prepare(repo)
+    state['interrupt'] = 'POST'
+    with pytest.raises(Diagnostic):
+        publish(path)
+    policy.configure(PR, 'disable', reason='Stop further partitioning of this PR.')
+    prepared = {'identity': {'pr_url': PR, 'head_sha': git(cwd, 'rev-parse', 'HEAD'), 'base_sha': base}}
+    with pytest.raises(ValueError, match='publication is pending'):
+        partition_gate.require({}, prepared, {'checkout': str(cwd), 'repository_identity': chain[0]})
+    assert p.check(cwd, PR, None)['outcome'] == 'partition_pending'
+    writes = list(state['writes'])
+    with pytest.raises(Diagnostic, match='current readiness failed'):
+        p.publish(path, reconcile=True)
+    assert writes == state['writes']
+    operations = [publication.load(value) for key, value in p.load(path)['operations'].items() if key.startswith('create-')]
+    assert operations[0]['status'] == 'verified'
+
+
+@pytest.mark.parametrize('defect', ['stale_policy', 'missing_reason', 'missing_evidence'])
+def test_conditional_agent_decision_requires_current_policy_and_evidence(repo, defect):
+    cwd, _, state, evidence, _, _, _ = repo
+    policy.configure(PR, 'instructions', reason='Conditions.', instructions='Partition only stable pieces.')
+    assessment = policy_assessment('retain')
+    if defect == 'stale_policy':
+        assessment['policy_fingerprint'] = 'stale'
+    elif defect == 'missing_reason':
+        assessment['reason'] = ''
+    else:
+        assessment['evidence'] = ['partition_policy']
+    with pytest.raises(ValueError):
+        p.assess_policy(cwd, PR, evidence, assessment)
+    assert not state['writes']
+
+
+def test_disabled_pr_can_use_stable_check_cli_without_evidence_or_github_reads(repo):
+    import sys
+    cwd, _, _, _, _, _, _ = repo
+    policy.configure(PR, 'disable', reason='Keep the entire PR together.')
+    script = Path(__file__).resolve().parents[3] / 'scripts/dk.py'
+    result = subprocess.run([sys.executable, str(script), '--host', 'codex', '--full', '--cwd', str(cwd),
+        '--pr', PR, 'partition-prs', 'check'], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert data['outcome'] == 'pr_disabled'
+    assert data['partition_policy']['decision']['reason'] == 'Keep the entire PR together.'
+
+
+def test_per_pr_conditions_do_not_enable_globally_disabled_behaviors(repo):
+    cwd, _, state, evidence, plan, _, chain = repo
+    pr_size.configure(chain, 'set', settings={'evacuate_unrelated': 'disabled', 'split_related': 'disabled'})
+    policy.configure(PR, 'instructions', reason='Human conditions.', instructions='Partition independent pieces.')
+    assert p.check(cwd, PR, evidence)['outcome'] == 'disabled'
+    with pytest.raises(ValueError, match='both configured partition behaviors are disabled'):
+        p.assess_policy(cwd, PR, evidence, policy_assessment('retain'))
+    plan['policy_assessment'] = policy_assessment('partition')
+    with pytest.raises(ValueError, match='disabled'):
+        prepare(repo)
+    assert not state['writes']
+
+
+@pytest.mark.parametrize('cancel', [False, True])
+def test_partial_publication_can_resume_after_recorded_disable_enable(repo, cancel):
+    cwd, _, state, evidence, _, base, chain = repo
+    path = prepare(repo)
+    original_head = p.load(path)['snapshot']['head']
+    state['interrupt'] = 'POST'
+    with pytest.raises(Diagnostic):
+        publish(path)
+    policy.configure(PR, 'disable', reason='Stop partitioning this PR.')
+    with pytest.raises(Diagnostic, match='current readiness failed'):
+        p.publish(path, reconcile=True)
+    if cancel:
+        result = p.cancel_policy(path)
+        assert result['outcome'] == 'cancelled' and result['original_head'] == original_head
+        assert len(result['retained_drafts']) == 1
+        assert not p.pending_states(cwd, PR)
+        prepared = {'identity': {'pr_url': PR, 'head_sha': original_head, 'base_sha': base}}
+        assert partition_gate.require({}, prepared, {'checkout': str(cwd), 'repository_identity': chain[0]})['outcome'] == 'pr_disabled'
+    policy.configure(PR, 'enable', reason='Resume the verified candidate partition.')
+    assert p.check(cwd, PR, evidence)['outcome'] == ('resume_required' if cancel else 'partition_pending')
+    before = list(state['writes'])
+    result = p.resume_policy(path, candidate_hash=p.load(path)['candidate_hash'])
+    assert result['outcome'] == 'selection_ready' and state['writes'] == before
+    assert publish(path)['outcome'] == 'published'
+    assert len(state['drafts']) == 2
+    assert sum(method == 'POST' for method, _ in state['writes']) == 2
+
+
+def test_policy_resume_requires_new_manual_approval_for_exact_existing_candidates(repo):
+    _, _, state, _, _, _, chain = repo
+    pr_size.configure(chain, 'set', settings={'split_related': 'manual'})
+    path = prepare(repo)
+    approval = publish(path)
+    old_action = approval['action_ids']['split_related']
+    state['interrupt'] = 'POST'
+    with pytest.raises(Diagnostic):
+        publish(path, decisions={'split_related': {'action_id': old_action, 'decision': 'approved'}})
+    policy.configure(PR, 'disable', reason='Stop for now.')
+    with pytest.raises(Diagnostic):
+        p.publish(path, reconcile=True)
+    policy.configure(PR, 'enable', reason='Resume this partition.')
+    candidate_hash = p.load(path)['candidate_hash']
+    pending = p.resume_policy(path, candidate_hash=candidate_hash)
+    assert pending['outcome'] == 'awaiting_approval'
+    assert pending['action_ids']['split_related'] != old_action
+    with pytest.raises(ValueError, match='current action'):
+        p.resume_policy(path, candidate_hash=candidate_hash,
+                        decisions={'split_related': {'action_id': old_action, 'decision': 'approved'}})
+    result = p.resume_policy(path, candidate_hash=candidate_hash,
+        decisions={'split_related': {'action_id': pending['action_ids']['split_related'], 'decision': 'approved',
+                                     'source': 'Continue these exact candidates under the new preference.'}})
+    assert result['outcome'] == 'selection_ready'
+    assert publish(path)['outcome'] == 'published' and len(state['drafts']) == 2
+
+
+def test_cancel_cannot_erase_uncertainty_or_cancel_after_source_removal(repo, monkeypatch):
+    _, _, state, _, _, _, _ = repo
+    path = prepare(repo)
+    state['interrupt'] = 'POST'
+    with pytest.raises(Diagnostic):
+        publish(path)
+    policy.configure(PR, 'disable', reason='Stop.')
+    with pytest.raises(ValueError, match='reconcile all recorded'):
+        p.cancel_policy(path)
+    with pytest.raises(Diagnostic):
+        p.publish(path, reconcile=True)
+    policy.configure(PR, 'enable', reason='Continue.')
+    p.resume_policy(path, candidate_hash=p.load(path)['candidate_hash'])
+    original_run = p.run
+    def interrupt_source(cwd, *argv):
+        result = original_run(cwd, *argv)
+        if argv[:2] == ('git', 'push') and argv[-1].endswith(':refs/heads/topic'):
+            raise RuntimeError('lost source rewrite response')
+        return result
+    monkeypatch.setattr(p, 'run', interrupt_source)
+    with pytest.raises(Diagnostic):
+        publish(path)
+    policy.configure(PR, 'disable', reason='Stop after source changed.')
+    with pytest.raises(Diagnostic):
+        p.publish(path, reconcile=True)
+    with pytest.raises(ValueError, match='cannot cancel after source removal'):
+        p.cancel_policy(path)
+
+
+def test_cancelled_partition_can_receive_a_fresh_conditional_retain_assessment(repo):
+    cwd, _, state, evidence, _, _, _ = repo
+    path = prepare(repo)
+    state['interrupt'] = 'POST'
+    with pytest.raises(Diagnostic):
+        publish(path)
+    policy.configure(PR, 'disable', reason='Keep it whole.')
+    with pytest.raises(Diagnostic):
+        p.publish(path, reconcile=True)
+    p.cancel_policy(path)
+    policy.configure(PR, 'instructions', reason='Only split independent integration boundaries.',
+                     instructions='Keep the PR whole while its integration boundary is unstable.')
+    assert p.check(cwd, PR, evidence)['outcome'] == 'resume_required'
+    result = p.assess_policy(cwd, PR, evidence, policy_assessment('retain'))
+    assert p.check(cwd, PR, evidence)['state'] == result['state']
+    assert p.check(cwd, PR, evidence)['outcome'] == 'no_op'
+
+
+def test_resuming_with_changed_conditions_requires_a_current_agent_assessment(repo):
+    _, _, state, _, _, _, _ = repo
+    path = prepare(repo)
+    state['interrupt'] = 'POST'
+    with pytest.raises(Diagnostic):
+        publish(path)
+    policy.configure(PR, 'instructions', reason='A new condition.', instructions='Partition only independent tested pieces.')
+    with pytest.raises(Diagnostic):
+        p.publish(path, reconcile=True)
+    candidate_hash = p.load(path)['candidate_hash']
+    with pytest.raises(ValueError, match='agent assessment'):
+        p.resume_policy(path, candidate_hash=candidate_hash)
+    result = p.resume_policy(path, candidate_hash=candidate_hash, assessment=policy_assessment('partition'))
+    assert result['outcome'] == 'selection_ready'
+    assert publish(path)['outcome'] == 'published' and len(state['drafts']) == 2
+
+
+def test_resuming_unpublished_manual_candidates_does_not_ask_for_approval_twice(repo):
+    _, _, state, _, _, _, chain = repo
+    pr_size.configure(chain, 'set', settings={'split_related': 'manual'})
+    path = prepare(repo)
+    policy.configure(PR, 'disable', reason='Wait for an integration decision.')
+    policy.configure(PR, 'enable', reason='The integration decision is settled.')
+    candidate_hash = p.load(path)['candidate_hash']
+    pending = p.resume_policy(path, candidate_hash=candidate_hash)
+    approval = {'split_related': {'action_id': pending['action_ids']['split_related'], 'decision': 'approved'}}
+    assert p.resume_policy(path, candidate_hash=candidate_hash, decisions=approval)['outcome'] == 'selection_ready'
+    assert p.load(path)['decisions']['split_related'] == 'approved'
+    assert publish(path)['outcome'] == 'published' and len(state['drafts']) == 2

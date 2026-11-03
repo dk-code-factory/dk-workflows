@@ -1,6 +1,6 @@
 ---
 name: dk-config
-description: Manage private repository rules, scoped architecture rules, ordered PR reviewers, PR size thresholds and independent partition modes, and explicit flaky-test or pipeline exceptions at repository or user scope. Use when asked to list, add, change, remove, or refresh these settings.
+description: Manage private repository rules, scoped architecture rules, ordered PR reviewers, PR size thresholds, per-PR partition decisions and instructions, independent partition modes, and explicit flaky-test or pipeline exceptions at repository or user scope. Use when asked to list, add, change, remove, or refresh these settings.
 ---
 
 Use Claude Code native agents and tools. `${CLAUDE_PLUGIN_ROOT}` is this plugin root. Do not require Codex for native execution. When shared instructions name a skill with a dollar prefix, use the corresponding Claude native skill in this plugin namespace.
@@ -12,3 +12,7 @@ Read [the shared procedure](../../../runtime/dk-config/procedure.md) and perform
 Use `config pr-size list|set|reset` for the positive additions threshold and
 independent `automatic|manual|disabled` evacuation/splitting modes. Report effective
 values and sources; use repository or user scope as requested.
+
+Use `dk.py --pr PR_URL config pr-partition show|enable|disable|instructions|clear-instructions|reset`
+with PR context before the route. Record explicit whole-PR opt-outs and exact human
+conditions; keep a declined proposal separate from disabling partitioning for the PR.

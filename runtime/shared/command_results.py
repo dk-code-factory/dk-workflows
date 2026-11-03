@@ -97,7 +97,7 @@ def classification(command, code, data):
     elif command == 'reviewers' and value.get('complete') is False:
         reason = 'review_incomplete'
     elif command == 'partition-prs' and value.get('outcome') in {
-            'assessment_required', 'partition_pending', 'awaiting_approval', 'selection_ready'}:
+            'assessment_required', 'partition_pending', 'awaiting_approval', 'selection_ready', 'resume_required'}:
         reason = 'partition_' + value['outcome']
     elif command == 'run-state' and value.get('status') == 'blocked':
         reason = value.get('readiness') or 'review_reconciliation_blocked'

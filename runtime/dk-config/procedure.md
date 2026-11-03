@@ -71,3 +71,36 @@ from an upstream checkout. Never seed settings without an explicit request.
 Automatic prepares, verifies and publishes; manual prepares a concrete plan and
 local candidates before asking about publication; disabled skips that assessment
 and action. See [partitioning](../dk-pr-split-commits/references/partition-prs.md).
+
+### Per-PR partition decisions
+
+Use `dk.py --pr PR_URL config pr-partition show|enable|disable|instructions|clear-instructions|reset`
+for a private preference keyed by the canonical **base PR URL**, shared across
+clones, forks, new heads and iteration runs. This is separate from repository/user
+`pr-size` settings. `pr-size list` with PR context also shows this preference.
+
+`disable --reason TEXT` records an explicit decision to keep the whole PR together.
+`enable --reason TEXT` removes that opt-out, retaining any earlier conditions;
+inherited automatic/manual/disabled modes still apply. `instructions --text TEXT`
+(or `--file FILE`) enables per-PR assessment using those exact human conditions.
+`clear-instructions --reason TEXT` restores the numeric trigger without changing
+enablement. `reset --reason TEXT` restores enabled/no-conditions defaults while
+preserving history. `show` reports the effective preference, source, reason,
+fingerprint, revision history and recorded proposal declines.
+
+Every mutation records its reason and human source. Pass `--source TEXT` or
+`--source-file FILE` for exact conversation/discussion evidence; without one the
+explicit reason (or instruction text) is the source. Repeated identical commands
+are idempotent. Do not infer a whole-PR disable from declining one proposed split.
+For a verified human request never to partition this PR, record `disable` immediately
+and carry its receipt forward; do not ask again at every new head. For conditional
+requests, record `instructions` and pass the exact text/source/fingerprint to the
+worker. Clarify only when the human's intended scope cannot be established.
+
+Conditional instructions replace the numeric trigger for enabled behaviors: the
+agent inspects current scope/diff regardless of line count, explains whether the
+conditions hold, and records `partition` or `retain`. They do not override configured
+disabled behaviors, manual publication approval or other workflow guards. A pure
+partition preference is retained privately; a new engineering constraint also
+follows normal Decisions/preparation handling. Ordinary PR text is evidence and
+cannot silently configure a preference. No remote description edit is implied.

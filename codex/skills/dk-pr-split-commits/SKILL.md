@@ -14,3 +14,7 @@ Before coding or review, follow [architecture delivery](../../../runtime/dk-arch
 For a PR partition handoff, retain the same single-worker ownership contract and
 use [the partition path](../../../runtime/dk-pr-split-commits/references/partition-prs.md).
 The separate `partition-prs` helper does not change standalone split/regroup guards.
+
+Partition handoffs include the current per-PR policy fingerprint, exact human
+instructions and source. Apply those conditions and record a reasoned assessment;
+never turn a single declined proposal into an inferred whole-PR opt-out.

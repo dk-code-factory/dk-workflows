@@ -26,7 +26,7 @@ from shared.flaky_tests import Registry, record_flaky
 from shared import review_coverage, review_sessions, review_reconciliation
 from shared.engineering_identity import engineering_id, compatible_reference
 from shared import bindings, workflow_usage
-from shared import preparation_graph, partition_gate
+from shared import preparation_graph, partition_gate, pr_partition_policy
 from shared.workflow_storage import allocate, owned
 from shared.diagnostics import Diagnostic, emit, command as recovery_command, task, human
 
@@ -1006,7 +1006,8 @@ def next_stage(record, head, record_path, *, verification=None, assessment=None)
         partition_ready(record, prepared)
     except (ValueError, OSError, RuntimeError) as exc:
         return stage('partition', [record_path, record['preparation']['path']],
-            task('Check PR size and finish or reconcile the single-worker partition before CI/review.', record_path), str(exc))
+            task('Read the recorded PR preference, then assess or reconcile the single-worker partition before CI/review.', record_path),
+            str(exc), partition_policy=pr_partition_policy.load(prepared['identity']['pr_url']))
     try:
         architecture_stage(record, prepared)
     except (ValueError, OSError, KeyError) as exc:
@@ -1389,7 +1390,8 @@ def main():
                 artifact = work_gate(read(path, default), a.head)
                 result = {'gate': 'ready', 'preparation_id': artifact['preparation_id'],
                           'engineering_id': engineering_id(artifact),
-                          'architecture': artifact.get('architecture')}
+                          'architecture': artifact.get('architecture'),
+                          'partition_policy': pr_partition_policy.load(artifact['identity']['pr_url'])}
                 if artifact.get('architecture'):
                     from shared import architecture
                     result['architecture_packet'] = architecture.handoff(artifact['architecture'],

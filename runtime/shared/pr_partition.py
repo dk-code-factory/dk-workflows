@@ -15,7 +15,7 @@ import sys
 import uuid
 from urllib.parse import quote
 
-from shared import pr_size, pr_dependencies, publication, workflow_storage
+from shared import pr_size, pr_dependencies, publication, workflow_storage, pr_partition_policy
 from shared.github_reads import run as github_run
 from shared.pr_identity import resolve
 from shared.private_state import write, atomic_text
@@ -85,6 +85,7 @@ def snapshot(cwd, pr, evidence, *, engineering_id=None):
                'base_repo': base_repo, 'head_repo': head_repo,
                'scope': {'title': meta['title'], 'body': meta['body']},
                'evidence': {key: item['sha256'] for key, item in sources(evidence).items()},
+               'partition_policy': pr_partition_policy.binding(pr),
                'settings': settings}
     return {'key': publication.digest(binding), 'binding': binding, 'head': head, 'metadata': meta,
             'added_lines': pr_size.additions(cwd, base, head)}
@@ -117,7 +118,24 @@ def preparation(snap, path):
     return engineering_id(prepared)
 
 
+def pending_states(cwd, pr):
+    target = cache_path(cwd, pr)
+    if not target.exists():
+        return []
+    return [state for state in set(json.loads(target.read_text()).values())
+            if (data := load(state))['operations'] and data['status'] not in ('published', 'cancelled')]
+
+
 def check(cwd, pr, evidence, *, preparation_file=None):
+    policy = pr_partition_policy.load(pr)
+    pending = pending_states(cwd, pr)
+    if pending:
+        return {'outcome': 'partition_pending', 'state': pending[0], 'partition_policy': policy,
+                'behaviors': []}
+    if not policy['enabled']:
+        return {'outcome': 'pr_disabled', 'state': None, 'partition_policy': policy, 'behaviors': []}
+    if evidence is None:
+        raise ValueError('enabled PR partition checks require --evidence-file')
     snap = snapshot(cwd, pr, evidence)
     if preparation_file:
         snap['binding']['engineering_id'] = preparation(snap, preparation_file)
@@ -125,8 +143,18 @@ def check(cwd, pr, evidence, *, preparation_file=None):
     settings = snap['binding']['settings']['pr_size']
     enabled = [key for key in BEHAVIORS if settings[key] != 'disabled']
     path = cache_path(cwd, pr)
-    cached = json.loads(path.read_text()).get(snap['key']) if path.exists() else None
-    outcome = 'below_threshold' if snap['added_lines'] < settings['added_lines_threshold'] else (
+    history = json.loads(path.read_text()) if path.exists() else {}
+    cached = history.get(snap['key'])
+    for retained_path in set(history.values()):
+        retained = load(retained_path)
+        if not cached and retained['status'] == 'cancelled':
+            previous = copy.deepcopy(retained['snapshot']['binding'])
+            previous['partition_policy'] = snap['binding']['partition_policy']
+            previous['engineering_id'] = snap['binding']['engineering_id']
+            if previous == snap['binding']:
+                return {**snap, 'outcome': 'resume_required', 'state': retained_path,
+                        'behaviors': enabled, 'partition_policy': policy}
+    outcome = 'below_threshold' if not policy['instructions'] and snap['added_lines'] < settings['added_lines_threshold'] else (
         'disabled' if not enabled else 'assessment_required')
     if cached:
         retained = load(cached)
@@ -136,7 +164,7 @@ def check(cwd, pr, evidence, *, preparation_file=None):
             outcome = retained['status']
         else:
             outcome = 'partition_pending'
-    return {**snap, 'outcome': outcome, 'state': cached, 'behaviors': enabled}
+    return {**snap, 'outcome': outcome, 'state': cached, 'behaviors': enabled, 'partition_policy': policy}
 
 
 def order(pieces):
@@ -209,9 +237,66 @@ def text(value, name):
     return value
 
 
+def validate_policy_assessment(snap, assessment, *, decision):
+    policy = snap['binding']['partition_policy']
+    if (not isinstance(assessment, dict) or set(assessment) != {
+            'decision', 'policy_fingerprint', 'reason', 'evidence'}
+            or assessment['decision'] != decision or assessment['policy_fingerprint'] != policy['fingerprint']):
+        raise ValueError('agent assessment must bind the current PR partition instructions and decision')
+    text(assessment['reason'], 'agent partition decision rationale')
+    evidence = assessment['evidence']
+    allowed = set(snap['binding']['evidence']) | {'partition_policy', 'diff'}
+    if (not isinstance(evidence, list) or any(not isinstance(item, str) for item in evidence)
+            or set(evidence) - allowed or len(evidence) != len(set(evidence))
+            or 'partition_policy' not in evidence or len(evidence) < 2):
+        raise ValueError('agent partition decision must cite the instructions and current scope/diff evidence')
+    return assessment
+
+
+def assess_policy(cwd, pr, evidence, assessment, *, preparation_file=None):
+    """Retain a conditional agent decision without constructing or publishing candidates."""
+    snap = snapshot(cwd, pr, evidence)
+    policy = snap['binding']['partition_policy']
+    if not policy['enabled'] or not policy['instructions']:
+        raise ValueError('conditional assessment requires enabled PR-specific partition instructions')
+    if all(snap['binding']['settings']['pr_size'][key] == 'disabled' for key in BEHAVIORS):
+        raise ValueError('both configured partition behaviors are disabled')
+    validate_policy_assessment(snap, assessment, decision='retain')
+    if pending_states(cwd, pr):
+        raise ValueError('reconcile pending partition publication before recording a new assessment')
+    if preparation_file:
+        snap['binding']['engineering_id'] = preparation(snap, preparation_file)
+        snap['key'] = publication.digest(snap['binding'])
+    index = cache_path(cwd, pr)
+    cached = json.loads(index.read_text()).get(snap['key']) if index.exists() else None
+    if cached:
+        previous = load(cached)
+        if previous.get('kind') == 'policy_assessment' and previous['assessment'] == assessment:
+            verify(cached)
+            return {'state': cached, 'outcome': 'no_op', 'assessment': previous['assessment'], 'reused': True}
+    directory = workflow_storage.allocate(repository=cwd)
+    target = directory / 'partition-assessment.json'
+    data = {'schema_version': 1, 'kind': 'policy_assessment', 'cwd': str(Path(cwd).resolve()),
+            'snapshot': snap, 'evidence': sources(evidence), 'assessment': assessment,
+            'assessment_id': publication.digest({'snapshot': snap['key'], 'assessment': assessment}),
+            'engineering_id': snap['binding']['engineering_id'], 'status': 'no_op', 'operations': {}}
+    if preparation_file:
+        data['preparation_file'] = str(Path(preparation_file).resolve())
+    write(target, data)
+    remember(cwd, snap, target)
+    return {'state': str(target), 'outcome': 'no_op', 'assessment': assessment}
+
+
 def validate_plan(cwd, snap, plan):
     settings = snap['binding']['settings']['pr_size']
-    if snap['added_lines'] < settings['added_lines_threshold']:
+    if all(settings[key] == 'disabled' for key in BEHAVIORS):
+        raise ValueError('both configured partition behaviors are disabled')
+    policy = snap['binding']['partition_policy']
+    if not policy['enabled']:
+        raise ValueError('partitioning is disabled for this PR by a recorded user decision')
+    if policy['instructions']:
+        validate_policy_assessment(snap, plan.get('policy_assessment'), decision='partition')
+    if not policy['instructions'] and snap['added_lines'] < settings['added_lines_threshold']:
         raise ValueError('PR is below the configured threshold')
     units = plan.get('units')
     pieces = plan.get('pieces')
@@ -427,12 +512,16 @@ def prepare(cwd, pr, evidence, plan, remote, *, preparation_file=None):
     if remote_head(cwd, urls[0], branch) != snap['head']:
         raise ValueError('owned remote branch does not match PR head')
     previous = check(cwd, pr, evidence, preparation_file=preparation_file)
+    superseded = None
     if previous['state']:
         # Resume, including prepared/manual work, without rebuilding or prompting.
         previous_path = Path(previous['state'])
         with previous_path.with_suffix('.lock').open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             retained = load(previous_path)
+            if (previous['outcome'] == 'resume_required' and retained['status'] == 'cancelled'
+                    and retained['plan_id'] != publication.digest(plan)):
+                superseded = {'state': str(previous_path), 'retained_drafts': retained['drafts']}
             if retained['snapshot']['head'] != snap['head'] and not retained['operations']:
                 # Same semantic binding and candidates, newly observed exact lease.
                 # Foreign-author remapping was already rejected by validate_plan.
@@ -442,7 +531,8 @@ def prepare(cwd, pr, evidence, plan, remote, *, preparation_file=None):
                     retained['preparation_file'] = str(Path(preparation_file).resolve())
                 git(cwd, 'update-ref', 'refs/pr-partition-recovery/' + snap['head'], snap['head'])
                 write(previous_path, retained)
-        return {'state': previous['state'], 'reused': True, 'outcome': previous['outcome']}
+        if superseded is None:
+            return {'state': previous['state'], 'reused': True, 'outcome': previous['outcome']}
     directory = workflow_storage.allocate(repository=cwd)
     path = directory / 'partition.json'
     git(cwd, 'update-ref', 'refs/pr-partition-recovery/' + snap['head'], snap['head'])
@@ -451,6 +541,11 @@ def prepare(cwd, pr, evidence, plan, remote, *, preparation_file=None):
     data = {'schema_version': 1, 'cwd': str(Path(cwd).resolve()), 'snapshot': snap,
             'evidence': sources(evidence), 'plan': plan, 'plan_id': publication.digest(plan),
             'remote_url': urls[0], 'status': 'prepared', 'decisions': {}, 'operations': {}, 'drafts': {}}
+    branch_id = publication.digest({'snapshot': snap['key'], 'plan': data['plan_id']})[:12]
+    data['branch_names'] = {piece['id']: 'dk-partition/' + str(snap['metadata']['number']) + '-' + branch_id + '-' + piece['id']
+                            for piece in plan['pieces'] if piece['id'] != 'original'}
+    if superseded:
+        data['superseded_partition'] = superseded
     if preparation_file:
         data['engineering_id'] = snap['binding']['engineering_id']
         data['preparation_file'] = str(Path(preparation_file).resolve())
@@ -474,8 +569,9 @@ def prepare(cwd, pr, evidence, plan, remote, *, preparation_file=None):
     with worktree(cwd, directory, snap['binding']['default_tip']) as checkout:
         replay(checkout, retained)
         data['after_evacuation_added_lines'] = pr_size.additions(checkout, snap['binding']['default_tip'], 'HEAD')
-    if data['after_evacuation_added_lines'] < settings['added_lines_threshold'] and any(
-            piece['id'] != 'original' and set(piece['units']) <= related for piece in plan['pieces']):
+    if (not snap['binding']['partition_policy']['instructions']
+            and data['after_evacuation_added_lines'] < settings['added_lines_threshold'] and any(
+            piece['id'] != 'original' and set(piece['units']) <= related for piece in plan['pieces'])):
         raise ValueError('retained scope is below threshold after evacuation; related splitting is not triggered')
     if len(plan['pieces']) == 1 and snap['metadata']['baseRefName'] == snap['binding']['default_branch']:
         data['status'] = 'no_op'
@@ -488,6 +584,15 @@ def prepare(cwd, pr, evidence, plan, remote, *, preparation_file=None):
 def load(path):
     path = workflow_storage.owned(path)
     data = json.loads(path.read_text())
+    if data.get('kind') == 'policy_assessment':
+        snap = data['snapshot']
+        if (data.get('schema_version') != 1 or data.get('status') != 'no_op' or data.get('operations') != {}
+                or snap['key'] != publication.digest(snap['binding'])
+                or data.get('engineering_id') != snap['binding']['engineering_id']
+                or data.get('assessment_id') != publication.digest({'snapshot': snap['key'], 'assessment': data.get('assessment')})):
+            raise ValueError('conditional partition assessment changed')
+        validate_policy_assessment(snap, data['assessment'], decision='retain')
+        return data
     if (data.get('schema_version') != 1 or data.get('plan_id') != publication.digest(data.get('plan'))
             or data['snapshot']['key'] != publication.digest(data['snapshot']['binding'])
             or data.get('engineering_id') != data['snapshot']['binding'].get('engineering_id')):
@@ -501,12 +606,25 @@ def remote_head(cwd, url, branch):
 
 
 def branch_name(data, name):
+    if name in data.get('branch_names', {}):
+        return data['branch_names'][name]
     return 'dk-partition/' + str(data['snapshot']['metadata']['number']) + '-' + data['plan_id'][:12] + '-' + name
 
 
-def verify(path, *, live=True):
+def verify(path, *, live=True, refresh_policy=False):
     data = load(path)
     cwd, snap = data['cwd'], data['snapshot']
+    if data.get('kind') == 'policy_assessment':
+        if sources({key: item['path'] for key, item in data['evidence'].items()}) != data['evidence']:
+            raise ValueError('conditional partition assessment evidence changed')
+        if data.get('preparation_file') and preparation(snap, data['preparation_file']) != data['engineering_id']:
+            raise ValueError('conditional partition assessment preparation changed')
+        if live:
+            current = snapshot(cwd, snap['binding']['pr'], {key: item['path'] for key, item in data['evidence'].items()},
+                               engineering_id=snap['binding']['engineering_id'])
+            if current['key'] != snap['key']:
+                raise ValueError('conditional partition assessment governing inputs changed')
+        return data
     built = {key: data[key] for key in ('pieces', 'candidates', 'recomposed_tree')}
     if data.get('candidate_hash') != publication.digest(built):
         raise ValueError('partition candidates changed or preparation is incomplete')
@@ -536,6 +654,8 @@ def verify(path, *, live=True):
             return data  # Tree-equivalent history does not stale a semantic assessment.
         # After our own verified writes, normalize only the fields those writes own.
         normalized = copy.deepcopy(current['binding'])
+        if refresh_policy:
+            normalized['partition_policy'] = snap['binding']['partition_policy']
         if current['head'] == data['candidates']['original']['head']:
             normalized['tree'] = snap['binding']['tree']
             normalized['base'] = snap['binding']['base']
@@ -556,11 +676,115 @@ def verify(path, *, live=True):
         if lease not in (snap['head'], data['candidates']['original']['head']):
             raise ValueError('source branch lease changed')
     return data
+
+
+def cancel_policy(path):
+    """Honor a whole-PR opt-out without deleting drafts or discarding source work."""
+    path = workflow_storage.owned(path)
+    with path.with_suffix('.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        data = load(path)
+        if data.get('kind') == 'policy_assessment' or data['status'] == 'published':
+            raise ValueError('only an unfinished partition can be cancelled')
+        pr = data['snapshot']['binding']['pr']
+        policy = pr_partition_policy.load(pr)
+        if policy['enabled']:
+            raise ValueError('cancellation requires a recorded whole-PR disable decision')
+        if any(publication.load(value)['status'] != 'verified' for value in data['operations'].values()):
+            raise ValueError('reconcile all recorded remote operations before cancelling')
+        meta = metadata(data['cwd'], pr)
+        host, base_repo, head_repo = resolve(meta, data['cwd'])
+        snap = data['snapshot']
+        if ((host, base_repo, head_repo, meta['headRefName'], meta['headRefOid']) != (
+                snap['binding']['host'], snap['binding']['base_repo'], snap['binding']['head_repo'],
+                snap['metadata']['headRefName'], snap['head'])
+                or remote_head(data['cwd'], data['remote_url'], meta['headRefName']) != snap['head']):
+            raise ValueError('original head changed; cannot cancel after source removal or a branch race')
+        data['status'] = 'cancelled'
+        if pr_partition_policy.binding(pr) != {key: policy[key] for key in ('enabled', 'instructions', 'fingerprint')}:
+            raise ValueError('PR partition decision changed during cancellation')
+        cancellation = {'policy': policy['fingerprint'], 'decision': policy['decision'], 'original_head': snap['head']}
+        if cancellation not in data.setdefault('cancellations', []):
+            data['cancellations'].append(cancellation)
+        write(path, data)
+        return {'state': str(path), 'outcome': 'cancelled', 'original_head': snap['head'],
+                'retained_drafts': data['drafts'], 'partition_policy': policy}
+
+
+def resume_policy(path, *, candidate_hash, assessment=None, decisions=None):
+    """Rebind unchanged candidates to a new enabled preference after live reconciliation."""
+    path = workflow_storage.owned(path)
+    with path.with_suffix('.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        data = load(path)
+        if data.get('kind') == 'policy_assessment' or data['status'] in ('published', 'no_op', 'declined'):
+            raise ValueError('resume requires an unfinished or cancelled candidate partition')
+        policy = pr_partition_policy.load(data['snapshot']['binding']['pr'])
+        if not policy['enabled']:
+            raise ValueError('explicitly enable this PR before resuming partition publication')
+        if any(publication.load(value)['status'] != 'verified' for value in data['operations'].values()):
+            raise ValueError('reconcile all recorded remote operations before resuming')
+        verify(path, refresh_policy=True)
+        if candidate_hash != data['candidate_hash']:
+            raise ValueError('resume must bind the exact verified candidate_hash')
+        previous_key = data['snapshot']['key']
+        snap = copy.deepcopy(data['snapshot'])
+        snap['binding']['partition_policy'] = {key: policy[key] for key in ('enabled', 'instructions', 'fingerprint')}
+        snap['key'] = publication.digest(snap['binding'])
+        if snap['key'] == previous_key:
+            raise ValueError('policy is unchanged; continue the existing verified partition instead')
+        if policy['instructions']:
+            validate_policy_assessment(snap, assessment, decision='partition')
+        elif assessment is not None:
+            validate_policy_assessment(snap, assessment, decision='partition')
+        action_ids = {key: publication.digest({'snapshot': snap['key'], 'plan': data['plan_id'], 'action': key})
+                      for key in data['action_ids']}
+        by_unit = {unit['id']: unit for unit in data['plan']['units']}
+        actual = {('evacuate_unrelated' if by_unit[piece['units'][0]]['scope'] == 'unrelated' else 'split_related')
+                  for piece in data['pieces'] if piece['id'] != 'original'}
+        manual = {key for key in actual if snap['binding']['settings']['pr_size'][key] == 'manual'}
+        supplied = decisions or {}
+        if set(supplied) - manual:
+            raise ValueError('resume decisions must name current manual publication actions')
+        for key, entry in supplied.items():
+            if (not isinstance(entry, dict) or not {'action_id', 'decision'} <= set(entry)
+                    or set(entry) - {'action_id', 'decision', 'reason', 'source'}
+                    or entry['action_id'] != action_ids[key] or entry['decision'] != 'approved'):
+                raise ValueError('resume requires approval of the current action; cancel if continuation is declined')
+            for field in ('reason', 'source'):
+                if field in entry:
+                    text(entry[field], 'decision ' + field)
+        missing = manual - supplied.keys()
+        if missing:
+            return {'state': str(path), 'outcome': 'awaiting_approval',
+                    'action_ids': {key: action_ids[key] for key in sorted(missing)}}
+        data.setdefault('policy_resumes', []).append({'previous_key': previous_key, 'key': snap['key'],
+            'policy': policy['fingerprint'], 'assessment': assessment, 'decisions': supplied})
+        data.update(snapshot=snap, action_ids=action_ids, status='prepared')
+        for key in manual:
+            data['decisions'][key] = 'approved'
+            data.setdefault('decision_details', {}).pop(key, None)
+            details = {field: supplied[key][field] for field in ('reason', 'source') if field in supplied[key]}
+            if details:
+                data['decision_details'][key] = details
+        data.pop('reviews', None)  # Fresh self-review binds the current instructions and selected candidates.
+        if pr_partition_policy.binding(snap['binding']['pr']) != snap['binding']['partition_policy']:
+            raise ValueError('PR partition decision changed during resume')
+        write(path, data)
+        remember(data['cwd'], snap, path)
+        return {'state': str(path), 'outcome': 'selection_ready', 'candidate_hash': data['candidate_hash'],
+                'next': 'Review the retained candidates and descriptions, then publish using the current policy.'}
+
+
 def decide(path, decisions):
     data = load(path)
     if data['operations']:
         for key, item in (decisions or {}).items():
-            if item != {'action_id': data['action_ids'].get(key), 'decision': data['decisions'].get(key)}:
+            if (not isinstance(item, dict) or set(item) - {'action_id', 'decision', 'reason', 'source'}
+                    or {field: item.get(field) for field in ('action_id', 'decision')} != {
+                        'action_id': data['action_ids'].get(key), 'decision': data['decisions'].get(key)}
+                    or any(item[field] != data.get('decision_details', {}).get(key, {}).get(field)
+                           for field in ('reason', 'source') if field in item)):
                 raise ValueError('publication already started; decisions are frozen')
         return data
     settings = data['snapshot']['binding']['settings']['pr_size']
@@ -573,18 +797,30 @@ def decide(path, decisions):
     for key in actions:
         entry = supplied.get(key)
         if entry:
-            if (not isinstance(entry, dict) or set(entry) != {'action_id', 'decision'}
+            if (not isinstance(entry, dict) or not {'action_id', 'decision'} <= set(entry)
+                    or set(entry) - {'action_id', 'decision', 'reason', 'source'}
                     or entry['action_id'] != data['action_ids'][key]
                     or entry['decision'] not in ('approved', 'declined')):
                 raise ValueError('approval/decline must bind the exact proposed action ID')
+            details = {field: text(entry[field], 'decision ' + field) for field in ('reason', 'source') if field in entry}
             previous = data['decisions'].get(key)
             if previous and previous != entry['decision']:
                 raise ValueError('retained action decision changed; prepare a new reviewed plan')
             data['decisions'][key] = entry['decision']
+            if details:
+                data.setdefault('decision_details', {})[key] = details
         elif settings[key] == 'automatic':
             data['decisions'].setdefault(key, 'approved')
     # Save each decline immediately: retries cannot turn it into another action.
     write(Path(path), data)
+    for key, decision in data['decisions'].items():
+        if decision == 'declined':
+            details = data.get('decision_details', {}).get(key, {})
+            pr_partition_policy.decline(data['snapshot']['binding']['pr'], key, data['action_ids'][key],
+                reason=details.get('reason', 'Declined the proposed ' + key + ' action.'),
+                source=details.get('source', json.dumps({'action_id': data['action_ids'][key], 'decision': decision}, sort_keys=True)),
+                context={'state': str(Path(path).resolve()), 'snapshot_key': data['snapshot']['key'],
+                         'head': data['snapshot']['head'], 'tree': data['snapshot']['binding']['tree']})
     if any(key not in data['decisions'] for key in actions):
         return {**data, 'awaiting_approval': [key for key in actions if key not in data['decisions']]}
     pieces = selected_pieces(data)

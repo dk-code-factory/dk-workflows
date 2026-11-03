@@ -555,3 +555,18 @@ removing source work. Interrupted writes reconcile through live reads without
 duplicate pushes or PRs. After partitioning, iteration refreshes original scope,
 Decisions, feedback and preparation, preserving review budgets and requiring
 current-head review and CI. New drafts receive local tests only.
+
+For a human decision to keep one PR together, use `dk.py --pr PR_URL config
+pr-partition disable --reason "Keep this PR as one deliverable"`. The recorded
+choice survives new commits and resumed runs. `enable --reason TEXT` restores
+partitioning under the configured modes; `show` displays the preference, exact
+human source and decision history. A declined individual proposal is audited
+without implicitly disabling the PR.
+
+Use `config pr-partition instructions --text "Partition only when each part has
+an independent integration test"` with PR context to record conditional guidance.
+The agent receives the exact text/source, assesses current evidence regardless of
+line count, and records a reasoned partition/retain decision. Manual approval and
+disabled behavior modes still apply. `clear-instructions --reason TEXT` restores
+the numeric trigger; `reset --reason TEXT` restores the default preference while
+preserving history. `--source-file FILE` can retain exact conversation evidence.

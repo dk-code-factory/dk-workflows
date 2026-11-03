@@ -8,6 +8,32 @@ rename detection. Tests, docs, generated text and copied prerequisites count;
 deletions never offset additions and binaries add no textual lines. Never sum
 commit churn or use GitHub's potentially stale addition count as the gate.
 
+Before applying the threshold, inspect `config pr-partition show` with PR context.
+A recorded whole-PR disable persists across new commits and resumed runs until
+explicitly enabled. It skips assessment and unpublished local candidates. Dispatched
+or uncertain writes still require reconciliation; a new preference cannot erase
+receipts or authorize completing a stale publication. After reconciliation, use
+`partition-prs cancel` only while the full original head is intact; it retains all
+drafts and branches. Explicit re-enablement uses guarded `partition-prs resume`,
+with current conditional assessment, new manual action approvals and fresh self-review.
+See the worker's partial-publication recovery contract.
+
+Record a human's whole-PR opt-out with `disable --reason TEXT --source-file FILE`;
+record conditional requests with `instructions --text TEXT --source-file FILE`.
+Keep exact wording and source. A decline of only the current proposal is audited
+separately and does not disable future partitioning. Never infer a permanent opt-out
+from ambiguous feedback. Include the effective preference, source and fingerprint
+from `partition-prs check`/`run-state work-gate` in every partition handoff.
+
+If instructions exist, pass them unchanged to the worker and let it decide against
+current scope/Decisions/diff. They replace the numeric trigger for enabled behaviors,
+including below threshold. The worker records its rationale and cited evidence as
+`partition` in the plan or `retain` with `partition-prs assess`. A retain assessment
+requires no candidate construction and satisfies the current size gate once
+registered. Changed instructions, scope, rules or dependency inputs invalidate its
+cache; equivalent history rewrites reuse it. Other engineering constraints still
+enter normal preparation. Configured disabled behaviors and manual approvals remain.
+
 The deterministic default threshold is **1,000 added lines, inclusive**. Read the
 effective private `pr_size` settings through `config pr-size list`; each key
 resolves fork → upstream → user → default. Both behaviors default to automatic.

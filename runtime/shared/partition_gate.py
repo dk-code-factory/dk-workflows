@@ -1,9 +1,8 @@
 """Keep partition work ahead of review allocation and iteration completion."""
-import json
 from pathlib import Path
 from urllib.parse import urlparse
 
-from shared import pr_partition, pr_size, publication
+from shared import pr_partition, pr_size, publication, pr_partition_policy
 from shared.engineering_identity import engineering_id
 
 
@@ -31,21 +30,21 @@ def attach(record, prepared, context, path):
 
 
 def require(record, prepared, context):
-    # Partial publication must remain visible after source removal shrinks the
-    # diff, even if interruption preceded run-record registration.
-    cache = pr_partition.cache_path(context.get('repository', context['checkout']), prepared['identity']['pr_url'])
-    if cache.exists():
-        for retained in set(json.loads(cache.read_text()).values()):
-            prior = pr_partition.load(retained)
-            if prior['operations'] and prior['status'] != 'published':
-                raise ValueError('PR partition publication is pending; reconcile and finish it before CI or review')
+    # A new preference cannot erase dispatched writes or uncertain receipts.
+    pr = prepared['identity']['pr_url']
+    if pr_partition.pending_states(context.get('repository', context['checkout']), pr):
+        raise ValueError('PR partition publication is pending; reconcile and finish it before CI or review')
     item = record.get('partition_assessment')
-    if item:
-        data = pr_partition.load(item['path'])
-        if data['status'] not in ('no_op', 'declined', 'published'):
-            raise ValueError('PR partition is pending; finish or reconcile it before CI or review')
-        if any(publication.load(path)['status'] == 'pending' for path in data['operations'].values()):
-            raise ValueError('PR partition publication is uncertain; reconcile it before continuing')
+    data = pr_partition.load(item['path']) if item else None
+    if data and any(publication.load(path)['status'] == 'pending' for path in data['operations'].values()):
+        raise ValueError('PR partition publication is uncertain; reconcile it before continuing')
+    policy = pr_partition_policy.load(pr)
+    if not policy['enabled']:
+        return {'outcome': 'pr_disabled', 'partition_policy': policy}
+    if data and data['snapshot']['binding'].get('partition_policy') != pr_partition_policy.binding(pr):
+        item = data = None  # Reassess new human instructions; never reuse an old interpretation.
+    if data and data['status'] not in ('no_op', 'declined', 'published'):
+        raise ValueError('PR partition is pending; finish or reconcile it before CI or review')
     config = settings(prepared, context)
     values = config['pr_size']
     if all(values[key] == 'disabled' for key in pr_partition.BEHAVIORS):
@@ -53,7 +52,7 @@ def require(record, prepared, context):
     cwd = context['checkout']
     base = pr_partition.git(cwd, 'merge-base', prepared['identity']['base_sha'], prepared['identity']['head_sha'])
     added = pr_size.additions(cwd, base, prepared['identity']['head_sha'])
-    if added < values['added_lines_threshold']:
+    if not policy['instructions'] and added < values['added_lines_threshold']:
         return {'outcome': 'below_threshold', 'added_lines': added}
     if not item or item['engineering_id'] != engineering_id(prepared):
         raise ValueError('PR size assessment required for current scope before review or completion')
@@ -62,4 +61,4 @@ def require(record, prepared, context):
     if data['status'] == 'published':
         raise ValueError('partition changed scope; refresh preparation and reassess the retained PR')
     pr_partition.verify(item['path'])
-    return {'outcome': data['status'], 'added_lines': added, 'state': item['path']}
+    return {'outcome': data['status'], 'added_lines': added, 'state': item['path'], 'partition_policy': policy}

@@ -5,7 +5,8 @@ regrouping. One split worker owns the assessment, semantic unit commits, local
 candidates, verification, descriptions and publication through reconciliation.
 The coordinator supplies the exact PR URL, checkout, pinned head/tree and merge
 base, default-branch tip, issue/description, verified Decisions, complete feedback,
-private rules, dependency evidence, active run and preparation (both IDs),
+private rules, dependency evidence, recorded per-PR preference/instructions/source
+and fingerprint, active run and preparation (both IDs),
 architecture packet, retained runtime/lifecycle and waiting policy. Preserve other
 workers' edits. Use isolated worktrees; never reset the caller's worktree.
 
@@ -16,10 +17,19 @@ Use `dk.py --invocation INVOCATION --cwd REPO --pr PR_URL partition-prs check
 `rules` and `dependencies` to absolute files. Include the issue, PR description,
 settled Decisions and engineering boundaries, all applicable guidance and private
 rules, and pinned prerequisite inputs. Keep source evidence complete and current.
-The helper requires fetched objects; fetch the PR target, default branch and
+An explicitly disabled PR can use `check` without an evidence file. Otherwise,
+the helper requires fetched objects; fetch the PR target, default branch and
 pinned dependency heads before checking. A missing object blocks the check.
 
-At `added_lines >= added_lines_threshold`, assess enabled behaviors in order:
+Honor a recorded whole-PR disable. When human conditions exist, interpret their
+exact text against the current scope, Decisions and diff, regardless of line count.
+Do not replace semantic conditions with invented keyword/threshold rules. Record
+why the conditions permit partitioning or require retention. `check` returns the
+unchanged instructions, human source and current fingerprint in `partition_policy`;
+the same preference is available through the config CLI. This judgment does not
+authorize disabled behaviors or bypass manual approval.
+
+With no per-PR conditions, at `added_lines >= added_lines_threshold`, assess enabled behaviors in order:
 
 1. Compare every final-diff change to the issue, description and settled Decisions.
    Evacuate unrelated work first. Do not broaden the description to make it fit.
@@ -36,6 +46,23 @@ requires a human decision before publication. Do not invent a classification.
 Disabled behaviors receive no assessment or action. Unrelated work retained by a
 disabled or declined evacuation cannot be moved by related splitting, including
 as a copied prerequisite.
+
+For a conditional `retain` decision, save this assessment outside the repository:
+
+```json
+{"decision": "retain", "policy_fingerprint": "FROM_CHECK",
+ "reason": "The adapters still depend on the unstable schema, so the human condition is unmet.",
+ "evidence": ["partition_policy", "scope", "diff"]}
+```
+
+Run `partition-prs assess --evidence-file EVIDENCE.json --assessment-file FILE
+--preparation-file PREPARATION.json`. Register its returned state with the existing
+iteration assessment command. This caches the exact interpretation and evidence,
+with no local candidate construction or remote action. For conditional partitioning,
+put the same structure in the plan as `policy_assessment` with `decision: "partition"`.
+Both choices require the current policy fingerprint, a nonempty rationale and
+citations to the policy plus current evidence (`scope`, `decisions`, `rules`,
+`dependencies` or `diff`). Changed governing inputs require reassessment.
 
 The private plan uses this shape (IDs and commit SHAs are pinned, not branch names):
 
@@ -131,7 +158,12 @@ behavior to the exact tree/base/scope/rules/settings/dependencies and plan. Supp
 {"evacuate_unrelated": {"action_id": "RETURNED_ACTION_ID", "decision": "approved"}}
 ```
 
-The alternative is `declined`. Retain the decision in the journal and cache. A
+The alternative is `declined`. Optional `reason` and `source` fields retain the
+human's exact rationale/evidence. Every decline is also audited in the persistent
+per-PR preference record, independently of the tree-bound journal/cache. A proposal
+decline never silently becomes a whole-PR opt-out; an explicit never-partition
+request is recorded through `config pr-partition disable`, and conditional requests
+through `instructions`. Record that choice before continuing dependent work. A
 missing answer never grants approval. Declining keeps affected units in original;
 the helper rebuilds and verifies the selected candidates. If another action would
 move/copy declined units, stop and revise the concrete plan with the human. A changed selection returns `selection_ready` and its new `candidate_hash`. Review
@@ -174,3 +206,36 @@ Register the current partition assessment using `run-state partition-assessment
 Reassess a retained oversized scope against the refreshed preparation; preserve
 prior explicit declines. Continue iteration and fresh CI/review coverage only on
 the retained original. Drafts receive relevant local tests, no automatic iteration.
+
+## Changing a preference during partial publication
+
+A whole-PR disable stops new publication. Reconcile every uncertain operation first;
+readiness may remain blocked by the new policy even after the receipt is verified.
+If the original still has its exact full source head, `partition-prs cancel --state
+STATE` can stop the partition under that recorded disable. It keeps every published
+draft, branch and recovery ref, reports their links, and records the cancellation.
+It cannot erase an uncertain write or cancel after source work has been removed.
+No draft or branch is deleted or silently closed.
+
+After explicit `config pr-partition enable`, use `partition-prs resume --state STATE
+--candidate-hash HASH` to retain verified candidate branches and drafts. The helper
+rechecks every other governing input and exact source lease. Conditional policies
+also require `--assessment-file FILE` with a current `partition` judgment. Changed
+policy fingerprints produce new action IDs; manual actions require fresh approvals
+through `--decisions-file FILE`. Missing approvals return `awaiting_approval`.
+Declining continuation leaves the state unchanged; disable/cancel when source is
+still whole, or request a recovery decision if removal already occurred.
+
+A successful resume returns `selection_ready`. Review the exact retained candidates
+and descriptions again, then publish with both completed self-review tokens and
+the returned candidate hash. Verified remote operations are observed and reused;
+creation and pushes are not blindly repeated. Attach the returned assessment to
+the active run without resetting review or CI budgets. A changed default tip,
+source head, scope, rules or dependency evidence still blocks continuation.
+
+A cancelled partition can instead receive a current conditional `retain` assessment.
+If new instructions require genuinely different boundaries, prepare a new plan,
+retaining the cancelled state and its draft links as provenance. New candidates use
+fresh branch names bound to their assessment; report the retained old drafts rather
+than silently closing or repurposing them. For unchanged boundaries, `check` returns
+`resume_required` so the worker resumes existing verified artifacts.

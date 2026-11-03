@@ -15,16 +15,22 @@ def main():
     parser.add_argument('--cwd', default='.')
     parser.add_argument('--pr')
     sub = parser.add_subparsers(dest='command', required=True)
-    for name in ('check', 'prepare', 'verify', 'publish', 'reconcile'):
+    for name in ('check', 'assess', 'prepare', 'verify', 'publish', 'reconcile', 'cancel', 'resume'):
         command = sub.add_parser(name)
-        if name in ('check', 'prepare'):
-            command.add_argument('--evidence-file', required=True, type=Path)
+        if name in ('check', 'assess', 'prepare'):
+            command.add_argument('--evidence-file', required=name != 'check', type=Path)
             command.add_argument('--preparation-file', type=Path)
+        if name == 'assess':
+            command.add_argument('--assessment-file', required=True, type=Path)
         if name == 'prepare':
             command.add_argument('--plan-file', required=True, type=Path)
             command.add_argument('--remote', required=True)
-        if name in ('verify', 'publish', 'reconcile'):
+        if name in ('verify', 'publish', 'reconcile', 'cancel', 'resume'):
             command.add_argument('--state', required=True, type=Path)
+        if name == 'resume':
+            command.add_argument('--candidate-hash', required=True)
+            command.add_argument('--assessment-file', type=Path)
+            command.add_argument('--decisions-file', type=Path)
         if name == 'reconcile':
             command.add_argument('--operation', type=Path, help='Exact journal operation from the recovery action')
         if name == 'publish':
@@ -36,13 +42,18 @@ def main():
     cwd = Path(args.cwd).resolve()
     def read(path):
         return json.loads(path.read_text())
-    if args.command in ('check', 'prepare'):
+    if args.command in ('check', 'assess', 'prepare'):
         if not args.pr:
-            raise ValueError('check and prepare require a full PR URL')
-        evidence = read(args.evidence_file)
-        result = (pr_partition.check(cwd, args.pr, evidence, preparation_file=args.preparation_file) if args.command == 'check' else
-                  pr_partition.prepare(cwd, args.pr, evidence, read(args.plan_file), args.remote,
-                      preparation_file=args.preparation_file))
+            raise ValueError('check, assess and prepare require a full PR URL')
+        evidence = read(args.evidence_file) if args.evidence_file else None
+        if args.command == 'check':
+            result = pr_partition.check(cwd, args.pr, evidence, preparation_file=args.preparation_file)
+        elif args.command == 'assess':
+            result = pr_partition.assess_policy(cwd, args.pr, evidence, read(args.assessment_file),
+                                                preparation_file=args.preparation_file)
+        else:
+            result = pr_partition.prepare(cwd, args.pr, evidence, read(args.plan_file), args.remote,
+                                          preparation_file=args.preparation_file)
     else:
         data = pr_partition.load(args.state)
         if args.pr and args.pr != data['snapshot']['binding']['pr']:
@@ -54,6 +65,12 @@ def main():
         if args.command == 'verify':
             pr_partition.verify(args.state)
             result = {'state': str(args.state), 'outcome': 'verified'}
+        elif args.command == 'cancel':
+            result = pr_partition.cancel_policy(args.state)
+        elif args.command == 'resume':
+            result = pr_partition.resume_policy(args.state, candidate_hash=args.candidate_hash,
+                assessment=read(args.assessment_file) if args.assessment_file else None,
+                decisions=read(args.decisions_file) if args.decisions_file else None)
         else:
             result = pr_partition.publish(args.state,
                 decisions=read(args.decisions_file) if getattr(args, 'decisions_file', None) else None,
