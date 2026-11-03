@@ -6,11 +6,22 @@ from pathlib import Path
 import subprocess
 import sys
 from unittest.mock import Mock
+from contextlib import contextmanager
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'runtime'))
 from shared import architecture, invocations, runtime_bundles
+
+
+@contextmanager
+def parent_lifecycle(root, host):
+    updater = runtime_bundles.updater()
+    parent = updater.lifecycle(root, host, 'entry')
+    try:
+        yield parent
+    finally:
+        updater.lifecycle(root, host, 'complete', token=parent['token'])
 
 
 @pytest.fixture
@@ -67,40 +78,63 @@ def test_owned_role_pins_caller_and_manages_real_lifecycle(owned_role, monkeypat
     (registry / 'plugins').mkdir(parents=True)
     (registry / 'plugins/installed_plugins.json').write_text(json.dumps({'plugins': {
         'dk-workflows@new': [{'installPath': str(replacement), 'version': '99.0.0'}]}}))
-    parent = runtime_bundles.updater().lifecycle(root, host, 'entry')
-    monkeypatch.setenv('DK_UPDATE_PARENT', parent['token'])
-    calls = []
+    with parent_lifecycle(root, host) as parent:
+        monkeypatch.setenv('DK_UPDATE_PARENT', parent['token'])
+        calls = []
+        def provider(argv, **kwargs):
+            env, prompt = kwargs['env'], kwargs['input']
+            receipt = invocations.load(env['DK_MANAGED_INVOCATION'])
+            assert receipt['runtime_root'] == str(root) and receipt['skill'] == role and receipt['managed']
+            lifecycle = json.loads(env['DK_UPDATE_MANAGED_RECEIPT'])
+            assert lifecycle['identity']['version'] != '99.0.0'
+            assert lifecycle['identity']['version'] == json.loads((root / '.codex-plugin/plugin.json').read_text())['version']
+            assert lifecycle['token'] == receipt['token'] == env['DK_UPDATE_PARENT']
+            assert state()['invocations'][receipt['token']]['parent'] == parent['token']
+            assert not state()['invocations'][receipt['token']]['complete']
+            assert 'DK_ANALYSIS_HOST' not in env
+            assert json.loads(env['DK_BINDING_STACK']) == ['dk-workflows:' + role]
+            assert f'procedure at {root}/runtime/{role}/evaluator.md' in prompt
+            assert 'SKILL.md' not in prompt and 'executor owns lifecycle entry and completion' in prompt
+            assert architecture.load(json.loads(env['DK_ARCHITECTURE_PACKET']))['agent'] == role
+            if host == 'codex':
+                assert argv[argv.index('--sandbox') + 1] == 'read-only'
+                Path(argv[argv.index('-o') + 1]).write_text('{"accepted":true}')
+            else:
+                assert argv[argv.index('--permission-mode') + 1] == 'plan'
+                assert argv[argv.index('--plugin-dir') + 1] == str(root)
+            calls.append(receipt)
+            return subprocess.CompletedProcess(argv, 0,
+                json.dumps({'subtype': 'success', 'result': '{"accepted":true}'}), '')
+        monkeypatch.setattr(module, 'run_provider', provider)
+        assert module.execute_architecture_role('Evaluate evidence.', repository, role=role,
+                                               architecture_packet=packet(role)) == '{"accepted":true}'
+        assert len(calls) == 1 and state()['invocations'][calls[0]['token']]['complete']
+        assert not state()['invocations'][parent['token']]['complete']
+        assert invocations.end(calls[0]['invocation'])['status'] == 'executor_managed'
+    assert state()['invocations'][parent['token']]['complete']
+
+
+@pytest.mark.parametrize('failure', ['provider', 'assertion'])
+def test_manually_owned_parent_finalizes_when_child_or_test_fails(owned_role, monkeypatch, failure):
+    module, root, repository, packet, state = owned_role
+    monkeypatch.setenv('DK_HOST', 'codex')
+    role = 'dk-architecture-review'
     def provider(argv, **kwargs):
-        env, prompt = kwargs['env'], kwargs['input']
-        receipt = invocations.load(env['DK_MANAGED_INVOCATION'])
-        assert receipt['runtime_root'] == str(root) and receipt['skill'] == role and receipt['managed']
-        lifecycle = json.loads(env['DK_UPDATE_MANAGED_RECEIPT'])
-        assert lifecycle['identity']['version'] != '99.0.0'
-        assert lifecycle['identity']['version'] == json.loads((root / '.codex-plugin/plugin.json').read_text())['version']
-        assert lifecycle['token'] == receipt['token'] == env['DK_UPDATE_PARENT']
-        assert state()['invocations'][receipt['token']]['parent'] == parent['token']
-        assert not state()['invocations'][receipt['token']]['complete']
-        assert 'DK_ANALYSIS_HOST' not in env
-        assert json.loads(env['DK_BINDING_STACK']) == ['dk-workflows:' + role]
-        assert f'procedure at {root}/runtime/{role}/evaluator.md' in prompt
-        assert 'SKILL.md' not in prompt and 'executor owns lifecycle entry and completion' in prompt
-        assert architecture.load(json.loads(env['DK_ARCHITECTURE_PACKET']))['agent'] == role
-        if host == 'codex':
-            assert argv[argv.index('--sandbox') + 1] == 'read-only'
-            Path(argv[argv.index('-o') + 1]).write_text('{"accepted":true}')
-        else:
-            assert argv[argv.index('--permission-mode') + 1] == 'plan'
-            assert argv[argv.index('--plugin-dir') + 1] == str(root)
-        calls.append(receipt)
-        return subprocess.CompletedProcess(argv, 0,
-            json.dumps({'subtype': 'success', 'result': '{"accepted":true}'}), '')
+        if failure == 'provider':
+            raise RuntimeError('synthetic provider failure')
+        Path(argv[argv.index('-o') + 1]).write_text('{"accepted":true}')
+        return subprocess.CompletedProcess(argv, 0, '', '')
     monkeypatch.setattr(module, 'run_provider', provider)
-    assert module.execute_architecture_role('Evaluate evidence.', repository, role=role,
-                                           architecture_packet=packet(role)) == '{"accepted":true}'
-    assert len(calls) == 1 and state()['invocations'][calls[0]['token']]['complete']
-    assert not state()['invocations'][parent['token']]['complete']
-    assert invocations.end(calls[0]['invocation'])['status'] == 'executor_managed'
-    runtime_bundles.updater().lifecycle(root, host, 'complete', token=parent['token'])
+    with pytest.raises((AssertionError, RuntimeError), match='synthetic'):
+        with parent_lifecycle(root, 'codex') as parent:
+            monkeypatch.setenv('DK_UPDATE_PARENT', parent['token'])
+            module.execute_architecture_role('Evaluate.', repository, role=role, architecture_packet=packet(role))
+            raise AssertionError('synthetic assertion after child completion')
+    records = state()['invocations']
+    assert len(records) == 2 and all(value['complete'] for value in records.values())
+    child, = [value for token, value in records.items() if token != parent['token']]
+    assert child['parent'] == parent['token']
+    assert all(not session['active'] for session in state()['sessions'].values())
 
 
 @pytest.mark.parametrize('failure', ['provider', 'cancel', 'setup'])

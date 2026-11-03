@@ -15,6 +15,7 @@ sys.path.insert(0,str(ROOT/'dk-pr-decisions/tests'))
 from preparation_fixtures import Package,analysis,prep,bind_agreements
 from shared import review_coverage
 from shared import architecture
+from shared import executors
 from shared.executors import ProviderExhausted, ProviderCancelled
 from shared.review_sessions import result_artifact, Session
 spec=importlib.util.spec_from_file_location('prepared_runner',ROOT/'dk-pr-review/scripts/run_reviewers.py')
@@ -209,37 +210,82 @@ class PreparedDeliveryTests(unittest.TestCase):
         self.assert_nested_delivery(['Standards','Spec'])
 
     def assert_nested_delivery(self, roles):
-        # Real Git/preparation and command transport; semantic providers remain mocked.
-        self.provider['nested_review_roles']=roles
-        self.name=runner.bindings.key(self.provider)
+        # Real Git/preparation and native proof; the provider transport is controlled.
         p=self.package
+        plugin=p.root/'plugin'
+        manifest=plugin/'.codex-plugin/plugin.json'
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(json.dumps({'name':'fixture','version':'1.0.0'}))
+        procedure=plugin/'skills/review/SKILL.md'
+        procedure.parent.mkdir(parents=True)
+        procedure.write_text('Review source read-only using independent declared passes.\n')
+        self.provider={'skill':'fixture:review','host':'codex','nested_review_roles':roles}
+        self.name=runner.bindings.key(self.provider)
+        resolved={'binding':self.provider,'identity':self.name,'executor':'codex','version':'1.0.0',
+                  'root':str(plugin),'procedure':str(procedure)}
         for suffix,agents in [('parent',[self.name]),('spec',['Spec'])]:
             rule={'id':'arch-'+suffix,'revision':1,'text':'Inspect transform boundaries.',
                   'origin':'user-created','sources':[],'agents':agents,'patterns':[]}
             architecture.edit(p.repo,rule,user={'actor':'user','instruction':'Fixture rule',
                 'source':'fixture'},expected=architecture.current(p.repo,baseline=p.context['base_sha'])['fingerprint'])
-        artifact=self.prepare()
+        with patch.dict(os.environ,{'DK_HOST':'codex'}),patch.object(runner.bindings,'resolve',return_value=resolved):
+            artifact=self.prepare()
         seen=[]
+        delivered=[]
+        launches=[]
         original=runner.invoke
         def invoke(binding,handoff_path,checkout,*args,**kwargs):
             handoff=json.loads(Path(handoff_path).read_text())
             parent=handoff['architecture_packet']
             self.assertEqual(set(handoff['nested_architecture_packets']),set(self.provider['nested_review_roles']))
+            delivered.append((Path(handoff_path),Path(handoff_path).read_bytes(),
+                              {ref['path']:Path(ref['path']).read_bytes()
+                               for ref in handoff['nested_architecture_packets'].values()}))
             for role,reference in handoff['nested_architecture_packets'].items():
                 packet=architecture.provider_packet(reference,checkout,role,parent=parent)
                 child=architecture.load(packet)
+                self.assertEqual(child['agent'],role)
                 self.assertEqual(child['parent'],parent)
                 self.assertEqual([r['id'] for r in child['rules']],
                     ['arch-parent','arch-spec'] if role=='Spec' else ['arch-parent'])
                 seen.append(role)
             return original(binding,handoff_path,checkout,*args,**kwargs)
+        def transport(argv,input,**kwargs):
+            self.assertIn('--json',argv);self.assertIn('--ephemeral',argv);self.assertIn('read-only',argv)
+            self.assertIn('DK_REVIEW_PASS=<role>',input)
+            launches.append(argv)
+            rows=[{'type':'thread.started','thread_id':'root'},{'type':'turn.started'}]
+            for role in roles:
+                child='child-'+role
+                rows.extend([
+                    {'type':'item.completed','item':{'type':'collab_tool_call','tool':'spawn_agent',
+                     'sender_thread_id':'root','receiver_thread_ids':[child],'status':'completed',
+                     'prompt':'DK_REVIEW_PASS='+role+'\nRead the pinned handoff.','agents_states':{}}},
+                    {'type':'item.completed','item':{'type':'collab_tool_call','tool':'wait',
+                     'sender_thread_id':'root','receiver_thread_ids':[child],'status':'completed',
+                     'prompt':None,'agents_states':{child:{'status':'completed','message':'No findings.'}}}}])
+            rows.append({'type':'turn.completed','usage':{}})
+            Path(argv[argv.index('-o')+1]).write_text('{"findings":[]}')
+            return subprocess.CompletedProcess(argv,0,'\n'.join(json.dumps(row) for row in rows),'')
         verdict={'complete':True,'reason':'','coverage':[{'rule_id':'arch-'+suffix,'revision':1,
             'status':'compliant','rationale':'Inspected transform.',
             'evidence':[{'path':'transform.py','start':1,'end':2}]} for suffix in ('parent','spec')]}
-        with patch.object(runner,'invoke',side_effect=invoke),patch.object(architecture,'analyze',return_value=verdict):
+        descriptor=artifact['reviewers'][self.name]
+        with patch.dict(os.environ,{'DK_HOST':'codex'}), \
+                patch.object(runner,'skill_path',return_value=Path(descriptor['execution']['procedure'])), \
+                patch.object(runner,'invoke',side_effect=invoke), \
+                patch.object(executors,'run_provider',side_effect=transport), \
+                patch.object(architecture,'analyze',return_value=verdict):
             result=runner.review(p.context,[self.provider],'',p.decisions,'',artifact)
         self.assertTrue(result['complete'],result)
         self.assertEqual(set(seen),set(self.provider['nested_review_roles']))
+        self.assertEqual(len(seen),len(roles))
+        self.assertEqual(len(launches),1)
+        self.assertEqual(len(delivered),1)
+        for path,content,packets in delivered:
+            self.assertEqual(path.read_bytes(),content)
+            for packet,content in packets.items():
+                self.assertEqual(Path(packet).read_bytes(),content)
         self.assertEqual(prep.git(p.repo,'status','--porcelain=v1'),'')
 
     def test_resumed_delivery_rejects_nested_packet_without_original_parent_before_launch(self):
@@ -258,7 +304,8 @@ class PreparedDeliveryTests(unittest.TestCase):
                 handoff['nested_architecture_packets']['Spec']=reference
             Path(path).write_text(json.dumps(handoff))
             return path
-        session=SimpleNamespace(id='fixture-resume',cached=lambda _:None,delivery=delivery)
+        session=SimpleNamespace(id='fixture-resume',invocation=2,cached=lambda _:None,delivery=delivery,
+                                update=lambda action:action({}))
         with patch.object(runner,'invoke') as launch,patch.object(architecture,'analyze') as semantic:
             result=runner.review(self.package.context,[self.provider],'',self.package.decisions,'',artifact,session=session)
         self.assertFalse(result['complete'],result)
