@@ -481,6 +481,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pr", help="GitHub pull-request URL or number; default: current branch PR")
     parser.add_argument("--cwd", default=".", help="Repository working directory")
+    parser.add_argument("--artifact", action="store_true", help="Store full snapshot privately; print a compact receipt")
     return parser.parse_args()
 
 
@@ -489,7 +490,10 @@ def main() -> int:
     cwd = Path(args.cwd).resolve()
     try:
         output = fetch_stable_snapshot(args.pr, cwd)
-    except (FetchError, OSError) as error:
+        if args.artifact:
+            from pr_evidence import write_artifact
+            output = write_artifact(output, "threads", cwd)
+    except (FetchError, OSError, ValueError, KeyError, TypeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     json.dump(output, sys.stdout, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
