@@ -94,10 +94,11 @@ refresh before scoped delivery. Analysis must re-establish those obligations;
 proposals alone never become delivered rules. Unrelated edits and deletions preserve
 that refresh requirement. Explicit resolution remains authoritative.
 Explicit rules supersede historical held proposals of the same ID. Ordinary
-proposal data that does not validate as a rule is not a held obligation. When
-legacy history contains several semantic alternatives for one ID, re-establish
-every alternative using the stable IDs supplied in the analysis prompt. Additional
-alternatives retain their original identity in `legacy_id`; this migration never
+proposal data that does not validate as a rule, or has `user-created` origin,
+is not a retained analysis obligation. When legacy history contains several
+semantic alternatives for one ID, re-establish every alternative using the stable
+IDs supplied in the analysis prompt. Additional alternatives retain their original
+identity in `legacy_id`; this migration never
 selects or discards an alternative. Their pending conflict still gates delivery.
 Unknown task paths require declaring the intended paths and creating a new packet.
 Unknown conflict impact requires inspecting the cited conflict and refreshing its

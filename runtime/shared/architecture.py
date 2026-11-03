@@ -338,6 +338,8 @@ def legacy_held(catalog):
             item = rule(proposal.get('rule'))
         except ValueError:
             continue
+        if item['origin'] == 'user-created':
+            continue
         item.pop('legacy_id', None)
         if item['id'] in chosen:
             continue

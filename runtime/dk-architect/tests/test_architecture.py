@@ -657,6 +657,41 @@ def test_legacy_migration_distinguishes_nonrule_proposals_from_held_rules(repo, 
                    'fingerprint': legacy['fingerprint']}) == legacy
 
 
+@pytest.mark.parametrize('held', [False, True])
+def test_legacy_user_created_proposal_does_not_require_analysis_adoption(repo, held):
+    result = model_result(rules=[obligation()] if held else [])
+    proposal = {'reason': 'Conflicting obligations require user resolution',
+                'rule': obligation('proposed', origin='user-created', sources=[])}
+    conflict = {'text': 'Legacy choice remains pending', 'sources': ['old.py'],
+                'patterns': ['legacy/**']}
+    result['proposals'] = [proposal]
+    result['conflicts'] = [conflict]
+    legacy = deepcopy(a.ensure(repo, analyzer=lambda *_: result))
+    legacy.pop('conditional_rules')
+    legacy = a.publish(a.folder(repo)[0], legacy)
+    if held:
+        with pytest.raises(ValueError, match='evidence-backed architecture refresh'):
+            a.packet(repo, 'worker', ['src/core.py'], baseline='HEAD', task='Repair core')
+        with pytest.raises(ValueError, match='re-establish each retained obligation'):
+            a.ensure(repo, force=True, analyzer=lambda *_: model_result())
+    else:
+        delivered = a.validate_packet(a.packet(repo, 'worker', ['src/core.py'],
+                                              baseline='HEAD', task='Repair core'), repo)
+        assert not delivered['rules']
+    refreshed = a.ensure(repo, force=True,
+                         analyzer=lambda *_: model_result(rules=[obligation()] if held else []))
+    delivered = a.validate_packet(a.packet(repo, 'worker', ['src/core.py'],
+                                          baseline='HEAD', task='Repair core'), repo)
+    assert [item['id'] for item in delivered['rules']] == (['arch-core'] if held else [])
+    assert refreshed['conflicts'] == [conflict] and proposal in refreshed['proposals']
+    assert a.load({'path': str(a.folder(repo)[0] / 'catalogs' / (legacy['fingerprint'] + '.json')),
+                   'fingerprint': legacy['fingerprint']}) == legacy
+    with pytest.raises(ValueError, match='explicit user resolution'):
+        a.packet(repo, 'worker', ['legacy/store.py'], baseline='HEAD', task='Repair legacy')
+    with pytest.raises(ValueError, match='create user rules'):
+        a.validate_analysis(model_result(rules=[proposal['rule']]), repo, refreshed['baseline'])
+
+
 @pytest.mark.parametrize('origin', ['documented', 'user-created'])
 def test_legacy_held_rule_edit_supersedes_historical_alternatives(repo, origin):
     result = model_result(rules=[obligation()])
