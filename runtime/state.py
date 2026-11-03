@@ -105,7 +105,7 @@ def _git_context(source):
     try:
         directory = checkout/'.git'
         if directory.is_file():
-            value = directory.read_text().strip()
+            value = os.fsdecode(directory.read_bytes().rstrip(b'\r\n'))
             if not value.startswith('gitdir: '):
                 return None
             directory = (checkout/value[8:]).resolve()
@@ -113,7 +113,7 @@ def _git_context(source):
             return None
         common = directory
         if (directory/'commondir').is_file():
-            common = (directory/(directory/'commondir').read_text().strip()).resolve()
+            common = (directory/os.fsdecode((directory/'commondir').read_bytes().rstrip(b'\r\n'))).resolve()
         for path in (common/'refs/replace', common/'info/grafts', common/'shallow'):
             if path.exists() and (not path.is_dir() or any(path.iterdir())):
                 return None

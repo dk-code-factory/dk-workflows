@@ -619,6 +619,48 @@ def test_status_falls_back_for_indirect_git_inputs(case, tmp_path, kind):
         assert expected[0] != before
 
 
+@pytest.mark.parametrize('metadata', ['gitfile', 'commondir'])
+def test_status_preserves_whitespace_in_git_metadata_paths(case, tmp_path, monkeypatch, metadata):
+    a, store = case
+    checkout = Path(a['git']['checkout'])
+    linked = tmp_path/'linked'
+    git(checkout, 'worktree', 'add', '-q', '--detach', str(linked), a['git']['head'])
+    gitfile = linked/'.git'
+    directory = Path(os.fsdecode(gitfile.read_bytes()).removeprefix('gitdir: ').rstrip('\r\n'))
+    if metadata == 'commondir':
+        common = tmp_path/'common '
+        shutil.copytree(checkout/'.git', common)
+        (directory/'commondir').write_bytes(os.fsencode(common)+b'\n')
+    else:
+        moved = tmp_path/'admin '
+        directory.rename(moved)
+        (moved/'commondir').write_bytes(os.fsencode(checkout/'.git')+b'\n')
+        gitfile.write_bytes(b'gitdir: '+os.fsencode(moved)+b'\n')
+        # A trimmed sibling must not be mistaken for the actual Git directory.
+        (tmp_path/'admin').mkdir()
+    a['git']['checkout'] = str(linked)
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    before = capture(a)
+    done(store, a); done(store, b)
+    expected = []
+    def specs():
+        yield a
+        git(linked, 'config', 'diff.noprefix', 'true')
+        expected.append(capture(b))
+        yield b
+    observed = []
+    original = state.capture
+    def collect(spec, **kwargs):
+        value = original(spec, **kwargs)
+        observed.append(value)
+        return value
+    monkeypatch.setattr(state, 'capture', collect)
+    tasks = store.status(specs())['tasks']
+    assert expected[0]['fingerprint'] != before['fingerprint']
+    assert observed == [before, expected[0]]
+    assert tasks[0]['reusable'] and not tasks[1]['reusable']
+
+
 def test_git_drift_after_status_still_rejects_completion(case):
     spec, store = case
     store.status([spec, deepcopy(spec)])
