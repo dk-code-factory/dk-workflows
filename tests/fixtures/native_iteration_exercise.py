@@ -200,7 +200,8 @@ def operate(root, command, args):
                 'evidence_reads':len(reads)-len(guidance),
                 'evidence_read_bytes':sum(row['output_bytes'] for row in reads if row not in guidance),
                 'output_bytes':sum(row['output_bytes'] for row in trace if row['command'] != 'summarize'),
-                'task_invocations':[row['args'][0] for row in trace if row['command'] == 'invoke'],
+                'task_invocations':[row['args'][0] for row in trace
+                                    if row['command'] == 'invoke' and row.get('ok', True)],
                 'counters':{key:state[key] for key in ('cycles','retries','ci_repairs','ci_reruns')},
                 'pins':json.loads((root/'pins.json').read_text()),
                 'source_sha256':sha((root/'sources.json').read_bytes()),
@@ -220,7 +221,7 @@ def main():
         ok = True
         try:
             result = operate(root, options.command, options.args)
-        except (ValueError, OSError, LookupError, subprocess.CalledProcessError) as error:
+        except (ValueError, OSError, LookupError, RecursionError, subprocess.CalledProcessError) as error:
             ok = False
             result = {'error':type(error).__name__, 'detail':str(error)}
         data = result.encode() if isinstance(result, str) else encoded(result)
