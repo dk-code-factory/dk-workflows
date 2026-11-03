@@ -40,6 +40,10 @@ def reset_time(message, now):
             unit = 'seconds'  # Numeric Retry-After values are seconds.
         if unit not in units:
             return None
+        remainder = message[relative.end():]
+        if re.match(r'\s*(?:(?:,|and|\+)\s*)?(?:\d|and\b|half\b|[½¼¾]|[:/])',
+                    remainder, re.I):
+            return None
         return supported_timestamp(now + float(relative[2]) * units[unit])
     absolute = re.search(r'(\d{4}-\d\d-\d\d[T ]\d\d:\d\d(?::\d\d)?(?:Z|[+-]\d\d:\d\d))', message)
     if absolute:
@@ -68,38 +72,36 @@ def live_evidence(context):
         raise ValueError('quota recovery PR evidence changed; refresh context and preparation within the existing cycle budget')
 
 
-def plan(session, result, *, clock=time.time):
-    """Persist a recovery checkpoint after retaining the original immutable result."""
+def plan(data, result, *, clock=time.time):
+    """Update recovery with the result in the same durable session mutation."""
     now = clock()
     reasons = [{'role': item['reviewer'], 'reason': item['reason']}
                for item in result.get('skipped_reviewers', [])]
     if result.get('architecture_accounting', {}).get('exhausted'):
         reasons.append({'role': 'architecture-review', 'reason': result['reason']})
-    def retain(data):
-        state = data.get('quota_recovery')
-        if result.get('complete'):
-            if state:
-                state['status'] = 'completed'
-            return state
-        if (not reasons or result.get('guard_failure') or result.get('failed_reviewers') or result.get('role_failures')
-                or result.get('outcome') != 'usage_exhausted'):
-            if state:
-                state['status'] = 'blocked'
-            return state
-        deadlines = [reset_time(item['reason'], now) for item in reasons]
-        known_deadline = max([now + BACKOFF_SECONDS, *(value for value in deadlines if value is not None)])
-        deadline = None if any(value is None for value in deadlines) else known_deadline
-        if state and state['restarts'] >= 1:
-            state.update(status='exhausted', reasons=reasons, not_before=deadline,
-                         known_not_before=known_deadline)
-            return state
-        state = {'version': 1, 'status': 'waiting', 'restarts': 0,
-                 'not_before': deadline, 'known_not_before': known_deadline,
-                 'reasons': reasons, 'history': [],
-                 'original_result': data['results'][-1]}
-        data['quota_recovery'] = state
+    state = data.get('quota_recovery')
+    if result.get('complete'):
+        if state:
+            state['status'] = 'completed'
         return state
-    return session.update(retain)
+    if (not reasons or result.get('guard_failure') or result.get('failed_reviewers') or result.get('role_failures')
+            or result.get('outcome') != 'usage_exhausted'):
+        if state:
+            state['status'] = 'blocked'
+        return state
+    deadlines = [reset_time(item['reason'], now) for item in reasons]
+    known_deadline = max([now + BACKOFF_SECONDS, *(value for value in deadlines if value is not None)])
+    deadline = None if any(value is None for value in deadlines) else known_deadline
+    if state and state['restarts'] >= 1:
+        state.update(status='exhausted', reasons=reasons, not_before=deadline,
+                     known_not_before=known_deadline)
+        return state
+    state = {'version': 1, 'status': 'waiting', 'restarts': 0,
+             'not_before': deadline, 'known_not_before': known_deadline,
+             'reasons': reasons, 'history': [],
+             'original_result': data['results'][-1]}
+    data['quota_recovery'] = state
+    return state
 
 
 def pending(session):

@@ -718,7 +718,7 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
                     review_execution.record(host,
                         output_text(getattr(result, 'stdout', None)),
                         output_text(getattr(result, 'stderr', None)),
-                        getattr(result, 'returncode', None), attempt)
+                        getattr(result, 'returncode', None), attempt, response=received)
                     transport(host=host, calling_host=env.get('DK_HOST', host),
                               argv=argv, returncode=getattr(result, 'returncode', None),
                               stdout=output_text(getattr(result, 'stdout', None)),

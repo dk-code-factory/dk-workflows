@@ -992,3 +992,67 @@ def test_matpocock_missing_spec_alone_cannot_imply_permission_to_skip(proof, hos
         ref = execution.finish(collector, {'findings': []})
     with pytest.raises(ValueError, match='execution unavailable:.*conditional applicability'):
         execution.verify(ref, binding, descriptor, path)
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+@pytest.mark.parametrize('failed_slot,repaired_slot', [(0, 0), (0, 1), (1, 0), (1, 1)])
+def test_native_structured_quota_is_replaced_only_by_same_slot_success(
+        proof, monkeypatch, host, failed_slot, repaired_slot):
+    from shared import executors
+    import subprocess
+    repository, path, descriptor = proof
+    binding = {'skill': 'fixture:review', 'host': host, 'nested_review_roles': ['Audit']}
+    descriptor['execution']['executor'] = host
+    handoff = json.loads(path.read_text())
+    handoff['review_execution_invocation'] = 'c' * 32
+    path.write_text(json.dumps(handoff))
+    quota = {'status': 'tokens_exhausted', 'findings': [], 'message': 'usage limit reached'}
+    responses = iter([quota, {'findings': []}])
+    calls = []
+    def provider(argv, **kwargs):
+        response = next(responses)
+        failed = response.get('status') == 'tokens_exhausted'
+        calls.append(argv)
+        if host == 'codex':
+            Path(argv[argv.index('-o') + 1]).write_text(json.dumps(response))
+            rows = codex_rows(['Audit'], state='errored' if failed else 'completed')
+        else:
+            rows = claude_rows(['Audit'], is_error=failed)
+            rows[-1]['result'] = json.dumps(response)
+        return subprocess.CompletedProcess(argv, 0, stream(rows), '')
+    monkeypatch.setattr(executors, 'run_provider', provider)
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        response = executors.execute_process('Review', repository, host, {}, None, failed_slot, 5)
+        assert json.loads(response) == quota
+        before = execution.finish(collector, quota)
+    before_bytes = Path(before['path']).read_bytes()
+    prior = json.loads(before_bytes)
+    raw = json.loads(Path(prior['attempts'][0]['path']).read_text())
+    assert raw['returncode'] == 0 and json.loads(raw['response']) == quota
+    assert prior['assessment']['status'] == 'unavailable'
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        response = executors.execute_process('Review', repository, host, {}, None, repaired_slot, 5)
+        assert json.loads(response) == {'findings': []}
+        after = execution.finish(collector, {'findings': []})
+    assert len(calls) == 2
+    assert Path(before['path']).read_bytes() == before_bytes
+    if failed_slot == repaired_slot:
+        execution.verify(after, binding, descriptor, path)
+    else:
+        with pytest.raises(ValueError, match='execution unavailable:.*provider failure'):
+            execution.verify(after, binding, descriptor, path)
+
+
+def test_malformed_structured_quota_does_not_discard_unfinished_pass(proof):
+    repository, path, descriptor = proof
+    malformed = {'status': 'tokens_exhausted', 'findings': [], 'message': 'usage limit', 'extra': True}
+    with execution.collect(BINDING, descriptor, path, repository) as collector:
+        execution.record('codex', stream(codex_rows([*ROLES, 'Performance'], state='errored')), '', 0, 0,
+                         response=json.dumps(malformed))
+        execution.record('codex', stream(codex_rows([*ROLES, 'Performance'])), '', 0, 0,
+                         response='{"findings":[]}')
+        reference = execution.finish(collector, {'findings': []})
+    with pytest.raises(ValueError, match='execution unavailable:.*Toolkit'):
+        execution.verify(reference, BINDING, descriptor, path)
+    assessment = json.loads(Path(reference['path']).read_text())['assessment']
+    assert set(ROLES).issubset(assessment['missing'])

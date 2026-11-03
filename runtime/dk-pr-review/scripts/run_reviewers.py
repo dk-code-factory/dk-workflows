@@ -945,7 +945,7 @@ def execute_session(session, context, reviewers, scope, decisions, rules, prepar
             result = review(context, reviewers, scope, decisions, rules, preparation,
                             stats=stats, session=session)
             artifact = session.finish(result.copy())
-            recovery = reviewer_recovery.plan(session, result)
+            recovery = reviewer_recovery.pending(session)
         if not recovery or recovery['status'] != 'waiting':
             return result, artifact, recovery
 

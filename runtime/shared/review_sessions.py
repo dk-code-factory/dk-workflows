@@ -567,9 +567,11 @@ class Session:
             coverage.validate_current(self.prepared,
                 check_checkout=not (result.get('guard_failure') and not result['complete']))
         item = coverage.retain(self.path, self.context, self.prepared, result, self.id)
+        from shared import reviewer_recovery
         def save(data):
             data['results'].append(item)
             data['status'] = 'completed' if result['complete'] else 'incomplete'
+            reviewer_recovery.plan(data, result)
         self.update(save)
         return item
 

@@ -147,7 +147,7 @@ def test_reset_parser_and_interruptible_wait_preserve_checkpoint(pinned, monkeyp
     with session.execution(), patch.object(runner, 'run_skill_reviewer', return_value=quota()):
         result = runner.review(context, names, '', decisions, '', prepared, session=session)
         session.finish(result)
-        recovery.plan(session, result, clock=lambda: 100)
+        session.update(lambda data: recovery.plan(data, result, clock=lambda: 100))
     with pytest.raises(KeyboardInterrupt):
         recovery.restart(session, clock=lambda: 99,
                          sleep=lambda delay: (_ for _ in ()).throw(KeyboardInterrupt()))
@@ -289,3 +289,33 @@ def test_interrupted_started_recovery_rechecks_remote_scope_on_resume(main_call,
     with patch.object(runner, 'run_skill_reviewer', return_value={'findings': []}):
         result = main_call('--session-file', path, '--resume')
     assert result['complete'] and result['quota_recovery']['restarts'] == 1
+
+
+@pytest.mark.parametrize('duration', ['1 hour 30 minutes', '1h30m', '1 hour and 30 minutes',
+                                     '1 hour, 30 minutes', '1 hour and a half', '1:30'])
+def test_compound_reset_durations_are_deferred_instead_of_shortened(duration):
+    assert recovery.reset_time('usage limit; try again in ' + duration, 100) is None
+    assert recovery.reset_time('Retry-After: ' + duration, 100) is None
+
+
+def test_interruption_after_result_retention_preserves_quota_checkpoint(main_call, pinned, tmp_path):
+    path = tmp_path / 'quota-result-interruption.json'
+    original_finish = Session.finish
+    def finish_and_interrupt(self, result):
+        original_finish(self, result)
+        raise KeyboardInterrupt()
+    with patch.object(Session, 'finish', finish_and_interrupt), \
+            patch.object(runner, 'run_skill_reviewer', return_value=quota('try again at 2099-01-01T00:00:00Z')):
+        with pytest.raises(KeyboardInterrupt):
+            main_call('--session-file', path)
+    saved = json.loads(path.read_text())
+    assert len(saved['results']) == 1
+    assert saved['quota_recovery']['original_result'] == saved['results'][0]
+    assert saved['quota_recovery']['status'] == 'waiting'
+    assert saved['quota_recovery']['restarts'] == 0
+    with patch.object(runner, 'run_skill_reviewer') as providers:
+        result = main_call('--session-file', path, '--resume')
+    providers.assert_not_called()
+    assert not result['complete']
+    assert result['review_artifact'] == saved['results'][0]
+    assert result['quota_recovery']['resume_after'] == '2099-01-01T00:00:00+00:00'
