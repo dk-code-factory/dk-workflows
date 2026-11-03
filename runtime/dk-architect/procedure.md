@@ -91,7 +91,8 @@ also apply to these delivered rules. Explicit conflict resolution discards held
 alternatives unless the user selects them; historical proposals cannot restore them.
 Legacy catalogs that retained held rules only as proposals require evidence-backed
 refresh before scoped delivery. Analysis must re-establish those obligations;
-proposals alone never become delivered rules. Explicit resolution remains authoritative.
+proposals alone never become delivered rules. Unrelated edits and deletions preserve
+that refresh requirement. Explicit resolution remains authoritative.
 Unknown task paths require declaring the intended paths and creating a new packet.
 Unknown conflict impact requires inspecting the cited conflict and refreshing its
 impact evidence before requesting a product decision. Source citations alone never

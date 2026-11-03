@@ -518,7 +518,7 @@ def edit(root, value=None, *, delete=None, user=None, expected=None, identity=No
             raise ValueError('Architecture catalog changed; inspect current catalog before editing')
         catalog = deepcopy(old)
         target = delete or value['id']
-        conditional = catalog.setdefault('conditional_rules', [])
+        conditional = catalog.get('conditional_rules', [])
         previous = next((r for r in catalog['rules'] + conditional if r['id'] == target), None)
         if delete:
             if previous is None:
@@ -538,7 +538,7 @@ def edit(root, value=None, *, delete=None, user=None, expected=None, identity=No
         discarded = set()
         if resolve_conflicts:
             catalog['conflicts'] = []
-            discarded = {r['id'] for r in catalog['conditional_rules']}
+            discarded = {r['id'] for r in conditional}
             catalog['conditional_rules'] = []
         catalog['stale_rules'] = [r for r in catalog['stale_rules'] if r != target and r not in discarded]
         return publish(directory, catalog)

@@ -565,6 +565,49 @@ def test_legacy_held_obligations_require_reanalysis_before_scoped_delivery(repo,
     assert a.load(retained) == legacy
 
 
+@pytest.mark.parametrize('known_impact', [False, True])
+@pytest.mark.parametrize('operation', ['add', 'edit', 'delete'])
+def test_unrelated_legacy_edits_preserve_held_obligation_recovery(repo, known_impact, operation):
+    initialize(repo, [obligation('unrelated')])
+    conflict = {'text': 'Legacy choice remains pending', 'sources': ['old.py']}
+    if known_impact:
+        conflict['patterns'] = ['legacy/**']
+    result = model_result(rules=[obligation()])
+    result['conflicts'] = [conflict]
+    legacy = deepcopy(a.ensure(repo, force=True, analyzer=lambda *_: result))
+    legacy.pop('conditional_rules')
+    legacy = a.publish(a.folder(repo)[0], legacy)
+    if operation == 'delete':
+        edited = a.edit(repo, delete='arch-unrelated', user=USER, expected=legacy['fingerprint'])
+    else:
+        edited = a.edit(repo, obligation('added' if operation == 'add' else 'unrelated',
+                                       text='Apply the unrelated user instruction.'),
+                        user=USER, expected=legacy['fingerprint'])
+    assert edited['conflicts'] == legacy['conflicts']
+    diagnostic = 'evidence-backed architecture refresh' if known_impact else 'affected paths are unknown'
+    with pytest.raises(ValueError, match=diagnostic):
+        a.packet(repo, 'worker', ['src/core.py'], baseline='HEAD', task='Repair core')
+    refined = {**conflict, 'patterns': ['legacy/**']}
+    incomplete = model_result()
+    incomplete['conflicts'] = [refined]
+    with pytest.raises(ValueError, match='re-establish each retained obligation'):
+        a.ensure(repo, force=True, analyzer=lambda *_: incomplete)
+    assert a.current(repo, baseline=edited['baseline']) == edited
+    result['conflicts'] = [refined]
+    refreshed = a.ensure(repo, force=True, analyzer=lambda *_: result)
+    assert refreshed['conflicts'] == [refined]
+    delivered = a.validate_packet(a.packet(repo, 'dk-architecture-review', ['src/core.py'],
+                                          baseline='HEAD', task='Repair core'), repo)
+    assert 'arch-core' in {rule['id'] for rule in delivered['rules']}
+    assert ('arch-unrelated' in {rule['id'] for rule in delivered['rules']}) == (operation != 'delete')
+    with pytest.raises(ValueError, match='omits or duplicates'):
+        a.validate_review_result({'complete': True, 'reason': '', 'coverage': []}, delivered, repo, [])
+    for retained in (legacy, edited):
+        reference = {'path': str(a.folder(repo)[0] / 'catalogs' / (retained['fingerprint'] + '.json')),
+                     'fingerprint': retained['fingerprint']}
+        assert a.load(reference) == retained
+
+
 @pytest.mark.parametrize('patterns', ['**', ['../outside/**'], [None], {'scope': '**'}])
 def test_malformed_retained_impact_requires_recovery_before_scoped_delivery(repo, patterns):
     catalog = initialize(repo, [obligation()])
