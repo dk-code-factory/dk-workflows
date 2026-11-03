@@ -203,14 +203,30 @@ class Store:
                            'invalidated' if entry.get('invalidated') else
                            'changed_inputs' if changed else saved['status'] if saved and saved['status'] != 'complete' else 'missing_or_incomplete_result')}
 
-    def status(self, specs):
+    def status(self, specs, *, compact=False, run=None):
         captures = [capture(spec) for spec in specs]
         if any(c['subject'] != self.subject for c in captures):
             raise ValueError('Specs refer to another PR')
         with self.locked() as manifest:
+            if run is not None and run not in manifest['runs']:
+                raise ValueError('Unknown run id: ' + run)
+            runs = manifest['runs'] if run is None else {run: manifest['runs'][run]}
+            if compact:
+                runs = {
+                    name: {
+                        **{key: value for key, value in state.items() if key != 'progress'},
+                        'cycle': state['cycles'][-1] if state['cycles'] else None,
+                        'progress_count': len(state['progress']),
+                        'progress_ref': {
+                            'manifest': str(self.manifest),
+                            'pointer': '/runs/' + name.replace('~', '~0').replace('/', '~1') + '/progress',
+                        },
+                    }
+                    for name, state in runs.items()
+                }
             return {'contract': CONTRACT, 'subject': self.subject, 'manifest': str(self.manifest),
                     'tasks': [self.describe(c, manifest['entries'].get(c['key'], {})) for c in captures],
-                    'runs': manifest['runs'],
+                    'runs': runs,
                     'unfinished': [e['claim'] for e in manifest['entries'].values() if e.get('claim')]}
 
     @staticmethod

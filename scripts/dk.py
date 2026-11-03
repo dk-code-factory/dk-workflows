@@ -17,6 +17,8 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
     p = sub.add_parser('status')
     p.add_argument('--spec', type=Path, action='append', default=[])
+    p.add_argument('--compact', action='store_true', help='Replace run progress with counts and references')
+    p.add_argument('--run', help='Select a retained run; unfinished claims remain PR-wide')
     p = sub.add_parser('start')
     p.add_argument('--spec', type=Path, required=True)
     p.add_argument('--recover', help='Explicitly recover this interrupted claim id; reconcile domain writes first')
@@ -40,7 +42,7 @@ def main():
     args = parser.parse_args()
     store = Store(args.repository, args.pr, checkout=args.checkout)
     if args.command == 'status':
-        result = store.status([read(p) for p in args.spec])
+        result = store.status([read(p) for p in args.spec], compact=args.compact, run=args.run)
     elif args.command == 'start':
         result = store.start(read(args.spec), recover=args.recover, run=args.run, cycle=args.cycle,
                              retry=args.retry, ci_repair=args.ci_repair, ci_rerun=args.ci_rerun, head=args.head)
