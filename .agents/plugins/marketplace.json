@@ -1,0 +1,20 @@
+{
+  "name": "dk-pr-skills",
+  "interface": {
+    "displayName": "dk-pr-skills"
+  },
+  "plugins": [
+    {
+      "name": "dk-pr-skills",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "dk-pr-skills",
+  "owner": {
+    "name": "dk-code-factory"
+  },
+  "plugins": [
+    {
+      "name": "dk-pr-skills",
+      "source": "./",
+      "description": "dk-pr-skills",
+      "version": "2.0.0"
+    }
+  ]
+}
