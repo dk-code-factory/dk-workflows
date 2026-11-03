@@ -242,13 +242,14 @@ def _save_collection(collector):
         write(collector['state'], {key: collector[key] for key in ('invocation', 'binding', 'attempts')} | {'version': 1})
 
 
-def record(host, stdout, stderr, returncode, attempt, *, response=None):
+def record(host, stdout, stderr, returncode, attempt, *, response=None, exhausted=False):
     collector = active()
     if collector is None:
         return
     value = {'version': 1, 'invocation': collector['invocation'], 'binding': collector['binding'],
              'host': host, 'attempt': attempt, 'stdout': stdout, 'stderr': stderr,
-             'returncode': returncode, **({'response': response} if response is not None else {})}
+             'returncode': returncode, **({'response': response} if response is not None else {}),
+             **({'exhausted': True} if exhausted else {})}
     path = collector['directory'] / ('attempt-' + uuid.uuid4().hex + '.json')
     try:
         write(path, value)
@@ -466,7 +467,7 @@ def claude_passes(raw):
 
 
 def failed_attempt(item):
-    if item.get('returncode') != 0:
+    if item.get('returncode') != 0 or item.get('exhausted') is True:
         return True
     try:
         response = json.loads(item.get('response', ''))

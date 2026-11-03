@@ -1043,6 +1043,48 @@ def test_native_structured_quota_is_replaced_only_by_same_slot_success(
             execution.verify(after, binding, descriptor, path)
 
 
+@pytest.mark.parametrize('failed_slot,repaired_slot', [(0, 0), (0, 1), (1, 0), (1, 1)])
+@pytest.mark.parametrize('error_field', ['is_error', 'subtype'])
+def test_claude_quota_error_envelope_requires_same_slot_success(
+        proof, monkeypatch, failed_slot, repaired_slot, error_field):
+    import subprocess
+    from shared import executors
+    repository, path, descriptor = proof
+    binding = {'skill': 'fixture:review', 'host': 'claude', 'nested_review_roles': ['Audit']}
+    descriptor['execution']['executor'] = 'claude'
+    handoff = json.loads(path.read_text())
+    handoff['review_execution_invocation'] = 'e' * 32
+    path.write_text(json.dumps(handoff))
+    quota = {'status': 'tokens_exhausted', 'findings': [], 'message': 'usage limit reached'}
+    rows = claude_rows(['Audit'], is_error=True)
+    rows[-1].update(result=quota['message'])
+    rows[-1][error_field] = True if error_field == 'is_error' else 'error_during_execution'
+    responses = iter([rows, claude_rows(['Audit'])])
+    monkeypatch.setattr(executors, 'run_provider', lambda argv, **kwargs:
+        subprocess.CompletedProcess(argv, 0, stream(next(responses)), ''))
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        with pytest.raises(executors.ProviderExhausted, match='usage limit reached'):
+            executors.execute_process('Review', repository, 'claude', {}, None, failed_slot, 5)
+        before = execution.finish(collector, quota)
+    before_bytes = Path(before['path']).read_bytes()
+    prior = json.loads(before_bytes)
+    raw = json.loads(Path(prior['attempts'][0]['path']).read_text())
+    assert raw['returncode'] == 0 and raw['exhausted'] is True and 'response' not in raw
+    assert raw['stdout'] == stream(rows)
+    assert prior['assessment']['unknown'] == ['provider failure']
+    with pytest.raises(ValueError, match='execution unavailable:.*Audit'):
+        execution.verify(before, binding, descriptor, path)
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        response = executors.execute_process('Review', repository, 'claude', {}, None, repaired_slot, 5)
+        after = execution.finish(collector, json.loads(response))
+    assert Path(before['path']).read_bytes() == before_bytes
+    if failed_slot == repaired_slot:
+        execution.verify(after, binding, descriptor, path)
+    else:
+        with pytest.raises(ValueError, match='execution unavailable:.*provider failure'):
+            execution.verify(after, binding, descriptor, path)
+
+
 def test_malformed_structured_quota_does_not_discard_unfinished_pass(proof):
     repository, path, descriptor = proof
     malformed = {'status': 'tokens_exhausted', 'findings': [], 'message': 'usage limit', 'extra': True}
@@ -1058,10 +1100,10 @@ def test_malformed_structured_quota_does_not_discard_unfinished_pass(proof):
     assert set(ROLES).issubset(assessment['missing'])
 
 
-@pytest.mark.parametrize('host', ['codex', 'claude'])
+@pytest.mark.parametrize('host,quota_envelope', [('codex', False), ('claude', False), ('claude', True)])
 @pytest.mark.parametrize('corrected', [False, True])
 def test_native_quota_restarts_through_json_journal_and_same_response_slot(
-        proof, monkeypatch, host, corrected):
+        proof, monkeypatch, host, quota_envelope, corrected):
     import importlib.util
     import subprocess
     from shared import executors
@@ -1088,6 +1130,9 @@ def test_native_quota_restarts_through_json_journal_and_same_response_slot(
         else:
             rows = claude_rows(['Audit'], is_error=failed)
             rows[-1]['result'] = json.dumps(response)
+            if failed and quota_envelope:
+                rows[-1].update(subtype='error_during_execution', is_error=True,
+                                result=quota['message'])
         return subprocess.CompletedProcess(argv, 0, stream(rows), '')
     def invoke(name, handoff_path, checkout, prompt, *, attempt):
         attempts.append(attempt)
@@ -1100,7 +1145,11 @@ def test_native_quota_restarts_through_json_journal_and_same_response_slot(
     journal_path, = (path.parent / 'state').glob('dk-code-factory/workflows/workflow-*/model-exchange.json')
     journal = json.loads(journal_path.read_text())
     assert journal['status'] == 'provider_failed'
-    assert json.loads(journal['attempts'][-1]['response']) == quota
+    if quota_envelope:
+        assert 'response' not in journal['attempts'][-1]
+        assert journal['attempts'][-1]['provider_error']['type'] == 'ProviderExhausted'
+    else:
+        assert json.loads(journal['attempts'][-1]['response']) == quota
     before_bytes = Path(before['path']).read_bytes()
     with execution.collect(binding, descriptor, path, repository) as collector:
         result = runner.run_skill_reviewer(binding, Path('SKILL.md'), path, repository)
