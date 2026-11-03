@@ -89,6 +89,9 @@ impact disjoint from the declared task paths. Broad rule patterns still apply
 outside the conflicting scope. Evidence checks and exception approval requirements
 also apply to these delivered rules. Explicit conflict resolution discards held
 alternatives unless the user selects them; historical proposals cannot restore them.
+Legacy catalogs that retained held rules only as proposals require evidence-backed
+refresh before scoped delivery. Analysis must re-establish those obligations;
+proposals alone never become delivered rules. Explicit resolution remains authoritative.
 Unknown task paths require declaring the intended paths and creating a new packet.
 Unknown conflict impact requires inspecting the cited conflict and refreshing its
 impact evidence before requesting a product decision. Source citations alone never
@@ -99,6 +102,8 @@ To establish previously unknown impact during refresh, preserve the exact confli
 text and sources and add patterns. The conflict remains pending and its original
 catalog remains immutable. Omitting it later cannot clear the conflict or its
 established impact; changing established impact retains both assessments.
+Malformed retained impact is unknown until a valid refresh establishes its paths.
+Resolving a refined conflict also preserves the resolution of its earlier unknown impact.
 
 Use `architecture export --baseline SHA --agent ID --task TASK --paths-file FILE
 --scope-file FILE` (or select its current `--catalog HASH`) for agents outside DK

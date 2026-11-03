@@ -306,6 +306,9 @@ def refresh_choices(directory, catalog):
                     deleted.setdefault(rule_id, rule_id not in after)
             cleared = {digest(c) for c in parent['conflicts']} - {digest(c) for c in catalog['conflicts']}
             resolved.update(cleared)
+            resolved.update(digest({key: val for key, val in conflict.items() if key != 'patterns'})
+                            for conflict in parent['conflicts']
+                            if isinstance(conflict, dict) and digest(conflict) in cleared)
             if cleared:
                 for proposal in parent['proposals']:
                     if (isinstance(proposal, dict)
@@ -315,6 +318,28 @@ def refresh_choices(directory, catalog):
                             deleted.setdefault(held['id'], True)
         catalog = parent
     return {rule_id for rule_id, removed in deleted.items() if removed}, resolved
+
+
+def legacy_held(catalog):
+    """Identify legacy refresh obligations without adopting arbitrary proposals."""
+    if not catalog or 'conditional_rules' in catalog or not catalog['conflicts']:
+        return []
+    return [item.get('rule') for item in catalog['proposals']
+            if isinstance(item, dict)
+            and item.get('reason') == 'Conflicting obligations require user resolution']
+
+
+def conflict_patterns(conflict):
+    """Malformed retained assessments have unknown impact, like omitted patterns."""
+    patterns = conflict.get('patterns') if isinstance(conflict, dict) else None
+    if not isinstance(patterns, list):
+        return None
+    try:
+        for pattern in patterns:
+            relative(pattern, pattern=True)
+    except ValueError:
+        return None
+    return patterns
 
 
 def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
@@ -382,6 +407,16 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
         finally:
             _CATALOG_SCOPE.reset(token)
     validate_analysis(value, root, baseline)
+    for held in legacy_held(old):
+        if isinstance(held, dict) and isinstance(held.get('id'), str) and held['id'] in deleted:
+            continue
+        fields = ('id', 'text', 'origin', 'patterns', 'agents')
+        if (not isinstance(held, dict) or not any(
+                all(rule(item).get(key) == held.get(key) for key in fields)
+                for item in value['rules'])):
+            raise ValueError('Legacy held architecture obligations require evidence-backed refresh; '
+                             're-establish each retained obligation in analysis rules or explicitly '
+                             'resolve the conflicting alternatives')
     if git(checkout, 'status', '--porcelain=v1').strip() or git(checkout, 'rev-parse', 'HEAD').strip() != baseline:
         raise ValueError('Architect changed its baseline checkout')
     # A model refresh cannot resolve pending user decisions by omission.
@@ -394,7 +429,10 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
             # Establish previously unknown impact without dropping the pending
             # decision or changing already-established scope. History stays sealed.
             unknown = {key: val for key, val in item.items() if key != 'patterns'}
-            conflicts.pop(digest(unknown), None)
+            for fingerprint, existing in list(conflicts.items()):
+                if (isinstance(existing, dict) and conflict_patterns(existing) is None
+                        and {key: val for key, val in existing.items() if key != 'patterns'} == unknown):
+                    conflicts.pop(fingerprint)
             if digest(unknown) in resolved:
                 resolved.add(digest(item))
         elif any('patterns' in existing and
@@ -525,9 +563,12 @@ def selected(catalog, agent, paths):
     # Held rules are enforceable only while every pending choice is proved
     # disjoint from this task. Explicit resolution never adopts alternatives.
     if (paths is not None and catalog['conflicts'] and all(
-            isinstance(conflict, dict) and conflict.get('patterns')
-            and not any(matches(pattern, path) for pattern in conflict['patterns'] for path in paths)
+            conflict_patterns(conflict)
+            and not any(matches(pattern, path) for pattern in conflict_patterns(conflict) for path in paths)
             for conflict in catalog['conflicts'])):
+        if legacy_held(catalog):
+            raise ValueError('Legacy held architecture obligations require evidence-backed architecture refresh '
+                             'before scoped delivery; re-establish retained obligations or explicitly resolve alternatives')
         rules = rules + catalog.get('conditional_rules', [])
     if identities & MANDATORY:
         return deepcopy(rules)
@@ -542,7 +583,7 @@ def scoped_obligations(catalog, paths):
     deferred = {'conflicts': [], 'stale_rules': []}
     blocked = []
     for conflict in catalog['conflicts']:
-        patterns = conflict.get('patterns') if isinstance(conflict, dict) else None
+        patterns = conflict_patterns(conflict)
         text = conflict.get('text', repr(conflict)) if isinstance(conflict, dict) else str(conflict)
         if paths is None:
             blocked.append(text + ' (task paths are unknown; declare intended repository-relative paths '
