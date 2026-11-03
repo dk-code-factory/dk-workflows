@@ -21,6 +21,8 @@ ALIASES = {
 NESTED_REVIEW_ROLES = {
     'code-review-ad:code-review-ad': ['Toolkit', 'Standards', 'Spec', 'Performance'],
     'code-review-matpocock:code-review-matpocock': ['Standards', 'Spec'],
+    'pr-review-toolkit:review-pr': ['code-reviewer', 'pr-test-analyzer', 'comment-analyzer',
+                                  'silent-failure-hunter', 'type-design-analyzer', 'code-simplifier'],
 }
 
 

@@ -1,0 +1,330 @@
+"""Runner completion and durable reuse require real native specialist evidence."""
+import copy
+import json
+from pathlib import Path
+import subprocess
+import sys
+from unittest.mock import Mock
+
+import pytest
+
+from test_stats_capture import runner
+from preparation_fixtures import Package, analysis, prep
+from shared import bindings, executors, review_execution, review_coverage, workflow_usage
+from shared.review_sessions import Session
+
+
+@pytest.fixture
+def native(tmp_path, monkeypatch, request):
+    monkeypatch.setenv('DK_HOST', 'codex')
+    host = getattr(request, 'param', 'codex')
+    package = Package(tmp_path)
+    plugin = tmp_path / 'plugin'
+    manifest = plugin / f'.{host}-plugin/plugin.json'
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({'name': 'fixture', 'version': '1.0.0'}))
+    procedure = plugin / 'skills/review/SKILL.md'
+    procedure.parent.mkdir(parents=True)
+    procedure.write_text('Review source read-only using independent Specialist.\n')
+    provider = {'skill': 'fixture:review', 'host': host, 'nested_review_roles': ['Specialist']}
+    name = bindings.key(provider)
+    resolved = {'binding': provider, 'identity': name, 'executor': host, 'version': '1.0.0',
+                'root': str(plugin), 'procedure': str(procedure)}
+    monkeypatch.setattr(bindings, 'resolve', lambda _: resolved)
+    descriptor = runner.describe_reviewer(provider)
+    package.manifest['evidence']['reviewers'] = [str(package.write('reviewer.json', descriptor))]
+    package.write('manifest.json', package.manifest)
+    prepared = prep.read(package.prepare(analysis([name]))['artifact'])
+    monkeypatch.setattr(runner, 'describe_reviewer', lambda _: descriptor)
+    monkeypatch.setattr(runner, 'skill_path', lambda _: Path(descriptor['execution']['procedure']))
+    return package, provider, name, prepared
+
+
+def events(complete=True, missing=False):
+    rows = [{'type': 'thread.started', 'thread_id': 'root'}, {'type': 'turn.started'}]
+    if not missing:
+        rows += [{'type': 'item.completed', 'item': {'type': 'collab_tool_call', 'tool': 'spawn_agent',
+            'sender_thread_id': 'root', 'receiver_thread_ids': ['specialist'], 'status': 'completed',
+            'prompt': 'DK_REVIEW_PASS=Specialist\nRead the pinned handoff.', 'agents_states': {}}},
+            {'type': 'item.completed', 'item': {'type': 'collab_tool_call', 'tool': 'wait',
+            'sender_thread_id': 'root', 'receiver_thread_ids': ['specialist'], 'status': 'completed',
+            'prompt': None, 'agents_states': {'specialist': {'status': 'completed' if complete else 'running',
+                                                          'message': 'No findings.' if complete else None}}}}]
+    rows.append({'type': 'turn.completed', 'usage': {}})
+    return '\n'.join(json.dumps(row) for row in rows)
+
+
+def transport(monkeypatch, responses, traces):
+    calls = []
+    def run(argv, input, **kwargs):
+        assert '--json' in argv and '--ephemeral' in argv and 'read-only' in argv
+        assert 'DK_REVIEW_PASS=<role>' in input
+        index = len(calls)
+        calls.append(argv)
+        Path(argv[argv.index('-o') + 1]).write_text(responses[index])
+        return subprocess.CompletedProcess(argv, 0, traces[index], '')
+    monkeypatch.setattr(executors, 'run_provider', run)
+    return calls
+
+
+@pytest.mark.parametrize('trace,reason', [(events(missing=True), 'missing'), ('', 'unavailable'),
+                                         (events(complete=False), 'missing')])
+def test_clean_json_cannot_complete_without_native_passes(native, monkeypatch, trace, reason):
+    package, provider, name, prepared = native
+    original = {'findings': [{'severity': 'Minor', 'path': 'transform.py', 'line': 1,
+                            'message': 'Original supported finding', 'fix': 'Preserve behavior'}]}
+    transport(monkeypatch, [json.dumps(original)], [trace])
+    result = runner.review(package.context, [provider], '', package.decisions, '', prepared)
+    assert not result['complete'] and result['executed_reviewers'] == []
+    assert 'execution ' + reason in result['reason']
+    ref = result['reviewer_execution'][name]['reference']
+    saved = json.loads(Path(ref['path']).read_text())
+    assert saved['original_result'] == original
+    assert saved['assessment']['status'] == reason
+
+
+@pytest.mark.parametrize('missing', [False, True])
+@pytest.mark.parametrize('usage_storage_failed', [False, True])
+def test_workflow_usage_remains_passive_while_native_execution_gate_is_required(
+    native, monkeypatch, capsys, missing, usage_storage_failed
+):
+    package, provider, name, prepared = native
+    receipt = {'token': 'native-execution-usage-root', 'skill': 'dk-pr-review', 'host': 'codex',
+               'runtime_digest': 'fixture-runtime', 'runtime_root': str(Path(__file__).resolve().parents[3]),
+               'invocation': str(package.root / 'usage-invocation.json'), 'lifecycle': {'identity': {}}}
+    usage = workflow_usage.register(receipt, package.root)
+    monkeypatch.setenv(workflow_usage.ENV, json.dumps(usage))
+    monkeypatch.delenv('DK_REVIEW_STATS_TRACE', raising=False)
+    if usage_storage_failed:
+        Path(usage['path']).write_text('corrupt passive usage storage')
+    rows = [json.loads(line) for line in events(missing=missing).splitlines()]
+    rows[-1]['usage'] = {'input_tokens': 4, 'output_tokens': 3, 'total_tokens': 7}
+    calls = transport(monkeypatch, ['{"findings":[]}'], ['\n'.join(json.dumps(row) for row in rows)])
+    result = runner.review(package.context, [provider], '', package.decisions, '', prepared)
+    assert len(calls) == 1
+    assert result['complete'] is not missing
+    assert bool(result.get('guard_failure')) is missing
+    proof = json.loads(Path(result['reviewer_execution'][name]['reference']['path']).read_text())
+    assert proof['assessment']['status'] == ('missing' if missing else 'complete')
+    if usage_storage_failed:
+        assert 'Workflow usage evidence unavailable' in capsys.readouterr().err
+    else:
+        report = workflow_usage.query(usage['path'])
+        assert report['review_coverage']['evidence']['outcome'] == ('guard_failed' if missing else 'completed')
+        assert report['usage']['tokens']['total_tokens']['known_subtotal'] == 7
+        executions = [event for event in report['events'] if event['kind'] == 'execution']
+        assert any(event['status'] == 'returned' for event in executions)
+
+
+@pytest.mark.parametrize('trace', [events(missing=True), ''])
+def test_execution_gate_failure_cannot_be_accepted_as_provider_failure(native, monkeypatch, trace):
+    package, provider, name, prepared = native
+    transport(monkeypatch, ['{"findings":[]}'], [trace])
+    session = Session(package.context, prepared, [name])
+    with session.execution():
+        result = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=session)
+        reference = session.finish(result)
+    with pytest.raises(ValueError, match='review evidence guard failed'):
+        review_coverage.verify(reference, prepared, accepted_failures=[name])
+    assert result['guard_failure'] and result['outcome'] == 'guard_failed'
+    assert not result.get('failed_reviewers')
+    assert result['reviewer_execution'][name]['reference']
+
+
+@pytest.mark.parametrize('stage', ['allocate', 'finish'])
+def test_execution_evidence_storage_failure_stays_blocking(native, monkeypatch, stage):
+    package, provider, name, prepared = native
+    transport(monkeypatch, ['{"findings":[]}'], [events()])
+    session = Session(package.context, prepared, [name])
+    monkeypatch.setattr(review_execution, stage, Mock(side_effect=OSError('execution evidence storage failed')))
+    with session.execution():
+        result = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=session)
+        reference = session.finish(result)
+    assert result['guard_failure'] and result['outcome'] == 'guard_failed'
+    with pytest.raises(ValueError, match='review evidence guard failed'):
+        review_coverage.verify(reference, prepared, accepted_failures=[name])
+
+
+@pytest.mark.parametrize('operation', ['write', 'read'])
+def test_native_attempt_storage_failure_cannot_be_accepted(native, monkeypatch, operation):
+    package, provider, name, prepared = native
+    transport(monkeypatch, ['{"findings":[]}'], [events()])
+    write = review_execution.write
+    read = Path.read_bytes
+    def fail_write(path, value):
+        if Path(path).name.startswith('attempt-'):
+            raise OSError('native attempt write failed')
+        return write(path, value)
+    def fail_read(path):
+        if path.name.startswith('attempt-'):
+            raise OSError('native attempt read failed')
+        return read(path)
+    monkeypatch.setattr(review_execution, 'write', fail_write if operation == 'write' else write)
+    if operation == 'read':
+        monkeypatch.setattr(Path, 'read_bytes', fail_read)
+    session = Session(package.context, prepared, [name])
+    with session.execution():
+        result = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=session)
+        reference = session.finish(result)
+    assert result['guard_failure'] and result['outcome'] == 'guard_failed'
+    assert not result.get('failed_reviewers')
+    saved = json.loads(Path(result['reviewer_execution'][name]['reference']['path']).read_text())
+    assert saved['assessment']['status'] == 'unavailable'
+    with pytest.raises(ValueError, match='review evidence guard failed'):
+        review_coverage.verify(reference, prepared, accepted_failures=[name])
+
+
+@pytest.mark.parametrize('native', ['claude'], indirect=True)
+@pytest.mark.parametrize('trace', ['not-json', '{"type":"system","session_id":"root"}',
+    '\n'.join([json.dumps({'type': 'result', 'subtype': 'success', 'result': '{"findings":[]}'})] * 2)])
+def test_native_stream_extraction_failure_cannot_be_accepted(native, monkeypatch, trace):
+    package, provider, name, prepared = native
+    calls = []
+    def run(argv, input, **kwargs):
+        assert '--output-format' in argv and 'stream-json' in argv and '--verbose' in argv
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, trace, '')
+    monkeypatch.setattr(executors, 'run_provider', run)
+    session = Session(package.context, prepared, [name])
+    with session.execution():
+        result = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=session)
+        reference = session.finish(result)
+    assert len(calls) == 1
+    assert result['guard_failure'] and result['outcome'] == 'guard_failed'
+    assert not result.get('failed_reviewers')
+    saved = json.loads(Path(result['reviewer_execution'][name]['reference']['path']).read_text())
+    attempt = json.loads(Path(saved['attempts'][0]['path']).read_text())
+    assert attempt['stdout'] == trace and attempt['returncode'] == 0
+    assert saved['assessment']['status'] == 'unavailable'
+    with pytest.raises(ValueError, match='review evidence guard failed'):
+        review_coverage.verify(reference, prepared, accepted_failures=[name])
+
+
+@pytest.mark.parametrize('detail,exhausted', [('authentication failed', False), ('usage limit reached', True)])
+def test_native_record_failure_preserves_original_provider_failure(native, monkeypatch, detail, exhausted):
+    package, provider, name, prepared = native
+    monkeypatch.setattr(executors, 'run_provider',
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 1, '', detail))
+    write = review_execution.write
+    def fail_attempt(path, value):
+        if Path(path).name.startswith('attempt-'):
+            raise OSError('native attempt write failed')
+        return write(path, value)
+    monkeypatch.setattr(review_execution, 'write', fail_attempt)
+    result = runner.review(package.context, [provider], '', package.decisions, '', prepared)
+    assert not result['complete'] and not result.get('guard_failure')
+    assert result['outcome'] == ('usage_exhausted' if exhausted else 'provider_failed')
+    failures = result['skipped_reviewers'] if exhausted else result['failed_reviewers']
+    assert detail in failures[0]['reason']
+
+
+def test_native_pass_completion_caches_proof_and_rechecks_it(native, monkeypatch):
+    package, provider, name, prepared = native
+    calls = transport(monkeypatch, ['{"findings":[]}'], [events()])
+    session = Session(package.context, prepared, [name])
+    with session.execution():
+        result = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=session)
+        assert result['complete'], result
+        # Simulate interruption after durable reviewer checkpoint, before the
+        # coordinator has committed a terminal aggregate result.
+    assert len(calls) == 1
+    restored = Session(package.context, prepared, [name], path=session.path, resume=True)
+    with restored.execution():
+        reused = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=restored)
+    assert reused['complete'] and reused['reused_reviewers'] == [name] and len(calls) == 1
+    reference = result['reviewer_execution'][name]['reference']
+    Path(reference['path']).write_text('{}')
+    again = Session(package.context, prepared, [name], path=session.path, resume=True)
+    with again.execution():
+        rejected = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=again)
+    assert not rejected['complete'] and rejected['guard_failure']
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('correction', [False, True])
+def test_conditional_method_provider_repair_resumes_same_slot_with_retained_proof(native, monkeypatch, correction):
+    package, provider, name, prepared = native
+    monkeypatch.setitem(review_execution._CONDITIONAL, provider['skill'], ('Specialist', ['Optional']))
+    calls = []
+    invocation_attempt = []
+    invoke = runner.invoke
+    def invoke_slot(*args, attempt=0):
+        invocation_attempt.append(attempt)
+        return invoke(*args, attempt=attempt)
+    monkeypatch.setattr(runner, 'invoke', invoke_slot)
+    def run(argv, input, **kwargs):
+        collector = review_execution.active()
+        assert collector['invocation'] in input
+        attempt = invocation_attempt[-1]
+        calls.append((input, attempt))
+        if len(calls) == (2 if correction else 1):
+            return subprocess.CompletedProcess(argv, 1, '', 'authentication failed')
+        Path(argv[argv.index('-o') + 1]).write_text('invalid' if correction and len(calls) == 1 else '{"findings":[]}')
+        trace = events(missing=correction and len(calls) == 3)
+        if not correction or len(calls) == 1:
+            binding = collector['binding']
+            applicability = {field: binding[field] for field in ('head_sha', 'base_sha', 'descriptor_sha256')}
+            applicability.update(invocation=collector['invocation'], roles={
+                'Optional': {'required': False, 'reason': 'The pinned fixture has no optional specialist scope.'}})
+            rows = [json.loads(line) for line in trace.splitlines()]
+            rows[3]['item']['agents_states']['specialist']['message'] = (
+                'DK_REVIEW_APPLICABILITY_JSON=' + json.dumps(applicability))
+            trace = '\n'.join(json.dumps(row) for row in rows)
+        return subprocess.CompletedProcess(argv, 0, trace, '')
+    monkeypatch.setattr(executors, 'run_provider', run)
+    session = Session(package.context, prepared, [name])
+    with session.execution():
+        failed = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=session)
+    assert not failed['complete'] and failed['outcome'] == 'provider_failed', failed
+    assert 'authentication failed' in failed['reason']
+    prior_reference = failed['reviewer_execution'][name]['reference']
+    prior_bytes = Path(prior_reference['path']).read_bytes()
+    prior = json.loads(prior_bytes)
+    assert prior['assessment']['status'] == 'unavailable'
+    restored = Session(package.context, prepared, [name], path=session.path, resume=True)
+    with restored.execution():
+        recovered = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=restored)
+        assert recovered['complete'], recovered
+        reference = restored.finish(recovered)
+    review_coverage.verify(reference, prepared)
+    assert calls[-1] == calls[-2]
+    assert [attempt for _, attempt in calls] == ([0, 1, 1] if correction else [0, 0])
+    saved_reference = recovered['reviewer_execution'][name]['reference']
+    saved = json.loads(Path(saved_reference['path']).read_text())
+    assert saved['invocation'] == prior['invocation']
+    assert saved['assessment']['status'] == 'complete'
+    assert saved['assessment']['completed'] == ['Specialist']
+    assert len(saved['attempts']) == len(calls)
+    records = [json.loads(Path(item['path']).read_text()) for item in saved['attempts']]
+    assert [item['returncode'] for item in records] == ([0, 1, 0] if correction else [1, 0])
+    assert records[-2]['stderr'] == 'authentication failed'
+    assert saved_reference['path'] != prior_reference['path']
+    assert Path(prior_reference['path']).read_bytes() == prior_bytes
+
+
+def test_one_correction_preserves_original_native_execution(native, monkeypatch):
+    package, provider, name, prepared = native
+    calls = transport(monkeypatch, ['invalid', '{"findings":[]}'], [events(), events(missing=True)])
+    result = runner.review(package.context, [provider], '', package.decisions, '', prepared)
+    assert result['complete'], result
+    assert len(calls) == 2
+    saved = json.loads(Path(result['reviewer_execution'][name]['reference']['path']).read_text())
+    assert len(saved['attempts']) == 2 and saved['assessment']['completed'] == ['Specialist']
+
+
+def test_final_coverage_rejects_historical_clean_json_without_proof(native, monkeypatch):
+    package, provider, name, prepared = native
+    transport(monkeypatch, ['{"findings":[]}'], [events()])
+    session = Session(package.context, prepared, [name])
+    with session.execution():
+        result = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=session)
+        reference = session.finish(result)
+    review_coverage.verify(reference, prepared)
+    saved = review_coverage.load(reference)
+    del saved['result']['reviewer_execution']
+    path = Path(reference['path']).parent / 'historical.json'
+    from shared.private_state import write
+    write(path, saved)
+    historical = {'path': str(path), 'sha256': review_coverage.digest(saved)}
+    with pytest.raises(ValueError, match='specialist execution evidence unavailable'):
+        review_coverage.verify(historical, prepared)

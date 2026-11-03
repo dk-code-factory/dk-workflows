@@ -183,6 +183,23 @@ def verify(item, prepared, *, accepted_failures=(), reconciliation=None, checkou
         architecture.verify_review(architecture_result, prepared.get('architecture'),
                                    context, raw_decisions.get('data', raw_decisions), live=not historical)
     completed = result['executed_reviewers'] + result['reused_reviewers']
+    from shared import review_execution
+    for reviewer in completed:
+        descriptor = prepared['reviewers'].get(reviewer, {})
+        binding = (descriptor.get('execution') or {}).get('binding', reviewer)
+        # The original delivery is the evidence identity, including after an
+        # independently approved tree-equivalent reconciliation.
+        evidence = result.get('reviewer_execution', {}).get(reviewer)
+        if review_execution.requirements(binding, {'patch': context['patch']}):
+            if not isinstance(evidence, dict):
+                raise ValueError('required specialist execution evidence unavailable')
+            import json
+            handoff = json.loads(Path(evidence['handoff']).read_text())
+            if (handoff.get('head_sha') != artifact['head']
+                    or handoff.get('response_budget') != artifact['session_id'] + ':' + reviewer
+                    or handoff.get('base_sha') != artifact['session_identity']['base']):
+                raise ValueError('specialist execution delivery does not match review session')
+            review_execution.verify(evidence.get('reference'), binding, descriptor, evidence['handoff'])
     skipped = result['skipped_reviewers']
     failed = failures(result)
     failed_names = [f['reviewer'] for f in failed]

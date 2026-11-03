@@ -148,3 +148,48 @@ def test_explicit_subprocess_environment_cannot_reinstrument_nested_provider(tmp
     assert process.stdout == 'None\n'
     assert child_env[ENV] == os.environ[ENV] == str(trace)
     assert len(json.loads(trace.read_text())['attempts']) == 1
+
+
+def test_claude_stream_result_preserves_inclusive_root_metadata_only():
+    final = {'type': 'result', 'subtype': 'success', 'session_id': 'root',
+             'usage': {'input_tokens': 10, 'output_tokens': 3, 'cache_read_input_tokens': 7},
+             'modelUsage': {'actual-model': {'inputTokens': 10}}, 'total_cost_usd': .2}
+    rows = [{'type': 'system', 'subtype': 'init', 'session_id': 'root'},
+            {'type': 'assistant', 'usage': {'input_tokens': 9000},
+             'modelUsage': {'child-model': {'inputTokens': 9000}}}, final]
+    raw = '\n'.join(json.dumps(row) for row in rows)
+    result = subprocess.CompletedProcess([], 0, raw, '')
+    model, usage = provider_metadata(result, 'claude')
+    assert model == 'actual-model'
+    assert usage == {**final['usage'], 'model_usage': final['modelUsage'], 'total_cost_usd': .2}
+    assert result.stdout == raw
+
+
+def test_ambiguous_claude_stream_results_do_not_guess_inclusive_total():
+    row = {'type': 'result', 'usage': {'input_tokens': 10}}
+    result = subprocess.CompletedProcess([], 0, json.dumps(row) + '\n' + json.dumps(row), '')
+    assert provider_metadata(result, 'claude') == (None, None)
+
+
+def test_codex_json_preserves_last_cumulative_total_without_summing_cached_or_prior_turns():
+    rows = [{'type': 'thread.started', 'thread_id': 'root'},
+            {'type': 'turn.completed', 'usage': {'input_tokens': 5, 'output_tokens': 2}},
+            {'type': 'item.completed', 'item': {'type': 'collab_tool_call', 'usage': {'input_tokens': 9999}}},
+            {'type': 'turn.completed', 'usage': {'input_tokens': 20, 'cached_input_tokens': 8,
+                                               'output_tokens': 7, 'reasoning_output_tokens': 3}}]
+    raw = '\n'.join(json.dumps(row) for row in rows)
+    result = subprocess.CompletedProcess([], 0, raw, '')
+    assert provider_metadata(result, 'codex') == (None, {
+        **rows[-1]['usage'], 'source': 'codex_cli_json'})
+    assert result.stdout == raw
+
+
+@pytest.mark.parametrize('usage', [{'input_tokens': True, 'output_tokens': 3},
+                                  {'input_tokens': -1, 'output_tokens': 3},
+                                  {'input_tokens': 10}, None])
+def test_codex_json_preserves_available_components_for_normalization(usage):
+    rows = [{'type': 'thread.started', 'thread_id': 'root'}, {'type': 'turn.completed', 'usage': usage}]
+    result = subprocess.CompletedProcess([], 0, '\n'.join(json.dumps(row) for row in rows), '')
+    model, measured = provider_metadata(result, 'codex')
+    assert model is None
+    assert measured == ({**usage, 'source': 'codex_cli_json'} if usage is not None else None)

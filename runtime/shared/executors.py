@@ -609,6 +609,8 @@ def output_failure(output, proc, checkout, argv, attempt, timeout, reason):
 
 
 def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
+    from shared import review_execution
+    required_execution = review_execution.active() is not None
     if host == 'codex':
         size = len(json.dumps(prompt, ensure_ascii=True))
         if size > CODEX_INPUT_LIMIT:
@@ -629,11 +631,14 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
         if host == 'codex':
             argv = ['codex', 'exec', '--ephemeral', '--sandbox', 'read-only', '--skip-git-repo-check',
                     '-C', str(checkout), '-o', str(output), '-']
-            if trace_path() or workflow_usage.context(env) is not None:
+            if required_execution or trace_path() or workflow_usage.context(env) is not None:
                 argv.insert(2, '--json')
         else:
             argv = ['claude', '--permission-mode', 'plan', '--no-session-persistence',
                     '--output-format', 'json', '--disallowedTools', 'Edit,Write,NotebookEdit', '-p']
+            if required_execution:
+                argv[argv.index('json')] = 'stream-json'
+                argv.append('--verbose')
             if resolved:
                 argv += ['--plugin-dir', resolved['root']]
         started = True
@@ -664,7 +669,21 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
                              task('Inspect the retained evidence and repair storage capacity, quota or permissions. '
                                   'Use a writable private TMPDIR if needed, then retry manually.', evidence),
                              outcome='error')
-        envelope = json.loads(proc.stdout)
+        if required_execution:
+            try:
+                envelopes = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+            except ValueError as exc:
+                raise review_execution.EvidenceFailure('review_execution_unavailable',
+                    'Claude native execution stream is malformed: ' + str(exc),
+                    task('Inspect the retained native specialist execution evidence.'), outcome='error') from exc
+            results = [item for item in envelopes if isinstance(item, dict) and item.get('type') == 'result']
+            if len(results) != 1:
+                raise review_execution.EvidenceFailure('review_execution_unavailable',
+                    'Claude native execution stream has no unique result',
+                    task('Inspect the retained native specialist execution evidence.'), outcome='error')
+            envelope = results[0]
+        else:
+            envelope = json.loads(proc.stdout)
         if envelope.get('is_error') or envelope.get('subtype') != 'success':
             provider_failure(envelope.get('result') or json.dumps(envelope), prompt=prompt, fallback='Claude execution failed')
         result = envelope.get('result')
@@ -682,14 +701,18 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
                 from shared.reviewer_telemetry import output_text
                 result = proc if proc is not None else original
                 try:
+                    review_execution.record(host,
+                        output_text(getattr(result, 'stdout', None)),
+                        output_text(getattr(result, 'stderr', None)),
+                        getattr(result, 'returncode', None), attempt)
                     transport(host=host, calling_host=env.get('DK_HOST', host),
                               argv=argv, returncode=getattr(result, 'returncode', None),
                               stdout=output_text(getattr(result, 'stdout', None)),
                               stderr=output_text(getattr(result, 'stderr', None)),
                               timeout_seconds=timeout, output=output, failure=original, response=received)
-                except (StorageFailure, OSError) as exc:
+                except (review_execution.EvidenceFailure, StorageFailure, OSError) as exc:
                     retain_temp = True
-                    if not isinstance(exc, StorageFailure):
+                    if not isinstance(exc, (StorageFailure, review_execution.EvidenceFailure)):
                         exc = StorageFailure('model_diagnostics_failed', str(exc),
                                              task('Repair private diagnostic storage.'), outcome='error')
                     exc.action['artifacts'].append(temp)

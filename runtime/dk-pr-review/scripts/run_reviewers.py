@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 import tempfile
 import time
+import uuid
 from contextlib import contextmanager, nullcontext
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutureWaitTimeout
 from contextvars import copy_context
@@ -26,7 +27,7 @@ from reviewer_prompts import preparation_instructions, source_files
 from stats_capture import for_iteration
 from shared.reviewer_telemetry import capture, transport
 from shared.role_failures import role_failure
-from shared import bindings, architecture, workflow_usage
+from shared import bindings, architecture, review_execution, workflow_usage
 from shared.runtime_bundles import retained_binding, retain
 from shared.review_sessions import Session
 from shared.preparation_views import reviewer_view
@@ -90,6 +91,9 @@ def run_skill_reviewer(name, skill, handoff_path, checkout):
         output = Path(temp)/'result.json'
         contract = bindings.normalize(name).get('handoff_contract', 'git-diff-v1')
         prompt = build_skill_prompt(skill, handoff_path, contract)
+        collector = review_execution.active()
+        if collector is not None:
+            prompt += review_execution.instructions(collector)
         handoff = json.loads(Path(handoff_path).read_text())
         changed = added_lines(Path(handoff['patch']).read_text())
         from shared.executors import execute_json
@@ -246,6 +250,7 @@ def describe_reviewer(name):
                Path(__file__).with_name('validate_result.py'),
                Path(__file__).with_name('review-result.schema.json'),
                ROOT/'shared/bindings.py', ROOT/'shared/executors.py', ROOT/'shared/preparation_views.py',
+               ROOT/'shared/review_execution.py',
                Path(__file__).parents[1] / 'references/handoff-contracts.md']
     if 'procedure' in resolved:
         initial += [Path(resolved['procedure'])]
@@ -369,6 +374,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
     architecture_findings = []
     architecture_accounting = {'executed': [], 'reused': [], 'failed': [], 'exhausted': []}
     role_failures = []
+    execution_evidence = {}
     handoff_references = []
     delivery_checkouts = set()
     def outcome(value):
@@ -384,7 +390,8 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                 **({'architecture_review': architecture_result} if architecture_result else {}),
                 **({'architecture_findings': architecture_findings} if architecture_findings else {}),
                 'executed_reviewers': executed, 'reused_reviewers': reused,
-                'architecture_accounting': architecture_accounting, 'role_failures': role_failures}
+                'architecture_accounting': architecture_accounting, 'role_failures': role_failures,
+                **({'reviewer_execution': execution_evidence} if execution_evidence else {})}
 
     def unchanged():
         preparation_api.validate(preparation, context, decisions)
@@ -415,6 +422,11 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             cached = session.cached(name) if session else None
             if cached is not None:
                 validate_findings(cached, lines)
+                if review_execution.requirements(provider_map[name], handoff):
+                    saved = session.execution_evidence(name)
+                    delivered = session.delivery_reference(name)
+                    review_execution.verify(saved, provider_map[name], preparation['reviewers'][name], delivered, cached)
+                    execution_evidence[name] = {'reference': saved, 'handoff': delivered}
                 results[name] = (cached, None)
                 workflow_usage.observe('checkpoint_reuse', role=name, status='reused', evidence={
                     'pr_url': context['url'], 'head_sha': context['head_sha'], 'base_sha': context['base_sha'],
@@ -484,6 +496,8 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             job['path'] = directory / f'{index}.json'
             if session:
                 job['handoff']['response_budget'] = session.id + ':' + name
+                if name != 'architecture-review':
+                    job['handoff']['review_execution_invocation'] = uuid.uuid4().hex
                 job['path'] = session.delivery(name, job['path'], job['handoff'])
                 job['handoff'] = preparation_api.read(job['path'])
                 if job['handoff']['contract'] == 'git-diff-v2':
@@ -530,7 +544,23 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                         result = architecture.review(job['handoff']['architecture'], job['handoff']['context'],
                             job['handoff']['decisions'], recipient_packet=job['handoff']['architecture_packet'])
                     else:
-                        result = run_skill_reviewer(provider_map[name], job['skill'], job['path'], job['checkout'])
+                        checking = True
+                        with review_execution.collect(provider_map[name], preparation['reviewers'][name],
+                                                      job['path'], job['checkout']) as collector:
+                            checking = False
+                            result = None
+                            try:
+                                result = run_skill_reviewer(provider_map[name], job['skill'], job['path'], job['checkout'])
+                            finally:
+                                checking = True
+                                evidence = review_execution.finish(collector, result)
+                                if evidence is not None:
+                                    execution_evidence[name] = {'reference': evidence, 'handoff': str(job['path'])}
+                                checking = False
+                        if result.get('status') not in ('incomplete', 'tokens_exhausted'):
+                            checking = True
+                            review_execution.verify(evidence, provider_map[name], preparation['reviewers'][name], job['path'], result)
+                            checking = False
                 finally:
                     if worker_stats:
                         job['duration_seconds'] = time.monotonic() - worker_stats.start
@@ -554,7 +584,9 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                 if session:
                     checking = True
                     session.record(name, status, result=result if status == 'completed' else None,
-                                   reason=result.get('message'))
+                                   reason=result.get('message'),
+                                   **({'execution_evidence': execution_evidence[name]}
+                                      if name in execution_evidence else {}))
                 if worker_stats:
                     worker_stats.safe(worker_stats.finish, status, result, result.get('message'),
                                       duration_seconds=job['duration_seconds'])
@@ -569,7 +601,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             return {'status': 'tokens_exhausted', 'message': str(exc)}, None
         except Exception as exc:
             with checkpoint_lock:
-                guard_failure = checking
+                guard_failure = checking or isinstance(exc, review_execution.EvidenceFailure)
                 try:
                     unchanged()
                 except Exception as guard_error:

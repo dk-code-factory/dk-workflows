@@ -69,10 +69,20 @@ def provider_metadata(result, provider):
     """Read inclusive CLI totals once; never sum nested model or agent usage."""
     model, usage = getattr(result, 'model', None), getattr(result, 'usage', None)
     if provider in ('claude', 'anthropic'):
+        stdout = output_text(getattr(result, 'stdout', None)) or ''
         try:
-            envelope = json.loads(output_text(getattr(result, 'stdout', None)) or '')
+            envelope = json.loads(stdout)
         except (ValueError, TypeError):
             envelope = None
+            # Required native-pass evidence uses verbose stream JSON. Only the
+            # root result carries the inclusive totals; never sum child events.
+            try:
+                rows = [json.loads(line) for line in stdout.splitlines() if line.strip()]
+                results = [row for row in rows if isinstance(row, dict) and row.get('type') == 'result']
+                if len(results) == 1:
+                    envelope = results[0]
+            except (ValueError, TypeError, AttributeError):
+                pass
         if isinstance(envelope, dict) and isinstance(envelope.get('usage'), dict):
             if usage is None:
                 usage = dict(envelope['usage'])

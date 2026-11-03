@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.7.4.
+Independent MIT plugin for Claude Code and Codex. Version 1.7.5.
 
 ## Install
 
@@ -109,6 +109,8 @@ retain full v1 delivery; mixed formats are supported. Contract changes require f
 preparation. See the [handoff contracts](runtime/dk-pr-review/references/handoff-contracts.md).
 
 Providers return findings or draft content only. DK owns pinned revisions, engineering preparation, active Decisions, evidence checks, bounded correction/review loops, review-state tokens, aggregation, retries, telemetry, and authorized publication. Draft providers use the `dk-draft-v1` content contract and cannot grant publication authority. PR title/body and force-push guards still require completed review tokens and fresh evidence. The supplied `scripts/repo_rules_hook.py` is an optional generic JSON startup hook; installation does not change existing hooks.
+
+AD, Mat Pocock and Toolkit reviewers, and providers declaring nested review roles, need retained native execution evidence before coverage can be complete. A clean findings object alone does not establish that those passes ran. Missing execution, unavailable evidence and unresolved conditional applicability remain explicit blockers; checkpoint reuse and final coverage revalidate the retained proof. Historical results remain unchanged and cannot supply missing execution evidence retroactively.
 
 For a Codex startup integration that follows installed plugin versions, copy
 `scripts/codex_rules_hook.py` from the installed plugin to a stable local hooks
