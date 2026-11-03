@@ -709,6 +709,7 @@ def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, go
                   'tree': git(root, 'rev-parse', head + '^{tree}').strip(), 'scope': digest(scope),
                   'scope_contents': scope, 'governing_sources': governing or {},
                   'rules': inherited_rules(catalog, agent, paths, inherited),
+                  'deferred_obligations': deferred,
                   **({'parent': parent} if parent else {}),
                   **({'checkout': checkout} if checkout else {})})
     if parent:
