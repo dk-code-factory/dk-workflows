@@ -31,6 +31,16 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path):
     checkout=tmp_path/'repo';checkout.mkdir()
     git('init','-q');git('config','user.name','Fixture');git('config','user.email','fixture@example.test')
     (checkout/'code.py').write_text('VALUE = 1\n')
+    # Issue #103: unrelated product-documentation conflicts must not become a
+    # global preparation gate for this value-change PR. Keep the contradictory
+    # source evidence in the actual pinned trees throughout the whole recipe.
+    unrelated_docs={
+        'DESIGN.md':'Startup invalidates old live execution.\n',
+        'RECOVERY.md':'Startup automatically resumes eligible old live execution.\n',
+        'PROVIDERS.md':'Provider adapters only read remote state.\n',
+        'PUBLICATION.md':'Provider adapters may submit reviews under server policy.\n',
+    }
+    for name,text in unrelated_docs.items():(checkout/name).write_text(text)
     git('add','.');git('commit','-qm','baseline');base=git('rev-parse','HEAD')
     git('checkout','-qb','pr-branch')
     (checkout/'code.py').write_text('VALUE = 0\n')
@@ -76,10 +86,12 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path):
     installed=tmp_path/'selected-skills';installed.mkdir()
     for name in ('domain','a','b'):(installed/(name+'.md')).write_text('Native fixture skill '+name)
     context=save('context.json',{'scope':'Return two.','decisions':['Return two.'],'instructions':'Fix this PR.'})
+    applicable_rules=save('applicable-rules.json',{'rules':['The settled value must be an integer.']})
     def spec(skill,task='content-review',current=None,cacheable=True):
         value={'repository':REPO,'pr':PR,'skill':{'identity':'fixture:'+skill,'resources':{'skill':str(installed/(skill+'.md'))}},
                'task':{'id':task,'instructions':'Perform '+task+' against the complete pinned scope and instructions.'},
-               'inputs':{'context':str(context)},'options':{},'cacheable':cacheable,'governing_inputs_complete':True,
+               'inputs':{'context':str(context),'rules':str(applicable_rules)},
+               'options':{},'cacheable':cacheable,'governing_inputs_complete':True,
                'git':{'checkout':str(checkout),'target':base,'base':base,'head':current or git('rev-parse','HEAD')}}
         if skill in ('a','b'):
             value['skill']['resources']['implementation']=str(FIXTURE/'reviewer.py')
@@ -182,3 +194,6 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path):
     publish({'kind':'request-review','pr':PR,'head':head,'reviewers':['reviewer']})
     assert remote_value()['writes']==before_writes
     assert git('ls-remote',str(bare),'refs/heads/pr-branch').split()[0]==head
+    for name,text in unrelated_docs.items():
+        assert (checkout/name).read_text()==text
+        assert git('show',head+':'+name)==text.strip()
