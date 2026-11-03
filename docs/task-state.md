@@ -37,4 +37,28 @@ For iteration, use `start --run RUN_ID --cycle CYCLE_ID` for reviewers. Reuse ne
 
 A reusable result may contain findings. The helper validates completion and artifact integrity; the coordinating agent assesses dispositions and readiness. Failed, incomplete, damaged, explicitly invalidated or unfinished results cannot satisfy coverage. Concurrent callers serialize on a per-PR lock; the loser sees the unfinished claim. Artifacts are immutable and content-addressed. Do not edit manifests, erase a claim or create a new run to bypass a limit.
 
+One `status` batch shares Git calculations for identical full commit IDs,
+checkout context and Git options. Each task still captures its own resources,
+instructions, input files and options, including `cacheable:false` tasks. A new
+status, start or record gets a fresh capture boundary. Mutable refs, abbreviated
+IDs and revision expressions always resolve independently. Unsupported Git
+layouts or indirect configuration, replacements, grafts and shallow repositories
+also fall back to independent capture. Ordinary repositories and linked worktrees
+check configuration, environment and affected-path attributes before reuse.
+
+Reproduce the capture-process comparison with:
+
+```sh
+python3 -m pytest -q -s tests/test_state.py -k status_batch_process_count_comparison
+```
+
+The probe completes two reviewer specs with identical pinned Git inputs, then
+runs initial status, two independent reuse starts, and final status. It compares
+independent captures (42 Git processes) with batched status captures (28).
+Each optimized status uses two changed-path probes plus five Git calculations;
+identical target/base commit and tree queries share a result. Each separate start
+still performs seven Git processes. Counts exclude Store initialization, initial
+result recording, publication and CI. No reviewers or new cycles launch during
+the measured recipe. This measures subprocess count, not elapsed time or tokens.
+
 Direct invocation of any external skill bypasses this cache unless its caller explicitly uses these commands. External skills require no custom SDK, execution receipts or workflow lifecycle tokens.

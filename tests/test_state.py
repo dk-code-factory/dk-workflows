@@ -9,6 +9,7 @@ import sys
 
 import pytest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'runtime'))
+import state
 from state import Store, capture, read
 
 REPO='github.com/acme/project'
@@ -118,6 +119,7 @@ def test_squash_keeps_content_reviews_but_refreshes_history_and_head_checks(case
     git(checkout,'commit','--amend','-qm','regrouped message')
     new=git(checkout,'rev-parse','HEAD')
     for spec in (content,history,head_check):spec['git']['head']=new
+    assert [task['reusable'] for task in store.status([content,history,head_check])['tasks']] == [True,False,False]
     assert store.start(content)['action']=='reuse'
     assert store.start(history)['action']=='invoke'
     assert store.start(head_check)['action']=='invoke'
@@ -260,3 +262,202 @@ def test_missing_resources_cannot_trap_an_interrupted_claim_or_reset_budgets(cas
     assert retained['unfinished']==[] and retained['runs']['run']['cycles']==['c1']
     entry=read(store.manifest)['entries'][first['claim']['key']]
     assert entry['attempts'][0]['status']=='interrupted' and entry['invalidated']
+
+
+@pytest.mark.parametrize('linked', [False, True])
+def test_status_batch_process_count_comparison(case, tmp_path, monkeypatch, linked):
+    """Reproduce the issue's two completed-reviewer recipe, without model calls."""
+    a, store = case
+    if linked:
+        checkout = tmp_path/'linked'
+        git(a['git']['checkout'], 'worktree', 'add', '--detach', '-q', str(checkout), a['git']['head'])
+        a['git']['checkout'] = str(checkout)
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    done(store, a); done(store, b)
+    retained = read(store.manifest)
+    original_git = state.git
+    calls = []
+    def counted(*args):
+        calls.append(args)
+        return original_git(*args)
+    monkeypatch.setattr(state, 'git', counted)
+    def probe():
+        calls.clear()
+        assert all(t['reusable'] for t in store.status([a, b])['tasks'])
+        assert store.start(a)['action'] == store.start(b)['action'] == 'reuse'
+        assert all(t['reusable'] for t in store.status([a, b])['tasks'])
+        assert read(store.manifest) == retained
+        return len(calls)
+    # Independent captures reproduce the pre-optimization implementation.
+    with monkeypatch.context() as legacy:
+        legacy.setattr(state._CaptureContext, 'git', lambda self, source: state._capture_git(source))
+        before = probe()
+    after = probe()
+    assert before == 42 and after == 28
+    print(f'capture-related Git processes: independent={before}, status-batched={after}')
+
+
+@pytest.mark.parametrize('history,head_sensitive', [(False, False), (True, False), (False, True), (True, True)])
+def test_batch_capture_matches_independent_fingerprints_and_provenance(case, monkeypatch, history, head_sensitive):
+    a, store = case
+    a['git'].update(history=history, head_sensitive=head_sensitive)
+    b = deepcopy(a)
+    b['skill']['identity'] = 'reviewer:b'
+    b['task'] = {'id': 'other', 'instructions': 'Different assigned instructions'}
+    b['options'] = {'strict': True}
+    b['cacheable'] = False
+    expected = [capture(a), capture(b)]
+    observed = []
+    original = state.capture
+    def collect(spec, **kwargs):
+        value = original(spec, **kwargs)
+        observed.append(value)
+        return value
+    monkeypatch.setattr(state, 'capture', collect)
+    store.status([a, b])
+    assert observed == expected
+    observed[0]['components']['inputs']['git']['trees']['head'] = 'altered'
+    assert observed[1]['components']['inputs']['git']['trees']['head'] != 'altered'
+
+
+@pytest.mark.parametrize('field', ['target', 'base', 'head', 'history', 'head_sensitive', 'checkout'])
+def test_status_batch_separates_different_git_inputs(case, tmp_path, monkeypatch, field):
+    a, store = case
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    if field in {'target', 'base', 'head'}:
+        b['git'][field] = a['git']['base'] if field == 'head' else a['git']['head']
+    elif field == 'checkout':
+        other = tmp_path/'other'
+        git(tmp_path, 'clone', '-q', a['git']['checkout'], str(other))
+        b['git']['checkout'] = str(other)
+    else:
+        b['git'][field] = True
+    expected = [capture(a), capture(b)]
+    observed = []
+    original = state.capture
+    def collect(spec, **kwargs):
+        value = original(spec, **kwargs)
+        observed.append(value)
+        return value
+    monkeypatch.setattr(state, 'capture', collect)
+    store.status([a, b])
+    assert observed == expected
+
+
+@pytest.mark.parametrize('ref', ['HEAD', 'refs/heads/moving'])
+def test_status_resolves_mutable_refs_freshly_inside_one_batch(case, ref):
+    a, store = case
+    checkout = a['git']['checkout']
+    if ref == 'refs/heads/moving':
+        git(checkout, 'update-ref', ref, a['git']['head'])
+    a['git']['head'] = ref
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    done(store, a); done(store, b)
+    def specs():
+        yield a
+        git(checkout, 'update-ref', ref, a['git']['base'])
+        yield b
+    tasks = store.status(specs())['tasks']
+    assert tasks[0]['reusable']
+    assert not tasks[1]['reusable']
+
+
+@pytest.mark.parametrize('revision', ['abbreviated', 'expression'])
+def test_status_does_not_share_unpinned_git_calculations(case, monkeypatch, revision):
+    spec, store = case
+    head = spec['git']['head']
+    spec['git']['head'] = head[:12] if revision == 'abbreviated' else head+'^0'
+    calls = []
+    original = state.git
+    def counted(*args):
+        calls.append(args)
+        return original(*args)
+    monkeypatch.setattr(state, 'git', counted)
+    store.status([spec, deepcopy(spec)])
+    assert len(calls) == 14
+
+
+@pytest.mark.parametrize('packed', [False, True])
+def test_status_does_not_share_hex_ref_names(case, monkeypatch, packed):
+    spec, store = case
+    checkout = spec['git']['checkout']
+    git(checkout, 'update-ref', 'refs/tags/'+spec['git']['head'], spec['git']['base'])
+    if packed:
+        git(checkout, 'pack-refs', '--all')
+    calls = []
+    original = state.git
+    def counted(*args):
+        calls.append(args)
+        return original(*args)
+    monkeypatch.setattr(state, 'git', counted)
+    store.status([spec, deepcopy(spec)])
+    assert len(calls) == 14
+
+
+@pytest.mark.parametrize('kind', ['resource', 'context', 'instruction', 'assigned', 'option', 'missing', 'noncacheable-missing', 'invalid-option'])
+def test_status_batch_keeps_each_tasks_mutable_checks(case, kind):
+    a, store = case
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    if kind == 'noncacheable-missing':
+        b['cacheable'] = False
+    done(store, a); done(store, b)
+    def specs():
+        yield a
+        if kind == 'resource': Path(b['skill']['resources']['entry']).write_text('new reviewer')
+        elif kind == 'context': Path(b['inputs']['context']).write_text('new context')
+        elif kind == 'instruction': Path(b['instructions']['user']).write_text('new instruction')
+        elif kind == 'assigned': b['task']['instructions'] = 'new task'
+        elif kind == 'option': b['options']['strict'] = True
+        elif kind in {'missing', 'noncacheable-missing'}: Path(b['skill']['resources']['entry']).unlink()
+        else: b['git']['history'] = 1
+        yield b
+    if kind in {'missing', 'noncacheable-missing', 'invalid-option'}:
+        with pytest.raises((OSError, ValueError)):
+            store.status(specs())
+    else:
+        tasks = store.status(specs())['tasks']
+        assert tasks[0]['reusable'] and not tasks[1]['reusable']
+
+
+@pytest.mark.parametrize('kind', ['config', 'attributes', 'index-attributes', 'environment', 'replace'])
+def test_status_batch_refreshes_changed_execution_context(case, monkeypatch, kind):
+    a, store = case
+    checkout = Path(a['git']['checkout'])
+    if kind in {'attributes', 'index-attributes'}:
+        (checkout/'.gitattributes').write_text('code -diff\n')
+        if kind == 'index-attributes':
+            git(checkout, 'add', '.gitattributes')
+            (checkout/'.gitattributes').unlink()
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    done(store, a); done(store, b)
+    calculations = []
+    original = state._capture_git
+    def counted(*args, **kwargs):
+        calculations.append(args)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(state, '_capture_git', counted)
+    def specs():
+        yield a
+        if kind == 'config': git(checkout, 'config', 'diff.noprefix', 'true')
+        elif kind == 'attributes': (checkout/'.gitattributes').write_text('code diff\n')
+        elif kind == 'index-attributes': git(checkout, 'rm', '--cached', '-q', '.gitattributes')
+        elif kind == 'environment': monkeypatch.setenv('GIT_CONFIG_COUNT', '1'); monkeypatch.setenv('GIT_CONFIG_KEY_0', 'diff.noprefix'); monkeypatch.setenv('GIT_CONFIG_VALUE_0', 'true')
+        else: git(checkout, 'replace', a['git']['head'], a['git']['base'])
+        yield b
+    tasks = store.status(specs())['tasks']
+    assert tasks[0]['reusable']
+    if kind != 'index-attributes':
+        assert not tasks[1]['reusable']
+    # The Git version may not consult indexed attributes for this tree diff,
+    # but changing the index must still prevent sharing its earlier capture.
+    assert len(calculations) == 2
+
+
+def test_git_drift_after_status_still_rejects_completion(case):
+    spec, store = case
+    store.status([spec, deepcopy(spec)])
+    claim = store.start(spec)['claim']
+    spec['git']['head'] = spec['git']['base']
+    with pytest.raises(ValueError, match='changed during'):
+        store.record(spec, claim['id'], b'x', {'complete': True}, 'complete')
+    assert store.status([spec])['tasks'][0]['unfinished']['id'] == claim['id']

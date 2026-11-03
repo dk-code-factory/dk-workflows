@@ -1,5 +1,6 @@
 """Small, host-independent task cache and retained workflow budgets (stdlib only)."""
 from contextlib import contextmanager
+from copy import deepcopy
 from pathlib import Path
 from urllib.parse import urlsplit
 import base64
@@ -83,7 +84,141 @@ def resource(path):
     return visit(path, set())
 
 
-def capture(spec):
+def _git_context(source):
+    """Cheap context check for ordinary repositories and linked worktrees.
+
+    Unusual Git layouts and indirection fall back to independent captures. This
+    is only a command-local optimization; resource capture never uses this key.
+    """
+    if any(name in os.environ for name in (
+            'GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_OBJECT_DIRECTORY',
+            'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_GLOBAL',
+            'GIT_CONFIG_COUNT', 'GIT_CONFIG_PARAMETERS', 'GIT_REPLACE_REF_BASE',
+            'GIT_SHALLOW_FILE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE', 'GIT_NAMESPACE',
+            'GIT_ATTR_SOURCE')):
+        return None
+    checkout = Path(source['checkout']).resolve()
+    try:
+        directory = checkout/'.git'
+        if directory.is_file():
+            value = directory.read_text().strip()
+            if not value.startswith('gitdir: '):
+                return None
+            directory = (checkout/value[8:]).resolve()
+        if not directory.is_dir():
+            return None
+        common = directory
+        if (directory/'commondir').is_file():
+            common = (directory/(directory/'commondir').read_text().strip()).resolve()
+        configs = [Path('/etc/gitconfig'), Path('/usr/local/etc/gitconfig'),
+                   Path.home()/'.gitconfig',
+                   Path(os.environ.get('XDG_CONFIG_HOME') or Path.home()/'.config')/'git/config',
+                   common/'config', directory/'config.worktree']
+        snapshots = []
+        for path in configs:
+            content = path.read_bytes() if path.exists() else None
+            # Includes and reftable repositories require a wider context than
+            # this fast path can establish without more Git processes.
+            if content and (re.search(rb'(?im)^\s*\[\s*include', content)
+                            or any(word in content.lower() for word in
+                                   (b'reftable', b'attributesfile', b'orderfile', b'submodule'))):
+                return None
+            snapshots.append((str(path.resolve()), content))
+        for path in (common/'refs/replace', common/'info/grafts', common/'shallow'):
+            if path.exists() and (not path.is_dir() or any(path.iterdir())):
+                return None
+        packed = common/'packed-refs'
+        content = packed.read_bytes() if packed.exists() else b''
+        if b' refs/replace/' in content:
+            return None
+        # A hex spelling may also name a mutable ref. Do not treat that
+        # ambiguous spelling as an immutable object input, even if Git happens
+        # to prefer the object on this version.
+        for pin in (source[key] for key in ('target', 'base', 'head')):
+            names = (pin, 'refs/'+pin, 'refs/tags/'+pin, 'refs/heads/'+pin,
+                     'refs/remotes/'+pin, 'refs/remotes/'+pin+'/HEAD')
+            if any((root/name).exists() for root in (directory, common) for name in names):
+                return None
+            if any(line.split()[-1:] == [name.encode()] for line in content.splitlines() for name in names):
+                return None
+        # A committed diff still reads attributes from the working tree. Probe
+        # changed paths, then read only their attribute ancestry, not the tree.
+        names = git(checkout, '-c', 'diff.renames=false', 'diff', '--name-only', '-z',
+                    '--no-relative', '--no-ext-diff', '--no-textconv', '--no-renames',
+                    source['base'], source['head'], '--')
+        attributes = {common/'info/attributes', directory/'info/attributes',
+                      Path('/etc/gitattributes'), Path('/usr/local/etc/gitattributes'),
+                      Path(os.environ.get('XDG_CONFIG_HOME') or Path.home()/'.config')/'git/attributes'}
+        for name in names.split(b'\0'):
+            if not name:
+                continue
+            parent = checkout/Path(os.fsdecode(name)).parent
+            if not parent.is_relative_to(checkout):
+                return None
+            while parent.is_relative_to(checkout):
+                attributes.add(parent/'.gitattributes')
+                parent = parent.parent
+        for path in sorted(attributes):
+            snapshots.append((str(path.resolve()), path.read_bytes() if path.exists() else None))
+        # Retain indexed attribute state as part of the checkout context, too.
+        index = directory/'index'
+        snapshots.append((str(index.resolve()), index.read_bytes() if index.exists() else None))
+        return (str(checkout), str(directory.resolve()), str(common), tuple(snapshots),
+                tuple(sorted(os.environ.items())))
+    except (OSError, ValueError):
+        return None
+
+
+def _capture_git(source, *, deduplicate=False):
+    checkout = source['checkout']
+    resolved = {}
+    def resolve(value, kind):
+        key = value, kind
+        if not deduplicate or key not in resolved:
+            args = ('--verify',) if kind == 'commit' else ()
+            resolved[key] = git(checkout, 'rev-parse', *args, value + '^{'+kind+'}').decode().strip()
+        return resolved[key]
+    commits = {key: resolve(source[key], 'commit') for key in ('target', 'base', 'head')}
+    trees = {key: resolve(sha, 'tree') for key, sha in commits.items()}
+    diff = git(checkout, '-c', 'diff.renames=false', 'diff', '--binary', '--full-index',
+               '--no-ext-diff', '--no-textconv', '--no-renames', commits['base'], commits['head'], '--')
+    inputs = {'trees': trees, 'diff_sha256': hashlib.sha256(diff).hexdigest()}
+    for option in ('history', 'head_sensitive'):
+        if type(source.get(option, False)) is not bool:
+            raise ValueError(option + ' must be boolean')
+    if source.get('history'):
+        history = git(checkout, 'log', '--format=raw', '--no-abbrev', '--no-decorate', '--no-notes',
+                      commits['target'] + '..' + commits['head'])
+        inputs['history'] = hashlib.sha256(history).hexdigest()
+    if source.get('head_sensitive'):
+        inputs['commits'] = commits
+    return inputs, {'checkout': str(Path(checkout).resolve()), 'commits': commits}
+
+
+class _CaptureContext:
+    """Share only identical immutable Git calculations within one status call."""
+    def __init__(self):
+        self.git_captures = {}
+
+    def git(self, source):
+        pins = tuple(source[key] for key in ('target', 'base', 'head'))
+        options = tuple(source.get(key, False) for key in ('history', 'head_sensitive'))
+        context = None
+        if (all(isinstance(pin, str) and re.fullmatch(r'(?:[0-9a-f]{40}|[0-9a-f]{64})', pin)
+                for pin in pins) and all(type(value) is bool for value in options)):
+            context = _git_context(source)
+        if context is None:
+            return _capture_git(source)
+        key = context, pins, options
+        if key not in self.git_captures:
+            captured = _capture_git(source, deduplicate=True)
+            if tuple(captured[1]['commits'][name] for name in ('target', 'base', 'head')) != pins:
+                return captured
+            self.git_captures[key] = captured
+        return deepcopy(self.git_captures[key])
+
+
+def capture(spec, *, _context=None):
     subject = identity(spec['repository'], spec['pr'])
     task, skill = spec['task'], spec['skill']
     if (not isinstance(task, dict) or not isinstance(task.get('id'), str) or not task['id']
@@ -104,24 +239,8 @@ def capture(spec):
     governing = files(spec.get('instructions', {}))
     provenance = {}
     if 'git' in spec:
-        source = spec['git']
-        checkout = source['checkout']
-        commits = {key: git(checkout, 'rev-parse', '--verify', source[key] + '^{commit}').decode().strip()
-                   for key in ('target', 'base', 'head')}
-        trees = {key: git(checkout, 'rev-parse', sha + '^{tree}').decode().strip() for key, sha in commits.items()}
-        diff = git(checkout, '-c', 'diff.renames=false', 'diff', '--binary', '--full-index',
-                   '--no-ext-diff', '--no-textconv', '--no-renames', commits['base'], commits['head'], '--')
-        inputs['git'] = {'trees': trees, 'diff_sha256': hashlib.sha256(diff).hexdigest()}
-        for option in ('history', 'head_sensitive'):
-            if type(source.get(option, False)) is not bool:
-                raise ValueError(option + ' must be boolean')
-        if source.get('history'):
-            history = git(checkout, 'log', '--format=raw', '--no-abbrev', '--no-decorate', '--no-notes',
-                          commits['target'] + '..' + commits['head'])
-            inputs['git']['history'] = hashlib.sha256(history).hexdigest()
-        if source.get('head_sensitive'):
-            inputs['git']['commits'] = commits
-        provenance = {'checkout': str(Path(checkout).resolve()), 'commits': commits}
+        inputs['git'], provenance = (_context.git(spec['git']) if _context is not None
+                                     else _capture_git(spec['git']))
     fingerprint_inputs = {'contract': CONTRACT, **subject, 'task': task, 'skill': {
         'identity': skill['identity'], 'resources': resources}, 'instructions': governing,
         'inputs': inputs, 'options': spec.get('options', {})}
@@ -204,7 +323,8 @@ class Store:
                            'changed_inputs' if changed else saved['status'] if saved and saved['status'] != 'complete' else 'missing_or_incomplete_result')}
 
     def status(self, specs):
-        captures = [capture(spec) for spec in specs]
+        context = _CaptureContext()
+        captures = [capture(spec, _context=context) for spec in specs]
         if any(c['subject'] != self.subject for c in captures):
             raise ValueError('Specs refer to another PR')
         with self.locked() as manifest:
