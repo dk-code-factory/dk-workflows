@@ -1,7 +1,7 @@
 {
   "name": "dk-workflows",
-  "version": "2.0.0",
-  "description": "Thin agent-led PR review and iteration coordination.",
+  "version": "2.1.0",
+  "description": "Agent-led PR workflows with bundled drafting, feedback, publication, cleanup and CI skills.",
   "author": {
     "name": "Dmitry Kropachev"
   },
