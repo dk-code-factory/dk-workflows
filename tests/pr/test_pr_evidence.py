@@ -148,6 +148,25 @@ def test_incomplete_snapshots_and_pagination_are_rejected(tmp_path, part):
             threads.fetch_all_threads(metadata, tmp_path)
 
 
+@pytest.mark.parametrize('field', list(snapshots()[0]['pullRequest']))
+def test_supplied_snapshots_require_full_pr_metadata(tmp_path, field):
+    inline, top = snapshots()
+    del inline['pullRequest'][field]
+    a, b = save(tmp_path, inline, top)
+    with pytest.raises(ValueError):
+        evidence.collect(PR, tmp_path, thread_file=a, conversation_file=b)
+
+
+@pytest.mark.parametrize(('field', 'value'), [('title', None), ('title', ''),
+                                              ('description', None), ('description', 7)])
+def test_supplied_snapshots_require_original_pr_text(tmp_path, field, value):
+    inline, top = snapshots()
+    inline['pullRequest'][field] = value
+    a, b = save(tmp_path, inline, top)
+    with pytest.raises(ValueError, match='PR metadata'):
+        evidence.collect(PR, tmp_path, thread_file=a, conversation_file=b)
+
+
 def test_wrong_pr_head_and_cross_snapshot_identity_are_rejected(tmp_path):
     receipt = collected(tmp_path)
     with pytest.raises(ValueError, match='another PR'):
@@ -209,6 +228,35 @@ def test_exact_instruction_bytes_and_source_drift(tmp_path):
             evidence.verify(receipt['path'], tmp_path, sha256=receipt['sha256'])
 
 
+@pytest.mark.parametrize('link_kind', ['file', 'directory'])
+def test_instruction_symlink_retarget_rejects_before_recording(tmp_path, monkeypatch, link_kind):
+    first, second = tmp_path/'first', tmp_path/'second'
+    first.mkdir()
+    second.mkdir()
+    (first/'rules.txt').write_text('Keep deferred work')
+    (second/'rules.txt').write_text('Implement deferred work now')
+    if link_kind == 'file':
+        link = tmp_path/'rules.txt'
+        link.symlink_to(first/'rules.txt')
+        source = Path('rules.txt')
+        replacement = second/'rules.txt'
+    else:
+        link = tmp_path/'current'
+        link.symlink_to(first, target_is_directory=True)
+        source = Path('current/rules.txt')
+        replacement = second
+    monkeypatch.chdir(tmp_path)
+    receipt = collected(tmp_path, instruction_files=[source])
+    handoff, inline, top = evidence.load_handoff(receipt['path'], tmp_path, sha256=receipt['sha256'])
+    with patch.object(threads, 'fetch_stable_snapshot', return_value=inline), \
+         patch.object(conversation, 'fetch', return_value=top):
+        assert evidence.verify(receipt['path'], tmp_path, sha256=receipt['sha256'])['unchanged']
+        link.unlink()
+        link.symlink_to(replacement, target_is_directory=link_kind == 'directory')
+        with pytest.raises(ValueError, match='instructions changed'):
+            evidence.verify(receipt['path'], tmp_path, sha256=receipt['sha256'])
+
+
 def test_helpers_default_output_and_artifact_cli(tmp_path):
     inline, top = snapshots()
     for module, flag, value, kind in [(threads, '--pr', PR, 'threads'),
@@ -239,10 +287,14 @@ def test_legacy_conversation_input_remains_compatible(tmp_path):
         assert conversation.main() == 0
 
 
-@pytest.mark.parametrize('value', [[], {}, {'pullRequest': {'url': 7}}, {'pullRequest': {'url': PR, 'headRefOid': None}}])
-def test_malformed_identity_rejected_cleanly(value):
-    with pytest.raises(ValueError):
-        evidence.validate(value, 'threads')
+@pytest.mark.parametrize(('identity', 'message'), [(None, 'PR identity'),
+                         ({}, 'canonical PR URL'), ({'url': 7}, 'canonical PR URL'),
+                         ({'url': PR, 'headRefOid': None}, 'captured head')])
+def test_malformed_identity_rejected_cleanly(identity, message):
+    inline, _ = snapshots()
+    inline['pullRequest'] = identity
+    with pytest.raises(ValueError, match=message):
+        evidence.validate(inline, 'threads')
 
 
 @pytest.mark.parametrize('damage', ['missing', 'corrupt', 'dropped_instructions', 'substituted_sources'])

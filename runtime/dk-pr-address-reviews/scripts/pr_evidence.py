@@ -59,6 +59,14 @@ def validate(snapshot, kind):
     if not isinstance(items, list) or snapshot.get('itemCount') != len(items):
         raise ValueError('snapshot item count is invalid')
     if kind == 'threads':
+        metadata = snapshot['pullRequest']
+        required_metadata = {'number', 'url', 'state', 'title', 'description', 'headRefName',
+                             'headRefOid', 'headRepository', 'baseRefName', 'baseRefOid',
+                             'closingIssuesReferences', 'isCrossRepository'}
+        if (not required_metadata.issubset(metadata)
+                or not isinstance(metadata['title'], str) or not metadata['title']
+                or not isinstance(metadata['description'], str)):
+            raise ValueError('thread snapshot PR metadata is incomplete or invalid')
         values = snapshot.get('threads')
         if (snapshot.get('schemaVersion') != 1 or not isinstance(values, list)
                 or snapshot.get('threadCount') != len(values)
@@ -165,7 +173,8 @@ def collect(pr, cwd, *, thread_file=None, conversation_file=None, instruction_fi
     directory = allocate(repository=cwd)
     instructions = []
     for index, source in enumerate(instruction_files):
-        original = Path(source).resolve(strict=True)
+        # Keep the lookup path so later symlink changes refresh the governing source.
+        original = Path(source).absolute()
         content = original.read_bytes()
         path = directory / f'instructions-{index}.txt'
         atomic_bytes(path, content)
