@@ -6,6 +6,7 @@ from pathlib import Path
 
 from shared import architecture, bindings, review_execution
 from shared.preparation_views import reviewer_view
+from shared.preparation_graph import digest as preparation_digest
 
 ROOT = Path(__file__).resolve().parents[2]
 COHORT = [('codex-ad', 'code-review-ad:code-review-ad', 'codex'),
@@ -20,6 +21,11 @@ SOURCE_CATEGORIES = {'issues', 'feedback', 'choices', 'user_instructions', 'run_
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def json_equal(left, right):
+    """Preserve JSON scalar types when comparing retained guidance copies."""
+    return json.dumps(left, sort_keys=True) == json.dumps(right, sort_keys=True)
 
 
 def private_path(value):
@@ -104,6 +110,9 @@ def packets(handoff, recipient):
                    'metadata': metadata.get('snapshot') or metadata['path']}
         decisions = read(handoff['full_decisions']) if 'full_decisions' in handoff else handoff['decisions']
         architecture.validate_preparation(prepared, context, decisions, live=False)
+        require(coordinator['paths'] == architecture.changed_paths(
+                    handoff['checkout'], handoff['base_sha'], handoff['head_sha']),
+                'architecture changed paths differ from captured revisions')
     for role, reference in references.items():
         private_path(reference['path'])
         packet = architecture.load(reference)
@@ -189,6 +198,11 @@ def delivery(run, handoff, proof):
                         and item.get('tool') == 'spawn_agent'
                         and item.get('sender_thread_id') == session and record['pointer'] == '/item/prompt',
                         'delivery must cite the direct specialist launch prompt')
+                receivers = item.get('receiver_thread_ids')
+                require(item.get('status') == 'completed' and isinstance(receivers, list)
+                        and len(receivers) == 1 and isinstance(receivers[0], str)
+                        and bool(receivers[0]) and receivers[0] != session,
+                        'native delivery launch did not establish a specialist recipient')
             else:
                 session = next((e['session_id'] for e in events if e.get('type') == 'result'), None)
                 require(isinstance(session, str) and bool(session), 'native delivery session marker unavailable')
@@ -200,6 +214,15 @@ def delivery(run, handoff, proof):
                         and evidence.get('parent_tool_use_id') is None and block.get('type') == 'tool_use'
                         and block.get('name') in ('Task', 'Agent'),
                         'delivery must cite the direct specialist launch prompt')
+                call = block.get('id')
+                require(isinstance(call, str) and bool(call) and not block['input'].get('resume')
+                        and any(event.get('type') == 'user' and event.get('session_id') == session
+                            and event.get('parent_tool_use_id') is None
+                            and any(part.get('type') == 'tool_result' and part.get('tool_use_id') == call
+                                    and part.get('is_error', False) is False
+                                    for part in event.get('message', {}).get('content', []))
+                            for event in events),
+                        'native delivery launch did not establish a specialist recipient')
             # An explicit JSON envelope avoids guessing what prose or a file path
             # conveyed. Existing traces without it can use source-bound observations.
             lines = [line.split('=', 1)[1] for line in selected.splitlines()
@@ -214,7 +237,7 @@ def delivery(run, handoff, proof):
                     and isinstance(selected, str) and record['excerpt'] in selected,
                     'delivery observation source excerpt unavailable')
             received = record['received']
-        require(received == delivery_payload(handoff, role), 'incomplete or changed guidance delivery: ' + role)
+        require(json_equal(received, delivery_payload(handoff, role)), 'incomplete or changed guidance delivery: ' + role)
         seen.add((role, slot))
         coverage.append({'recipient': role, 'attempt': slot, 'kind': kind})
     for slot in slots:
@@ -240,16 +263,22 @@ def inspect_run(run, binding, contract):
     if contract == 'git-diff-v2':
         prepared, decisions = (read(handoff[key]) for key in ('full_preparation', 'full_decisions'))
         require(handoff.get('preparation_view_version') == 1, 'unknown preparation view version')
-        require(handoff['preparation'] == reviewer_view(prepared, reviewer), 'compact guidance projection changed')
-        require(handoff['decisions'] == active_decisions(decisions), 'compact active Decisions changed')
+        require(json_equal(handoff['preparation'], reviewer_view(prepared, reviewer)), 'compact guidance projection changed')
+        require(json_equal(handoff['decisions'], active_decisions(decisions)), 'compact active Decisions changed')
     else:
         prepared, decisions = handoff['preparation'], handoff['decisions']
-    require(prepared['reviewers'][reviewer] == descriptor, 'preparation descriptor differs from execution')
-    require(handoff['reviewer_addendum'] == prepared['analysis']['reviewer_addenda'][reviewer],
+    require(json_equal(prepared['reviewers'][reviewer], descriptor), 'preparation descriptor differs from execution')
+    require(json_equal(handoff['reviewer_addendum'], prepared['analysis']['reviewer_addenda'][reviewer]),
             'assigned reviewer addendum changed')
     for key in ('base_sha', 'head_sha', 'pr_url'):
         require(prepared['identity'][key] == handoff[key], 'preparation governing revision mismatch: ' + key)
     sources = source_pins(prepared)
+    source = prepared['sources']['decisions']
+    original_decisions = read({'path': source.get('snapshot') or source['path'], 'sha256': source['sha256']})
+    require(json_equal(decisions, original_decisions), 'delivered Decisions differ from preparation original')
+    require(prepared['identity']['decisions_hash'] == preparation_digest(decisions)
+            and prepared['identity']['body_hash'] == decisions['body_hash'],
+            'preparation Decisions identity differs from delivered Decisions')
     patch = private_path(handoff['patch']).read_bytes()
     patch_hash = hashlib.sha256(patch).hexdigest()
     require(sources['patch'] == patch_hash, 'patch differs from preparation')
@@ -307,10 +336,10 @@ def compare(path):
                 runs.append(inspected)
             full, compact = runs
             require(full['method'] == compact['method'], 'installed version, procedure, sources or execution changed')
-            require(full['pins'] == compact['pins'], 'paired governing evidence or requested scope changed')
+            require(json_equal(full['pins'], compact['pins']), 'paired governing evidence or requested scope changed')
             pins = {k: full['pins'][k] for k in ('base_sha', 'head_sha', 'pr_url', 'scope', 'rules', 'patch', 'decisions', 'sources')}
             pins['shared_analysis'] = {k: v for k, v in full['pins']['analysis'].items() if k != 'reviewer_addenda'}
-            require(cohort is None or cohort == pins, 'cohort governing evidence or requested scope changed')
+            require(cohort is None or json_equal(cohort, pins), 'cohort governing evidence or requested scope changed')
             cohort = pins
             finding_sets = [{review_execution.digest(f): f for f in run['result']['findings']} for run in runs]
             left, right = finding_sets

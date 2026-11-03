@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'runtime'))
 from shared import architecture, bindings, compact_compatibility as compatibility, review_execution as execution
 from shared.preparation_views import reviewer_view
+from shared.preparation_graph import digest
 from test_review_execution import claude_rows, codex_rows, stream
 
 
@@ -25,12 +26,24 @@ def captures(tmp_path, monkeypatch):
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
     repository = tmp_path / 'repository'
     repository.mkdir()
+    def git(*args):
+        return subprocess.check_output(['git', '-c', 'user.name=Offline fixture',
+            '-c', 'user.email=fixture@example.test', *args], cwd=repository, text=True).strip()
+    git('init', '-q')
+    (repository / 'a.py').write_text('old\n')
+    git('add', 'a.py')
+    git('commit', '-qm', 'Synthetic base')
+    base = git('rev-parse', 'HEAD')
+    (repository / 'a.py').write_text('new\n')
+    git('commit', '-qam', 'Synthetic head')
+    head = git('rev-parse', 'HEAD')
     patch = tmp_path / 'patch.diff'
-    patch.write_text('diff --git a/a.py b/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-old\n+new\n')
+    patch.write_text(git('diff', base, head) + '\n')
     patch_ref = {'path': str(patch), 'sha256': hashlib.sha256(patch.read_bytes()).hexdigest()}
     decisions = {'decisions': [{'id': 'choice', 'status': 'active', 'text': 'Preserve exact scope.',
                                'conditions': 'Until upgraded.', 'rationale': 'Compatibility.', 'sources': ['user']}],
-                 'local_decisions': [], 'discussion_decisions': [], 'live_decisions': []}
+                 'local_decisions': [], 'discussion_decisions': [], 'live_decisions': [],
+                 'verified': True, 'body_hash': 'synthetic-body'}
     manifest = {'version': 1, 'provenance': 'synthetic', 'pairs': []}
     shared_sources = {'patch': patch_ref,
         'metadata': retain(tmp_path / 'metadata.json', {'url': 'https://example.test/pull/1'}),
@@ -60,7 +73,8 @@ def captures(tmp_path, monkeypatch):
                               'procedure': str(source), 'version': 'test', 'bundle_digest': 'synthetic',
                               'binding': binding}}
             prepared = {'preparation_version': 4, 'preparation_id': mode,
-                        'identity': {'base_sha': 'base', 'head_sha': 'head', 'pr_url': 'https://example.test/pull/1'},
+                        'identity': {'base_sha': base, 'head_sha': head, 'pr_url': 'https://example.test/pull/1',
+                                     'body_hash': decisions['body_hash'], 'decisions_hash': digest(decisions)},
                         'sources': {**shared_sources,
                             'reviewers/0': retain(directory / (mode + '-source-descriptor.json'), descriptor),
                             'reviewer-source/0/0': source_ref}, 'reviewers': {reviewer: descriptor},
@@ -160,8 +174,9 @@ def refresh(run, *, slots=(0,), findings=None):
 
 def add_architecture(captures):
     directory = captures[0].parent
+    first_handoff = compatibility.read(captures[1]['pairs'][0]['full']['handoff'])
     catalog = architecture.seal({'repository': 'path:' + str(directory / 'repository'),
-        'baseline': 'base', 'rules': [{'id': 'rule', 'agents': ['all'], 'patterns': ['*.py']}],
+        'baseline': first_handoff['base_sha'], 'rules': [{'id': 'rule', 'agents': ['all'], 'patterns': ['*.py']}],
         'conflicts': [], 'stale_rules': []})
     storage, _ = architecture.folder(directory / 'repository', catalog['repository'])
     catalog_path = storage / 'catalogs' / (catalog['fingerprint'] + '.json')
@@ -183,7 +198,7 @@ def add_architecture(captures):
             def packet(role):
                 value = architecture.seal({'schema_version': 1, 'kind': 'architecture-packet',
                     'repository': catalog['repository'], 'catalog': catalog['fingerprint'],
-                    'baseline': 'base', 'head': 'head', 'tree': 'tree', 'task': handoff['pr_url'],
+                    'baseline': handoff['base_sha'], 'head': handoff['head_sha'], 'tree': 'tree', 'task': handoff['pr_url'],
                     'agent': role, 'paths': ['a.py'], 'rules': catalog['rules'],
                     'scope': architecture.digest(scope), 'scope_contents': scope,
                     'governing_sources': governing,
@@ -215,6 +230,125 @@ def replace_preparation(run, handoff, prepared):
         handoff['preparation'] = prepared
     run['handoff'] = retain(Path(run['handoff']['path']), handoff)
     refresh(run)
+
+
+def replace_native_attempts(run, attempts):
+    handoff, descriptor = (compatibility.read(run[key]) for key in ('handoff', 'descriptor'))
+    with execution.collect(run['binding'], descriptor, run['handoff']['path'], handoff['checkout']) as collector:
+        for rows, returncode in attempts:
+            execution.record(run['binding']['host'], stream(rows), '', returncode, 0)
+        run['execution'] = execution.finish(collector, compatibility.read(run['result']))
+    proof = compatibility.read(run['execution'])
+    for record in run['deliveries']:
+        if 'event' in record:
+            record['source'] = proof['attempts'][0]
+
+
+@pytest.mark.parametrize('change', ['status', 'empty-receiver', 'invalid-receiver', 'self-receiver', 'claude-error'])
+def test_repaired_failed_launch_does_not_establish_delivery(captures, change):
+    pair_index = 1 if change == 'claude-error' else 0
+    run = captures[1]['pairs'][pair_index]['compact']
+    proof = compatibility.read(run['execution'])
+    original = compatibility.read(proof['attempts'][0])
+    failed = [json.loads(line) for line in original['stdout'].splitlines()]
+    repaired = json.loads(json.dumps(failed))
+    for row in failed:
+        item = row.get('item', {})
+        if item.get('tool') == 'spawn_agent':
+            if change == 'status':
+                item['status'] = 'failed'
+            else:
+                item['receiver_thread_ids'] = {'empty-receiver': [], 'invalid-receiver': [17],
+                                              'self-receiver': ['root']}[change]
+        for block in row.get('message', {}).get('content', []):
+            if block.get('type') == 'tool_result':
+                block['is_error'] = True
+    for row in repaired:
+        item = row.get('item', {})
+        if item.get('tool') == 'spawn_agent':
+            item['prompt'] = item['prompt'].splitlines()[0]
+        for block in row.get('message', {}).get('content', []):
+            if block.get('type') == 'tool_use':
+                block['input']['prompt'] = block['input']['prompt'].splitlines()[0]
+    replace_native_attempts(run, [(failed, 1), (repaired, 0)])
+    execution.verify(run['execution'], run['binding'], compatibility.read(run['descriptor']), run['handoff']['path'])
+    row = compare(captures)['pairs'][pair_index]
+    assert row['status'] == 'incomplete'
+    assert 'launch' in row['issues'][0]
+
+
+@pytest.mark.parametrize('target', ['native', 'observation', 'compact'])
+def test_guidance_comparison_preserves_json_boolean_types(captures, target):
+    run = captures[1]['pairs'][0]['compact']
+    if target == 'compact':
+        handoff = compatibility.read(run['handoff'])
+        handoff['decisions']['verified'] = 1
+        run['handoff'] = retain(Path(run['handoff']['path']), handoff)
+        refresh(run)
+    elif target == 'observation':
+        run['deliveries'][-1]['received']['decisions']['verified'] = 1
+    else:
+        proof = compatibility.read(run['execution'])
+        original = compatibility.read(proof['attempts'][0])
+        rows = [json.loads(line) for line in original['stdout'].splitlines()]
+        for event in rows:
+            item = event.get('item', {})
+            if item.get('tool') == 'spawn_agent':
+                marker, envelope = item['prompt'].split('\nDK_REVIEW_DELIVERY_JSON=')
+                value = json.loads(envelope)
+                value['decisions']['verified'] = 1
+                item['prompt'] = marker + '\nDK_REVIEW_DELIVERY_JSON=' + json.dumps(value)
+        replace_native_attempts(run, [(rows, 0)])
+    row = compare(captures)['pairs'][0]
+    assert row['status'] == 'incomplete'
+    expected = 'Decisions changed' if target == 'compact' else 'guidance delivery'
+    assert expected in row['issues'][0]
+
+
+def test_consistently_narrowed_architecture_packets_cannot_omit_changed_paths(captures):
+    add_architecture(captures)
+    for label in ('full', 'compact'):
+        run = captures[1]['pairs'][0][label]
+        handoff = compatibility.read(run['handoff'])
+        prepared = compatibility.read(handoff['full_preparation']) if label == 'compact' else handoff['preparation']
+        references = [prepared['architecture']['packet'], handoff['architecture_packet'],
+                      *handoff['nested_architecture_packets'].values()]
+        for reference in references:
+            packet = architecture.load(reference)
+            packet.pop('fingerprint')
+            packet['paths'] = []
+            packet['rules'] = packet['rules'] if packet['agent'] == 'coordinator' else []
+            packet = architecture.seal(packet)
+            Path(reference['path']).write_text(json.dumps(packet))
+            reference['fingerprint'] = packet['fingerprint']
+        prepared['sources']['architecture/0'] = retain(Path(references[0]['path']), architecture.load(references[0]))
+        replace_preparation(run, handoff, prepared)
+    row = compare(captures)['pairs'][0]
+    assert row['status'] == 'incomplete'
+    assert 'architecture changed paths' in row['issues'][0]
+
+
+@pytest.mark.parametrize('change', ['source', 'identity'])
+def test_delivered_decisions_are_bound_to_preparation_original(captures, change):
+    for pair in captures[1]['pairs']:
+        for label in ('full', 'compact'):
+            run = pair[label]
+            handoff = compatibility.read(run['handoff'])
+            prepared = compatibility.read(handoff['full_preparation']) if label == 'compact' else handoff['preparation']
+            decisions = compatibility.read(handoff['full_decisions']) if label == 'compact' else handoff['decisions']
+            decisions['decisions'][0]['conditions'] = 'Changed governing condition.'
+            if change == 'source':
+                prepared['identity']['decisions_hash'] = digest(decisions)
+            else:
+                source = prepared['sources']['decisions']
+                prepared['sources']['decisions'] = retain(Path(source['path']), decisions)
+            handoff['decisions'] = compatibility.active_decisions(decisions) if label == 'compact' else decisions
+            if label == 'compact':
+                handoff['full_decisions'] = retain(Path(handoff['full_decisions']['path']), decisions)
+            replace_preparation(run, handoff, prepared)
+    report = compare(captures)
+    assert report['status'] == 'incomplete'
+    assert all('Decisions' in pair['issues'][0] for pair in report['pairs'])
 
 
 @pytest.mark.parametrize('source', ['manifest', 'context', 'metadata', 'decisions', 'patch',

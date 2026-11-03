@@ -47,6 +47,10 @@ Preparation sources select `snapshot` when present, otherwise `path`.
 The retained source index must include the standard preparation records and
 every evidence category, including explicit absence records. Installed reviewer
 procedure sources remain checked per pair rather than compared across providers.
+Delivered Decisions must match the original preparation Decisions source and
+its identity hash. Architecture-bearing captures also require the pinned Git
+checkout: coordinator paths must match both revisions' changed paths before
+recipient packet coverage can be considered complete.
 
 The manifest object has these fields:
 
@@ -121,6 +125,9 @@ Two kinds are supported:
   must contain the recipient's own `DK_REVIEW_PASS=ROLE` line and exactly one
   `DK_REVIEW_DELIVERY_JSON=JSON_OBJECT` line. This diagnostic envelope is optional
   trial instrumentation, not a change to either handoff version or live gates.
+  Codex launches require a completed spawn and a distinct child identity. Claude
+  launches require a matching successful tool response. A failed launch retained
+  before transport repair cannot establish delivery.
 - `source-bound-observation` also supplies nonempty `excerpt` and `received`.
   The excerpt must occur in the string selected by the source pointer. `received`
   is the observer's explicit normalized delivery observation. Retain the native
@@ -132,6 +139,7 @@ Two kinds are supported:
 
 `received` (or the native envelope's JSON object) must equal the exact object
 returned by `shared.compact_compatibility.delivery_payload(handoff, recipient)`:
+JSON scalar types remain distinct, including booleans and numbers.
 
 ```python
 {
