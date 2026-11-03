@@ -67,7 +67,7 @@ def classification(command, code, data):
     """Only documented structured outcomes may turn a failed call into a block."""
     value = data if isinstance(data, dict) else {}
     objects = {'edit-pr', 'post-review', 'publication-actions', 'branch-publish', 'run-state',
-               'decisions', 'ci-wait', 'completion', 'replies', 'conversation', 'inline-feedback'}
+               'decisions', 'ci-wait', 'completion', 'replies', 'conversation', 'inline-feedback', 'partition-prs'}
     if not code and command in objects and not isinstance(data, dict):
         return 'error', 'malformed_output', 'Inspect retained native output before resuming.'
     diagnostic = value.get('diagnostic')
@@ -96,6 +96,9 @@ def classification(command, code, data):
             reason = 'publication_pending'
     elif command == 'reviewers' and value.get('complete') is False:
         reason = 'review_incomplete'
+    elif command == 'partition-prs' and value.get('outcome') in {
+            'assessment_required', 'partition_pending', 'awaiting_approval', 'selection_ready', 'resume_required'}:
+        reason = 'partition_' + value['outcome']
     elif command == 'run-state' and value.get('status') == 'blocked':
         reason = value.get('readiness') or 'review_reconciliation_blocked'
     elif command == 'update' and value.get('action') == 'stop':

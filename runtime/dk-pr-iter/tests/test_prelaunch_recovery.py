@@ -523,6 +523,7 @@ def test_malformed_session_has_unknown_accounting_and_restore_guidance(tmp_path,
         'preparation': {'path': 'prepared'}, 'review_sessions': [{
             'iteration_run_id': 'run', 'cycle': 1, 'attempt': 1, 'head': head, 'session_file': str(target)}]}
     monkeypatch.setattr(state, 'work_gate', lambda *_: {})
+    monkeypatch.setattr(state, 'partition_ready', lambda *_: {'outcome': 'below_threshold'})
     before = copy.deepcopy(record)
     status = state.cycle_status(record)
     entry = status['cycles'][0]['sessions'][0]
@@ -668,6 +669,7 @@ def test_missing_binding_fields_report_unknown_and_restore_without_invented_refe
         'cycles': [{'number': 1, 'head': 'a' * 40}], 'review_sessions': [binding],
         'review_results': [], 'preparation': {'path': 'ready'}}
     monkeypatch.setattr(state, 'work_gate', lambda *_: {})
+    monkeypatch.setattr(state, 'partition_ready', lambda *_: {'outcome': 'below_threshold'})
     before = copy.deepcopy(record)
     item = state.cycle_status(record)['cycles'][0]['sessions'][0]
     assert item['state'] == 'unknown' and item[missing] is None

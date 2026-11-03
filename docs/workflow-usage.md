@@ -93,3 +93,28 @@ The supplied evidence remains an observation; it grants no publication or review
 authority. Only actual `run_state` terminal observations establish the iteration
 outcome. Standalone workflows retain their coverage and lifecycle status without
 inventing an iteration completion record.
+
+## PR partitions
+
+The `partition-prs` route exposes `check`, `prepare`, `verify`, `publish` and
+`reconcile`; use common `--cwd` and `--pr` before the route. It returns retained
+artifact receipts like `split`. `config pr-size list|set|reset` manages per-setting
+threshold/mode inheritance. `run-state partition-assessment --head SHA --state FILE`
+registers its prepared evidence, and `partition-gate --head SHA` prevents pending
+partitions from reaching CI/review/completion. See the
+[partition contract](../runtime/dk-pr-split-commits/references/partition-prs.md).
+
+`config pr-partition show|enable|disable|instructions|clear-instructions|reset`
+with common `--pr` context records a persistent preference and human source for
+one PR. `partition-prs check` returns that preference for worker handoffs.
+`partition-prs assess --assessment-file FILE --evidence-file FILE` records a
+conditional retain judgment without candidates; conditional partition judgments
+belong in the plan's `policy_assessment`. Both are bound to the current policy and
+evidence. Proposal-specific declines remain separately audited.
+
+After a policy change during partial publication, reconcile uncertain writes.
+`partition-prs cancel --state FILE` records a safe stop under a whole-PR disable
+while the original source is intact. After enabling, `resume --state FILE
+--candidate-hash HASH` rechecks governing inputs and reuses verified artifacts;
+conditional assessment and fresh manual approvals apply. Neither operation erases
+recovery evidence or resets review budgets.

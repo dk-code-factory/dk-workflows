@@ -18,7 +18,7 @@ from shared.diagnostics import Diagnostic, emit
 
 ARTIFACT_DEFAULTS = {'run-state', 'replies', 'reviewers', 'conversation', 'inline-feedback',
                      'edit-pr', 'post-review', 'publication-actions', 'branch-publish',
-                     'split', 'decisions'}
+                     'split', 'partition-prs', 'decisions'}
 # Each row is a packaged script, cwd argument placement, PR argument, repo argument.
 ROUTES = {
     'architecture': ('runtime/dk-architect/scripts/architecture.py', 'before', 'url', False),
@@ -42,6 +42,7 @@ ROUTES = {
     'replies': ('runtime/dk-pr-reply-review/scripts/reply_passes.py', 'before', 'url', False),
     'reply-batch': ('runtime/dk-pr-reply-review/scripts/reply_batch.py', None, None, False),
     'split': ('runtime/dk-pr-split-commits/scripts/split_guard.py', None, 'url', False),
+    'partition-prs': ('runtime/dk-pr-split-commits/scripts/partition_prs.py', 'before', 'url', False),
     'flaky-tests': ('runtime/dk-flaky-tests/scripts/flaky_tests.py', 'before', None, True),
     'discovery': ('runtime/shared/discovery_cache.py', 'after', 'url', False),
     'draft': ('runtime/shared/drafting.py', 'before', 'url', False),

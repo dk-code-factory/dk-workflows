@@ -260,3 +260,32 @@ class RulesTest(unittest.TestCase):
         self.assertIn('refresh failed',json.loads(p.stdout)['systemMessage'])
 
 if __name__=='__main__': unittest.main()
+
+
+def test_pr_size_cli_partial_settings_and_reset(tmp_path):
+    import os
+    import subprocess
+    import sys
+    root = Path(__file__).resolve().parents[3]
+    env = dict(os.environ, XDG_DATA_HOME=str(tmp_path / 'private'))
+    def invoke(*args):
+        result = subprocess.run([sys.executable, str(root / 'runtime/dk-config/scripts/repo_rules.py'),
+            '--cwd', str(tmp_path), 'pr-size', *args], env=env, text=True, capture_output=True)
+        return result
+    default = invoke('list')
+    assert default.returncode == 0, default.stderr
+    assert json.loads(default.stdout)['pr_size']['added_lines_threshold'] == 1000
+    result = invoke('set', '--added-lines-threshold', '999', '--split-related', 'manual', '--scope', 'user')
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['settings']['split_related']['source'] == 'user'
+    assert invoke('set', '--added-lines-threshold', '0').returncode != 0
+    assert invoke('set', '--evacuate-unrelated', 'yes').returncode != 0
+    assert invoke('set').returncode != 0
+    assert invoke('reset', 'unknown_setting', '--scope', 'user').returncode != 0
+    result = invoke('reset', 'split_related', '--scope', 'user')
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['pr_size'] == {'added_lines_threshold': 999,
+        'evacuate_unrelated': 'automatic', 'split_related': 'automatic'}
+    result = invoke('reset', '--scope', 'user')
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['pr_size']['added_lines_threshold'] == 1000
