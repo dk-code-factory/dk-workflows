@@ -619,6 +619,55 @@ def test_status_falls_back_for_indirect_git_inputs(case, tmp_path, kind):
         assert expected[0] != before
 
 
+def test_status_refreshes_replacement_refs_with_continued_reftable_config(case, monkeypatch):
+    a, store = case
+    checkout = Path(a['git']['checkout'])
+    migration_help = subprocess.run(['git', '-C', str(checkout), 'refs', 'migrate', '-h'],
+                                    capture_output=True, text=True)
+    if '--ref-format' not in migration_help.stdout+migration_help.stderr:
+        pytest.skip('Git does not support reftable migration')
+    git(checkout, 'refs', 'migrate', '--ref-format=reftable')
+    config = checkout/'.git/config'
+    original_config = config.read_bytes()
+    assert b'reftable' in original_config
+    config.write_bytes(original_config.replace(b'reftable', b'ref\\\ntable', 1))
+    assert git(checkout, 'config', '--get', 'extensions.refStorage') == 'reftable'
+    (checkout/'code').write_text('replacement tree\n')
+    git(checkout, 'commit', '-qam', 'replacement')
+    replacement = git(checkout, 'rev-parse', 'HEAD')
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    before = capture(a)
+    done(store, a); done(store, b)
+    expected = []
+    def specs():
+        yield a
+        git(checkout, 'replace', a['git']['head'], replacement)
+        expected.append(capture(b))
+        yield b
+    observed = []
+    original = state.capture
+    def collect(spec, **kwargs):
+        value = original(spec, **kwargs)
+        observed.append(value)
+        return value
+    monkeypatch.setattr(state, 'capture', collect)
+    tasks = store.status(specs())['tasks']
+    assert expected[0]['fingerprint'] != before['fingerprint']
+    assert observed == [before, expected[0]]
+    assert tasks[0]['reusable'] and not tasks[1]['reusable']
+
+
+def test_status_falls_back_for_cyclic_optional_attributes(case):
+    spec, store = case
+    attributes = Path(spec['git']['checkout'])/'.gitattributes'
+    attributes.symlink_to('.gitattributes')
+    before = capture(spec)
+    done(store, spec)
+    tasks = store.status([spec, deepcopy(spec)])['tasks']
+    assert all(task['reusable'] for task in tasks)
+    assert capture(spec) == before
+
+
 @pytest.mark.parametrize('metadata', ['gitfile', 'commondir'])
 def test_status_preserves_whitespace_in_git_metadata_paths(case, tmp_path, monkeypatch, metadata):
     a, store = case

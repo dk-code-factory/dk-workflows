@@ -163,7 +163,7 @@ def _git_context(source):
             normalized = content.removeprefix(b'\xef\xbb\xbf') if content else b''
             if (re.search(rb'(?im)^\s*\[\s*(?:include|attr)', normalized)
                     or any(word in normalized.lower() for word in
-                           (b'reftable', b'attributesfile', b'orderfile', b'submodule', b'worktree'))
+                           (b'refstorage', b'attributesfile', b'orderfile', b'submodule', b'worktree'))
                     or (source.get('history') and b'showsignature' in normalized.lower())):
                 return None
             snapshots.append((str(path.resolve()), content))
@@ -194,7 +194,7 @@ def _git_context(source):
         snapshots.append((str(index.resolve()), index_hash))
         return (str(checkout), str(directory.resolve()), str(common), tuple(snapshots),
                 tuple(sorted(os.environ.items())))
-    except (OSError, ValueError, subprocess.CalledProcessError):
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError):
         return None
 
 
