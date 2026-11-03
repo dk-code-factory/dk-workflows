@@ -1,12 +1,27 @@
 #!/usr/bin/env python3
-"""Run independent regression suites without module-name collisions."""
-import os,subprocess,sys
+"""Run offline workflow unit and full-recipe tests with an explicit skill dependency."""
+import argparse
+import json
+import os
 from pathlib import Path
-r=Path(__file__).resolve().parent.parent
-env=dict(os.environ,DK_HOST='codex',PYTHONPATH=str(r/'runtime'))
-dirs=[r/'tests']+sorted(r.glob('runtime/*/tests'))+sorted(r.glob('common/*/tests'))
-if (r/'runtime/dk-pr-address-reviews/scripts').exists():dirs.append(r/'runtime/dk-pr-address-reviews/scripts')
-for d in dirs:
- if not list(d.glob('test_*.py')):continue
- p=subprocess.run([sys.executable,'-m','pytest','-q',str(d),'--tb=short'],cwd=r,env=env)
- if p.returncode:sys.exit(p.returncode)
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[1]
+p = argparse.ArgumentParser(description=__doc__)
+p.add_argument('--pr-skills-root', type=Path, default=os.environ.get('DK_PR_SKILLS_ROOT'))
+a = p.parse_args()
+dependency = Path(a.pr_skills_root or ROOT/'.dependencies/dk-pr-skills').resolve()
+pin = json.loads((ROOT/'test-dependencies.json').read_text())['pr_skills']
+manifest = dependency/'.codex-plugin/plugin.json'
+if not manifest.is_file():
+    p.error('Provide --pr-skills-root or DK_PR_SKILLS_ROOT for '+pin['repository']+' at '+pin['revision'])
+metadata = json.loads(manifest.read_text())
+if metadata.get('name') != 'dk-pr-skills' or metadata.get('version') != pin['version']:
+    p.error('The test dependency must match the pinned skill identity/version')
+env = {**os.environ, 'PYTHONDONTWRITEBYTECODE':'1', 'DK_PR_SKILLS_ROOT':str(dependency)}
+with tempfile.TemporaryDirectory(prefix='dk-workflows-v2-tests-') as temporary:
+    result = subprocess.run([sys.executable, '-m', 'pytest', '-q', str(ROOT/'tests'), '--tb=short',
+                             '--basetemp', str(Path(temporary)/'tests')], cwd=ROOT, env=env)
+    raise SystemExit(result.returncode)
