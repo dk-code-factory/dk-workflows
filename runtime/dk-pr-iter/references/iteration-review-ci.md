@@ -1,24 +1,20 @@
 ## Review and CI loop
 
-The independent [architecture review](../../dk-architecture-review/procedure.md)
-is mandatory beside configured reviewers and never satisfies their requirements.
-Retain its result and rule-linked violations. Treat architecture_findings as
-actionable work: fix violations or request independent exceptions and repeat
-architecture review before completion. Never report a clean review while those
-findings remain. Missing/incomplete architecture
-coverage cannot be accepted as a configured provider failure. CI repair workers
-declare paths as `ci-repair` (or their stable skill ID), obtain a fresh work-gate
-architecture_packet, and follow [delivery](../../dk-architect/procedure.md), including
-nested handoffs, scope expansion and exception requests before a breach.
+The [pre-loop architecture stage](iteration-architecture.md) must be complete
+before cycle 1. Reuse its immutable result throughout this run. Each cycle runs
+only the configured reviewers, concurrently with separate immutable handoffs,
+checkpoints and telemetry, and aggregates them in configured order. Do not launch
+another architecture reviewer during review, CI repair, cleanup or completion.
+Continue delivering current architecture packets to reviewers and CI repair workers,
+including nested workers. Refresh packets when paths expand and obtain independent
+enforcer authorization before a rule breach. Recheck recorded architecture findings
+against the current head; unresolved findings block review and completion.
 
-Within each cycle the shared runner executes independent configured reviewers
-concurrently with the independent architecture role, using separate immutable handoffs, checkpoints and telemetry, then aggregates configured reviewers in
-configured order. Interruption aborts this invocation's in-flight provider
-transport and prevents later provider or correction launches, then waits for
-actual reviewer cleanup and checkpoint work before releasing session ownership.
-Completed checkpoints remain reusable; unfinished reviewers remain unknown and
-are rerun on exact-evidence resume rather than counted as provider failures.
-Genuine failures observed before interruption retain their classification.
+Interruption aborts this invocation's in-flight provider transport and prevents
+later provider or correction launches. Wait for actual reviewer cleanup and
+checkpoint work before releasing session ownership. Completed checkpoints remain
+reusable. Unfinished reviewers remain unknown and rerun on exact-evidence resume;
+genuine failures observed before interruption retain their classification.
 Review-and-fix cycles and their budgets remain sequential.
 
 After initial fixes, perform at most **five** sequential review-and-fix cycles. Give each cycle to a **new agent** working from a freshly pinned current PR head via [dk-pr-review](../../dk-pr-review/procedure.md); do not reuse a previous cycle's agent. Pass the saved thread snapshot and complete conversation artifact as scope evidence only when their head matches the current PR head; refresh them once when needed. Pass the current decision context, preparation artifact paths with both preparation_id and engineering_id, retained runtime and parent lifecycle context, and a concise summary, including unpublished discussion decisions and local choices. The review coordinator consumes the same boundaries and discovers per-reviewer addenda; it must not replace them with unconstrained review instructions. The review agent still pins its own current remote diff. Before delegation, allocate the cycle's session with `run_state.py review-session --head SHA` and give its returned `session_file` to dk-pr-review as `--session-file`. Each new cycle or authorized usage retry gets a fresh session. Only resume an interrupted session explicitly with `--resume`; never reuse completed sessions as a new cycle. The reviewer runner uses the same mandatory session and provenance contract as standalone review. Optional statistics may read iteration state to discover an omitted cycle. Save its JSON and register it with `run_state.py review-result --head SHA --file RESULT.json`. Iteration separately validates the active run/cycle/attempt, registered session result and finding assessments at completion. Use `review-finding:` plus `shared.review_coverage.digest(finding)` as each aggregated finding reference for ordinary validity and scope assessments; retain those assessments in the run record before completion. Verify findings and fix actionable in-scope work, then commit and push. Stop early on a complete review with no actionable in-scope fixes. Incomplete review is a blocker unless the human explicitly accepts its recorded provider failures as described below; never call it a clean review. Record cycle starts before delegation so a resumed run cannot exceed the cap.
@@ -35,13 +31,13 @@ identical head/base/tree, computed engineering scope, Decisions, reviewer order,
 effective instructions, runtime bindings and intact checkpoints for every role.
 Only structured helper/transport failures qualify. Free-form incomplete messages,
 malformed responses, semantic rejection, changed evidence, corruption and uncertain
-ownership cannot grant an attempt. Reuse completed configured and architecture
+ownership cannot grant an attempt. Reuse completed configured-reviewer
 checkpoints; rerun only eligible failed roles in the same session. Response slots
 and the sole correction remain consumed. Keep every original result/failure,
 recovery charge and activation receipt. Follow returned session_file and resume.
 Usage recovery retains its separate allowance; a usage-retried cycle cannot use
 this infrastructure recovery. Neither path grants another code-review cycle or a
-sixth cycle. Report allocations, dispatched/reused roles, architecture accounting,
+sixth cycle. Report allocations, dispatched/reused roles, the separate pre-loop architecture result,
 infrastructure recoveries and unresolved launch states separately.
 
 An untouched reservation receives ordinary initial launch guidance. A pending

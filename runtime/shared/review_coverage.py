@@ -173,7 +173,12 @@ def verify(item, prepared, *, accepted_failures=(), reconciliation=None, checkou
             or artifact['tree'] != tree or ((artifact['scope'] != current_scope or changed_head) and reconciliation is None)):
         raise ValueError('final tree or scope lacks review coverage')
     result = artifact['result']
-    if prepared.get('preparation_version', 1) >= 3:
+    if result.get('iteration_architecture'):
+        from shared import iteration_architecture
+        iteration_architecture.verify(result['iteration_architecture'], prepared)
+        if result.get('architecture_review') or result.get('architecture_findings'):
+            raise ValueError('iteration cycle contains an additional architecture review')
+    elif prepared.get('preparation_version', 1) >= 3:
         from shared import architecture
         api = preparation_api()
         raw_decisions = api.read(api.source_path(prepared, 'decisions'))

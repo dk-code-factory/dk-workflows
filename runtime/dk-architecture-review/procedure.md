@@ -16,9 +16,11 @@ refresh preparation with the intended manifest first. Return one coverage
 judgment for every catalog rule, including evidence-backed
 not-applicable judgments. Missing/duplicate coverage, provider failure and stale
 evidence block the gate. Incomplete means complete:false, a reason, and no coverage.
-The shared PR runner invokes this mandatory independent gate alongside configured
-reviewers. It never counts toward their requirements or changes their settings.
-Retain its immutable result in review-session and completion evidence. Unresolved
+The standalone PR runner invokes this independent gate alongside configured
+reviewers. PR iteration invokes it once after initial feedback fixes and before
+cycle 1, then retains that stage through later cycles and cleanup. It never counts
+toward configured reviewer requirements or changes their settings. Retain its
+immutable result and reviewed head in session and completion evidence. Unresolved
 violations and missing architecture reviews cannot be waived by accepting a
 configured reviewer's provider failure. Existing publication authorization remains
 unchanged; this role never posts reviews unless separately authorized.

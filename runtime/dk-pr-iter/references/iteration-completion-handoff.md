@@ -4,12 +4,14 @@ Follow [waiting and communication](waiting-communication.md) during this stage.
 Include its retained runtime path in every handoff; recipients read it and pass
 it to their nested workers.
 
-Include architecture catalog fingerprint, packet references, approved exceptions
-and independent architecture review in the completion handoff. The coverage gate
-requires complete rule coverage with current rule/code/scope evidence. Scope or
-Decisions changes trigger fresh architecture judgment during reconciliation even
-on an unchanged tree. Do not treat configured-reviewer failure acceptance as an
-architecture waiver; unresolved violations remain blocking.
+Include current architecture catalog fingerprints, packet references and approved
+exceptions, plus the run's immutable pre-loop architecture stage reference. Verify
+that original review and the current-head dispositions of its findings. Report its
+reviewed head separately from configured reviewers' current-tree coverage. Continue
+current rule delivery and engineering verification after scope or Decisions changes.
+Do not launch another architecture reviewer during reconciliation or completion.
+Configured-reviewer failure acceptance cannot waive a missing/incomplete pre-loop
+stage or unresolved architecture findings.
 
 A prepublication `cleanup_prechecks` receipt cannot supply final review coverage or authorize completion. `--cleanup-precheck` is accepted only by the review-stage gate. Report review readiness separately from cleanup and completion readiness.
 

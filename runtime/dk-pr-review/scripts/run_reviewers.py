@@ -389,6 +389,11 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                'rules': rules, 'pr_url': context['url'], 'preparation': preparation}
     findings, skipped_reviewers, failed_reviewers = [], [], []
     executed, reused = [], []
+    iteration_stage = (session.update(lambda data: data.get('iteration_allocation', {}).get('architecture_stage'))
+                       if session else None)
+    if iteration_stage:
+        from shared import iteration_architecture
+        iteration_architecture.verify(iteration_stage, preparation)
     architecture_result = None
     architecture_findings = []
     architecture_accounting = {'executed': [], 'reused': [], 'failed': [], 'exhausted': []}
@@ -405,7 +410,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                 'session_id': session.id if session else None, 'session_invocation': session.invocation if session else None,
                 'required_reviewers': reviewers, 'executed_reviewers': list(executed), 'reused_reviewers': list(reused),
                 'architecture_accounting': architecture_accounting, 'outcome': typed})
-        return {**value, 'outcome': typed, **({'failed_reviewers': failed_reviewers} if failed_reviewers else {}),
+        return {**value, **({'iteration_architecture': iteration_stage} if iteration_stage else {}), 'outcome': typed, **({'failed_reviewers': failed_reviewers} if failed_reviewers else {}),
                 **({'architecture_review': architecture_result} if architecture_result else {}),
                 **({'architecture_findings': architecture_findings} if architecture_findings else {}),
                 'executed_reviewers': executed, 'reused_reviewers': reused,
@@ -475,7 +480,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             return outcome({'complete': False, 'failed_reviewer': name, 'reason': str(exc),
                             'guard_failure': True, 'findings': [], 'skipped_reviewers': []})
 
-    if preparation.get('preparation_version', 1) >= 4:
+    if preparation.get('preparation_version', 1) >= 4 and not iteration_stage:
         try:
             cached = session.cached('architecture-review') if session else None
             if cached is not None:
@@ -750,7 +755,7 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
         (executed if name in jobs else reused).append(name)
 
     preparation_api.validate(preparation, context, decisions)
-    if preparation.get('preparation_version', 1) >= 4:
+    if preparation.get('preparation_version', 1) >= 4 and not iteration_stage:
         result, failure = results['architecture-review']
         if failure:
             architecture_accounting['failed'].append('architecture-review')

@@ -122,6 +122,7 @@ def test_contract_change_blocks_before_reusing_a_checkpoint_or_launching(deliver
     prepared = prepare([compact])
     legacy = {key: value for key, value in compact.items() if key != 'handoff_contract'}
     session = Mock()
+    session.update.return_value = None
     session.cached.return_value = {'findings': []}
     result = runner.review(package.context, [legacy], '', package.decisions, '', prepared, session=session)
     assert not result['complete'] and result['guard_failure']

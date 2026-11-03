@@ -62,7 +62,9 @@ After a verified no-op assessment, refresh operational evidence once. When the
 current coverage gate passes, retain the existing review and architecture coverage
 with zero subsequent preparation/comparison/architecture model calls. A rewritten
 head still needs guarded publication, new-head CI and final-head reconciliation.
-Architecture reuse requires validated tree, baseline, scope, catalog rules,
+For the pre-loop iteration stage, validate its original immutable inputs and
+current-head finding dispositions; do not repeat architecture review. Standalone
+architecture coverage reuse requires validated tree, baseline, scope, catalog rules,
 approvals and governing inputs; the receipt retains the coverage attestation.
 The separate completion agent consumes the existing assessment and verification;
 it runs fresh live gates without repeating preparation or series assessment.

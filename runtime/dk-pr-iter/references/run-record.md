@@ -306,3 +306,26 @@ Operational preparation refresh preserves assessment/result/verification reuse b
 runtime-computed engineering ID while retaining original preparation references.
 
 Use the owned helper and strict cleanup schema in [operational refresh](operational-refresh.md). `run-state timings` is diagnostic only.
+
+
+## Once-only architecture stage
+
+Fresh runs set `iteration_run.architecture_review_mode: once_before_cycles`.
+After initial feedback fixes, call `run-state architecture-review --head SHA`
+before allocating cycle 1. The helper reserves the stage before evaluator dispatch,
+retains its immutable preparation and review, and records `architecture_stage`.
+A completed stage returns the same reference on resume. Failed or uncertain
+dispatches block another evaluator launch; preserve their evidence and report
+the limitation. Runs without this marker keep their retained per-cycle behavior.
+
+Each review-session allocation binds the stage reference. Results retain it as
+`iteration_architecture`, separate from current-tree configured-reviewer coverage.
+Review recovery preserves the binding and dispatches only configured roles.
+Cleanup and completion validate the original review without launching architecture
+again, including after code fixes or tree-equivalent regrouping.
+
+For each original violation use `architecture-finding:` plus its coverage-item
+digest as the classification reference. Before another cycle or completion, record
+a verified `already_fixed` or evidence-backed `unsupported` classification on the
+current head. Do not classify a real excluded or deferred violation as unsupported.
+New requests after terminal runs clear this stage and receive their own review.

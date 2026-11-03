@@ -950,7 +950,7 @@ def review(value, context, decisions, *, exceptions=None, reviewer=None, recipie
     return retain(directory / 'reviews' / (saved['fingerprint'] + '.json'), saved)
 
 
-def verify_review(reference, prepared, context, decisions, *, live=True):
+def verify_review(reference, prepared, context, decisions, *, live=True, allow_violations=False):
     value = load(reference)
     delivered = validate_preparation(prepared, context, decisions, live=live)
     if not live:
@@ -974,6 +974,6 @@ def verify_review(reference, prepared, context, decisions, *, live=True):
     covered = [(r.get('rule_id'), r.get('revision')) for r in result['coverage']]
     if not result['complete'] or set(covered) != expected or len(covered) != len(expected):
         raise ValueError('Architecture review incomplete')
-    if any(r['status'] == 'violation' for r in result['coverage']):
+    if not allow_violations and any(r['status'] == 'violation' for r in result['coverage']):
         raise ValueError('Architecture violations remain unresolved')
     return value

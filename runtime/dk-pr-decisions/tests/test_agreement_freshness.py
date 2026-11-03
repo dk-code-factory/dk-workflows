@@ -296,6 +296,7 @@ def test_work_result_acceptance_and_both_completion_stages_recheck_store(package
     completion = load_module('agreement_completion', 'dk-pr-iter/scripts/completion.py')
     record = {'local_decisions': []}
     state.start_run(record)
+    record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
     state.attach_preparation(record, saved['artifact'], package.context['url'], package.head)
     state.next_cycle(record, package.head)
     record_path = package.write('run-record.json', record)

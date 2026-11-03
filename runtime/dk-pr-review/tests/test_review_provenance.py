@@ -148,6 +148,7 @@ def test_legacy_main_validates_effective_selection_before_completed_reuse(
     from preparation_fixtures import architecture_review
     write(preparation_path, prepared)
     state.start_run(record)
+    record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
     state.attach_preparation(record, preparation_path, context['url'], context['head_sha'])
     state.next_cycle(record, context['head_sha'])
     record_path = root / 'run.json'

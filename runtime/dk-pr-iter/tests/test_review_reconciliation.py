@@ -80,6 +80,7 @@ class Scenario:
         self.original = prep.read(self.original_path)
         record = {}
         state.start_run(record)
+        record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
         state.attach_preparation(record, self.original_path, p.context['url'], self.reviewed_head)
         for _ in range(cycles):
             state.next_cycle(record, self.reviewed_head)

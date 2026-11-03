@@ -57,6 +57,7 @@ def reviewed(tmp_path, monkeypatch):
     prepared = prep.read(saved['artifact'])
     record = {}
     state.start_run(record)
+    record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
     state.attach_preparation(record, saved['artifact'], context['url'], head)
     for _ in range(5):
         state.next_cycle(record, head)
@@ -107,6 +108,7 @@ def test_completed_five_cycle_request_starts_distinct_run_and_preserves_history(
     with pytest.raises(ValueError, match='no active'):
         state.start_run(record, resume=True)
     new = state.start_run(record)['id']
+    record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle scenario.
     assert new != old and record['cycles'] == [] and record['review_results'] == []
     assert record['run_history'][0]['review_results'] == [item]
     assert len(record['run_history'][0]['cycles']) == 5
@@ -301,6 +303,7 @@ def test_acceptance_is_bound_to_run_result_tree_and_scope(reviewed, change):
         record = read(path, {})
         state.finish_run(record, 'limited', 'Previous request ended')
         state.start_run(record)
+        record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle scenario.
         state.attach_preparation(record, record['run_history'][-1]['preparation']['path'],
                                  context['url'], context['head_sha'])
         state.next_cycle(record, context['head_sha'])

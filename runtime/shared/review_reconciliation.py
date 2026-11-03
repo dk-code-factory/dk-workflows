@@ -435,7 +435,12 @@ def reconcile(record_path, head, assessment_path, api, *, precheck=None):
                                                 'evidence': diagnostic_identity(binding, original, current)},
                               inherit_architecture=False)
     architecture_review = None
-    if comparison['equivalent'] and current.get('preparation_version', 1) >= 3:
+    original_result = coverage.load(binding['review_artifact'])['result']
+    if original_result.get('iteration_architecture'):
+        from shared import iteration_architecture
+        iteration_architecture.verify(original_result['iteration_architecture'], current,
+            run_id=binding['iteration_run_id'])
+    elif comparison['equivalent'] and current.get('preparation_version', 1) >= 3:
         from shared import architecture
         raw = api.preparation_api.read(api.preparation_api.source_path(current, 'decisions'))
         decisions = raw.get('data', raw)

@@ -185,8 +185,10 @@ def start_run(record, *, resume=False):
     for field in ('cycles', 'cycle_retries', 'infrastructure_recoveries', 'repairs', 'review_results', 'review_sessions', 'review_reconciliations', 'cleanup_prechecks'):
         record[field] = []
     record.pop('preparation', None)
+    record.pop('architecture_stage', None)
     record['iteration_run'] = {'id': uuid.uuid4().hex, 'status': 'active',
-                               'contract_version': 3, 'workflow_dir': str(allocate())}
+                               'contract_version': 3, 'workflow_dir': str(allocate()),
+                               'architecture_review_mode': 'once_before_cycles'}
     return record['iteration_run']
 
 
@@ -341,9 +343,79 @@ def append_unique(record, field, item, key):
     return item
 
 
+def architecture_stage(record, prepared, *, require_resolved=True):
+    """Keep the pre-loop architecture review separate from current-tree reviews."""
+    run = record.get('iteration_run', {})
+    if run.get('architecture_review_mode') != 'once_before_cycles':
+        return None
+    stage = record.get('architecture_stage', {})
+    if stage.get('status') != 'completed':
+        raise ValueError('pre-loop architecture review required; stage is ' + stage.get('status', 'missing'))
+    from shared import iteration_architecture
+    reference = stage['reference']
+    value = iteration_architecture.verify(reference, prepared, run_id=run['id'])
+    if require_resolved:
+        for finding in value['findings']:
+            ref = 'architecture-finding:' + review_coverage.digest(finding)
+            classification = record.get('threads', {}).get(ref, {}).get(prepared['identity']['head_sha'], {})
+            if (classification.get('classification') not in {'already_fixed', 'unsupported'}
+                    or not classification.get('evidence') or not classification.get('reason')):
+                raise ValueError('architecture finding remains actionable: ' + ref)
+    return reference
+
+
+def run_architecture_review(record_path, head):
+    """Reserve one evaluator call; perform model work outside the record lock."""
+    from shared import architecture, iteration_architecture
+    record_path = Path(record_path)
+    def reserve(record):
+        prepared = work_gate(record, head)
+        run = record['iteration_run']
+        if run.get('architecture_review_mode') != 'once_before_cycles':
+            raise ValueError('legacy run uses architecture review inside its review cycles')
+        if record.get('architecture_stage'):
+            reference = architecture_stage(record, prepared, require_resolved=False)
+            return {'reference': reference}
+        if record.get('cycles'):
+            raise ValueError('architecture review must run before the first review cycle')
+        slot = {'status': 'running', 'iteration_run_id': run['id'],
+                'preparation': record['preparation']['path'], 'head': head}
+        record['architecture_stage'] = slot
+        return {'slot': copy.deepcopy(slot), 'prepared': prepared, 'workflow_dir': run['workflow_dir']}
+    reservation = mutate(record_path, {}, reserve)
+    if 'reference' in reservation:
+        return reservation['reference']
+    slot, prepared = reservation['slot'], reservation['prepared']
+    context = preparation_api.context_for(prepared)
+    raw = preparation_api.read(preparation_api.source_path(prepared, 'decisions'))
+    decisions = raw.get('data', raw)
+    try:
+        from shared.workflow_timings import span
+        with span(context['url'], 'architecture'):
+            review = architecture.review(prepared['architecture'], context, decisions)
+        architecture.verify_review(review, prepared['architecture'], context, decisions, allow_violations=True)
+        reference = iteration_architecture.retain(reservation['workflow_dir'], slot, prepared, review)
+        def complete(record):
+            # Preparation and head must still match the reservation. A saved result
+            # never permits a second evaluator call after an uncertain outcome.
+            work_gate(record, head)
+            if record.get('architecture_stage') != slot or record['preparation']['path'] != slot['preparation']:
+                raise ValueError('architecture stage changed during review')
+            record['architecture_stage'] = {**slot, 'status': 'completed', 'reference': reference}
+        mutate(record_path, {}, complete)
+        return reference
+    except Exception as exc:
+        def fail(record):
+            if record.get('architecture_stage') == slot:
+                record['architecture_stage'] = {**slot, 'status': 'failed', 'reason': str(exc)}
+        mutate(record_path, {}, fail)
+        raise
+
+
 def next_cycle(record, head):
     require_head(head)
     prepared = work_gate(record, head)
+    architecture_stage(record, prepared)
     with bindings.pinned_bindings(prepared['reviewers'],
                                   cwd=prepared.get('workspace')):
         pass
@@ -372,11 +444,15 @@ def review_attempt(record, head):
     latest = max(retries, key=lambda r: r.get('attempt', 2), default=last)
     if head != latest['head']:
         raise ValueError('review head differs from recorded cycle')
-    return {'iteration_run_id': run['id'], 'cycle': last['number'], 'attempt': 1 + len(retries)}
+    identity = {'iteration_run_id': run['id'], 'cycle': last['number'], 'attempt': 1 + len(retries)}
+    if run.get('architecture_review_mode') == 'once_before_cycles':
+        identity['architecture_stage'] = record['architecture_stage']['reference']
+    return identity
 
 
 def review_session(record, head, record_path):
     prepared = work_gate(record, head)
+    architecture_stage(record, prepared)
     identity = review_attempt(record, head)
     entries = record.setdefault('review_sessions', [])
     item = next((v for v in entries if all(v[k] == value for k, value in identity.items())), None)
@@ -457,10 +533,12 @@ def reconcile_recovery(record, head, *, scope='', rules=''):
     plan = review_sessions.activation_plan(saved)
     context = preparation_api.context_for(prepared)
     current = review_sessions.identity(context, prepared, prepared['reviewer_order'], scope, rules)
+    expected = {'iteration_run_id': run['id'], 'cycle': number, 'attempt': 1}
+    if run.get('architecture_review_mode') == 'once_before_cycles':
+        expected['architecture_stage'] = architecture_stage(record, prepared)
     if (plan['prior_binding'] != original or plan['identity'] != current
-            or plan['binding']['head'] != head or plan['prior_allocation'] != {
-                'iteration_run_id': run['id'], 'cycle': number, 'attempt': 1}
-            or plan['allocation'] != {'iteration_run_id': run['id'], 'cycle': number, 'attempt': 2}
+            or plan['binding']['head'] != head or plan['prior_allocation'] != expected
+            or plan['allocation'] != {**expected, 'attempt': 2}
             or any(item['number'] == number for item in record.get('cycle_retries', []))):
         raise ValueError('pending recovery identity changed')
     proof = read(Path(plan['proof']['path']), {})
@@ -541,7 +619,7 @@ def cycle_status(record):
                 if recovery:
                     reference = recovery['proof']
                     saved = read(Path(reference['path']), {})
-                    allocation = {key: binding[key] for key in ('iteration_run_id', 'cycle', 'attempt')}
+                    allocation = review_sessions.iteration_allocation(binding)
                     if (review_coverage.digest(saved) != reference['sha256']
                             or saved.get('iteration_allocation') != allocation):
                         raise ValueError('historical recovery proof changed')
@@ -675,6 +753,10 @@ def current_review(record, prepared):
                        for s in record.get('review_sessions', []))):
         raise ValueError('current iteration cycle lacks review coverage')
     review_sessions.result_artifact(item['session_file'], reference)
+    if run.get('architecture_review_mode') == 'once_before_cycles':
+        expected = architecture_stage(record, prepared)
+        if artifact['result'].get('iteration_architecture') != expected:
+            raise ValueError('review result differs from the run architecture stage')
     return reference, artifact
 
 
@@ -911,6 +993,14 @@ def next_stage(record, head, record_path, *, verification=None, assessment=None)
         prepared = work_gate(record, head)
     except (ValueError, OSError, RuntimeError) as exc:
         return stage('preparation', [record_path], task('Refresh Decisions and engineering preparation, then register it.', record_path), str(exc))
+    try:
+        architecture_stage(record, prepared)
+    except (ValueError, OSError, KeyError) as exc:
+        return stage('architecture_review', [record_path, record['preparation']['path']],
+            recovery_command([*base, 'architecture-review', '--head', head], record_path)
+                if not record.get('architecture_stage') else
+                task('Resolve the recorded architecture findings or report the failed stage; do not rerun the evaluator.', record_path),
+            str(exc))
     # A drained typed role failure uses the same bounded infrastructure ledger.
     latest_binding = next((item for item in reversed(record.get('review_sessions', []))
         if record.get('cycles') and item.get('cycle') == record['cycles'][-1]['number']
@@ -1201,6 +1291,8 @@ def main():
     recovery.add_argument('--head', required=True)
     recovery.add_argument('--scope-file')
     recovery.add_argument('--rules-file')
+    architecture_command = sub.add_parser('architecture-review', help='Run the once-only architecture stage before review cycles')
+    architecture_command.add_argument('--head', required=True)
     session = sub.add_parser('review-session'); session.add_argument('--head', required=True)
     result = sub.add_parser('review-result')
     result.add_argument('--head', required=True); result.add_argument('--file', required=True)
@@ -1240,6 +1332,7 @@ def main():
                 from shared.workflow_timings import query
                 saved = read(path, default)
                 result = query(saved.get('preparation', {}).get('pr_url', 'https://' + a.repo + '/pull/' + str(a.pr)))
+            elif a.command == 'architecture-review': result = run_architecture_review(path, a.head)
             elif a.command == 'cycle-status': result = cycle_status(read(path, default))
             elif a.command == 'preparation-history': result = preparation_history(read(path, default))
             elif a.command == 'operational':
