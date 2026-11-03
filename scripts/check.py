@@ -59,9 +59,14 @@ def check(base=None):
                     if '://' in link or link.startswith('#'):continue
                     target=(path.parent/link.split('#')[0]).resolve()
                     assert target.is_relative_to(root) and target.is_file(),str(path)+': '+link
-    core_sources='\n'.join(p.read_text() for folder in ('runtime','scripts') for p in (ROOT/folder).glob('*.py') if p.name not in {'check.py','version.py','test.py'})
-    for forbidden in ('codex exec','claude -p','shared.executors','preparation_graph','architecture_packet'):
-        assert forbidden not in core_sources,'Unexpected core execution/domain integration: '+forbidden
+    for folder in ('runtime','scripts'):
+        for path in sorted((ROOT/folder).rglob('*.py')):
+            relative=path.relative_to(ROOT)
+            if 'tests' in relative.parts or '__pycache__' in relative.parts:continue
+            if relative.as_posix() in {'scripts/check.py','scripts/version.py','scripts/test.py'}:continue
+            text=path.read_text()
+            for forbidden in ('codex exec','claude -p','--ephemeral','shared.executors','preparation_graph','architecture_packet'):
+                assert forbidden not in text,'Unexpected core execution/domain integration: '+str(relative)+': '+forbidden
     if base:
         previous=json.loads(subprocess.check_output(['git','show',base+':.codex-plugin/plugin.json'],text=True,cwd=ROOT))
         changes=subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True,cwd=ROOT).splitlines()
