@@ -18,7 +18,7 @@ DESCRIBE = runner.describe_reviewer
 
 
 @pytest.fixture
-def prepared_description(pinned, tmp_path, monkeypatch, capsys):
+def prepared_description(pinned, tmp_path, monkeypatch, capsys, request):
     context, decisions, preparation, names, git = pinned
     plugin = tmp_path / 'plugin'
     (plugin / '.codex-plugin').mkdir(parents=True)
@@ -37,6 +37,12 @@ def prepared_description(pinned, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(runner, 'describe_reviewer', DESCRIBE)
     providers = [{'skill': 'fixture:review', 'host': 'current'},
                  {'command': [sys.executable, str(script), '{handoff}']}]
+    if getattr(request, 'param', None) == 'profiled':
+        from shared import codex_profiles
+        providers[0]['codex_profile'] = 'review'
+        monkeypatch.setattr(codex_profiles, 'resolve_profile', lambda profile, cwd=None: {
+            'profile': profile, 'settings': {'model': 'fixture-model'},
+            'identity_evidence': {'workspace': str(Path(cwd or Path.cwd()).resolve())}})
     names[:] = [runner.bindings.key(provider) for provider in providers]
     preparation['reviewers'] = {name: DESCRIBE(provider) for name, provider in zip(names, providers)}
     preparation['analysis']['reviewer_addenda'] = {name: 'Review the pinned diff.' for name in names}
@@ -84,6 +90,20 @@ def test_prepared_description_uses_exact_native_and_command_bindings(prepared_de
     result = invoke()
     assert result == {'reviewers': [preparation['reviewers'][name] for name in preparation['reviewer_order']]}
     assert not {'complete', 'review_artifact', 'review_session'} & result.keys()
+    registry.assert_not_called()
+
+
+@pytest.mark.parametrize('prepared_description', ['profiled'], indirect=True)
+@pytest.mark.parametrize('caller', ['repository', 'unrelated'])
+def test_prepared_profile_description_uses_owned_checkout(
+        prepared_description, tmp_path, monkeypatch, caller):
+    context, decisions, preparation, providers, registry, invoke = prepared_description
+    caller_directory = Path(context['repository']) if caller == 'repository' else tmp_path
+    assert caller_directory.resolve() != Path(context['checkout']).resolve()
+    monkeypatch.chdir(caller_directory)
+    result = invoke()
+    assert result == {'reviewers': [preparation['reviewers'][name]
+                                    for name in preparation['reviewer_order']]}
     registry.assert_not_called()
 
 

@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.7.7.
+Independent MIT plugin for Claude Code and Codex. Version 1.7.8.
 
 ## Install
 
@@ -102,6 +102,82 @@ This is an overview of the effective model; private files store reviewers and dr
 
 Skill bindings use the selected host's registry and manifest. Commands receive a `git-diff-v1` handoff through an argument vector, without a shell. No DK-specific provider manifest is required. Missing or ambiguous selected installations fail with diagnostics; unused plugins do not affect lookup. Legacy wrapper identities normalize in memory to the corresponding native skill and `host: claude`. Existing private-state and telemetry paths remain unchanged; aliases are recorded in `runtime/shared/bindings.py` without rewriting past observations.
 
+Native Codex skill bindings may select a named execution profile through the same
+binding files, for example:
+
+```json
+{"skill": "my-plugin:review", "host": "codex", "codex_profile": "review"}
+```
+
+`codex_profile` must be a native name containing letters, numbers, hyphens or
+underscores. `host: current` is checked against the resolved executor; Claude and
+command bindings reject profile selection. Omission preserves existing provider
+identities and execution arguments and performs no profile metadata discovery.
+A readable profile-v2 file is required at `$CODEX_HOME/<profile>.config.toml`
+(default home: `~/.codex`). This format was introduced in Codex 0.134; native
+selection rejects matching legacy selectors or tables in base `config.toml`.
+Definitions, model choices and user context thresholds stay in private Codex
+configuration.
+
+Resolution uses native no-turn validation and configuration discovery, including
+profile-controlled project trust/root markers and managed precedence. Relative
+`model_catalog_json` and `model_instructions_file` references use the selected
+file's lexical parent; inherited references keep their native origins. Contents
+and canonical targets are fingerprinted separately. Required facilities include
+native configuration/requirements reads, active catalogue discovery and
+`debug prompt-input`. Native default-model resolution also uses model listing
+when the accepted API-key catalogue projection does not apply. The adapter was
+validated with Codex 0.164.1; unavailable
+facilities or unsupported metadata fail visibly, and native version changes
+invalidate preparation.
+
+For profiled reviewers, preparation captures execution evidence in its owned
+execution checkout before analysis, retaining the supplied descriptor separately.
+Internal analysis keeps its existing source context. Native project trust is
+observed in the actual execution checkout; original-checkout trust is not copied.
+Exact live evidence stays workspace-bound. Engineering comparison projects only
+proved typed owned paths with content, source and target evidence; external
+references, trust changes and unknown fields remain governing.
+
+Preparation and telemetry distinguish configured values, effective request
+settings and CLI header observations. Native catalogue defaults, effort aliases,
+context maximum/headroom and compaction scope determine effective settings;
+a native proven absence remains distinct from an unknown value. Provider
+definitions and governing layers/catalogues are fingerprinted without retaining
+credential/header values. The metadata helper selects from a private immutable
+catalogue capture; actual execution continues through `codex exec --profile`
+without a catalogue override. Bounded input/catalogue rereads reject observed
+drift before launch, checkpoint reuse and result acceptance; they do not promise
+an atomic snapshot against transient changes between observations.
+
+Metadata helpers project required differences in selected-provider definitions,
+catalogue paths, top-level routing/auth settings and features, together with
+project trust/root markers and native sanitation controls. Discovery omits proxy
+routing URLs; credential-family destinations may require a private baseline read
+before the authoritative selected discovery round. Unchanged sensitive leaves
+stay in native files. Broker/masking booleans, credential environment-variable
+names and ordinary credential-family metadata remain supported.
+
+Required generic header and eligible bearer overrides use child-only native
+environment channels. Needed literal query/auth-argument, sensitive
+`model_catalog_url` or message-board bearer-token overrides without a proven safe
+channel fail before the affected helper starts. Explicit routing, OAuth, proxy,
+credential-destination and message-board URL fields reject required username or
+password user-info using native credential-position rules. This does not classify
+arbitrary path/query or other String values as secrets. Unused static-catalogue
+endpoint and inference fields are not copied or rejected. Original fingerprints
+exclude random transport variable names. These channels never alter the actual
+`codex exec --profile` environment or argv.
+
+The native raw-catalogue facility cannot address the special internal Work/Chat
+originator partitions used by some first-party hosts. Verification fails clearly
+for those dynamic routes; use an ordinary CLI environment or an explicitly
+configured native catalogue snapshot. An explicit static catalogue does not use
+those partitions. Missing profiles/files, unverifiable metadata and applicable
+observed-setting mismatches also stop execution. Known profile metadata stays
+outside compact reviewer prompts. Validation starts no model turn; offline
+regressions cover the adapter and retained-checkpoint guards.
+
 Review bindings can explicitly select `"handoff_contract": "git-diff-v2"` for a
 provider that supports compact input. It carries shared guidance, active Decisions,
 the assigned addendum and hashed references to complete originals. Existing bindings
@@ -153,6 +229,13 @@ The value must be a positive integer number of seconds; invalid values fail befo
 starting the provider. This applies to Claude, Codex, and command providers used for
 reviews, preparation, Decisions, and drafting. It is not a deadline for the entire workflow.
 
+Native Codex profile verification runs before and after provider execution and at
+other freshness gates outside this provider-process timeout. Each native metadata
+operation has its own local 30-second budget; one app-server call shares that
+budget across its requests. Several sequential operations may add minutes. This
+includes an additional baseline operation when credential-family discovery needs
+private leaf comparison. It is not a whole-attempt or whole-review deadline.
+
 Internal read-only analysis uses the calling host by default. After quota
 exhaustion, a coordinator may select an installed, authenticated alternate under
 the current task authorization by prefixing the original helper command with
@@ -165,6 +248,11 @@ resets a correction budget or relaxes evidence, review, CI or completion gates.
 See [the provider policy](common/lifecycle.md) for recovery and provenance details.
 
 Interruption aborts this invocation's in-flight provider transport and prevents later provider or correction launches, then waits for reviewer cleanup and checkpoint work before releasing session ownership. Completed checkpoints remain available for exact-evidence resume. Unfinished reviewers remain unknown rather than provider failures; a resume reruns them. Genuine failures observed before interruption retain their classification.
+
+An in-progress native profile metadata observation is not a cancellation point.
+It may finish its remaining locally bounded helpers before worker cleanup and
+checkpoint acknowledgement release ownership; interruption does not promise
+prompt cancellation of those metadata operations.
 
 Reviewer description, execution and configuration diagnostics reuse one Codex
 plugin inventory within each command invocation. A later invocation reads the

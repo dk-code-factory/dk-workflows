@@ -7,7 +7,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
-from shared.bindings import ROLES
+from shared.bindings import ROLES, execution_directory
 from shared.executors import invoke
 from shared.runtime_bundles import provider_scope
 
@@ -36,7 +36,7 @@ def validate(handoff, role):
 def draft(binding, role, handoff_path, cwd):
     handoff = json.loads(Path(handoff_path).read_text())
     validate(handoff, role)
-    with provider_scope(binding):
+    with execution_directory(cwd), provider_scope(binding):
         return _draft(binding, role, handoff_path, cwd, handoff)
 
 

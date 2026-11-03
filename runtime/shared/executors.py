@@ -13,12 +13,13 @@ import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from threading import Event, RLock
-from shared.bindings import current_host, resolve
+from shared.bindings import current_host, resolve, execution_directory
 from shared.diagnostics import Diagnostic, task
 from shared.private_state import write
 from shared.reviewer_telemetry import capture, trace_path
 from shared.workflow_storage import allocate
 from shared import workflow_usage
+from shared.codex_profiles import observed_settings
 
 
 class ProviderExhausted(RuntimeError):
@@ -623,6 +624,11 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
                      'its retained exchange and input file. Reduce oversized dispatch instructions '
                      'without dropping governing inputs, then retry manually with the existing budget.'),
                 outcome='error')
+    profile = resolved.get('codex_execution') if resolved else None
+    if resolved and 'codex_profile' in resolved['binding']:
+        checkout = Path(checkout).resolve()
+        from shared.codex_profiles import verify_profile
+        verify_profile(resolved, checkout)
     temp = tempfile.mkdtemp(prefix='dk-provider-')
     retain_temp = False
     proc, started, original, received = None, False, None, None
@@ -633,6 +639,9 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
                     '-C', str(checkout), '-o', str(output), '-']
             if required_execution or trace_path() or workflow_usage.context(env) is not None:
                 argv.insert(2, '--json')
+            if profile:
+                from shared.codex_profiles import profile_flags
+                argv[2:2] = profile_flags(resolved['binding']['codex_profile'])
         else:
             argv = ['claude', '--permission-mode', 'plan', '--no-session-persistence',
                     '--output-format', 'json', '--disallowedTools', 'Edit,Write,NotebookEdit', '-p']
@@ -644,9 +653,14 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
         started = True
         proc = capture(run_provider, argv, input=prompt, text=True, capture_output=True,
                        cwd=checkout, env=env, timeout=timeout, telemetry_prompt=prompt,
-                       telemetry_attempt=attempt, telemetry_provider=host, telemetry_output=output)
+                       telemetry_attempt=attempt, telemetry_provider=host, telemetry_output=output,
+                       telemetry_execution=profile)
         if proc.returncode:
             provider_failure('\n'.join(filter(None, (proc.stderr, proc.stdout))), prompt=prompt, fallback=f'{host} execution failed')
+        if profile:
+            from shared.codex_profiles import verify_observed, verify_profile
+            verify_observed(profile, observed_settings(proc.stderr))
+            verify_profile(resolved, checkout)
         if host == 'codex':
             if codex_write_failed(proc.stderr, output, prompt):
                 reason = 'Codex failed to write the requested response file'
@@ -709,7 +723,9 @@ def execute_process(prompt, checkout, host, env, resolved, attempt, timeout):
                               argv=argv, returncode=getattr(result, 'returncode', None),
                               stdout=output_text(getattr(result, 'stdout', None)),
                               stderr=output_text(getattr(result, 'stderr', None)),
-                              timeout_seconds=timeout, output=output, failure=original, response=received)
+                              timeout_seconds=timeout, output=output, failure=original, response=received,
+                              **({'codex_execution': {'prepared': profile,
+                                  'observed': observed_settings(output_text(getattr(result, 'stderr', None)))}} if profile else {}))
                 except (review_execution.EvidenceFailure, StorageFailure, OSError) as exc:
                     retain_temp = True
                     if not isinstance(exc, (StorageFailure, review_execution.EvidenceFailure)):
@@ -740,7 +756,8 @@ def invoke(binding, handoff_path, checkout, prompt, *, attempt=0):
     if _CANCELLATION.get() is not None:
         _CANCELLATION.get().check()
     from shared.runtime_bundles import retained_binding
-    resolved = resolve(binding)
+    with execution_directory(checkout):
+        resolved = resolve(binding)
     handoff = json.loads(Path(handoff_path).read_text()) if Path(handoff_path).is_file() else {}
     architecture_packet = handoff.get('architecture_packet')
     if architecture_packet:
