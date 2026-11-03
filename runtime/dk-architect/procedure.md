@@ -83,10 +83,17 @@ conflicts and stale rules are retained in `deferred_obligations` and in the
 immutable catalog. This records separate outstanding work; it does not schedule
 a repair or a follow-up issue, authorize changing those paths, resolve conflicts,
 or approve rule deviations. Relevant conflicts still require explicit resolution.
-Unknown conflict impact or unknown task paths block with the concrete uncertainty;
-inspect the cited conflict and refresh its impact evidence before requesting a
-product decision. Source citations alone never establish affected paths. Relevant
-stale evidence requires refresh or explicit resolution. Scope expansion requires
+New established rules held by conflicts remain in `conditional_rules`, separately
+from uncertain proposals. Deliver them only when every pending conflict has known
+impact disjoint from the declared task paths. Broad rule patterns still apply
+outside the conflicting scope. Evidence checks and exception approval requirements
+also apply to these delivered rules. Explicit conflict resolution discards held
+alternatives unless the user selects them; historical proposals cannot restore them.
+Unknown task paths require declaring the intended paths and creating a new packet.
+Unknown conflict impact requires inspecting the cited conflict and refreshing its
+impact evidence before requesting a product decision. Source citations alone never
+establish affected paths. Relevant stale evidence requires refresh or explicit
+resolution. Scope expansion requires
 a new packet and repeats these gates; validation checks the retained deferrals.
 To establish previously unknown impact during refresh, preserve the exact conflict
 text and sources and add patterns. The conflict remains pending and its original

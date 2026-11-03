@@ -298,8 +298,8 @@ def refresh_choices(directory, catalog):
         if any(parent[key] != catalog[key] for key in ('repository', 'baseline')):
             raise ValueError('Architecture edit history differs from selected baseline/repository')
         if 'user_resolution' in catalog:
-            before = {r['id']: r for r in parent['rules']}
-            after = {r['id']: r for r in catalog['rules']}
+            before = {r['id']: r for r in parent['rules'] + parent.get('conditional_rules', [])}
+            after = {r['id']: r for r in catalog['rules'] + catalog.get('conditional_rules', [])}
             for rule_id in before.keys() | after.keys():
                 if before.get(rule_id) != after.get(rule_id):
                     # Walk newest first so a later explicit re-add/edit wins.
@@ -407,6 +407,8 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
                     'reason': 'Resolved conflict requires explicit user reconsideration'}
         proposals[digest(proposal)] = proposal
     rules = [deepcopy(r) for r in old['rules'] if r['id'] not in deleted] if old else []
+    conditional = [deepcopy(r) for r in old.get('conditional_rules', [])
+                   if r['id'] not in deleted] if old else []
     for item in value['rules']:
         item = rule(item)
         item['sources'] = [source(root, baseline, ref) for ref in item['sources']]
@@ -414,7 +416,7 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
             proposal = {'rule': item, 'reason': 'Excluded obligation requires explicit user reconsideration'}
             proposals[digest(proposal)] = proposal
             continue
-        previous = next((r for r in rules if r['id'] == item['id']), None)
+        previous = next((r for r in rules + conditional if r['id'] == item['id']), None)
         if previous:
             # Semantic changes, including potentially stronger/conflicting ones,
             # require explicit user resolution; source refresh alone is allowed.
@@ -433,8 +435,9 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
         else:
             proposal = {'rule': item, 'reason': 'Conflicting obligations require user resolution'}
             proposals[digest(proposal)] = proposal
+            conditional.append(item)
     stale = []
-    for item in rules:
+    for item in rules + conditional:
         for ref in item['sources']:
             try:
                 source(root, baseline, ref)
@@ -447,7 +450,8 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
             item['sources'] = [source(root, baseline, ref) for ref in item['sources']]
     catalog = {'schema_version': 1, 'repository': key, 'baseline': baseline, 'tree': tree,
                'parent': expected, 'generation': (old['generation'] + 1 if old else 1),
-               'knowledge': knowledge, 'rules': rules, 'proposals': list(proposals.values()),
+               'knowledge': knowledge, 'rules': rules, 'conditional_rules': conditional,
+               'proposals': list(proposals.values()),
                'conflicts': list(conflicts.values()), 'stale_rules': sorted(set(stale))}
     with locked(directory):
         pointer = read(baseline_pointer(directory, baseline), None)
@@ -476,25 +480,29 @@ def edit(root, value=None, *, delete=None, user=None, expected=None, identity=No
             raise ValueError('Architecture catalog changed; inspect current catalog before editing')
         catalog = deepcopy(old)
         target = delete or value['id']
-        previous = next((r for r in catalog['rules'] if r['id'] == target), None)
+        conditional = catalog.setdefault('conditional_rules', [])
+        previous = next((r for r in catalog['rules'] + conditional if r['id'] == target), None)
         if delete:
             if previous is None:
                 raise ValueError('Unknown architecture rule')
-            catalog['rules'].remove(previous)
+            (catalog['rules'] if previous in catalog['rules'] else conditional).remove(previous)
         else:
             item = rule(value)
             item['revision'] = previous['revision'] + 1 if previous else 1
             item['sources'] = [source(root, catalog['baseline'], ref) for ref in item['sources']]
             if previous:
-                catalog['rules'].remove(previous)
+                (catalog['rules'] if previous in catalog['rules'] else conditional).remove(previous)
             catalog['rules'].append(item)
         catalog['parent'] = old['fingerprint']
         catalog['generation'] += 1
         catalog['user_resolution'] = evidence
         # Resolution explicitly identifies the obligations being reconciled.
+        discarded = set()
         if resolve_conflicts:
             catalog['conflicts'] = []
-        catalog['stale_rules'] = [r for r in catalog['stale_rules'] if r != target]
+            discarded = {r['id'] for r in catalog['conditional_rules']}
+            catalog['conditional_rules'] = []
+        catalog['stale_rules'] = [r for r in catalog['stale_rules'] if r != target and r not in discarded]
         return publish(directory, catalog)
 
 
@@ -513,9 +521,17 @@ def changed_paths(root, base, head):
 
 def selected(catalog, agent, paths):
     identities = {agent, agent.rsplit('@', 1)[0]}
+    rules = catalog['rules']
+    # Held rules are enforceable only while every pending choice is proved
+    # disjoint from this task. Explicit resolution never adopts alternatives.
+    if (paths is not None and catalog['conflicts'] and all(
+            isinstance(conflict, dict) and conflict.get('patterns')
+            and not any(matches(pattern, path) for pattern in conflict['patterns'] for path in paths)
+            for conflict in catalog['conflicts'])):
+        rules = rules + catalog.get('conditional_rules', [])
     if identities & MANDATORY:
-        return deepcopy(catalog['rules'])
-    return [deepcopy(r) for r in catalog['rules']
+        return deepcopy(rules)
+    return [deepcopy(r) for r in rules
             if ('all' in r['agents'] or identities.intersection(r['agents']))
             and (paths is None or not r['patterns']
                  or any(matches(pattern, path) for pattern in r['patterns'] for path in paths))]
@@ -528,14 +544,18 @@ def scoped_obligations(catalog, paths):
     for conflict in catalog['conflicts']:
         patterns = conflict.get('patterns') if isinstance(conflict, dict) else None
         text = conflict.get('text', repr(conflict)) if isinstance(conflict, dict) else str(conflict)
-        if patterns is None or paths is None:
+        if paths is None:
+            blocked.append(text + ' (task paths are unknown; declare intended repository-relative paths '
+                           'and create a new packet)')
+        elif patterns is None:
             blocked.append(text + ' (affected paths are unknown; establish impact with architecture refresh)')
         elif not patterns or any(matches(pattern, path) for pattern in patterns for path in paths):
             blocked.append(text + ' (conflict affects the declared paths; explicit user resolution required)')
         else:
             deferred['conflicts'].append(deepcopy(conflict))
     for rule_id in catalog['stale_rules']:
-        obligation = next((r for r in catalog['rules'] if r['id'] == rule_id), None)
+        obligation = next((r for r in catalog['rules'] + catalog.get('conditional_rules', [])
+                           if r['id'] == rule_id), None)
         if (obligation is None or paths is None or not obligation['patterns']
                 or any(matches(pattern, path) for pattern in obligation['patterns'] for path in paths)):
             blocked.append(rule_id + ' (stale rule evidence; refresh or explicitly resolve this obligation)')
