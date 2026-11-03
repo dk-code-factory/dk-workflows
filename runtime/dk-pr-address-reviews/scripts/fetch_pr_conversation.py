@@ -67,7 +67,8 @@ def normalize(items: list[dict], *, review: bool) -> list[dict]:
 
 
 def fetch(snapshot: dict, cwd: Path, attempts: int = 3) -> dict:
-    if snapshot.get("complete") is not True or not isinstance(snapshot.get("items"), list):
+    if (not isinstance(snapshot, dict) or snapshot.get("complete") is not True
+            or not isinstance(snapshot.get("items"), list)):
         raise FetchError("complete thread snapshot required")
     canonical_items = json.dumps(snapshot["items"], ensure_ascii=False, sort_keys=True,
                                  separators=(",", ":"))
@@ -110,11 +111,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--snapshot-file", required=True)
     parser.add_argument("--cwd", default=".")
+    parser.add_argument("--artifact", action="store_true", help="Store full snapshot privately; print a compact receipt")
     args = parser.parse_args()
     try:
+        from pr_evidence import ARTIFACT, load_artifact, write_artifact
         snapshot = json.loads(Path(args.snapshot_file).read_text())
+        if isinstance(snapshot, dict) and snapshot.get("contract") == ARTIFACT:
+            snapshot = load_artifact(snapshot, "threads", Path(args.cwd).resolve())
         result = fetch(snapshot, Path(args.cwd).resolve())
-    except (OSError, ValueError, FetchError) as error:
+        if args.artifact:
+            result = write_artifact(result, "conversation", Path(args.cwd).resolve())
+    except (OSError, ValueError, KeyError, TypeError, FetchError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
