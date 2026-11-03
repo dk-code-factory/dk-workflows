@@ -10,7 +10,7 @@ import pytest
 
 from test_stats_capture import runner
 from preparation_fixtures import Package, analysis, prep
-from shared import bindings, executors, review_execution, review_coverage
+from shared import bindings, executors, review_execution, review_coverage, workflow_usage
 from shared.review_sessions import Session
 
 
@@ -81,6 +81,39 @@ def test_clean_json_cannot_complete_without_native_passes(native, monkeypatch, t
     saved = json.loads(Path(ref['path']).read_text())
     assert saved['original_result'] == original
     assert saved['assessment']['status'] == reason
+
+
+@pytest.mark.parametrize('missing', [False, True])
+@pytest.mark.parametrize('usage_storage_failed', [False, True])
+def test_workflow_usage_remains_passive_while_native_execution_gate_is_required(
+    native, monkeypatch, capsys, missing, usage_storage_failed
+):
+    package, provider, name, prepared = native
+    receipt = {'token': 'native-execution-usage-root', 'skill': 'dk-pr-review', 'host': 'codex',
+               'runtime_digest': 'fixture-runtime', 'runtime_root': str(Path(__file__).resolve().parents[3]),
+               'invocation': str(package.root / 'usage-invocation.json'), 'lifecycle': {'identity': {}}}
+    usage = workflow_usage.register(receipt, package.root)
+    monkeypatch.setenv(workflow_usage.ENV, json.dumps(usage))
+    monkeypatch.delenv('DK_REVIEW_STATS_TRACE', raising=False)
+    if usage_storage_failed:
+        Path(usage['path']).write_text('corrupt passive usage storage')
+    rows = [json.loads(line) for line in events(missing=missing).splitlines()]
+    rows[-1]['usage'] = {'input_tokens': 4, 'output_tokens': 3, 'total_tokens': 7}
+    calls = transport(monkeypatch, ['{"findings":[]}'], ['\n'.join(json.dumps(row) for row in rows)])
+    result = runner.review(package.context, [provider], '', package.decisions, '', prepared)
+    assert len(calls) == 1
+    assert result['complete'] is not missing
+    assert bool(result.get('guard_failure')) is missing
+    proof = json.loads(Path(result['reviewer_execution'][name]['reference']['path']).read_text())
+    assert proof['assessment']['status'] == ('missing' if missing else 'complete')
+    if usage_storage_failed:
+        assert 'Workflow usage evidence unavailable' in capsys.readouterr().err
+    else:
+        report = workflow_usage.query(usage['path'])
+        assert report['review_coverage']['evidence']['outcome'] == ('guard_failed' if missing else 'completed')
+        assert report['usage']['tokens']['total_tokens']['known_subtotal'] == 7
+        executions = [event for event in report['events'] if event['kind'] == 'execution']
+        assert any(event['status'] == 'returned' for event in executions)
 
 
 @pytest.mark.parametrize('trace', [events(missing=True), ''])

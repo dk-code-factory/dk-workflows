@@ -27,7 +27,7 @@ from reviewer_prompts import preparation_instructions, source_files
 from stats_capture import for_iteration
 from shared.reviewer_telemetry import capture, transport
 from shared.role_failures import role_failure
-from shared import bindings, architecture, review_execution
+from shared import bindings, architecture, review_execution, workflow_usage
 from shared.runtime_bundles import retained_binding, retain
 from shared.review_sessions import Session
 from shared.preparation_views import reviewer_view
@@ -380,6 +380,12 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
     def outcome(value):
         typed = ('completed' if value.get('complete') else 'guard_failed' if value.get('guard_failure')
                  else 'provider_failed' if failed_reviewers or architecture_accounting['failed'] else 'usage_exhausted')
+        workflow_usage.observe('review_coverage', status='completed' if value.get('complete') else 'incomplete',
+            evidence={'pr_url': context['url'], 'base_sha': context['base_sha'], 'head_sha': context['head_sha'],
+                'preparation_id': preparation.get('preparation_id'), 'engineering_id': preparation.get('engineering_id'),
+                'session_id': session.id if session else None, 'session_invocation': session.invocation if session else None,
+                'required_reviewers': reviewers, 'executed_reviewers': list(executed), 'reused_reviewers': list(reused),
+                'architecture_accounting': architecture_accounting, 'outcome': typed})
         return {**value, 'outcome': typed, **({'failed_reviewers': failed_reviewers} if failed_reviewers else {}),
                 **({'architecture_review': architecture_result} if architecture_result else {}),
                 **({'architecture_findings': architecture_findings} if architecture_findings else {}),
@@ -422,6 +428,10 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                     review_execution.verify(saved, provider_map[name], preparation['reviewers'][name], delivered, cached)
                     execution_evidence[name] = {'reference': saved, 'handoff': delivered}
                 results[name] = (cached, None)
+                workflow_usage.observe('checkpoint_reuse', role=name, status='reused', evidence={
+                    'pr_url': context['url'], 'head_sha': context['head_sha'], 'base_sha': context['base_sha'],
+                    'preparation_id': preparation.get('preparation_id'), 'session_id': session.id,
+                    'session_invocation': session.invocation, 'binding': preparation['reviewers'][name]})
                 from shared.workflow_timings import span
                 with span(context['url'], 'reviewer:' + name, reused=True):
                     pass
@@ -451,6 +461,10 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             if cached is not None:
                 architecture.verify_review(cached, preparation['architecture'], context, decisions)
                 results['architecture-review'] = (cached, None)
+                workflow_usage.observe('checkpoint_reuse', role='architecture-review', status='reused', evidence={
+                    'pr_url': context['url'], 'head_sha': context['head_sha'], 'base_sha': context['base_sha'],
+                    'preparation_id': preparation.get('preparation_id'), 'session_id': session.id,
+                    'session_invocation': session.invocation, 'architecture_result': cached})
                 from shared.workflow_timings import span
                 with span(context['url'], 'architecture', reused=True):
                     pass
@@ -614,7 +628,12 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             job['started'] = True
         try:
             from shared.workflow_timings import span
-            with span(context['url'], 'architecture' if name == 'architecture-review' else 'reviewer:' + name,
+            with workflow_usage.role(name, evidence={'pr_url': context['url'],
+                    'head_sha': context['head_sha'], 'base_sha': context['base_sha'],
+                    'preparation_id': preparation.get('preparation_id'),
+                    'session_id': session.id if session else None,
+                    'session_invocation': session.invocation if session else None}), \
+                    span(context['url'], 'architecture' if name == 'architecture-review' else 'reviewer:' + name,
                       retry=bool(session and session.invocation > 1)):
                 return run_reviewer(name)
         finally:

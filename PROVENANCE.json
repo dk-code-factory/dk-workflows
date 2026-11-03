@@ -65,8 +65,13 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
-      "version": "1.7.4",
+      "version": "1.7.5",
       "description": "Verify required independent reviewer passes from retained native execution evidence before accepting complete coverage; bind evidence to the reviewer and pinned session and preserve incomplete execution diagnostics."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
+      "version": "1.7.4",
+      "description": "Add passive private workflow usage attribution across lifecycle invocations, helper stages, native and command provider attempts, review coverage and checkpoint reuse; retain explicit unknown host measurements and completion status separately from reviewer quality statistics."
     },
     {
       "source": "dk-code-factory/dk-workflows",

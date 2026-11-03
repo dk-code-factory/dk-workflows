@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from shared.private_state import mutate
+from shared import workflow_usage
 
 ENV = 'DK_REVIEW_STATS_TRACE'
 _INHERIT = object()
@@ -122,12 +123,13 @@ def transport(result):
 def capture(function, *args, telemetry_prompt, telemetry_attempt, telemetry_provider=None,
             telemetry_output=None, **kwargs):
     path = trace_path()
+    workflow = workflow_usage.context(kwargs.get('env'))
     # Strip instrumentation only from the child environment. Process-wide
     # environment mutation would redirect concurrent reviewers' observations.
     if function is subprocess.run or kwargs.get('env') is not None:
         kwargs['env'] = dict(kwargs.get('env') if kwargs.get('env') is not None else os.environ)
         kwargs['env'].pop(ENV, None)
-    if not path:
+    if not path and workflow is None:
         return function(*args, **kwargs)
     start = time.monotonic()
     started_at = datetime.now(timezone.utc).isoformat()
@@ -135,6 +137,14 @@ def capture(function, *args, telemetry_prompt, telemetry_attempt, telemetry_prov
     result = None
     error = None
     failure = None
+    if workflow is not None:
+        workflow_usage.execution(workflow, {'execution_id': execution_id,
+            'started_at': started_at, 'observed_at': started_at, 'status': 'running',
+            'attempt': telemetry_attempt, 'provider': telemetry_provider,
+            'inclusive': True, 'scope': 'execution'})
+        if kwargs.get('env') is not None:
+            child_context = {**workflow, 'parent_execution_id': execution_id}
+            kwargs['env'][workflow_usage.ENV] = json.dumps(child_context)
     # The configured adapter owns this trace. Its provider process may launch
     # native subreviewers with inclusive totals; do not instrument those again.
     token = _TRACE.set(None)
@@ -161,7 +171,17 @@ def capture(function, *args, telemetry_prompt, telemetry_attempt, telemetry_prov
                  'stderr': output_text(getattr(evidence, 'stderr', None)),
                  'returncode': getattr(evidence, 'returncode', None), 'error': error,
                  'error_type': type(failure).__name__ if failure else None,
-                 'timeout_seconds': getattr(failure, 'timeout', None)}
+                 'timeout_seconds': getattr(failure, 'timeout', None),
+                 'status': ('interrupted' if isinstance(failure, (KeyboardInterrupt, SystemExit))
+                            or type(failure).__name__ == 'ProviderCancelled' else
+                            'failed' if failure or getattr(evidence, 'returncode', 0) else 'returned'),
+                 'compactions': getattr(evidence, 'compactions', None),
+                 'tool_output_bytes': getattr(evidence, 'tool_output_bytes', None),
+                 'settings': getattr(evidence, 'settings', None),
+                 'settings_source': getattr(evidence, 'settings_source', None),
+                 'transport_output_bytes': sum(len((output_text(getattr(evidence, field, None)) or '').encode(
+                     'utf-8', errors='replace')) for field in ('stdout', 'stderr'))
+                    if any(getattr(evidence, field, None) is not None for field in ('stdout', 'stderr')) else None}
         try:
             event['model'], event['usage'] = provider_metadata(evidence, telemetry_provider)
             event['effort'] = getattr(evidence, 'effort', None)
@@ -183,6 +203,9 @@ def capture(function, *args, telemetry_prompt, telemetry_attempt, telemetry_prov
                     event['effort'] = match[1]
             if telemetry_output and Path(telemetry_output).exists():
                 event['output'] = Path(telemetry_output).read_text(encoding='utf-8', errors='replace')
-            mutate(Path(path), {'attempts': []}, lambda d: d['attempts'].append(event))
+            if path:
+                mutate(Path(path), {'attempts': []}, lambda d: d['attempts'].append(event))
         except Exception as exc:
             print(f'review stats missing execution evidence ({path}): {exc}', file=sys.stderr)
+        finally:
+            workflow_usage.execution(workflow, event)
