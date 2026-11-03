@@ -32,6 +32,13 @@ def test_frozen_interface_records_failed_reads_and_rejects_cross_task_claim(tmp_
     assert mismatched.returncode == 2
     invoked = command('invoke', 'scope-partition', claim)
     assert invoked.returncode == 0 and json.loads(invoked.stdout)['result']['complete'] is True
+    malformed = [command('read'), command('finish'), command('state', 'start', '--spec')]
+    for result in malformed:
+        assert result.returncode == 2, result.stdout+result.stderr
+        assert json.loads(result.stdout)['error'] == 'IndexError'
+        assert not result.stderr
     trace = [json.loads(line) for line in (arm/'trace.jsonl').read_text().splitlines()]
-    assert [row['ok'] for row in trace] == [False, False, True, False, True]
+    assert [row['ok'] for row in trace] == [False, False, True, False, True, False, False, False]
     assert trace[0]['output_bytes'] == len(missing.stdout.rstrip('\n').encode())
+    for row, result in zip(trace[-3:], malformed):
+        assert row['output_bytes'] == len(result.stdout.rstrip('\n').encode())

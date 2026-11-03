@@ -220,7 +220,7 @@ def main():
         ok = True
         try:
             result = operate(root, options.command, options.args)
-        except (ValueError, OSError, KeyError, subprocess.CalledProcessError) as error:
+        except (ValueError, OSError, LookupError, subprocess.CalledProcessError) as error:
             ok = False
             result = {'error':type(error).__name__, 'detail':str(error)}
         data = result.encode() if isinstance(result, str) else encoded(result)
