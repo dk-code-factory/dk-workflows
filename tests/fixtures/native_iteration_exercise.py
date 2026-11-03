@@ -190,7 +190,8 @@ def operate(root, command, args):
         counts = {kind:sum(row['command'] == kind for row in trace)
                   for kind in ('read','resolve','collect','verify','state','invoke','finish')}
         reads = [row for row in trace if row['command'] == 'read' and row.get('ok', True)]
-        guidance = [row for row in reads if row['args'][0].startswith('guidance/')]
+        guidance = [row for row in reads
+                    if row.get('read_path', row['args'][0]).startswith('guidance/')]
         manifest = next((root/'state').rglob('manifest.json'))
         state = json.loads(manifest.read_text())['runs']['exercise']
         return {'operation_counts':counts,
@@ -225,9 +226,11 @@ def main():
             ok = False
             result = {'error':type(error).__name__, 'detail':str(error)}
         data = result.encode() if isinstance(result, str) else encoded(result)
+        row = {'command':options.command, 'args':options.args, 'output_bytes':len(data), 'ok':ok}
+        if ok and options.command == 'read':
+            row['read_path'] = str((root/options.args[0]).resolve().relative_to(root))
         with (root/'trace.jsonl').open('a') as out:
-            out.write(json.dumps({'command':options.command, 'args':options.args,
-                                  'output_bytes':len(data), 'ok':ok})+'\n')
+            out.write(json.dumps(row)+'\n')
         if not ok:
             print(json.dumps(result, sort_keys=True))
             raise SystemExit(2)
