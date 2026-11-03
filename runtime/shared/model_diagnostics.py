@@ -12,6 +12,7 @@ import tempfile
 
 from shared.diagnostics import Diagnostic, task
 from shared.private_state import read, write
+from shared.review_responses import is_quota_response
 from shared.repository_scope import inside_checkout
 from shared.workflow_storage import allocate
 
@@ -280,8 +281,16 @@ def retained(path, identity):
                 if key in item and (not isinstance(item[key], dict)
                                     or not all(isinstance(item[key].get(field), str) for field in ('type', 'detail'))):
                     raise ValueError('invalid attempt diagnostic')
+            quota_failure = False
+            if 'provider_error' in item and 'response' in item:
+                try:
+                    response = json.loads(item['response'])
+                except (ValueError, RecursionError):
+                    response = None
+                quota_failure = (item['provider_error']['type'] == 'ProviderExhausted'
+                                 and is_quota_response(response))
             if ('validation' in item and ('response' not in item or 'provider_error' in item)
-                    or 'provider_error' in item and 'response' in item
+                    or 'provider_error' in item and 'response' in item and not quota_failure
                     or 'field' in item.get('validation', {}) and not isinstance(item['validation']['field'], str)):
                 raise ValueError('inconsistent consumed response')
             if previous is None:

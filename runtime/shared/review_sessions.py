@@ -415,6 +415,8 @@ class Session:
         with ownership(self.path):
             def begin(data):
                 require_activation(data, self.path)
+                if data.get('quota_recovery', {}).get('status') in {'waiting', 'exhausted'}:
+                    raise ValueError('quota recovery is waiting; resume through the review runner')
                 if data['status'] not in {'active', 'incomplete'}:
                     raise ValueError('review session finished; start a fresh review')
                 history = data.get('execution_history', [])
@@ -475,18 +477,29 @@ class Session:
             return str(path)
         return Path(self.update(select))
 
-    def cached(self, reviewer):
+    def cached(self, reviewer, *, include_exhausted=False):
         def lookup(data):
             item = data['reviews'].get(reviewer, {})
-            if item.get('status') != 'completed':
+            exhausted = include_exhausted and item.get('status') == 'exhausted'
+            if item.get('status') != 'completed' and not exhausted:
                 return None
             saved = read(Path(item['checkpoint']['path']), {})
             if coverage.digest(saved) != item['checkpoint']['sha256']:
                 raise ValueError('review checkpoint changed')
             if (saved.get('checkpoint_version') != (2 if self.prepared.get('preparation_version', 1) >= 4 else 1) or saved.get('reviewer') != reviewer
-                    or saved.get('status') != 'completed' or saved.get('session_id') != self.id
+                    or saved.get('status') != item['status'] or saved.get('session_id') != self.id
                     or saved.get('session_identity') != self.identity):
                 raise ValueError('review checkpoint does not match this session and reviewer')
+            if exhausted:
+                if item.get('quota') != saved.get('quota'):
+                    raise ValueError('review quota checkpoint changed')
+                recovery = data.get('quota_recovery', {})
+                history = recovery.get('history', [])
+                # Only exhaustion preceding this reservation may execute again.
+                if (recovery.get('status') == 'started' and history
+                        and saved.get('quota', {}).get('invocation', 0) <= history[-1].get('after_invocation', 0)):
+                    return None
+                return {'status': 'tokens_exhausted', 'findings': [], 'message': saved['reason']}
             if reviewer != 'architecture-review':
                 from shared import review_execution
                 descriptor = self.prepared['reviewers'][reviewer]
@@ -528,8 +541,17 @@ class Session:
         self.validate_storage()
         if reviewer not in [*self.identity['reviewers'], *(['architecture-review'] if self.prepared.get('preparation_version', 1) >= 4 else [])]:
             raise ValueError('reviewer is outside this session')
+        quota = None
+        if status == 'exhausted':
+            import time
+            from shared import reviewer_recovery
+            now = time.time()
+            deadline, known = reviewer_recovery.reset_deadlines(reason, now)
+            quota = {'not_before': deadline, 'known_not_before': max(known, now + reviewer_recovery.BACKOFF_SECONDS),
+                     'invocation': self.invocation}
         saved = {'checkpoint_version': 2 if self.prepared.get('preparation_version', 1) >= 4 else 1, 'session_id': self.id, 'session_identity': self.identity,
                  'reviewer': reviewer, 'status': status, 'result': result, 'reason': reason,
+                 **({'quota': quota} if quota is not None else {}),
                  **({'execution_evidence': execution_evidence} if execution_evidence is not None else {}),
                  **({'diagnostic': diagnostic} if diagnostic is not None else {})}
         fingerprint = coverage.digest(saved)
@@ -544,7 +566,8 @@ class Session:
             # replace a completed reviewer's authoritative checkpoint or history.
             if status == 'failed' and data['reviews'].get(reviewer, {}).get('status') == 'completed':
                 return
-            item = {'status': status, 'checkpoint': {'path': str(path), 'sha256': fingerprint}}
+            item = {'status': status, 'checkpoint': {'path': str(path), 'sha256': fingerprint},
+                    **({'quota': quota} if quota is not None else {})}
             data.setdefault('review_history', []).append({'reviewer': reviewer, **item})
             data['reviews'][reviewer] = item
         self.update(save)
@@ -565,9 +588,11 @@ class Session:
             coverage.validate_current(self.prepared,
                 check_checkout=not (result.get('guard_failure') and not result['complete']))
         item = coverage.retain(self.path, self.context, self.prepared, result, self.id)
+        from shared import reviewer_recovery
         def save(data):
             data['results'].append(item)
             data['status'] = 'completed' if result['complete'] else 'incomplete'
+            reviewer_recovery.plan(data, result)
         self.update(save)
         return item
 

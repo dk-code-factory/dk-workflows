@@ -7,6 +7,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from shared.review_responses import validate_incomplete_response
 
 
 def added_lines(patch):
@@ -72,11 +73,7 @@ def validate(result, changed):
 
 
 def validate_response(result, changed):
-    if isinstance(result, dict) and result.get('status') in ('incomplete', 'tokens_exhausted'):
-        if set(result) != {'status', 'findings', 'message'} or result.get('findings') != []:
-            raise ValueError('$: incomplete response requires only status, an empty findings array, and message')
-        if not isinstance(result.get('message'), str) or not result['message'].strip():
-            raise ValueError('/message: incomplete response requires a nonempty reason')
+    if validate_incomplete_response(result):
         return result
     return validate(result, changed)
 

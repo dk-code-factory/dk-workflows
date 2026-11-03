@@ -140,7 +140,7 @@ def test_exhaustion_and_analytics_failure_do_not_change_review_contract(pinned, 
     exhausted = {'status': 'tokens_exhausted', 'findings': [], 'message': 'usage limit reached'}
     with patch.object(runner, 'run_skill_reviewer', side_effect=responses(names, [exhausted, {'findings': []}])):
         result = runner.review(context, names, '', decisions, '', prep, stats=stats)
-    assert result['complete'], result.get('reason', result)
+    assert not result['complete']
     assert result['skipped_reviewers'] == [{'reviewer': names[0], 'reason': 'usage limit reached'}]
     assert api.summary()['total']['reviews']['exhausted'] == 1
     assert api.summary()['total']['reviews']['clean'] == 1

@@ -27,11 +27,12 @@ from reviewer_prompts import preparation_instructions, source_files
 from stats_capture import for_iteration
 from shared.reviewer_telemetry import capture, transport
 from shared.role_failures import role_failure
-from shared import bindings, architecture, review_execution, workflow_usage
+from shared import bindings, architecture, review_execution, workflow_usage, reviewer_recovery
 from shared.runtime_bundles import retained_binding, retain
 from shared.review_sessions import Session
 from shared.preparation_views import reviewer_view
 from shared.executors import invoke, ProviderExhausted, ProviderCancelled, provider_cancellation
+from shared.review_responses import is_quota_response
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())
 _spec = importlib.util.spec_from_file_location('decision_api', ROOT/'dk-pr-decisions/scripts/decisions.py')
@@ -97,9 +98,20 @@ def run_skill_reviewer(name, skill, handoff_path, checkout):
         handoff = json.loads(Path(handoff_path).read_text())
         changed = added_lines(Path(handoff['patch']).read_text())
         from shared.executors import execute_json
+        def execute(text, root, attempt=0):
+            raw = invoke(name, handoff_path, root, text, attempt=attempt)
+            # Quota is a transport failure, including a valid structured reply.
+            # Preserve the current response slot and its correction attempt.
+            try:
+                value = json.loads(raw)
+            except (ValueError, RecursionError):
+                return raw
+            if is_quota_response(value):
+                raise ProviderExhausted(value['message'])
+            return raw
         try:
             return execute_json(prompt, checkout, validate=lambda value: validate_response(value, changed),
-                executor=lambda text, root, attempt=0: invoke(name, handoff_path, root, text, attempt=attempt),
+                executor=execute,
                 diagnostic_scope={'operation': 'configured-review',
                     'evidence': handoff.get('response_budget', str(handoff_path))},
                 inherit_architecture=False)
@@ -444,8 +456,11 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                 if describe_reviewer(provider_map[name]) != preparation['reviewers'][name]:
                     raise ValueError('effective reviewer instructions changed; refresh preparation')
                 skill = skill_path(provider_map[name]) or Path('command')
-            cached = session.cached(name) if session else None
-            if cached is not None:
+            cached = session.cached(name, include_exhausted=True) if session else None
+            if cached is not None and cached.get('status') == 'tokens_exhausted':
+                validate_response(cached, lines)
+                results[name] = (cached, None)
+            elif cached is not None:
                 validate_findings(cached, lines)
                 if review_execution.requirements(provider_map[name], handoff):
                     saved = session.execution_evidence(name)
@@ -482,8 +497,10 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
 
     if preparation.get('preparation_version', 1) >= 4 and not iteration_stage:
         try:
-            cached = session.cached('architecture-review') if session else None
-            if cached is not None:
+            cached = session.cached('architecture-review', include_exhausted=True) if session else None
+            if cached is not None and cached.get('status') == 'tokens_exhausted':
+                results['architecture-review'] = (cached, None)
+            elif cached is not None:
                 architecture.verify_review(cached, preparation['architecture'], context, decisions)
                 results['architecture-review'] = (cached, None)
                 workflow_usage.observe('checkpoint_reuse', role='architecture-review', status='reused', evidence={
@@ -778,8 +795,8 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                         'reason': first['reason'], 'findings': findings,
                         **({'guard_failure': True} if guard_failures else {}),
                         'skipped_reviewers': skipped_reviewers})
-    if not executed and not reused:
-        return outcome({'complete': False, 'reason': 'all configured reviewers exhausted their usage limits',
+    if skipped_reviewers:
+        return outcome({'complete': False, 'reason': 'configured reviewers exhausted their usage limits',
                         'findings': findings, 'skipped_reviewers': skipped_reviewers})
     return outcome({'complete': True, 'findings': findings, 'skipped_reviewers': skipped_reviewers})
 
@@ -801,6 +818,7 @@ def main():
     parser.add_argument('--stats-attempt', help='Optional suffix for statistics IDs derived from the session and invocation')
     parser.add_argument('--session-file', help='External session path (filenames ending in .lock are reserved); omitted paths create a fresh review')
     parser.add_argument('--resume', action='store_true', help='Explicitly resume an interrupted session with identical evidence')
+    parser.add_argument('--quota-reset-at', help='Verified ISO-8601 reset with timezone for an unresolved quota checkpoint')
     parser.add_argument('--run-record', help='Compatibility adapter for earlier iteration callers')
     args = parser.parse_args()
     if args.describe_prepared:
@@ -875,23 +893,66 @@ def _run_cli(args, parser):
         args.session_file, args.resume, args.stats_cycle = options['session_file'], options['resume'], options['cycle']
     session = Session(context, preparation, names, path=args.session_file,
                       resume=args.resume, scope=scope, rules=rules)
-    with session.execution():
-        pending = [name for name in names if session.cached(name) is None]
-        # Reuse changes execution, not the configured comparison cohort. Cached
-        # reviewers stay not_run in this invocation's optional statistics.
-        stats = for_iteration(context, preparation, names, args.stats_cycle,
-                              session.id + ':' + str(session.invocation) + ':' + (args.stats_attempt or '1')) if pending else None
-        result = review(context, config['reviewers'], scope, decisions, rules, preparation,
-                        stats=stats, session=session)
-        artifact = session.finish(result.copy())
+    if args.quota_reset_at:
+        if not args.resume:
+            raise ValueError('--quota-reset-at requires --resume')
+        reviewer_recovery.resolve_reset(session, args.quota_reset_at)
+    resume_argv = [sys.executable, str(Path(__file__).resolve()), '--context', str(Path(args.context).resolve()),
+                   '--decisions-file', str(Path(args.decisions_file).resolve()),
+                   '--preparation-file', str(Path(args.preparation_file).resolve())]
+    if args.run_record:
+        resume_argv += ['--run-record', str(Path(args.run_record).resolve())]
+    else:
+        resume_argv += ['--session-file', str(session.path), '--resume']
+    for flag, value in (('--scope-file', args.scope_file), ('--rules-file', args.rules_file),
+                        ('--stats-cycle', args.stats_cycle), ('--stats-attempt', args.stats_attempt)):
+        if value is not None:
+            resume_argv += [flag, str(Path(value).resolve()) if flag.endswith('-file') else str(value)]
+    result, artifact, recovery = execute_session(session, context, config['reviewers'], scope,
+        decisions, rules, preparation, args.stats_cycle, args.stats_attempt, manual_resume=args.resume)
     result['review_session'] = {'id': session.id, 'path': str(session.path)}
     result['review_artifact'] = artifact
+    if recovery:
+        result['quota_recovery'] = reviewer_recovery.checkpoint(session, recovery, resume_argv)
     if fresh:
         result.update(preparation_id=preparation['preparation_id'],
                       engineering_id=preparation_api.engineering_id(preparation))
     if legacy:
         legacy.legacy_register_review(args.run_record, result, context['head_sha'])
     print(json.dumps(result, ensure_ascii=True))
+
+
+def execute_session(session, context, reviewers, scope, decisions, rules, preparation,
+                    stats_cycle=None, stats_attempt=None, *, manual_resume=False):
+    """Restart quota failures automatically without resetting session or cycle history."""
+    from shared.review_sessions import ownership
+    names = [bindings.key(value) for value in reviewers]
+    while True:
+        recovery = reviewer_recovery.pending(session)
+        if recovery and (recovery['status'] == 'waiting' or manual_resume and recovery['status'] == 'exhausted'):
+            with ownership(session.path):
+                if not reviewer_recovery.restart(session, manual=manual_resume):
+                    artifact = session.update(lambda data: data['results'][-1])
+                    from shared.review_coverage import load
+                    return load(artifact)['result'], artifact, recovery
+            # A reserved restart reuses the same session, immutable handoffs,
+            # completed checkpoints and provider response slots.
+            session = Session(context, preparation, names, path=session.path,
+                              resume=True, scope=scope, rules=rules)
+        with session.execution():
+            if recovery and recovery['status'] == 'started':
+                # A previously reserved recovery may have been interrupted for
+                # any length of time. Recheck the remote scope on that resume.
+                reviewer_recovery.live_evidence(context)
+            pending = [name for name in names if session.cached(name) is None]
+            stats = for_iteration(context, preparation, names, stats_cycle,
+                session.id + ':' + str(session.invocation) + ':' + (stats_attempt or '1')) if pending else None
+            result = review(context, reviewers, scope, decisions, rules, preparation,
+                            stats=stats, session=session)
+            artifact = session.finish(result.copy())
+            recovery = reviewer_recovery.pending(session)
+        if not recovery or recovery['status'] != 'waiting':
+            return result, artifact, recovery
 
 
 if __name__ == '__main__':

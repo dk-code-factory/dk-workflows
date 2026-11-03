@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.8.0.
+Independent MIT plugin for Claude Code and Codex. Version 1.8.1.
 
 ## Install
 
@@ -251,6 +251,9 @@ packets retain their providers. Internal catalog analysis is eligible. The
 selected provider and calling host are retained privately, and selection never
 resets a correction budget or relaxes evidence, review, CI or completion gates.
 See [the provider policy](common/lifecycle.md) for recovery and provenance details.
+PR review sessions automatically restart usage-exhausted reviewers once with the
+same provider, evidence and correction budget. Longer or ambiguous resets return
+a durable incomplete checkpoint; see [quota recovery](runtime/dk-pr-review/references/sessions.md#quota-recovery).
 
 Interruption aborts this invocation's in-flight provider transport and prevents later provider or correction launches, then waits for reviewer cleanup and checkpoint work before releasing session ownership. Completed checkpoints remain available for exact-evidence resume. Unfinished reviewers remain unknown rather than provider failures; a resume reruns them. Genuine failures observed before interruption retain their classification.
 

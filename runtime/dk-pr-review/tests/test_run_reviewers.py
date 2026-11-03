@@ -60,10 +60,10 @@ class RunnerTests(unittest.TestCase):
     def test_incomplete_never_becomes_clean(self):
         with patch.object(mod,'run',side_effect=self.git),patch.object(mod,'run_skill_reviewer',return_value={'status':'incomplete','findings':[],'message':'no spec'}):result=self.review()
         self.assertFalse(result['complete']);self.assertEqual(result['reason'],'no spec')
-    def test_exhaustion_continues_but_all_exhausted_is_incomplete(self):
+    def test_exhaustion_continues_and_remains_incomplete(self):
         exhausted={'status':'tokens_exhausted','findings':[],'message':'limit'}
         with patch.object(mod,'run',side_effect=self.git),patch.object(mod,'run_skill_reviewer',side_effect=lambda provider,*a: exhausted if provider == self.providers[0] else {'findings':[self.finding]}):result=self.review()
-        self.assertTrue(result['complete']);self.assertEqual(len(result['skipped_reviewers']),1)
+        self.assertFalse(result['complete']);self.assertEqual(len(result['skipped_reviewers']),1)
         with patch.object(mod,'run',side_effect=self.git),patch.object(mod,'run_skill_reviewer',return_value=exhausted):result=self.review()
         self.assertFalse(result['complete']);self.assertEqual(len(result['skipped_reviewers']),2)
     def test_continues_after_failed_provider_without_claiming_completion(self):

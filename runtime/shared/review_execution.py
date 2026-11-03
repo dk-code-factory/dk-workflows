@@ -12,6 +12,7 @@ import re
 import uuid
 
 from shared import bindings
+from shared.review_responses import is_quota_response
 from shared.diagnostics import Diagnostic, task
 from shared.private_state import write
 from shared.workflow_storage import allocate
@@ -242,13 +243,14 @@ def _save_collection(collector):
         write(collector['state'], {key: collector[key] for key in ('invocation', 'binding', 'attempts')} | {'version': 1})
 
 
-def record(host, stdout, stderr, returncode, attempt):
+def record(host, stdout, stderr, returncode, attempt, *, response=None, exhausted=False):
     collector = active()
     if collector is None:
         return
     value = {'version': 1, 'invocation': collector['invocation'], 'binding': collector['binding'],
              'host': host, 'attempt': attempt, 'stdout': stdout, 'stderr': stderr,
-             'returncode': returncode}
+             'returncode': returncode, **({'response': response} if response is not None else {}),
+             **({'exhausted': True} if exhausted else {})}
     path = collector['directory'] / ('attempt-' + uuid.uuid4().hex + '.json')
     try:
         write(path, value)
@@ -465,6 +467,16 @@ def claude_passes(raw):
             'reports': reports, 'native_session': session}
 
 
+def failed_attempt(item):
+    if item.get('returncode') != 0 or item.get('exhausted') is True:
+        return True
+    try:
+        response = json.loads(item.get('response', ''))
+    except (ValueError, TypeError, RecursionError):
+        return False
+    return is_quota_response(response)
+
+
 def assess(attempts, invocation, expected, required):
     observed, unknown = [], []
     if expected.get('method_profile', {}).get('status') == 'unsupported':
@@ -484,10 +496,10 @@ def assess(attempts, invocation, expected, required):
             raise ValueError('specialist execution evidence response slot unavailable')
         records.append(item)
     for index, item in enumerate(records):
-        if item.get('returncode') != 0:
-            # A repaired transport resumes this same response slot. Keep the
-            # failed raw attempt, but only a later success in that slot replaces it.
-            if not any(later['attempt'] == item['attempt'] and later.get('returncode') == 0
+        if failed_attempt(item):
+            # A repaired transport or structured quota resumes this response slot.
+            # Only a later successful attempt in that slot replaces failed proof.
+            if not any(later['attempt'] == item['attempt'] and not failed_attempt(later)
                        for later in records[index + 1:]):
                 unknown.append('provider failure')
             continue
