@@ -11,6 +11,8 @@ import shutil
 import subprocess
 import sys
 
+import pytest
+
 ROOT=Path(__file__).resolve().parents[1]
 PR_PACKAGE=ROOT
 FIXTURE=ROOT/'tests/fixtures/recipe'
@@ -18,7 +20,8 @@ PR='https://github.com/owner/repo/pull/7'
 REPO='github.com/owner/repo'
 
 
-def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path):
+@pytest.mark.parametrize('final_ci_outcome',['success','rerun','repair'])
+def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_outcome):
     def execute(argv, *, env=None, ok=True, cwd=None):
         result=subprocess.run([str(v) for v in argv],env=env,text=True,capture_output=True,cwd=cwd)
         if ok:assert result.returncode==0,result.stdout+result.stderr
@@ -50,6 +53,7 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path):
     fixture_spec=importlib.util.spec_from_file_location('recipe_fixture',PR_PACKAGE/'tests/pr/fixtures/github_remote.py')
     fixture=importlib.util.module_from_spec(fixture_spec);fixture_spec.loader.exec_module(fixture)
     state=fixture.initial();state['metadata']['headRefOid']=head;state['run']['head_sha']=head
+    state['checks'][0].update(bucket='pending',state='PENDING')
     state['branches'].update(main=base,**{'pr-branch':head})
     state['lose_response']=['push','edit-pr','reply-inline','resolve-thread','request-review','ci-rerun']
     remote=save('remote.json',state)
@@ -79,10 +83,12 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path):
     def push(old,new):
         return publish({'kind':'push','checkout':str(checkout),'remote':'https://github.com/owner/repo.git',
                         'branch':'pr-branch','head':new,'expected_head':old})
-    def ci(current,rerun=None):
+    ci_heads=[]
+    def ci(current,rerun=None,*,ok=True):
+        ci_heads.append(current)
         args=['--pr',PR,'--head',current,'--no-checks-grace','0','--timeout','1']
         if rerun:args+=['--rerun-operation',rerun]
-        return command(PR_PACKAGE/'runtime/dk-ci/scripts/ci_wait.py',*args)
+        return command(PR_PACKAGE/'runtime/dk-ci/scripts/ci_wait.py',*args,ok=ok)
     installed=tmp_path/'selected-skills';installed.mkdir()
     for name in ('domain','a','b'):(installed/(name+'.md')).write_text('Native fixture skill '+name)
     context=save('context.json',{'scope':'Return two.','decisions':['Return two.'],'instructions':'Fix this PR.'})
@@ -102,14 +108,14 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path):
               '--status','complete' if value['complete'] else 'incomplete']
         if progress:args+=['--progress',save('progress.json',progress)]
         return cache('record',*args)
-    def domain(task,perform,**budget):
+    def domain(task,perform,*,complete=True,**budget):
         task_spec=spec('domain',task,cacheable=False)
         args=['--spec',task_spec,'--run','iteration']
         for key,value in budget.items():
             args+=['--'+key.replace('_','-')]
             if value is not True:args+=[value]
         claim=cache('start',*args)['claim'];result=perform()
-        record(task_spec,claim,{'complete':True,'result':result},progress={'stage':task,'complete':True})
+        record(task_spec,claim,{'complete':complete,'result':result},progress={'stage':task,'complete':complete})
         return result
     # Inspect instructions/Decisions and complete feedback before changing code.
     domain('inspect',lambda:{'scope':'Return two.','feedback':[{'source':PR+'#discussion_r41','text':'Document the value'}]})
@@ -122,14 +128,7 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path):
     domain('description',lambda:publish({'kind':'edit-pr','pr':PR,'head':head,'fields':{'body':body}}))
     domain('decisions',lambda:{'decisions':['Return two.'],'source':PR})
     domain('partition',lambda:{'outcome':'retain','added_lines_threshold':1000,'reason':'Below the configured gate'})
-    # Existing CI observation is unresolved; a targeted rerun opens its next window.
-    update_remote(lambda v:v.update(checks=[]))
-    unresolved=command(PR_PACKAGE/'runtime/dk-ci/scripts/ci_wait.py','--pr',PR,'--head',head,'--no-checks-grace','0',ok=False)
-    assert unresolved['result']=='no_checks'
-    rerun=domain('rerun',lambda:publish({'kind':'ci-rerun','pr':PR,'head':head,'run_id':77,'attempt':1,
-                                      'reason':'Verified transient fixture outage'}),ci_rerun=True,head=head)
-    update_remote(lambda v:v.update(checks=fixture.initial()['checks']))
-    assert domain('ci',lambda:ci(head,rerun['operation']))['result']=='success'
+    # Pending checks do not gate review/fix cycles or commit cleanup.
     reviewer_log=tmp_path/'reviewer-launches.jsonl'
     def review(skill,cycle,*,recover=None,retry=False,fail=False,run='iteration'):
         task=spec(skill)
@@ -158,7 +157,7 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path):
         git('commit','-qam','fix the reviewed value');new=git('rev-parse','HEAD')
         push(old,new);return {'head':new,'disposition':{'value':'fixed'}}
     head=domain('fix-findings',fix)['head']
-    assert domain('ci-after-fix',lambda:ci(head))['result']=='success'
+    domain('partition-after-fix',lambda:{'outcome':'retain','reason':'Reviewed fix remains within scope'})
     assert not review('a','c2')['findings'] and not review('b','c2')['findings']
     reviewed_tree=git('rev-parse','HEAD^{tree}')
     def cleanup():
@@ -168,19 +167,61 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path):
         return {'outcome':'published','reviewed_head':old,'head':candidate,'tree':reviewed_tree,
                 'reasons':['One coherent behavior change with documentation'],'target':base}
     head=domain('cleanup',cleanup)['head']
-    assert domain('ci-after-cleanup',lambda:ci(head))['result']=='success'
     # Squash changes only provenance: final content review coverage is retained.
     for skill in ('a','b'):assert review(skill,'c3')['action']=='reuse'
     reply=domain('reply',lambda:publish({'kind':'reply-inline','pr':PR,'head':head,'parent':41,'body':'Verified answer'}))
     domain('resolve',lambda:publish({'kind':'resolve-thread','pr':PR,'head':head,'thread_id':'PRRT_fixture','reply_id':reply['receipt']['id']}))
+    assert not ci_heads and not remote_value().get('check_reads')
+    assert remote_value()['checks'][0]['bucket']=='pending'
+    final_head=head
+    rerun=None
+    if final_ci_outcome=='rerun':
+        # The first observation is at the final gate. A verified rerun opens
+        # the next attempt window without allocating another review cycle.
+        update_remote(lambda v:v.update(checks=[]))
+        unresolved=domain('ci',lambda:ci(head,ok=False),complete=False)
+        assert unresolved['result']=='no_checks'
+        rerun=domain('rerun',lambda:publish({'kind':'ci-rerun','pr':PR,'head':head,'run_id':77,'attempt':1,
+                                          'reason':'Verified transient fixture outage'}),ci_rerun=True,head=head)
+    elif final_ci_outcome=='repair':
+        # An unknown final failure remains blocking. Its code repair changes
+        # review inputs, so refresh coverage and cleanup before observing again.
+        update_remote(lambda v:v.update(checks=[{**fixture.initial()['checks'][0],
+                                               'bucket':'fail','state':'FAILURE'}]))
+        failed=domain('ci',lambda:ci(head,ok=False),complete=False)
+        assert failed['result']=='failure' and failed['blockers']
+        assert cache('status','--run','iteration','--spec',spec('domain','ci',cacheable=False))['tasks'][0]['completion']=='incomplete'
+        def repair():
+            old=git('rev-parse','HEAD')
+            (checkout/'code.py').write_text('VALUE = 2\nCI_VALIDATED = True\n')
+            execute([sys.executable,'-c','exec(open("code.py").read()); assert VALUE == 2 and CI_VALIDATED'],env=env,cwd=checkout)
+            git('commit','-qam','repair final CI');new=git('rev-parse','HEAD')
+            push(old,new);return {'head':new,'validated':True}
+        head=domain('ci-repair',repair,ci_repair=True,cycle='c2')['head']
+        domain('partition-after-ci-repair',lambda:{'outcome':'retain','reason':'CI repair remains within scope'})
+        changed=cache('status','--spec',spec('a'),'--spec',spec('b'))
+        assert all(not task['reusable'] for task in changed['tasks'])
+        assert not review('a','c3')['findings'] and not review('b','c3')['findings']
+        reviewed_tree=git('rev-parse','HEAD^{tree}')
+        head=domain('cleanup',cleanup)['head']
+        for skill in ('a','b'):assert review(skill,'c3')['action']=='reuse'
+        assert ci_heads==[final_head] and head!=final_head
+        assert set(remote_value()['check_reads'])=={final_head}
+    update_remote(lambda v:v.update(checks=fixture.initial()['checks']))
+    final_ci=domain('ci',lambda:ci(head,rerun['operation'] if rerun else None))
+    assert final_ci['result']=='success' and final_ci['head']==head
+    assert ci_heads==([head] if final_ci_outcome=='success' else [final_head,head])
+    assert set(remote_value()['check_reads'])==set(ci_heads)
     domain('re-review',lambda:publish({'kind':'request-review','pr':PR,'head':head,'reviewers':['reviewer']}))
     domain('complete',lambda:{'head':head,'coverage':['a','b'],'findings':[],'ci':'success','cleanup':'published'})
     status=cache('status','--compact','--run','iteration','--spec',spec('a'),'--spec',spec('b'))
     assert all(t['reusable'] and not t['findings'] for t in status['tasks'])
     run=status['runs']['iteration']
-    assert run['cycles']==['c1','c2'] and list(run['retries'].values())==[1]
-    assert run['ci_reruns']=={rerun['receipt']['head']:1} and not status['unfinished']
-    assert run['cycle']=='c2' and run['progress_count']>=6 and 'progress' not in run
+    assert run['cycles']==(['c1','c2','c3'] if final_ci_outcome=='repair' else ['c1','c2'])
+    assert list(run['retries'].values())==[1]
+    assert run['ci_reruns']==({head:1} if rerun else {}) and not status['unfinished']
+    assert run['ci_repairs']==({'c2':1} if final_ci_outcome=='repair' else {})
+    assert run['cycle']==run['cycles'][-1] and run['progress_count']>=6 and 'progress' not in run
     detailed=cache('status','--run','iteration')['runs']['iteration']
     assert {p['value']['stage'] for p in detailed['progress']} >= {'inspect','feedback','partition','ci','cleanup','complete'}
     before=reviewer_log.read_text()
