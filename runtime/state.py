@@ -161,7 +161,7 @@ def _git_context(source):
             # Git skips an initial UTF-8 BOM. Indirect configuration, alternate
             # attribute roots and signature verification need a wider context.
             normalized = content.removeprefix(b'\xef\xbb\xbf') if content else b''
-            if (re.search(rb'(?im)^\s*\[\s*(?:include|attr)', normalized)
+            if (re.search(rb'(?i)\[\s*(?:include|attr)', normalized)
                     or any(word in normalized.lower() for word in
                            (b'refstorage', b'attributesfile', b'orderfile', b'submodule', b'worktree'))
                     or (source.get('history') and b'showsignature' in normalized.lower())):
@@ -185,14 +185,15 @@ def _git_context(source):
                 parent = parent.parent
         for path in sorted(attributes):
             snapshots.append((str(path.resolve()), path.read_bytes() if path.exists() else None))
-        # Retain indexed attribute state as part of the checkout context, too.
-        index = directory/'index'
-        index_hash = None
-        if index.exists():
-            with index.open('rb') as indexed:
-                index_hash = hashlib.file_digest(indexed, 'sha256').digest()
-        snapshots.append((str(index.resolve()), index_hash))
+        # Indexed attributes and checkout submodule configuration also affect diffs.
+        for path in (directory/'index', checkout/'.gitmodules'):
+            file_hash = None
+            if path.exists():
+                with path.open('rb') as source_file:
+                    file_hash = hashlib.file_digest(source_file, 'sha256').digest()
+            snapshots.append((str(path.resolve()), file_hash))
         return (str(checkout), str(directory.resolve()), str(common), tuple(snapshots),
+                hashlib.sha256(names).digest(),
                 tuple(sorted(os.environ.items())))
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError):
         return None

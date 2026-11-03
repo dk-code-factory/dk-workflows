@@ -619,6 +619,53 @@ def test_status_falls_back_for_indirect_git_inputs(case, tmp_path, kind):
         assert expected[0] != before
 
 
+@pytest.mark.parametrize('kind', ['inline-include', 'gitmodules'])
+def test_status_refreshes_indirect_diff_configuration(case, tmp_path, monkeypatch, kind):
+    a, store = case
+    checkout = Path(a['git']['checkout'])
+    if kind == 'inline-include':
+        included = tmp_path/'inline.gitconfig'
+        included.write_text('[diff]\n noprefix = false\n')
+        config = checkout/'.git/config'
+        config.write_bytes(config.read_bytes()+b'[core] [include] path = '+os.fsencode(included)+b'\n')
+        assert git(checkout, 'config', '--get', 'include.path') == str(included)
+        def change():
+            included.write_text('[diff]\n noprefix = true\n')
+    else:
+        git(checkout, 'update-index', '--add', '--cacheinfo', '160000,'+a['git']['base']+',module')
+        git(checkout, 'commit', '-qm', 'first gitlink')
+        base = git(checkout, 'rev-parse', 'HEAD')
+        (checkout/'code').write_text('another ordinary change\n')
+        git(checkout, 'add', 'code')
+        git(checkout, 'update-index', '--cacheinfo', '160000,'+a['git']['head']+',module')
+        git(checkout, 'commit', '-qm', 'second gitlink and ordinary change')
+        a['git'].update(target=base, base=base, head=git(checkout, 'rev-parse', 'HEAD'))
+        modules = checkout/'.gitmodules'
+        modules.write_text('[submodule "module"]\n path = module\n url = local\n ignore = none\n')
+        def change():
+            modules.write_text(modules.read_text().replace('ignore = none', 'ignore = all'))
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    before = capture(a)
+    done(store, a); done(store, b)
+    expected = []
+    def specs():
+        yield a
+        change()
+        expected.append(capture(b))
+        yield b
+    observed = []
+    original = state.capture
+    def collect(spec, **kwargs):
+        value = original(spec, **kwargs)
+        observed.append(value)
+        return value
+    monkeypatch.setattr(state, 'capture', collect)
+    tasks = store.status(specs())['tasks']
+    assert expected[0]['fingerprint'] != before['fingerprint']
+    assert observed == [before, expected[0]]
+    assert tasks[0]['reusable'] and not tasks[1]['reusable']
+
+
 def test_status_refreshes_replacement_refs_with_continued_reftable_config(case, monkeypatch):
     a, store = case
     checkout = Path(a['git']['checkout'])
