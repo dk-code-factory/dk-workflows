@@ -22,14 +22,17 @@ def require(condition, message):
 
 def private_path(value):
     path = Path(value)
-    require(path.is_absolute() and not path.resolve().is_relative_to(ROOT),
+    resolved = path.resolve()
+    require(path.is_absolute() and not resolved.is_relative_to(ROOT)
+            and not any((parent / '.git').exists() for parent in (resolved, *resolved.parents)),
             'captures and reports must use absolute private paths outside the repository')
     return path
 
 
-def read(reference, *, json_value=True):
+def read(reference, *, json_value=True, installed_source=False):
     require(isinstance(reference, dict), 'hashed evidence reference required')
-    path = private_path(reference['path'])
+    path = Path(reference['path']) if installed_source else private_path(reference['path'])
+    require(path.is_absolute(), 'absolute evidence path required')
     raw = path.read_bytes()
     require(hashlib.sha256(raw).hexdigest() == reference['sha256'], 'evidence changed: ' + str(path))
     return json.loads(raw) if json_value else raw
@@ -49,7 +52,7 @@ def method(descriptor):
     sources = {}
     root = Path(value['root'])
     for ref in descriptor['sources']:
-        read(ref, json_value=False)
+        read(ref, json_value=False, installed_source=True)
         path = Path(ref['path'])
         sources[str(path.relative_to(root)) if path.is_relative_to(root) else str(path)] = ref['sha256']
     return {'execution': value, 'sources': sources}
@@ -62,7 +65,7 @@ def source_pins(prepared):
         read(ref, json_value=False)
         # These transport records legitimately change when preparation is refreshed
         # for a different contract. Provider texts are compared separately.
-        if name not in {'manifest', 'context'} and not name.startswith(('reviewers/', 'reviewer-execution/')):
+        if name not in {'manifest', 'context'} and not name.startswith(('reviewers/', 'reviewer-execution/', 'architecture/')):
             pins[name] = value['sha256']
     return pins
 
@@ -72,6 +75,14 @@ def packets(handoff, recipient):
     if handoff.get('architecture_packet'):
         references['reviewer'] = handoff['architecture_packet']
     result = {}
+    prepared = handoff['preparation'].get('architecture')
+    require(not references or prepared, 'architecture preparation unavailable')
+    coordinator = None
+    if prepared:
+        private_path(prepared['packet']['path'])
+        coordinator = architecture.validate_packet(prepared['packet'], handoff['checkout'],
+            agent='coordinator', current_catalog=False, live=False)
+        require(coordinator['catalog'] == prepared['catalog'], 'architecture preparation catalog mismatch')
     for role, reference in references.items():
         private_path(reference['path'])
         packet = architecture.load(reference)
@@ -79,8 +90,22 @@ def packets(handoff, recipient):
                 'architecture packet recipient mismatch: ' + role)
         require(packet['head'] == handoff['head_sha'] and packet['baseline'] == handoff['base_sha'],
                 'architecture packet governing revisions mismatch')
+        architecture.validate_packet(reference, handoff['checkout'], agent=packet['agent'],
+            paths=coordinator['paths'], current_catalog=False, live=False)
+        require(all(packet[key] == coordinator[key] for key in
+                    ('repository', 'catalog', 'baseline', 'head', 'tree', 'task', 'scope', 'scope_contents')),
+                'architecture packet preparation scope mismatch')
         result[role] = packet
     return result
+
+
+def packet_pins(packets):
+    """Compare governing packet content independently of capture locations."""
+    return {role: {**{key: value for key, value in packet.items()
+                     if key not in {'fingerprint', 'governing_sources'}},
+                   'governing_sources': {key: ref['fingerprint']
+                       for key, ref in packet.get('governing_sources', {}).items()}}
+            for role, packet in packets.items()}
 
 
 def pointer(value, path):
@@ -136,13 +161,15 @@ def delivery(run, handoff, proof):
             events = [json.loads(line) for line in matching[0]['stdout'].splitlines() if line.strip()]
             if host == 'codex':
                 item = evidence.get('item', {})
-                session = next(e['thread_id'] for e in events if e.get('type') == 'thread.started')
+                session = next((e['thread_id'] for e in events if e.get('type') == 'thread.started'), None)
+                require(session is not None, 'native delivery session marker unavailable')
                 require(evidence.get('type') == 'item.completed' and item.get('type') == 'collab_tool_call'
                         and item.get('tool') == 'spawn_agent'
                         and item.get('sender_thread_id') == session and record['pointer'] == '/item/prompt',
                         'delivery must cite the direct specialist launch prompt')
             else:
-                session = next(e['session_id'] for e in events if e.get('type') == 'result')
+                session = next((e['session_id'] for e in events if e.get('type') == 'result'), None)
+                require(session is not None, 'native delivery session marker unavailable')
                 parts = record['pointer'].split('/')
                 require(len(parts) == 6 and parts[1:3] == ['message', 'content']
                         and parts[3].isdigit() and parts[4:] == ['input', 'prompt'], 'invalid native prompt pointer')
@@ -216,7 +243,7 @@ def inspect_run(run, binding, contract):
     return {'handoff': handoff, 'method': installed, 'proof': proof,
             'pins': {**{key: handoff[key] for key in ('base_sha', 'head_sha', 'pr_url', 'scope', 'rules')},
                      'patch': patch_hash, 'sources': sources, 'analysis': prepared['analysis'],
-                     'decisions': decisions, 'architecture': packet_values},
+                     'decisions': decisions, 'architecture': packet_pins(packet_values)},
             'coverage': coverage, 'issues': issues, 'result': result,
             'matrix': {'reviewer': reviewer, 'contract': contract,
                        'execution': descriptor['execution'], 'sources': descriptor['sources'],

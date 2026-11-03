@@ -40,6 +40,9 @@ References below use `{ "path": "ABSOLUTE_PRIVATE_PATH", "sha256": "HEX_SHA256" 
 and bind the **exact file bytes**. Architecture references use the existing
 `{ "path": "ABSOLUTE_PRIVATE_PATH", "fingerprint": "PACKET_FINGERPRINT" }` contract.
 The original records and installed procedure sources must remain readable.
+Installed procedure texts may reside in a local plugin checkout; generated
+captures and reports must remain outside Git checkouts, including separate
+reviewed repositories.
 Preparation sources select `snapshot` when present, otherwise `path`.
 
 The manifest object has these fields:
@@ -160,6 +163,11 @@ never edit preparation descriptors to reuse an incompatible checkpoint. Manifest
 context and reviewer transport captures may change during this refresh. Installed
 method execution and source hashes are compared independently. Unknown preparation
 fields remain subject to the existing compact projection; originals stay hashed.
+Architecture packets are checked against their retained catalog and preparation
+for recipient, intended paths, rules, revisions and governing scope. Packet
+fingerprints and governing-source capture locations can differ across freshly
+prepared runs; the comparison retains their governing content and source
+fingerprints. Retain the original catalog in private architecture storage.
 
 When separately authorized and bounded, capture Codex AD while keeping it in the
 cohort, then invoke Claude Toolkit and Claude AD **separately**, using

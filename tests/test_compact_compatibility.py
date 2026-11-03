@@ -148,6 +148,54 @@ def refresh(run, *, slots=(0,), findings=None):
             record['received'] = compatibility.delivery_payload(handoff, record['recipient'])
 
 
+def add_architecture(captures):
+    directory = captures[0].parent
+    catalog = architecture.seal({'repository': 'path:' + str(directory / 'repository'),
+        'baseline': 'base', 'rules': [{'id': 'rule', 'agents': ['all'], 'patterns': ['*.py']}],
+        'conflicts': [], 'stale_rules': []})
+    storage, _ = architecture.folder(directory / 'repository', catalog['repository'])
+    catalog_path = storage / 'catalogs' / (catalog['fingerprint'] + '.json')
+    catalog_path.parent.mkdir(parents=True)
+    catalog_path.write_text(json.dumps(catalog))
+    for pair in captures[1]['pairs']:
+        for label in ('full', 'compact'):
+            run = pair[label]
+            handoff = compatibility.read(run['handoff'])
+            prepared = (compatibility.read(handoff['full_preparation']) if label == 'compact'
+                        else handoff['preparation'])
+            root = Path(run['handoff']['path']).parent
+            guidance = retain(root / (label + '-instructions.json'), {'instruction': 'Same governing scope.'})
+            scope_decisions = (compatibility.read(handoff['full_decisions']) if label == 'compact'
+                               else handoff['decisions'])
+            scope = {'metadata': {'url': handoff['pr_url']}, 'decisions': scope_decisions,
+                     'governing': {'user_instructions/0': guidance['sha256']}}
+            def packet(role):
+                value = architecture.seal({'schema_version': 1, 'kind': 'architecture-packet',
+                    'repository': catalog['repository'], 'catalog': catalog['fingerprint'],
+                    'baseline': 'base', 'head': 'head', 'tree': 'tree', 'task': handoff['pr_url'],
+                    'agent': role, 'paths': ['a.py'], 'rules': catalog['rules'],
+                    'scope': architecture.digest(scope), 'scope_contents': scope,
+                    'governing_sources': {'user_instructions/0': {'path': guidance['path'],
+                                                              'fingerprint': guidance['sha256']}},
+                    'deferred_obligations': {'conflicts': [], 'stale_rules': []}})
+                path = root / (label + '-' + role.replace(':', '-') + '-packet.json')
+                path.write_text(json.dumps(value))
+                return {'path': str(path), 'fingerprint': value['fingerprint']}
+            coordinator = packet('coordinator')
+            prepared['architecture'] = {'packet': coordinator, 'catalog': catalog['fingerprint']}
+            prepared['sources']['architecture/0'] = retain(Path(coordinator['path']), architecture.load(coordinator))
+            handoff['architecture_packet'] = packet(bindings.key(run['binding']))
+            proof = compatibility.read(run['execution'])
+            handoff['nested_architecture_packets'] = {role: packet(role) for role in proof['assessment']['completed']}
+            if label == 'compact':
+                handoff['full_preparation'] = retain(Path(handoff['full_preparation']['path']), prepared)
+                handoff['preparation'] = reviewer_view(prepared, bindings.key(run['binding']))
+            else:
+                handoff['preparation'] = prepared
+            run['handoff'] = retain(Path(run['handoff']['path']), handoff)
+            refresh(run)
+
+
 def test_synthetic_pair_matrix_retains_no_adoption_authority(captures):
     report = compare(captures)
     assert report['status'] == 'observed', report
@@ -229,10 +277,40 @@ def test_regenerated_capture_hashes_do_not_hide_changed_governing_inputs(capture
     assert row['issues']
 
 
-def test_cohort_omission_and_route_drift_are_invalid(captures):
+def test_cohort_omission_is_invalid(captures):
     captures[1]['pairs'].pop()
     with pytest.raises(ValueError, match='cohort required'):
         compare(captures)
+
+
+def test_claude_route_drift_is_invalid(captures):
+    captures[1]['pairs'][2]['route'] = 'native'
+    with pytest.raises(ValueError, match='Claude Toolkit and AD routes must match'):
+        compare(captures)
+
+
+@pytest.mark.parametrize('pair_index,marker', [(0, 'thread.started'), (1, 'result')])
+def test_partial_repaired_native_delivery_is_explicitly_incomplete(captures, pair_index, marker):
+    run = captures[1]['pairs'][pair_index]['compact']
+    handoff, descriptor = (compatibility.read(run[key]) for key in ('handoff', 'descriptor'))
+    previous = compatibility.read(run['execution'])
+    raw = compatibility.read(previous['attempts'][0])
+    rows = [json.loads(line) for line in raw['stdout'].splitlines()]
+    partial = [row for row in rows if row.get('type') != marker]
+    with execution.collect(run['binding'], descriptor, run['handoff']['path'], handoff['checkout']) as collector:
+        execution.record(raw['host'], stream(partial), 'interrupted transport', 1, 0)
+        execution.record(raw['host'], stream(rows), '', 0, 0)
+        run['execution'] = execution.finish(collector, compatibility.read(run['result']))
+    execution.verify(run['execution'], run['binding'], descriptor, run['handoff']['path'])
+    proof = compatibility.read(run['execution'])
+    for record in run['deliveries']:
+        if 'event' in record:
+            event = rows[record['event'] - 1]
+            record['event'] = partial.index(event) + 1
+            record['source'] = proof['attempts'][0]
+    row = compare(captures)['pairs'][pair_index]
+    assert row['status'] == 'incomplete'
+    assert row['issues'] == ['native delivery session marker unavailable']
 
 
 def test_correction_needs_independent_delivery_observations(captures):
@@ -287,13 +365,12 @@ def test_retained_findings_are_compared_without_recall_claims(captures):
     assert 'recall' not in row
 
 
-def test_architecture_recipient_and_revision_are_checked(tmp_path):
-    packet = architecture.seal({'agent': 'Spec', 'head': 'head', 'baseline': 'base'})
-    path = tmp_path / 'packet.json'
-    path.write_text(json.dumps(packet))
-    ref = {'path': str(path), 'fingerprint': packet['fingerprint']}
-    handoff = {'head_sha': 'head', 'base_sha': 'base', 'nested_architecture_packets': {'Spec': ref}}
-    assert compatibility.packets(handoff, 'parent')['Spec'] == packet
+def test_architecture_recipient_and_revision_are_checked(captures):
+    add_architecture(captures)
+    handoff = compatibility.read(captures[1]['pairs'][0]['full']['handoff'])
+    ref = handoff['nested_architecture_packets']['Spec']
+    assert compatibility.packets(handoff, bindings.key(captures[1]['pairs'][0]['full']['binding']))['Spec'] == architecture.load(ref)
+    handoff.pop('architecture_packet')
     handoff['nested_architecture_packets'] = {'Standards': ref}
     with pytest.raises(ValueError, match='recipient mismatch'):
         compatibility.packets(handoff, 'parent')
@@ -301,6 +378,40 @@ def test_architecture_recipient_and_revision_are_checked(tmp_path):
     handoff['head_sha'] = 'moved'
     with pytest.raises(ValueError, match='revisions mismatch'):
         compatibility.packets(handoff, 'parent')
+
+
+def test_fresh_architecture_captures_compare_governing_content(captures):
+    add_architecture(captures)
+    pair = captures[1]['pairs'][0]
+    full, compact = (compatibility.read(pair[label]['handoff']) for label in ('full', 'compact'))
+    assert full['architecture_packet']['fingerprint'] != compact['architecture_packet']['fingerprint']
+    assert compare(captures)['status'] == 'observed'
+
+
+@pytest.mark.parametrize('change,error', [('paths', 'scope expanded'), ('rules', 'rule coverage differs'),
+                                       ('scope', 'preparation scope mismatch')])
+def test_architecture_applicability_is_checked(captures, change, error):
+    add_architecture(captures)
+    run = captures[1]['pairs'][0]['compact']
+    handoff = compatibility.read(run['handoff'])
+    reference = handoff['nested_architecture_packets']['Spec']
+    packet = architecture.load(reference)
+    packet.pop('fingerprint')
+    if change in ('paths', 'rules'):
+        packet[change] = []
+        if change == 'paths':
+            packet['rules'] = []
+    else:
+        packet['scope_contents']['metadata']['url'] = 'https://example.test/pull/2'
+        packet['scope'] = architecture.digest(packet['scope_contents'])
+    packet = architecture.seal(packet)
+    Path(reference['path']).write_text(json.dumps(packet))
+    reference['fingerprint'] = packet['fingerprint']
+    run['handoff'] = retain(Path(run['handoff']['path']), handoff)
+    refresh(run)
+    row = compare(captures)['pairs'][0]
+    assert row['status'] == 'incomplete'
+    assert error in row['issues'][0]
 
 
 def test_cli_writes_private_non_overwriting_diagnostic_report(captures, tmp_path):
@@ -318,3 +429,28 @@ def test_cli_writes_private_non_overwriting_diagnostic_report(captures, tmp_path
 def test_report_path_inside_repository_is_rejected():
     with pytest.raises(ValueError, match='private paths'):
         compatibility.private_path(ROOT / 'accidental-capture.json')
+
+
+def test_external_checkout_captures_and_report_are_rejected(tmp_path):
+    checkout = tmp_path / 'external'
+    subprocess.run(['git', 'init', str(checkout)], check=True, capture_output=True)
+    target = checkout / 'nested' / 'report.json'
+    with pytest.raises(ValueError, match='private paths'):
+        compatibility.private_path(target)
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/compare_review_handoffs.py'),
+        str(tmp_path / 'missing-manifest.json'), '--report', str(target)], capture_output=True, text=True)
+    assert result.returncode == 2
+    assert 'private paths' in result.stderr
+    assert not target.exists()
+
+
+def test_installed_procedure_source_can_be_a_local_checkout(captures):
+    run = captures[1]['pairs'][0]['full']
+    descriptor = compatibility.read(run['descriptor'])
+    root = captures[0].parent / 'installed-plugin'
+    subprocess.run(['git', 'init', str(root)], check=True, capture_output=True)
+    source = root / 'SKILL.md'
+    source.write_bytes(Path(descriptor['sources'][0]['path']).read_bytes())
+    descriptor['execution']['root'] = str(root)
+    descriptor['sources'][0]['path'] = str(source)
+    assert compatibility.method(descriptor)['sources'] == {'SKILL.md': descriptor['sources'][0]['sha256']}
