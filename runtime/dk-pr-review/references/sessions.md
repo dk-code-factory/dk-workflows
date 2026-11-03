@@ -28,7 +28,12 @@ name, move only its JSON to a nonreserved filename in the same external director
 preserve its checkpoint and result files, then explicitly resume with identical evidence.
 
 The session checkpoints each completed reviewer in immutable private storage before
-continuing. Resume reuses only completed checkpoints; interrupted reviewers execute again. Iteration failures require bounded cycle-recover for typed infrastructure failures, or the quota recovery below; arbitrary incomplete responses cannot authorize another attempt. A per-session execution lock rejects
+continuing. Completed checkpoints supply reusable review coverage. Exhausted
+checkpoints retain their reset guards across interrupted aggregation; they execute
+again only after a recovery reservation. Other interrupted reviewers execute again.
+Iteration failures require bounded cycle-recover for typed infrastructure failures,
+or the quota recovery below; arbitrary incomplete responses cannot authorize another
+attempt. A per-session execution lock rejects
 concurrent coordinators. Missing, changed or unwritable session evidence blocks
 review; analytics failure merely warns and retains replay inputs.
 
@@ -172,7 +177,8 @@ reviewer; do not substitute providers or infer failure acceptance.
 
 Retain the first immutable result before retrying. The session's `quota_recovery`
 checkpoint records original reasons, the original result, the reset deadline and
-restart history. The restart preserves reviewer bindings, original deliveries,
+restart history. Each exhausted role also retains its deadline before aggregation
+finishes. The restart preserves reviewer bindings, original deliveries,
 completed checkpoints, execution evidence, response slots, correction attempts and
 iteration allocation. It does not allocate a new review cycle. Optional statistics
 retain separate session invocation identities for both attempts.

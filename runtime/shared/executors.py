@@ -247,7 +247,8 @@ def _execute_json(prompt, checkout, validate, executor, correction_instructions,
         except StorageFailure:
             raise
         except Exception as exc:
-            if journal and 'response' not in journal.value['attempts'][-1]:
+            if journal and (isinstance(exc, ProviderExhausted)
+                            or 'response' not in journal.value['attempts'][-1]):
                 try:
                     journal.provider_failed(exc)
                 except StorageFailure as failure:

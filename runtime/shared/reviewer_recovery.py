@@ -27,35 +27,46 @@ def supported_timestamp(value):
 
 def reset_time(message, now):
     """Unknown advertised reset times must never become immediate retries."""
-    relative = re.search(r'(retry[- ]after[: ]+|try again in\s+)(\d+(?:\.\d+)?)\s*'
-                         r'([a-z]+)?', message, re.I)
-    if relative:
-        unit = (relative[3] or '').lower()
-        units = {'s': 1, 'sec': 1, 'secs': 1, 'second': 1, 'seconds': 1,
-                 'm': 60, 'min': 60, 'mins': 60, 'minute': 60, 'minutes': 60,
-                 'h': 3600, 'hr': 3600, 'hrs': 3600, 'hour': 3600, 'hours': 3600,
-                 'd': 86400, 'day': 86400, 'days': 86400,
-                 'w': 604800, 'week': 604800, 'weeks': 604800}
-        if not unit and relative[1].lower().startswith('retry'):
-            unit = 'seconds'  # Numeric Retry-After values are seconds.
-        if unit not in units:
-            return None
-        remainder = message[relative.end():]
-        if re.match(r'\s*(?:(?:,|and|\+)\s*)?(?:\d|and\b|half\b|[½¼¾]|[:/])',
-                    remainder, re.I):
-            return None
-        return supported_timestamp(now + float(relative[2]) * units[unit])
-    absolute = re.search(r'(\d{4}-\d\d-\d\d[T ]\d\d:\d\d(?::\d\d)?(?:Z|[+-]\d\d:\d\d))', message)
-    if absolute:
-        try:
-            return supported_timestamp(datetime.fromisoformat(absolute[1].replace('Z', '+00:00')).timestamp())
-        except (OverflowError, OSError, ValueError):
-            return None
-    # Codex reports a local wall time without a zone. It is unsafe to infer the
-    # provider's zone from the coordinator's environment.
-    if re.search(r'try again (?:at|in)|resets? (?:at|on|in)|retry[- ]after', message, re.I):
-        return None
-    return now
+    return reset_deadlines(message, now)[0]
+
+
+def reset_deadlines(message, now):
+    """Parse whole hints and retain known bounds even beside an unknown reset."""
+    absolute = r'\d{4}-\d\d-\d\d[T ]\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d:\d\d)'
+    markers = list(re.finditer(r'retry[- ]after\s*:?\s*|try again (?:in|at)\s*|'
+                              r'resets? (?:at|on|in)\s*', message, re.I))
+    hints = [(match[0], message[match.end():markers[index + 1].start()
+                              if index + 1 < len(markers) else len(message)].strip(' \t\r\n.;'))
+             for index, match in enumerate(markers)]
+    if not markers:
+        hints = [('', match[0]) for match in re.finditer(absolute, message)]
+    units = {'s': 1, 'sec': 1, 'secs': 1, 'second': 1, 'seconds': 1,
+             'm': 60, 'min': 60, 'mins': 60, 'minute': 60, 'minutes': 60,
+             'h': 3600, 'hr': 3600, 'hrs': 3600, 'hour': 3600, 'hours': 3600,
+             'd': 86400, 'day': 86400, 'days': 86400,
+             'w': 604800, 'week': 604800, 'weeks': 604800}
+    deadlines, unresolved = [], False
+    for marker, hint in hints:
+        deadline = None
+        if re.fullmatch(absolute, hint):
+            try:
+                deadline = supported_timestamp(datetime.fromisoformat(hint.replace('Z', '+00:00')).timestamp())
+            except (OverflowError, OSError, ValueError):
+                pass
+        elif re.search(r'retry|\bin\b', marker, re.I):
+            relative = re.fullmatch(r'(\d+(?:\.\d+)?)\s*([a-z]+)?', hint, re.I)
+            if relative:
+                unit = (relative[2] or '').lower()
+                if not unit and marker.lower().startswith('retry'):
+                    unit = 'seconds'  # Numeric Retry-After values are seconds.
+                if unit in units:
+                    deadline = supported_timestamp(now + float(relative[1]) * units[unit])
+        if deadline is None:
+            unresolved = True
+        else:
+            deadlines.append(deadline)
+    known = max(deadlines, default=now)
+    return (None if unresolved else known), known
 
 
 def live_evidence(context):
@@ -89,9 +100,14 @@ def plan(data, result, *, clock=time.time):
         if state:
             state['status'] = 'blocked'
         return state
-    deadlines = [reset_time(item['reason'], now) for item in reasons]
-    known_deadline = max([now + BACKOFF_SECONDS, *(value for value in deadlines if value is not None)])
-    deadline = None if any(value is None for value in deadlines) else known_deadline
+    deadlines = []
+    for item in reasons:
+        checkpoint = data.get('reviews', {}).get(item['role'], {})
+        quota = checkpoint.get('quota') if checkpoint.get('status') == 'exhausted' else None
+        deadlines.append((quota['not_before'], quota['known_not_before']) if quota
+                         else reset_deadlines(item['reason'], now))
+    known_deadline = max([now + BACKOFF_SECONDS, *(known for _, known in deadlines)])
+    deadline = None if any(value is None for value, _ in deadlines) else known_deadline
     if state and state['restarts'] >= 1:
         state.update(status='exhausted', reasons=reasons, not_before=deadline,
                      known_not_before=known_deadline)
@@ -151,7 +167,8 @@ def restart(session, *, manual=False, clock=time.time, sleep=time.sleep):
             saved['restarts'] = 1
         saved['status'] = 'started'
         saved['history'].append({'started_at': clock(), 'roles': [item['role'] for item in saved['reasons']],
-                                 'automatic': automatic, 'prior_result': data['results'][-1]})
+                                 'automatic': automatic, 'prior_result': data['results'][-1],
+                                 'after_invocation': data.get('invocations', 0)})
     session.update(reserve)
     return True
 

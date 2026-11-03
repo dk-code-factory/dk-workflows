@@ -137,6 +137,21 @@ def test_structured_quota_preserves_correction_slot(pinned, tmp_path):
     assert attempts == [0, 1, 1]
 
 
+@pytest.mark.parametrize('malformed', [
+    {'status': 'tokens_exhausted', 'findings': []},
+    {'status': 'tokens_exhausted', 'findings': [], 'message': 'limit', 'extra': True},
+    {'status': 'tokens_exhausted', 'findings': [{}], 'message': 'limit'},
+])
+def test_malformed_quota_gets_schema_correction(pinned, tmp_path, malformed):
+    handoff = tmp_path / 'quota-correction.json'
+    handoff.write_text(json.dumps({'patch': pinned[0]['patch'], 'response_budget': 'malformed-quota'}))
+    with patch.object(runner, 'invoke', side_effect=[json.dumps(malformed), '{"findings":[]}']) as provider:
+        result = runner.run_skill_reviewer(pinned[3][0], Path('SKILL.md'), handoff, pinned[0]['checkout'])
+    assert result == {'findings': []}
+    assert [call.kwargs['attempt'] for call in provider.call_args_list] == [0, 1]
+    assert 'Correction:' in provider.call_args.args[3]
+
+
 def test_reset_parser_and_interruptible_wait_preserve_checkpoint(pinned, monkeypatch):
     assert recovery.reset_time('Retry-After: 120', 100) == 220
     assert recovery.reset_time('try again in 2 minutes', 100) == 220
@@ -147,9 +162,9 @@ def test_reset_parser_and_interruptible_wait_preserve_checkpoint(pinned, monkeyp
     with session.execution(), patch.object(runner, 'run_skill_reviewer', return_value=quota()):
         result = runner.review(context, names, '', decisions, '', prepared, session=session)
         session.finish(result)
-        session.update(lambda data: recovery.plan(data, result, clock=lambda: 100))
+    deadline = recovery.pending(session)['not_before']
     with pytest.raises(KeyboardInterrupt):
-        recovery.restart(session, clock=lambda: 99,
+        recovery.restart(session, clock=lambda: deadline - 1,
                          sleep=lambda delay: (_ for _ in ()).throw(KeyboardInterrupt()))
     assert recovery.pending(session)['status'] == 'waiting'
     assert recovery.pending(session)['restarts'] == 0
@@ -292,7 +307,9 @@ def test_interrupted_started_recovery_rechecks_remote_scope_on_resume(main_call,
 
 
 @pytest.mark.parametrize('duration', ['1 hour 30 minutes', '1h30m', '1 hour and 30 minutes',
-                                     '1 hour, 30 minutes', '1 hour and a half', '1:30'])
+                                     '1 hour, 30 minutes', '1 hour and a half', '1:30',
+                                     '1 hour & 30 minutes', '1 hour (30 minutes)',
+                                     '1 hour plus 30 minutes', '1 hour; 30 minutes'])
 def test_compound_reset_durations_are_deferred_instead_of_shortened(duration):
     assert recovery.reset_time('usage limit; try again in ' + duration, 100) is None
     assert recovery.reset_time('Retry-After: ' + duration, 100) is None
@@ -318,4 +335,78 @@ def test_interruption_after_result_retention_preserves_quota_checkpoint(main_cal
     providers.assert_not_called()
     assert not result['complete']
     assert result['review_artifact'] == saved['results'][0]
+    assert result['quota_recovery']['resume_after'] == '2099-01-01T00:00:00+00:00'
+
+
+@pytest.mark.parametrize('message', [
+    'usage limit; Retry-After: 2099-01-01T00:00:00Z',
+    'Retry-After: 60; try again at 2099-01-01T00:00:00Z',
+    'try again at 2099-01-01T00:00:00Z; Retry-After: 60',
+])
+def test_all_reset_hints_preserve_latest_known_deadline(message):
+    from datetime import datetime, timezone
+    expected = datetime(2099, 1, 1, tzinfo=timezone.utc).timestamp()
+    assert recovery.reset_time(message, 100) == expected
+
+
+def test_unknown_hint_cannot_override_other_known_hint_in_same_message(main_call, pinned):
+    with patch.object(runner, 'run_skill_reviewer', return_value=quota(
+            'Retry-After: 2099-01-01T00:00:00Z; try again at noon')) as providers:
+        first = main_call()
+        result = main_call('--session-file', first['review_session']['path'], '--resume',
+                           '--quota-reset-at', '2000-01-01T00:00:00Z')
+    assert providers.call_count == len(pinned[3])
+    assert result['quota_recovery']['resume_after'] == '2099-01-01T00:00:00+00:00'
+    assert result['quota_recovery']['restarts'] == 0
+
+
+@pytest.mark.parametrize('phase', ['initial', 'restarted'])
+@pytest.mark.parametrize('role', ['configured', 'architecture'])
+def test_interruption_before_aggregate_preserves_exhausted_role_and_deadline(
+        main_call, pinned, tmp_path, phase, role):
+    from preparation_fixtures import interrupt_after_checkpoint
+    path = tmp_path / 'quota-role-interruption.json'
+    names = pinned[3]
+    exhausted = names[0] if role == 'configured' else 'architecture-review'
+    saved_record = Session.record
+    checkpointed = False
+    def record(self, name, status, **kwargs):
+        nonlocal checkpointed
+        saved_record(self, name, status, **kwargs)
+        if name == exhausted and status == 'exhausted':
+            checkpointed = True
+    message = 'try again at 2099-01-01T00:00:00Z'
+    original_architecture = runner.architecture.review
+    if phase == 'restarted':
+        with patch.object(runner, 'run_skill_reviewer', return_value=quota('try again at noon')), \
+                patch.object(runner.architecture, 'review', side_effect=runner.ProviderExhausted('try again at noon')):
+            first = main_call('--session-file', path)
+        options = ['--session-file', path, '--resume', '--quota-reset-at', '2000-01-01T00:00:00Z']
+        assert first['quota_recovery']['restarts'] == 0
+    else:
+        options = ['--session-file', path]
+    interrupt = interrupt_after_checkpoint(exhausted, quota(message), lambda: checkpointed)
+    def provider(name, *args):
+        return interrupt(name, *args)
+    def architecture(*args, **kwargs):
+        if role == 'architecture':
+            raise runner.ProviderExhausted(message)
+        return original_architecture(*args, **kwargs)
+    with patch.object(Session, 'record', record), \
+            patch.object(runner, 'run_skill_reviewer', side_effect=provider), \
+            patch.object(runner.architecture, 'review', side_effect=architecture):
+        with pytest.raises(KeyboardInterrupt):
+            main_call(*options)
+    saved = json.loads(path.read_text())
+    assert saved['reviews'][exhausted]['status'] == 'exhausted'
+    assert len(saved['results']) == (1 if phase == 'restarted' else 0)
+    with patch.object(runner, 'run_skill_reviewer', return_value={'findings': []}) as providers, \
+            patch.object(runner.architecture, 'review', side_effect=original_architecture) as architecture:
+        result = main_call('--session-file', path, '--resume')
+    assert exhausted not in [call.args[0] for call in providers.call_args_list]
+    if role == 'architecture':
+        architecture.assert_not_called()
+    assert not result['complete']
+    assert result['quota_recovery']['status'] == ('exhausted' if phase == 'restarted' else 'waiting')
+    assert result['quota_recovery']['restarts'] == (1 if phase == 'restarted' else 0)
     assert result['quota_recovery']['resume_after'] == '2099-01-01T00:00:00+00:00'

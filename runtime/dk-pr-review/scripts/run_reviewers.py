@@ -106,7 +106,10 @@ def run_skill_reviewer(name, skill, handoff_path, checkout):
             except ValueError:
                 return raw
             if isinstance(value, dict) and value.get('status') == 'tokens_exhausted':
-                validate_response(value, changed)
+                try:
+                    validate_response(value, changed)
+                except ValueError:
+                    return raw
                 raise ProviderExhausted(value['message'])
             return raw
         try:
@@ -456,8 +459,11 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
                 if describe_reviewer(provider_map[name]) != preparation['reviewers'][name]:
                     raise ValueError('effective reviewer instructions changed; refresh preparation')
                 skill = skill_path(provider_map[name]) or Path('command')
-            cached = session.cached(name) if session else None
-            if cached is not None:
+            cached = session.cached(name, include_exhausted=True) if session else None
+            if cached is not None and cached.get('status') == 'tokens_exhausted':
+                validate_response(cached, lines)
+                results[name] = (cached, None)
+            elif cached is not None:
                 validate_findings(cached, lines)
                 if review_execution.requirements(provider_map[name], handoff):
                     saved = session.execution_evidence(name)
@@ -494,8 +500,10 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
 
     if preparation.get('preparation_version', 1) >= 4 and not iteration_stage:
         try:
-            cached = session.cached('architecture-review') if session else None
-            if cached is not None:
+            cached = session.cached('architecture-review', include_exhausted=True) if session else None
+            if cached is not None and cached.get('status') == 'tokens_exhausted':
+                results['architecture-review'] = (cached, None)
+            elif cached is not None:
                 architecture.verify_review(cached, preparation['architecture'], context, decisions)
                 results['architecture-review'] = (cached, None)
                 workflow_usage.observe('checkpoint_reuse', role='architecture-review', status='reused', evidence={

@@ -1056,3 +1056,57 @@ def test_malformed_structured_quota_does_not_discard_unfinished_pass(proof):
         execution.verify(reference, BINDING, descriptor, path)
     assessment = json.loads(Path(reference['path']).read_text())['assessment']
     assert set(ROLES).issubset(assessment['missing'])
+
+
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+@pytest.mark.parametrize('corrected', [False, True])
+def test_native_quota_restarts_through_json_journal_and_same_response_slot(
+        proof, monkeypatch, host, corrected):
+    import importlib.util
+    import subprocess
+    from shared import executors
+    spec = importlib.util.spec_from_file_location('quota_runner',
+        Path(__file__).resolve().parents[1] / 'runtime/dk-pr-review/scripts/run_reviewers.py')
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    repository, path, descriptor = proof
+    monkeypatch.setenv('XDG_STATE_HOME', str(path.parent / 'state'))
+    binding = {'skill': 'fixture:review', 'host': host, 'nested_review_roles': ['Audit']}
+    descriptor['execution']['executor'] = host
+    handoff = json.loads(path.read_text())
+    handoff['review_execution_invocation'] = 'd' * 32
+    path.write_text(json.dumps(handoff))
+    quota = {'status': 'tokens_exhausted', 'findings': [], 'message': 'usage limit reached'}
+    responses = iter(([{'bad': 'schema'}] if corrected else []) + [quota, {'findings': []}])
+    attempts = []
+    def provider(argv, **kwargs):
+        response = next(responses)
+        failed = response.get('status') == 'tokens_exhausted'
+        if host == 'codex':
+            Path(argv[argv.index('-o') + 1]).write_text(json.dumps(response))
+            rows = codex_rows(['Audit'], state='errored' if failed else 'completed')
+        else:
+            rows = claude_rows(['Audit'], is_error=failed)
+            rows[-1]['result'] = json.dumps(response)
+        return subprocess.CompletedProcess(argv, 0, stream(rows), '')
+    def invoke(name, handoff_path, checkout, prompt, *, attempt):
+        attempts.append(attempt)
+        return executors.execute_process(prompt, checkout, host, {}, None, attempt, 5)
+    monkeypatch.setattr(executors, 'run_provider', provider)
+    monkeypatch.setattr(runner, 'invoke', invoke)
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        assert runner.run_skill_reviewer(binding, Path('SKILL.md'), path, repository) == quota
+        before = execution.finish(collector, quota)
+    journal_path, = (path.parent / 'state').glob('dk-code-factory/workflows/workflow-*/model-exchange.json')
+    journal = json.loads(journal_path.read_text())
+    assert journal['status'] == 'provider_failed'
+    assert json.loads(journal['attempts'][-1]['response']) == quota
+    before_bytes = Path(before['path']).read_bytes()
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        result = runner.run_skill_reviewer(binding, Path('SKILL.md'), path, repository)
+        after = execution.finish(collector, result)
+    assert result == {'findings': []}
+    assert attempts == ([0, 1, 1] if corrected else [0, 0])
+    assert Path(before['path']).read_bytes() == before_bytes
+    assert json.loads(journal_path.read_text())['status'] == 'accepted'
+    execution.verify(after, binding, descriptor, path)
