@@ -5,12 +5,13 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import sys
 import threading
 from unittest.mock import patch
 
 import pytest
 
-from test_review_coverage import state, Package, analysis, prep, descriptor
+from test_review_coverage import state, completion, Package, analysis, prep, descriptor, retain
 from shared import architecture, cleanup_precheck, preparation_refresh, review_sessions
 from shared import review_reconciliation, workflow_timings
 from shared.ci_observation import Observation, PermissionDenied
@@ -49,10 +50,11 @@ def fresh(tmp_path, monkeypatch):
     p.write('conversation.json', conversation)
     p.write('history.json', state.preparation_history(record))
     names = ['one', 'two']
+    procedure = p.write('review-procedure.json', {'instruction': 'Check the supported local transform'})
     p.manifest.update(mode='iteration')
     p.manifest['evidence'].update(feedback=['inline.json', 'conversation.json'],
         run_history=['history.json'], choices=['decisions.json'],
-        reviewers=[str(p.write(name + '.json', {**descriptor(name, p.repo / 'transform.py'),
+        reviewers=[str(p.write(name + '.json', {**descriptor(name, procedure),
             **({'nested_review_roles': ['Toolkit', 'Standards']} if name == 'one' else {})})) for name in names])
     p.write('manifest.json', p.manifest)
     saved = p.prepare(analysis(names))
@@ -150,6 +152,151 @@ def test_pr89_noop_cleanup_preserves_identity_and_zero_later_model_calls(fresh, 
     assert state.verify_review(path, prepared, assessment=assessment, assessment_path=assessment_path)
     assert sorted(calls) == names and architecture_calls == ['architecture']
     assert len(read(path, {})['cycles']) == 1
+
+
+def test_fifth_clean_review_survives_closure_refresh_two_commit_cleanup_and_completion(fresh, monkeypatch):
+    from shared.review_loop import encode
+    p, original, path, names, calls, base = fresh
+    for _ in range(4):
+        assert dispatch(fresh)[0]['complete']
+    record = read(path, {})
+    state.classify(record, 'finding', p.head, 'valid', 'review:four', 'Missing empty-value handling')
+    state.assess(record, 'finding', p.head, original['preparation_id'], 'within_scope',
+                 'review:four', 'Repair the local transform')
+    write(path, record)
+    # A real code repair occurs after four consumed configured review cycles.
+    (p.repo / 'transform.py').write_text('def transform(value):\n    return "" if value is None else value\n')
+    (p.repo / 'test_transform.py').write_text('from transform import transform\ndef test_empty():\n    assert transform(None) == ""\n')
+    prep.git(p.repo, 'add', '.')
+    prep.git(p.repo, 'commit', '-qm', 'Handle empty transform values')
+    p.head = prep.git(p.repo, 'rev-parse', 'HEAD')
+
+    def collect_head():
+        p.context['head_sha'] = p.decisions['head_sha'] = p.head
+        p.write('context.json', p.context)
+        p.write('decisions.json', p.decisions)
+        for name in ('inline.json', 'conversation.json'):
+            value = prep.read(p.root / name)
+            value['pullRequest']['headRefOid'] = p.head
+            if name == 'conversation.json':
+                value.pop('sha256')
+                value['sha256'] = prep.digest(value)
+            p.write(name, value)
+
+    collect_head()
+    def reassess(prompt, checkout):
+        batch = json.JSONDecoder().raw_decode(prompt.split(
+            'REASSESSMENT (one batch, read original changed and governing sources):\n', 1)[1])[0]
+        return retain(original, ids=batch['affected_ids'], unmapped=batch['unmapped_changes'])
+    repaired = preparation_refresh.refresh(path, read(path, {})['preparation']['path'],
+        p.root / 'context.json', p.root / 'decisions.json', p.root / 'inline.json',
+        p.root / 'conversation.json', state.reconciliation_api(), analyzer=reassess)
+    assert repaired['model_call_count'] == 1 and repaired['engineering_id'] != original['engineering_id']
+    prepared = prep.read(repaired['artifact'])
+    monkeypatch.setattr(runner, 'describe_reviewer', lambda name: prepared['reviewers'][name])
+    fresh = (p, prepared, path, names, calls, base)
+    result, session = dispatch(fresh)
+    assert result['complete'] and result['findings'] == []
+    assert result['executed_reviewers'] == names and result['reused_reviewers'] == []
+    reviewed_head = p.head
+    record = read(path, {})
+    state.classify(record, 'finding', p.head, 'already_fixed', 'review:five', 'Current repair verified')
+    state.assess(record, 'finding', p.head, prepared['preparation_id'], 'within_scope',
+                 'review:five', 'Local repair remains within scope')
+    write(path, record)
+    immutable_result = record['review_results'][-1]
+    provenance = {Path(ref): Path(ref).read_bytes() for ref in (session.path, immutable_result['path'])}
+    cleanup_record(fresh, 'handoff', {})
+    with patch.object(prep, 'analyze', side_effect=AssertionError('bookkeeping regenerated obligations')):
+        ready = refresh(fresh)
+    assert ready['engineering_id'] == repaired['engineering_id'] and ready['model_call_count'] == 0
+    assert prep.read(ready['artifact'])['analysis'] == prepared['analysis']
+    assert state.verify_review(path, prep.read(ready['artifact']))
+    # Coverage uses the actual immutable session/result, not claims in exported history.
+    history = state.preparation_history(read(path, {}))
+    assert 'review_results' not in history['governing']
+    assert history['operational']['cycles'] == 5
+    with pytest.raises(ValueError, match='five review cycles exhausted'):
+        state.next_cycle(read(path, {}), p.head)
+
+    branch = prep.git(p.repo, 'symbolic-ref', '--short', 'HEAD')
+    remote = p.root / 'remote.git'
+    prep.git(p.repo, 'init', '--bare', '-q', str(remote))
+    prep.git(p.repo, 'remote', 'add', 'origin', str(remote))
+    prep.git(p.repo, 'push', '-qu', 'origin', branch)
+    tree = prep.git(p.repo, 'rev-parse', 'HEAD^{tree}')
+    recovery = 'refs/pr-split-recovery/' + reviewed_head
+    prep.git(p.repo, 'update-ref', recovery, reviewed_head)
+    prep.git(p.repo, 'reset', '--mixed', base)
+    prep.git(p.repo, 'add', 'transform.py')
+    prep.git(p.repo, 'commit', '-qm', 'Handle empty transform values')
+    prep.git(p.repo, 'add', 'test_transform.py')
+    prep.git(p.repo, 'commit', '-qm', 'Cover empty transform values')
+    candidate = prep.git(p.repo, 'rev-parse', 'HEAD')
+    assert candidate != reviewed_head and prep.git(p.repo, 'rev-parse', 'HEAD^{tree}') == tree
+    assert prep.git(p.repo, 'rev-list', '--count', base + '..HEAD') == '2'
+    guard_path = p.repo / '.git/pr-split-state.json'
+    guard_data = {'branch': branch, 'remote': 'origin', 'remote_branch': branch,
+        'remote_sha': reviewed_head, 'original_head': reviewed_head, 'original_tree': tree,
+        'base': base, 'pr': 1, 'pr_url': p.context['url'], 'host': 'github.com',
+        'base_repo': 'example/fixture', 'head_repo': 'example/fixture',
+        'author': 'fixture@example.test', 'mode': 'regroup', 'target_tip': base,
+        'target_branch': 'main', 'recovery_ref': recovery}
+    write(guard_path, guard_data)
+    cleanup_record(fresh, 'prepared', {'guard': guard_path})
+    def live(*args):
+        head = prep.git(p.repo, 'ls-remote', '--heads', 'origin', branch).split()[0]
+        return {'pr_url': p.context['url'], 'head_repo': 'example/fixture', 'final_head': head,
+            'final_tree': prep.git(p.repo, 'rev-parse', head + '^{tree}'), 'target_tip': base,
+            'target_branch': 'main', 'commit_count': 2}
+    monkeypatch.setattr(review_reconciliation.series, 'live_snapshot', live)
+    with patch.object(review_reconciliation, 'execute_json', side_effect=AssertionError('comparison dispatched')):
+        receipt = cleanup_precheck.precheck(path, reviewed_head, candidate, guard_path, state.reconciliation_api())
+    assert receipt['proof_kind'] == 'exact_identity'
+    spec = importlib.util.spec_from_file_location('stable_cleanup_guard',
+        Path(__file__).parents[2] / 'dk-pr-split-commits/scripts/split_guard.py')
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    monkeypatch.chdir(p.repo)
+    actual_command = guard.run
+    def command(*args, **kwargs):
+        if args[0] == 'gh':
+            return json.dumps({'number': 1, 'url': p.context['url'], 'headRefName': branch,
+                'headRefOid': live()['final_head'], 'isCrossRepository': False,
+                'headRepository': {'nameWithOwner': 'example/fixture'}})
+        return actual_command(*args, **kwargs)
+    monkeypatch.setattr(guard, 'run', command)
+    token = encode('split', 1, True)
+    def invoke(*args):
+        monkeypatch.setattr(sys, 'argv', ['split_guard.py', *args])
+        guard.main()
+    invoke('push', '--allow-force-push', '--review-state', token,
+           '--cleanup-precheck', receipt['precheck']['path'])
+    reasons = p.write('reasons.json', ['Separate transform repair and regression'])
+    assessment_path = p.root / 'assessment.json'
+    invoke('assess', '--review-state', token, '--cleanup-precheck', receipt['precheck']['path'],
+           '--reasons-file', str(reasons), '--output', str(assessment_path))
+    p.head = candidate
+    collect_head()
+    final = refresh(fresh)
+    final_prepared = prep.read(final['artifact'])
+    assert final['model_call_count'] == 0 and final['engineering_id'] == repaired['engineering_id']
+    with patch.object(review_reconciliation, 'execute_json', side_effect=AssertionError('comparison dispatched')):
+        reconciled = review_reconciliation.reconcile(path, candidate, assessment_path, state.reconciliation_api())
+    assert reconciled['status'] == 'reconciled' and reconciled['proof_kind'] == 'exact_identity'
+    check = {'satisfied': True, 'rationale': 'Transform repair and its regression verified',
+             'evidence': [final_prepared['sources']['production/0']]}
+    verification = p.write('verification.json', {'verification_version': 2,
+        'preparation_id': final_prepared['preparation_id'], 'engineering_id': final['engineering_id'],
+        'pr_url': p.context['url'], 'head_sha': candidate,
+        'checks': {key: check for key in ('behavior', 'placement', 'test_sufficiency', 'compatibility', 'complexity')}})
+    assessment = review_reconciliation.series.load(assessment_path, p.repo)
+    assert completion.completion_gate(reviewed_head, candidate, candidate, True, False,
+        {'head': candidate, 'result': 'success'}, preparation=final['artifact'],
+        pr_url=p.context['url'], body='', run_record=path, verification=verification,
+        assessment=assessment, series_snapshot=live()) == 'clean'
+    assert len(read(path, {})['cycles']) == 5 and sorted(calls) == sorted(names * 5)
+    assert all(source.read_bytes() == raw for source, raw in provenance.items())
 
 
 def test_architecture_and_configured_roles_overlap_and_recovery_reuses_success(fresh, monkeypatch):

@@ -166,6 +166,20 @@ an excluded string or artifact reference. Recollect live PR metadata through
 `review_context.py` before refresh; it checks head/base/title/body/readiness again
 before retaining the current snapshot. A concurrent change blocks that snapshot.
 
+Full iteration run records are not preparation-history envelopes, even with a
+`capture` source mode. Collection rejects them with `untyped_run_history` before
+architecture or analyst dispatch. The typed export carries operational counters,
+not claims of completed reviewer coverage. Refresh preserves reviewed engineering
+obligations; coverage gates independently validate the original immutable result
+and its exact originating run/cycle/attempt, reviewer session, head/tree and
+preparation bindings. A counter or CI receipt cannot supply a missing review.
+
+Verified prior-preparation packets use their preparation ID as immutable origin.
+An advancing parent receives a separate citation key. A manifest must retain any
+older ancestor cited by analysis or graph watches; removal or explicit origin
+reuse blocks rather than rebinding that citation to different evidence. Verified
+lineage advancement without changed governing content needs no analyst call.
+
 ## Stored artifact and verification
 
 Immutable `preparation_version:4` artifacts retain `analysis`, graph/retired IDs,

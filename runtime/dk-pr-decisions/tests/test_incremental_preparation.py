@@ -1446,7 +1446,7 @@ class IncrementalPreparationTests(unittest.TestCase):
         self.assertEqual(previous['refresh']['model_call_count'], 0)
         for paths, changed in ((['absence.json', first['artifact'], 'absence.json'], ['prior_preparation/2']),
                                (['absence.json', first['artifact']], ['prior_preparation/2']),
-                               (['absence.json', 'absence.json'], ['prior_preparation/1'])):
+                               (['absence.json', 'absence.json'], ['prior_preparation/2'])):
             package.manifest['evidence']['prior_preparation'] = paths
             package.write('manifest.json', package.manifest)
             parent = prep.read(previous['artifact'])
@@ -1456,9 +1456,9 @@ class IncrementalPreparationTests(unittest.TestCase):
         package.manifest['evidence']['prior_preparation'] = [previous['artifact']]
         package.write('manifest.json', package.manifest)
         parent = prep.read(previous['artifact'])
-        result = self.refresh(previous, retain(parent, unmapped=['source:prior_preparation/0', 'source:prior_preparation/1']))
+        result = self.refresh(previous, retain(parent, unmapped=['source:prior_preparation/0', 'source:prior_preparation/2']))
         self.assertEqual(result['refresh']['model_call_count'], 1)
-        self.assertEqual(result['refresh']['changed_sources'], ['prior_preparation/0', 'prior_preparation/1'])
+        self.assertEqual(result['refresh']['changed_sources'], ['prior_preparation/0', 'prior_preparation/2'])
 
     def test_new_absence_cannot_hide_when_replacing_a_lineage_slot(self):
         package = self.package
@@ -1489,10 +1489,11 @@ class IncrementalPreparationTests(unittest.TestCase):
             package.manifest['evidence']['prior_preparation'] = prior
             package.write('manifest.json', package.manifest)
             with self.subTest(prior=prior):
-                result = self.refresh(first, retain(parent, unmapped=['source:prior_preparation/1']))
+                changed = ['prior_preparation/1'] + (['prior_preparation/2'] if len(prior) == 2 else [])
+                result = self.refresh(first, retain(parent, unmapped=['source:' + key for key in changed]))
                 self.assertEqual(result['refresh']['model_call_count'], 1)
                 self.assertEqual(result['refresh']['mode'], 'incremental')
-                self.assertEqual(result['refresh']['changed_sources'], ['prior_preparation/1'])
+                self.assertEqual(result['refresh']['changed_sources'], changed)
 
     def test_real_context_transport_head_changes_still_use_zero_calls(self):
         package = self.package

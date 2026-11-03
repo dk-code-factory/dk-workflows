@@ -252,6 +252,24 @@ Report review readiness separately from cleanup and completion readiness.
 
 Legacy active runs without `contract_version: 3` must continue through their original retained runtime. This recovery procedure applies to compatible contract-v3 runs only.
 
+An exhausted legacy run whose cleanup comparison rejected regenerated preparation
+cannot gain completion coverage by installing this fix. Preserve the original
+negative comparison, both preparation packets and evidence, all five cycle/session
+results, unpublished candidate, guard/lease and recovery ref. Keep a terminal
+LIMITED run terminal. If still active, record its actual terminal limitation using
+its retained runtime; that records the blocker and grants no completion proof.
+Do not rerun the same comparison until a model agrees, rewrite a packet, adopt the
+old run into the new contract or reset its review/correction budget.
+
+A later, separately authorized user request may start a distinct run through the
+normal preflight path. Archive the old run with its exhausted counters and blocked
+comparison, retain cross-run choices/publication/rerun history, and collect fresh
+typed preparation history. Review the still-published changes under that new run's
+own scope and fresh configured reviews before any guarded cleanup. This does not
+retroactively complete or supersede the old negative verdict. Without a new request
+or valid retained-runtime recovery, report the existing limitation and leave the
+candidate unpublished.
+
 First verify that the old invocation and all its children have stopped. Inspect
 their retained lifecycle records with `update.py inspect --host HOST`, and
 explicitly complete each stopped child's token before its parent using the normal
