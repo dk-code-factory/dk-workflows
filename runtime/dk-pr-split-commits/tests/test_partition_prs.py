@@ -556,6 +556,30 @@ def test_below_threshold_and_disabled_iteration_gate_needs_no_assessment(repo):
     assert partition_gate.require({}, prepared, context)['outcome'] == 'disabled'
 
 
+@pytest.mark.parametrize(('settings', 'outcome'), [
+    ({'added_lines_threshold': 1000}, 'below_threshold'),
+    ({'evacuate_unrelated': 'disabled', 'split_related': 'disabled'}, 'disabled'),
+])
+def test_iteration_gate_skips_unpublished_plan_when_settings_remove_trigger(repo, monkeypatch, settings, outcome):
+    cwd, _, state, evidence, plan, base, chain = repo
+    pr_size.configure(chain, 'set', settings={'evacuate_unrelated': 'manual', 'split_related': 'manual'})
+    prepared = {'identity': {'pr_url': PR, 'head_sha': git(cwd, 'rev-parse', 'HEAD'), 'base_sha': base},
+                'engineering': 'engineering-one'}
+    context = {'checkout': str(cwd), 'repository_identity': chain[0]}
+    monkeypatch.setattr(partition_gate, 'engineering_id', lambda value: value['engineering'])
+    monkeypatch.setattr(p, 'preparation', lambda *_: prepared['engineering'])
+    path = Path(p.prepare(cwd, PR, evidence, plan, 'origin', preparation_file=Path('/private/preparation'))['state'])
+    record = {}
+    partition_gate.attach(record, prepared, context, path)
+    assert p.load(path)['status'] == 'prepared' and not p.load(path)['operations']
+    with pytest.raises(ValueError, match='pending'):
+        partition_gate.require(record, prepared, context)
+    pr_size.configure(chain, 'set', settings=settings)
+    assert p.check(cwd, PR, evidence)['outcome'] == outcome
+    assert partition_gate.require(record, prepared, context)['outcome'] == outcome
+    assert not state['writes']
+
+
 def test_reconciliation_records_dispatched_write_even_when_rules_changed(repo):
     _, _, state, evidence, _, _, _ = repo
     path = prepare(repo)
@@ -574,7 +598,11 @@ def test_reconciliation_records_dispatched_write_even_when_rules_changed(repo):
         publish(path)
 
 
-def test_partial_source_removal_blocks_iteration_even_without_record_registration(repo):
+@pytest.mark.parametrize('settings', [
+    {'added_lines_threshold': 1000},
+    {'evacuate_unrelated': 'disabled', 'split_related': 'disabled'},
+])
+def test_partial_source_removal_blocks_iteration_even_without_record_registration(repo, settings):
     cwd, _, _, _, _, base, chain = repo
     path = prepare(repo)
     data = p.load(path)
@@ -583,7 +611,7 @@ def test_partial_source_removal_blocks_iteration_even_without_record_registratio
         directory=path.parent)['operation']
     from shared.private_state import write
     write(path, data)
-    pr_size.configure(chain, 'set', settings={'added_lines_threshold': 1000})
+    pr_size.configure(chain, 'set', settings=settings)
     prepared = {'identity': {'pr_url': PR, 'head_sha': git(cwd, 'rev-parse', 'HEAD'), 'base_sha': base}}
     with pytest.raises(ValueError, match='publication is pending'):
         partition_gate.require({}, prepared, {'checkout': str(cwd), 'repository_identity': chain[0]})

@@ -43,8 +43,6 @@ def require(record, prepared, context):
         return {'outcome': 'pr_disabled', 'partition_policy': policy}
     if data and data['snapshot']['binding'].get('partition_policy') != pr_partition_policy.binding(pr):
         item = data = None  # Reassess new human instructions; never reuse an old interpretation.
-    if data and data['status'] not in ('no_op', 'declined', 'published'):
-        raise ValueError('PR partition is pending; finish or reconcile it before CI or review')
     config = settings(prepared, context)
     values = config['pr_size']
     if all(values[key] == 'disabled' for key in pr_partition.BEHAVIORS):
@@ -54,6 +52,8 @@ def require(record, prepared, context):
     added = pr_size.additions(cwd, base, prepared['identity']['head_sha'])
     if not policy['instructions'] and added < values['added_lines_threshold']:
         return {'outcome': 'below_threshold', 'added_lines': added}
+    if data and data['status'] not in ('no_op', 'declined', 'published'):
+        raise ValueError('PR partition is pending; finish or reconcile it before CI or review')
     if not item or item['engineering_id'] != engineering_id(prepared):
         raise ValueError('PR size assessment required for current scope before review or completion')
     if data['snapshot']['key'] != item['key'] or data['snapshot']['binding']['settings'] != config:
