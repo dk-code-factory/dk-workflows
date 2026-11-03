@@ -71,6 +71,22 @@ def source_pins(prepared):
     require({'manifest', 'context', 'decisions', 'metadata', 'patch'} <= sources.keys()
             and SOURCE_CATEGORIES <= {key.split('/')[0] for key in sources if '/' in key},
             'preparation source index is incomplete')
+    source = sources['manifest']
+    manifest = read({'path': source.get('snapshot') or source['path'], 'sha256': source['sha256']})
+    evidence = manifest.get('evidence')
+    require(isinstance(evidence, dict) and set(evidence) == SOURCE_CATEGORIES,
+            'preparation manifest evidence categories are incomplete')
+    for category, values in evidence.items():
+        require(isinstance(values, list) and bool(values)
+                and all(isinstance(value, str) and bool(value) for value in values),
+                'preparation manifest source paths are incomplete')
+        expected = {category + '/' + str(index) for index in range(len(values))}
+        require(expected == {key for key in sources if key.startswith(category + '/')},
+                'preparation source index differs from manifest: ' + category)
+        for index, value in enumerate(values):
+            require(Path(sources[category + '/' + str(index)]['path']).resolve()
+                    == (Path(source['path']).parent / value).resolve(),
+                    'preparation source path differs from manifest: ' + category + '/' + str(index))
     pins = {}
     for name, value in sources.items():
         ref = {'path': value.get('snapshot') or value['path'], 'sha256': value['sha256']}
@@ -237,6 +253,9 @@ def delivery(run, handoff, proof):
                     and isinstance(selected, str) and record['excerpt'] in selected,
                     'delivery observation source excerpt unavailable')
             received = record['received']
+        if 'event' in record:
+            require(matching[0].get('returncode') == 0,
+                    'native delivery transport attempt did not complete')
         require(json_equal(received, delivery_payload(handoff, role)), 'incomplete or changed guidance delivery: ' + role)
         seen.add((role, slot))
         coverage.append({'recipient': role, 'attempt': slot, 'kind': kind})

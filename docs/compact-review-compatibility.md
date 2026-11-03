@@ -45,7 +45,8 @@ captures and reports must remain outside Git checkouts, including separate
 reviewed repositories.
 Preparation sources select `snapshot` when present, otherwise `path`.
 The retained source index must include the standard preparation records and
-every evidence category, including explicit absence records. Installed reviewer
+every manifest evidence entry, including explicit absence records. Category
+indexes and original paths must match the retained manifest. Installed reviewer
 procedure sources remain checked per pair rather than compared across providers.
 Delivered Decisions must match the original preparation Decisions source and
 its identity hash. Architecture-bearing captures also require the pinned Git
@@ -127,7 +128,9 @@ Two kinds are supported:
   trial instrumentation, not a change to either handoff version or live gates.
   Codex launches require a completed spawn and a distinct child identity. Claude
   launches require a matching successful tool response. A failed launch retained
-  before transport repair cannot establish delivery.
+  before transport repair cannot establish delivery. Native event observations
+  must cite a successful transport attempt; a successful launch in a discarded
+  failed attempt cannot establish delivery to reviewers in the retry.
 - `source-bound-observation` also supplies nonempty `excerpt` and `received`.
   The excerpt must occur in the string selected by the source pointer. `received`
   is the observer's explicit normalized delivery observation. Retain the native

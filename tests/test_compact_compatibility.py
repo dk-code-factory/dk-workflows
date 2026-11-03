@@ -81,6 +81,10 @@ def captures(tmp_path, monkeypatch):
                         'analysis': {'boundaries': ['Preserve all shared guidance.'], 'questions': [],
                             'reviewer_addenda': {reviewer: 'Assigned addendum.'},
                             'worker_instructions': 'Read original history only when needed.'}}
+            evidence = {category: [prepared['sources'][category + '/0']['path']]
+                        for category in compatibility.SOURCE_CATEGORIES}
+            prepared['sources']['manifest'] = retain(directory / (mode + '-source-manifest.json'),
+                {'mode': 'standalone', 'evidence': evidence})
             handoff = {'contract': contract, **prepared['identity'], 'scope': 'Exact requested scope.',
                        'rules': 'Exact rules.', 'patch': str(patch), 'checkout': str(repository),
                        'preparation': prepared, 'decisions': decisions, 'reviewer_addendum': 'Assigned addendum.',
@@ -244,6 +248,35 @@ def replace_native_attempts(run, attempts):
             record['source'] = proof['attempts'][0]
 
 
+@pytest.mark.parametrize('pair_index', [0, 1])
+@pytest.mark.parametrize('cite_retry', [False, True])
+def test_delivery_is_bound_to_successful_transport_attempt(captures, pair_index, cite_retry):
+    run = captures[1]['pairs'][pair_index]['compact']
+    proof = compatibility.read(run['execution'])
+    original = compatibility.read(proof['attempts'][0])
+    discarded = [json.loads(line) for line in original['stdout'].splitlines()]
+    retry = json.loads(json.dumps(discarded).replace('child-', 'retry-child-')
+                       .replace('call-', 'retry-call-'))
+    for row in retry:
+        item = row.get('item', {})
+        if item.get('tool') == 'spawn_agent' and not cite_retry:
+            item['prompt'] = item['prompt'].splitlines()[0]
+        for block in row.get('message', {}).get('content', []):
+            if block.get('type') == 'tool_use' and not cite_retry:
+                block['input']['prompt'] = block['input']['prompt'].splitlines()[0]
+    replace_native_attempts(run, [(discarded, 1), (retry, 0)])
+    execution.verify(run['execution'], run['binding'], compatibility.read(run['descriptor']), run['handoff']['path'])
+    if cite_retry:
+        proof = compatibility.read(run['execution'])
+        for record in run['deliveries']:
+            if 'event' in record:
+                record['source'] = proof['attempts'][1]
+    row = compare(captures)['pairs'][pair_index]
+    assert row['status'] == ('observed' if cite_retry else 'incomplete'), row['issues']
+    if not cite_retry:
+        assert 'transport attempt' in row['issues'][0]
+
+
 @pytest.mark.parametrize('change', ['status', 'empty-receiver', 'invalid-receiver', 'self-receiver', 'claude-error'])
 def test_repaired_failed_launch_does_not_establish_delivery(captures, change):
     pair_index = 1 if change == 'claude-error' else 0
@@ -365,6 +398,33 @@ def test_omitted_required_source_cannot_hide_unavailable_original(captures, sour
     row = compare(captures)['pairs'][0]
     assert row['status'] == 'incomplete'
     assert row['issues'] == ['preparation source index is incomplete']
+
+
+@pytest.mark.parametrize('change', ['none', 'omit', 'replace'])
+def test_every_manifest_source_in_multi_record_category_is_required(captures, change):
+    original = retain(captures[0].parent / 'second-feedback.json',
+                      {'verified_absence': True, 'reason': 'Additional synthetic source.'})
+    for pair in captures[1]['pairs']:
+        for label in ('full', 'compact'):
+            run = pair[label]
+            handoff = compatibility.read(run['handoff'])
+            prepared = (compatibility.read(handoff['full_preparation']) if label == 'compact'
+                        else handoff['preparation'])
+            source = prepared['sources']['manifest']
+            manifest = compatibility.read(source)
+            manifest['evidence']['feedback'].append(original['path'])
+            prepared['sources']['manifest'] = retain(Path(source['path']), manifest)
+            if change != 'omit':
+                prepared['sources']['feedback/1'] = (prepared['sources']['feedback/0']
+                    if change == 'replace' else original)
+            replace_preparation(run, handoff, prepared)
+    if change != 'none':
+        Path(original['path']).unlink()
+    report = compare(captures)
+    assert report['status'] == ('observed' if change == 'none' else 'incomplete')
+    if change != 'none':
+        assert all('source ' in row['issues'][0] and 'manifest' in row['issues'][0]
+                   for row in report['pairs'])
 
 
 def test_provider_specific_procedure_sources_do_not_change_cohort_scope(captures):
