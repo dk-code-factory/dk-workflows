@@ -341,6 +341,48 @@ def test_declined_work_cannot_be_copied_as_a_prerequisite(repo):
     assert not state['writes']
 
 
+def test_revised_plan_replaces_failed_decline_without_reusing_approvals(repo):
+    cwd, _, state, evidence, plan, _, chain = repo
+    plan['units'][2]['scope'] = 'unrelated'
+    plan['pieces'][1]['depends_on'] = ['c']
+    pr_size.configure(chain, 'set', settings={'evacuate_unrelated': 'manual', 'split_related': 'manual'})
+    path = prepare(repo)
+    actions = publish(path)['action_ids']
+    with pytest.raises(ValueError, match='declined work is a prerequisite'):
+        publish(path, decisions={key: {'action_id': action, 'decision': (
+            'declined' if key == 'evacuate_unrelated' else 'approved')} for key, action in actions.items()})
+    revised = copy.deepcopy(plan)
+    revised['pieces'][0]['units'].append('c')
+    revised['pieces'][1]['depends_on'] = ['original']
+    revised['pieces'][1]['prerequisite_units'] = {'original': ['a']}
+    revised['pieces'].pop()
+    replacement = prepare(repo, revised)
+    assert replacement != path
+    data = p.verify(replacement)
+    assert data['plan'] == revised and data['decisions'] == {} and 'reviews' not in data
+    assert all(data['action_ids'][key] != action for key, action in actions.items())
+    assert p.check(cwd, PR, evidence)['state'] == str(replacement)
+    with pytest.raises(ValueError, match='superseded'):
+        publish(path)
+    pending = publish(replacement)
+    assert pending['outcome'] == 'awaiting_approval' and not state['writes']
+    assert publish(replacement, decisions={'split_related': {
+        'action_id': pending['action_ids']['split_related'], 'decision': 'approved'}})['outcome'] == 'published'
+    assert len(state['drafts']) == 1
+
+
+def test_revised_plan_cannot_replace_journaled_publication(repo):
+    _, _, state, _, plan, _, _ = repo
+    path = prepare(repo)
+    state['interrupt'] = 'POST'
+    with pytest.raises(Diagnostic):
+        publish(path)
+    revised = copy.deepcopy(plan)
+    revised['pieces'][1]['title'] = 'Revised deliverable'
+    with pytest.raises(ValueError, match='publication already started'):
+        prepare(repo, revised)
+
+
 def test_indivisible_assessment_and_declines_are_cached_across_history_rewrites(repo):
     cwd, remote, state, evidence, plan, _, chain = repo
     plan['pieces'][0]['units'] = ['a', 'b', 'c']
@@ -450,7 +492,9 @@ def test_interrupted_decline_rebuild_preserves_artifacts_and_can_resume(repo, mo
     assert publish(path)['outcome'] == 'published'
 
 
-def test_generated_recovery_command_is_accepted_by_the_cli(repo):
+def test_generated_recovery_command_is_accepted_by_the_cli(repo, monkeypatch, capsys):
+    import importlib.util
+    import sys
     _, _, state, _, _, _, _ = repo
     path = prepare(repo)
     state['interrupt'] = 'POST'
@@ -459,10 +503,25 @@ def test_generated_recovery_command_is_accepted_by_the_cli(repo):
     data = p.load(path)
     operation = next(publication.load(path) for key, path in data['operations'].items() if key.startswith('create-'))
     argv = operation['reconcile_argv']
-    # Execute the parser with --help so the real subprocess never accesses GitHub.
-    result = subprocess.run([*argv, '--help'], capture_output=True, text=True)
-    assert result.returncode == 0 and '--operation' in result.stdout
-    assert '--cwd' in argv and str(repo[0]) in argv
+    spec = importlib.util.spec_from_file_location('partition_cli', argv[1])
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    calls = []
+    def reconcile(state_path, **kwargs):
+        calls.append((state_path, kwargs))
+        return {'outcome': 'reconciled'}
+    monkeypatch.setattr(p, 'publish', reconcile)
+    monkeypatch.setattr(sys, 'argv', argv[1:])
+    cli.main()
+    assert json.loads(capsys.readouterr().out)['outcome'] == 'reconciled'
+    assert len(calls) == 1 and calls[0][0] == path
+    assert calls[0][1]['reconcile'] is True
+    assert calls[0][1]['operation_path'] == Path(data['operations'][next(
+        key for key in data['operations'] if key.startswith('create-'))])
+    monkeypatch.setattr(sys, 'argv', [*argv[1:], '--unsupported-recovery-option'])
+    with pytest.raises(SystemExit) as rejected:
+        cli.main()
+    assert rejected.value.code == 2 and len(calls) == 1
 
 
 @pytest.mark.parametrize('evacuate,split', [(a, b) for a in pr_size.MODES for b in pr_size.MODES])
@@ -602,15 +661,30 @@ def test_reconciliation_records_dispatched_write_even_when_rules_changed(repo):
     {'added_lines_threshold': 1000},
     {'evacuate_unrelated': 'disabled', 'split_related': 'disabled'},
 ])
-def test_partial_source_removal_blocks_iteration_even_without_record_registration(repo, settings):
-    cwd, _, _, _, _, base, chain = repo
+@pytest.mark.parametrize('phase', ['prepared', 'source_removed'])
+def test_journaled_publication_blocks_iteration_even_without_record_registration(repo, monkeypatch, settings, phase):
+    cwd, remote, _, _, _, base, chain = repo
     path = prepare(repo)
     data = p.load(path)
-    # Simulate interruption after any journaled publication but before record attach.
-    data['operations']['push-b'] = publication.prepare('partition-branch', PR, {}, {}, ['reconcile'],
-        directory=path.parent)['operation']
-    from shared.private_state import write
-    write(path, data)
+    if phase == 'prepared':
+        data['operations']['push-b'] = publication.prepare('partition-branch', PR, {}, {}, ['reconcile'],
+            directory=path.parent)['operation']
+        from shared.private_state import write
+        write(path, data)
+    else:
+        original_run = p.run
+        def interrupt_source(work, *argv):
+            result = original_run(work, *argv)
+            if argv[:2] == ('git', 'push') and argv[-1].endswith(':refs/heads/topic'):
+                raise RuntimeError('lost source rewrite response')
+            return result
+        monkeypatch.setattr(p, 'run', interrupt_source)
+        with pytest.raises(Diagnostic):
+            publish(path)
+        assert git(remote, 'rev-parse', 'topic') == data['candidates']['original']['head']
+        assert git(remote, 'ls-tree', '--name-only', 'topic').splitlines() == ['a', 'base']
+        operation = publication.load(p.load(path)['operations']['push-original'])
+        assert operation['status'] == 'pending' and 'intent' in operation
     pr_size.configure(chain, 'set', settings=settings)
     prepared = {'identity': {'pr_url': PR, 'head_sha': git(cwd, 'rev-parse', 'HEAD'), 'base_sha': base}}
     with pytest.raises(ValueError, match='publication is pending'):

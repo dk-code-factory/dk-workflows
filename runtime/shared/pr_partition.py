@@ -346,7 +346,7 @@ def validate_plan(cwd, snap, plan):
         else:
             if len(scopes) != 1 or 'retained' in scopes:
                 raise ValueError('draft cannot mix related and unrelated units')
-            behavior = 'evacuate_unrelated' if scopes == {'unrelated'} else 'split_related'
+            behavior = piece_behavior(piece, by_unit)
             if settings[behavior] == 'disabled':
                 raise ValueError('disabled behavior cannot move its changes')
             if settings['evacuate_unrelated'] == 'disabled':
@@ -394,6 +394,10 @@ def validate_plan(cwd, snap, plan):
     return plan
 
 
+def piece_behavior(piece, by_unit):
+    return 'evacuate_unrelated' if by_unit[piece['units'][0]]['scope'] == 'unrelated' else 'split_related'
+
+
 def selected_pieces(data):
     pieces = copy.deepcopy(data['plan']['pieces'])
     units = {unit['id']: unit for unit in data['plan']['units']}
@@ -402,7 +406,7 @@ def selected_pieces(data):
     for piece in pieces:
         if piece['id'] == 'original':
             continue
-        behavior = 'evacuate_unrelated' if units[piece['units'][0]]['scope'] == 'unrelated' else 'split_related'
+        behavior = piece_behavior(piece, units)
         if data['decisions'].get(behavior) == 'declined':
             removed.append(piece['id'])
             original['units'].extend(piece['units'])
@@ -542,15 +546,17 @@ def prepare(cwd, pr, evidence, plan, remote, *, preparation_file=None):
     previous = check(cwd, pr, evidence, preparation_file=preparation_file)
     superseded = None
     if previous['state']:
-        # Resume, including prepared/manual work, without rebuilding or prompting.
+        # Identical plans retain approvals; revised unpublished plans start afresh.
         previous_path = Path(previous['state'])
         with previous_path.with_suffix('.lock').open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             retained = load(previous_path)
-            if (previous['outcome'] == 'resume_required' and retained['status'] == 'cancelled'
-                    and retained['plan_id'] != publication.digest(plan)):
-                superseded = {'state': str(previous_path), 'retained_drafts': retained['drafts']}
-            if retained['snapshot']['head'] != snap['head'] and not retained['operations']:
+            if retained.get('plan_id') != publication.digest(plan):
+                cancelled = previous['outcome'] == 'resume_required' and retained['status'] == 'cancelled'
+                if not cancelled and (retained['operations'] or retained['status'] == 'published'):
+                    raise ValueError('publication already started; reconcile and continue the retained plan')
+                superseded = {'state': str(previous_path), 'retained_drafts': retained.get('drafts', {})}
+            if superseded is None and retained['snapshot']['head'] != snap['head'] and not retained['operations']:
                 # Same semantic binding and candidates, newly observed exact lease.
                 # Foreign-author remapping was already rejected by validate_plan.
                 retained.setdefault('equivalent_heads', []).append(retained['snapshot']['head'])
@@ -605,7 +611,16 @@ def prepare(cwd, pr, evidence, plan, remote, *, preparation_file=None):
         data['status'] = 'no_op'
     data['candidate_hash'] = publication.digest(built)
     write(path, data)
-    remember(cwd, snap, path)
+    if superseded:
+        previous_path = Path(superseded['state'])
+        with previous_path.with_suffix('.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            retained = load(previous_path)
+            if retained['operations'] and retained['status'] != 'cancelled':
+                raise ValueError('publication already started; continue the retained plan')
+            remember(cwd, snap, path)
+    else:
+        remember(cwd, snap, path)
     return {'state': str(path), 'action_ids': data['action_ids'], 'outcome': data['status']}
 
 
@@ -642,6 +657,10 @@ def branch_name(data, name):
 def verify(path, *, live=True, refresh_policy=False):
     data = load(path)
     cwd, snap = data['cwd'], data['snapshot']
+    history_path = cache_path(cwd, snap['binding']['pr'])
+    current = json.loads(history_path.read_text()).get(snap['key']) if history_path.exists() else None
+    if current and Path(current).resolve() != Path(path).resolve():
+        raise ValueError('partition plan was superseded; use ' + current)
     if data.get('kind') == 'policy_assessment':
         if sources({key: item['path'] for key, item in data['evidence'].items()}) != data['evidence']:
             raise ValueError('conditional partition assessment evidence changed')
@@ -720,7 +739,7 @@ def recover_operations(data, action):
 
 def publication_actions(data, pieces):
     by_unit = {unit['id']: unit for unit in data['plan']['units']}
-    actions = {('evacuate_unrelated' if by_unit[piece['units'][0]]['scope'] == 'unrelated' else 'split_related')
+    actions = {piece_behavior(piece, by_unit)
                for piece in pieces if piece['id'] != 'original'}
     if len(pieces) == 1 and data['snapshot']['metadata']['baseRefName'] != data['snapshot']['binding']['default_branch']:
         actions.update(data['action_ids'])
