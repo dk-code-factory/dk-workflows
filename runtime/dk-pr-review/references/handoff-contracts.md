@@ -17,6 +17,9 @@ through `dk-config reviewers set --bindings-file FILE`:
 Selecting v2 declares that the provider supports the compact input. Never infer
 support from an existing binding. Unknown versions fail rather than silently
 falling back. Drafting uses its own contract and rejects this reviewer-only field.
+Use the [offline compatibility diagnostic](../../../docs/compact-review-compatibility.md)
+to compare privately retained full/compact captures. Synthetic checks and diagnostic
+reports do not authorize adoption; native compatibility trials remain pending.
 The provider identity stays stable. The selected contract participates in its
 descriptor, preparation identity and resume checks. Changing it requires refreshed
 preparation; pinned execution cannot hide a changed selection.

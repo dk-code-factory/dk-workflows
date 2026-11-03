@@ -1,6 +1,6 @@
 # dk-workflows
 
-Independent MIT plugin for Claude Code and Codex. Version 1.7.8.
+Independent MIT plugin for Claude Code and Codex. Version 1.7.10.
 
 ## Install
 
@@ -517,3 +517,7 @@ before its configured-reviewer loop. Later cycles, CI repairs, commit cleanup an
 completion retain that original result and reviewed head. Current architecture
 rules still reach every worker, and unresolved architecture findings block progress.
 Standalone PR reviews continue to run architecture alongside configured reviewers.
+
+The offline [compact review compatibility report](docs/compact-review-compatibility.md)
+compares retained full and compact provider evidence. Synthetic checks do not
+establish live compatibility or enable compact reviewer bindings.
