@@ -6,20 +6,27 @@ from state import digest, read
 DEFAULTS = {
     'reviewers': [],
     'skills': {
-        'feedback': 'dk-pr-skills:dk-pr-address-reviews',
-        'decisions': 'dk-pr-skills:dk-pr-decisions',
-        'description': 'dk-pr-skills:dk-pr-description',
-        'reply': 'dk-pr-skills:dk-pr-reply-review',
-        'partition': 'dk-pr-skills:dk-pr-split-commits',
-        'cleanup': 'dk-pr-skills:dk-pr-split-commits',
-        'ci': 'dk-pr-skills:dk-ci',
-        'flaky_tests': 'dk-pr-skills:dk-flaky-tests',
-        'publish': 'dk-pr-skills:dk-pr-publish',
+        'feedback': 'dk-workflows:dk-pr-address-reviews',
+        'decisions': 'dk-workflows:dk-pr-decisions',
+        'description': 'dk-workflows:dk-pr-description',
+        'reply': 'dk-workflows:dk-pr-reply-review',
+        'partition': 'dk-workflows:dk-pr-split-commits',
+        'cleanup': 'dk-workflows:dk-pr-split-commits',
+        'ci': 'dk-workflows:dk-ci',
+        'flaky_tests': 'dk-workflows:dk-flaky-tests',
+        'publish': 'dk-workflows:dk-pr-publish',
     },
     'iteration': {'max_cycles': 5, 'same_cycle_retries': 1, 'ci_repairs_per_cycle': 5,
                   'ci_reruns_per_head': 3},
     'domain_settings': {},
 }
+
+
+def normalize_skill(skill):
+    if isinstance(skill, str) and skill.startswith('dk-pr-skills:'):
+        mapping = read(Path(__file__).resolve().parents[1]/'docs/v1-skill-mapping.json')
+        return mapping.get(skill, skill)
+    return skill
 
 
 def validate(settings):
@@ -30,6 +37,8 @@ def validate(settings):
     for key in ('skills', 'domain_settings'):
         if not isinstance(settings.get(key, {}), dict):
             raise ValueError(key + ' must be an object')
+    import copy
+    settings = copy.deepcopy(settings)
     for reviewer in settings.get('reviewers', []):
         if (not isinstance(reviewer, dict) or set(reviewer) - {'skill', 'required', 'options'}
                 or not isinstance(reviewer.get('skill'), str) or not reviewer['skill']
@@ -47,6 +56,16 @@ def validate(settings):
     for owner, reference in settings.get('domain_settings', {}).items():
         if not isinstance(owner, str) or not isinstance(reference, str) or not reference:
             raise ValueError('Domain settings must be owner-to-reference strings')
+    for reviewer in settings.get('reviewers', []):
+        reviewer['skill'] = normalize_skill(reviewer['skill'])
+    if 'skills' in settings:
+        settings['skills'] = {role: normalize_skill(skill) for role, skill in settings['skills'].items()}
+    references = settings.get('domain_settings', {})
+    if 'dk-pr-skills' in references:
+        previous = references.pop('dk-pr-skills')
+        if 'dk-workflows' in references and references['dk-workflows'] != previous:
+            raise ValueError('Conflicting saved PR settings references require reconciliation')
+        references['dk-workflows'] = previous
     return settings
 
 
@@ -100,8 +119,8 @@ def migrate(reviewers=None, drafting=None):
         result.append({'skill': mapping.get(binding['skill'], binding['skill']), 'required': binding.get('required', True)})
     return {'mapping': mapping, 'proposed': {'reviewers': result}, 'unresolved_bindings': unresolved,
             'drafting_for_domain_owner': drafting or {},
-            'domain_owners': {'rules': 'dk-pr-skills', 'drafting': 'dk-pr-skills',
-                              'pr_size': 'dk-pr-skills', 'pr_partition': 'dk-pr-skills',
-                              'completion': 'dk-pr-skills', 'ci_exceptions': 'dk-pr-skills',
+            'domain_owners': {'rules': 'dk-workflows', 'drafting': 'dk-workflows',
+                              'pr_size': 'dk-workflows', 'pr_partition': 'dk-workflows',
+                              'completion': 'dk-workflows', 'ci_exceptions': 'dk-workflows',
                               'architecture': 'dk-architecture'},
             'v1_state': 'Use retained v1 runtime for active runs; never migrate review caches'}

@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""Run offline workflow unit and full-recipe tests with an explicit skill dependency."""
-import argparse
-import json
+"""Run the bundled workflow, PR-domain and full-recipe suites offline."""
 import os
 from pathlib import Path
 import subprocess
@@ -9,19 +7,15 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-p = argparse.ArgumentParser(description=__doc__)
-p.add_argument('--pr-skills-root', type=Path, default=os.environ.get('DK_PR_SKILLS_ROOT'))
-a = p.parse_args()
-dependency = Path(a.pr_skills_root or ROOT/'.dependencies/dk-pr-skills').resolve()
-pin = json.loads((ROOT/'test-dependencies.json').read_text())['pr_skills']
-manifest = dependency/'.codex-plugin/plugin.json'
-if not manifest.is_file():
-    p.error('Provide --pr-skills-root or DK_PR_SKILLS_ROOT for '+pin['repository']+' at '+pin['revision'])
-metadata = json.loads(manifest.read_text())
-if metadata.get('name') != 'dk-pr-skills' or metadata.get('version') != pin['version']:
-    p.error('The test dependency must match the pinned skill identity/version')
-env = {**os.environ, 'PYTHONDONTWRITEBYTECODE':'1', 'DK_PR_SKILLS_ROOT':str(dependency)}
-with tempfile.TemporaryDirectory(prefix='dk-workflows-v2-tests-') as temporary:
-    result = subprocess.run([sys.executable, '-m', 'pytest', '-q', str(ROOT/'tests'), '--tb=short',
-                             '--basetemp', str(Path(temporary)/'tests')], cwd=ROOT, env=env)
-    raise SystemExit(result.returncode)
+suites = [sorted((ROOT/'tests').glob('test_*.py')), [ROOT/'tests/pr']]
+suites += [[path] for path in sorted(ROOT.glob('runtime/*/tests'))]
+env = {**os.environ, 'PYTHONDONTWRITEBYTECODE':'1',
+       'PYTHONPATH':os.pathsep.join([str(ROOT/'runtime'), str(ROOT/'runtime/dk-pr-address-reviews/scripts')])}
+with tempfile.TemporaryDirectory(prefix='dk-workflows-tests-') as temporary:
+    for index, suite in enumerate(suites):
+        command = [sys.executable, '-m', 'pytest', '-q', *map(str, suite), '--tb=short',
+                   '--basetemp', str(Path(temporary)/str(index)), '-o',
+                   'cache_dir='+str(Path(temporary)/'cache')]
+        result = subprocess.run(command, cwd=ROOT, env=env)
+        if result.returncode:
+            raise SystemExit(result.returncode)

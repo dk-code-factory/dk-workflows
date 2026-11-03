@@ -34,7 +34,7 @@ def package(root):
             assert re.search(r'(?m)^description: .+',text)
     assert entries[0]==entries[1]
     if manifests[0]['name']=='dk-workflows':
-        assert entries[0]==['dk-config','dk-pr-iter','dk-pr-review']
+        assert entries[0]==['dk-ci', 'dk-commit-message', 'dk-config', 'dk-flaky-tests', 'dk-issue-description', 'dk-pr-address-reviews', 'dk-pr-config', 'dk-pr-decisions', 'dk-pr-description', 'dk-pr-iter', 'dk-pr-post-review', 'dk-pr-publish', 'dk-pr-read-comments', 'dk-pr-reply-review', 'dk-pr-review', 'dk-pr-split-commits']
     for name in ('.agents/plugins/marketplace.json','.claude-plugin/marketplace.json'):
         catalog=json.loads((root/name).read_text())
         assert catalog['name']==manifests[0]['name']

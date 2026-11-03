@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 ROOT=Path(__file__).resolve().parents[1]
-PR_PACKAGE=Path(os.environ.get('DK_PR_SKILLS_ROOT',ROOT/'.dependencies/dk-pr-skills')).resolve()
+PR_PACKAGE=ROOT
 FIXTURE=ROOT/'tests/fixtures/recipe'
 PR='https://github.com/owner/repo/pull/7'
 REPO='github.com/owner/repo'
@@ -26,7 +26,7 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path):
     def git(*args):return execute([real_git,'-C',checkout,*args]).stdout.strip()
     def save(name,value):
         path=tmp_path/name;path.write_text(json.dumps(value));return path
-    assert (PR_PACKAGE/'scripts/publish.py').is_file(), 'Set DK_PR_SKILLS_ROOT to the pinned dk-pr-skills checkout'
+    assert (PR_PACKAGE/'scripts/publish.py').is_file(), 'Bundled PR publisher must be installed with the workflow'
     real_git=shutil.which('git')
     checkout=tmp_path/'repo';checkout.mkdir()
     git('init','-q');git('config','user.name','Fixture');git('config','user.email','fixture@example.test')
@@ -37,7 +37,7 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path):
     git('commit','-qam','initial change');head=git('rev-parse','HEAD')
     bare=tmp_path/'remote.git';execute([real_git,'init','--bare','-q',bare])
     execute([real_git,'-C',checkout,'push',str(bare),'HEAD:refs/heads/pr-branch'])
-    fixture_spec=importlib.util.spec_from_file_location('recipe_fixture',PR_PACKAGE/'tests/fixtures/github_remote.py')
+    fixture_spec=importlib.util.spec_from_file_location('recipe_fixture',PR_PACKAGE/'tests/pr/fixtures/github_remote.py')
     fixture=importlib.util.module_from_spec(fixture_spec);fixture_spec.loader.exec_module(fixture)
     state=fixture.initial();state['metadata']['headRefOid']=head;state['run']['head_sha']=head
     state['branches'].update(main=base,**{'pr-branch':head})
@@ -47,7 +47,7 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path):
     for executable in ('gh','git'):
         path=bin_path/executable;path.write_text('#!'+sys.executable+'\n'+(FIXTURE/'remote_cli.py').read_text());path.chmod(0o755)
     env={**os.environ,'PATH':str(bin_path)+os.pathsep+os.environ['PATH'],'DK_RECIPE_REMOTE':str(remote),
-         'DK_RECIPE_FIXTURE':str(PR_PACKAGE/'tests/fixtures/github_remote.py'),
+         'DK_RECIPE_FIXTURE':str(PR_PACKAGE/'tests/pr/fixtures/github_remote.py'),
          'DK_RECIPE_BARE':str(bare),'DK_RECIPE_GIT':real_git}
     def remote_value():return json.loads(remote.read_text())
     def update_remote(fn):

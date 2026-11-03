@@ -1,0 +1,132 @@
+"""Offline GitHub transport shared by domain and full-recipe acceptance tests."""
+from copy import deepcopy
+from urllib.parse import urlsplit, parse_qs
+
+PR = 'https://github.com/owner/repo/pull/7'
+HEAD = 'a' * 40
+
+
+def initial():
+    return {'metadata': {'url': PR, 'headRefOid': HEAD, 'title': 'Fix the value', 'body': 'Scope: return two.\n## Decisions\n- Return two.'},
+            'actor': 'author', 'run': {'id': 77, 'head_sha': HEAD, 'run_attempt': 1, 'status': 'completed', 'conclusion': 'failure'},
+            'thread': {'id': 'PRRT_fixture', 'isResolved': False, 'viewerCanResolve': True,
+                       'comments': [{'id': 'comment-42', 'databaseId': 42, 'url': PR+'#discussion_r42',
+                                     'body': 'Verified answer', 'author': {'login': 'author'}}]},
+            'requested': {'users': [], 'teams': []}, 'branches': {'main': 'b'*40, 'partition': 'c'*40},
+            'pulls': [], 'reviews': [], 'review_comments': {}, 'replies': [], 'writes': {}, 'lose_response': [],
+            'files': [{'filename': 'code.py', 'patch': '@@ -1 +1 @@\n-VALUE = 0\n+VALUE = 2'}],
+            'checks': [{'name': 'test', 'bucket': 'pass', 'state': 'SUCCESS', 'link': PR+'/checks/1', 'workflow': 'CI'}]}
+
+
+class Remote:
+    def __init__(self, state=None):
+        self.state = initial() if state is None else state
+
+    def metadata(self, pr):
+        if pr != self.state['metadata']['url']:
+            raise ValueError('Unknown fixture PR')
+        return deepcopy(self.state['metadata'])
+
+    def changed(self, kind, value):
+        self.state['writes'][kind] = self.state['writes'].get(kind, 0) + 1
+        if kind in self.state['lose_response']:
+            self.state['lose_response'].remove(kind)
+            raise OSError('Fixture lost response after applying '+kind)
+        return value
+
+    def api(self, pr, path, *, payload=None):
+        if path == 'user':
+            return {'login': self.state['actor']}
+        prefix = 'repos/owner/repo'
+        if not path.startswith(prefix):
+            raise AssertionError('Unexpected fixture API: '+path)
+        parsed = urlsplit(path[len(prefix):])
+        suffix = parsed.path
+        if suffix == '':
+            return {'default_branch': 'main'}
+        if suffix.startswith('/git/ref/heads/'):
+            from urllib.parse import unquote
+            return {'object': {'sha': self.state['branches'][unquote(suffix[len('/git/ref/heads/'):])]}}
+        if suffix == '/actions/runs/77':
+            return deepcopy(self.state['run'])
+        if suffix == '/actions/runs/77/rerun-failed-jobs':
+            assert payload == {}
+            self.state['run'].update(run_attempt=self.state['run']['run_attempt']+1, status='queued', conclusion=None)
+            return self.changed('ci-rerun', '')
+        if suffix == '/pulls/7/requested_reviewers':
+            if payload is None:
+                return deepcopy(self.state['requested'])
+            self.state['requested'] = {'users': [{'login':v} for v in payload['reviewers']],
+                                       'teams': [{'slug':v} for v in payload['team_reviewers']]}
+            return self.changed('request-review', deepcopy(self.state['requested']))
+        if suffix == '/pulls':
+            if payload is None:
+                query = parse_qs(parsed.query)
+                return deepcopy([v for v in self.state['pulls'] if v['head']['ref'] == query.get('head',[':'])[0].split(':',1)[-1]])
+            value = {'id': 500+len(self.state['pulls']), 'number': 8+len(self.state['pulls']),
+                     'html_url': PR.replace('/7','/8'), 'state':'open', 'draft':payload['draft'],
+                     'title':payload['title'], 'body':payload['body'], 'user':{'login':self.state['actor']},
+                     'head':{'ref':payload['head'],'sha':self.state['branches'][payload['head']]},
+                     'base':{'ref':payload['base'],'sha':self.state['branches'][payload['base']]}}
+            self.state['pulls'].append(value)
+            return self.changed('create-draft-pr',deepcopy(value))
+        if suffix == '/pulls/7/files':
+            return deepcopy(self.state['files'])
+        if suffix == '/pulls/7/reviews':
+            if payload is None:
+                return deepcopy(self.state['reviews'])
+            review_id=100+len(self.state['reviews'])
+            value={'id':review_id,'commit_id':payload['commit_id'],'body':payload['body'],
+                   'state':{'COMMENT':'COMMENTED','APPROVE':'APPROVED','REQUEST_CHANGES':'CHANGES_REQUESTED'}[payload['event']],
+                   'user':{'login':self.state['actor']},'html_url':PR+'#review-'+str(review_id)}
+            self.state['reviews'].append(value)
+            self.state['review_comments'][str(review_id)] = [{'id':200+i,**v} for i,v in enumerate(payload['comments'])]
+            return self.changed('post-review',deepcopy(value))
+        if suffix.startswith('/pulls/7/reviews/') and suffix.endswith('/comments'):
+            return deepcopy(self.state['review_comments'][suffix.split('/')[-2]])
+        if suffix == '/pulls/7/comments':
+            return deepcopy(self.state['replies'])
+        if suffix == '/pulls/7/comments/41/replies':
+            value={'id':42,'in_reply_to_id':41,'body':payload['body'],'user':{'login':self.state['actor']},'html_url':PR+'#discussion_r42'}
+            self.state['replies'].append(value)
+            self.state['thread']['comments']=[{'id':'comment-42','databaseId':42,'url':value['html_url'],'body':value['body'],'author':value['user']}]
+            return self.changed('reply-inline',value)
+        raise AssertionError('Unexpected fixture API: '+path)
+
+    def run(self, argv, *, payload=None, json_output=True, **kwargs):
+        assert argv[0] == 'gh'
+        if argv[1:3] == ['pr','view']:
+            fields=argv[argv.index('--json')+1].split(',')
+            return {k:v for k,v in self.metadata(argv[3]).items() if k in fields}
+        if argv[1:3] == ['pr','checks']:
+            return deepcopy(self.state['checks'])
+        if argv[1:3] == ['pr','edit']:
+            if '--title' in argv:self.state['metadata']['title']=argv[argv.index('--title')+1]
+            if '--body-file' in argv:
+                from pathlib import Path
+                self.state['metadata']['body']=Path(argv[argv.index('--body-file')+1]).read_text()
+            return self.changed('edit-pr','')
+        path=argv[argv.index('--hostname')+2]
+        if path == 'graphql':
+            if 'mutation' in payload['query']:
+                self.state['thread']['isResolved']=True
+                return self.changed('resolve-thread',{'data':{'resolveReviewThread':{'thread':{'id':self.state['thread']['id'],'isResolved':True}}}})
+            node=deepcopy(self.state['thread'])
+            comments=node.pop('comments')
+            offset=int(payload['variables'].get('after') or '0')
+            node['pullRequest']={'url':self.state['metadata']['url'],'headRefOid':self.state['metadata']['headRefOid']}
+            next_offset=offset+100
+            node['comments']={'nodes':comments[offset:next_offset], 'pageInfo':{'hasNextPage':next_offset<len(comments),'endCursor':str(next_offset)}}
+            return {'data':{'node':node}}
+        value=self.api(PR,path,payload=payload)
+        return [value] if '--paginate' in argv else value
+
+
+def request(kind):
+    value={'kind':kind,'pr':PR,'head':HEAD}
+    if kind=='ci-rerun':value.update(run_id=77,attempt=1,reason='Verified transient infrastructure failure')
+    if kind=='resolve-thread':value.update(thread_id='PRRT_fixture',reply_id=42)
+    if kind=='request-review':value.update(reviewers=['reviewer'],team_reviewers=['team'])
+    if kind=='create-draft-pr':value.update(head_branch='partition',branch_sha='c'*40,base_branch='main',base_sha='b'*40,title='Evacuated scope',body='Independent work')
+    if kind=='post-review':value.update(body='Verified findings',comments=[{'path':'code.py','line':1,'side':'RIGHT','body':'Consider the value.'}])
+    return value
