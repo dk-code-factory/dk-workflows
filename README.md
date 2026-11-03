@@ -1,6 +1,6 @@
 # dk-workflows
 
-Version 2.2.4. Agent-led PR workflows and bundled PR skills for Codex and Claude Code. Python 3.11+ and Git support deterministic bookkeeping; authenticated gh is required for remote PR actions.
+Version 2.2.5. Agent-led PR workflows and bundled PR skills for Codex and Claude Code. Python 3.11+ and Git support deterministic bookkeeping; authenticated gh is required for remote PR actions.
 
 The coordinating skills are `dk-pr-review`, `dk-pr-iter` and `dk-config`. This same plugin also includes PR drafting, Decisions, feedback reads/fixes, replies, review publication, partitioning/commit cleanup, CI/flaky-test handling, durable publication and PR settings:
 

@@ -26,6 +26,8 @@ def distribution(tmp_path, monkeypatch):
     ('scripts/providers/review.py','import shared.executors\n','shared.executors'),
     ('runtime/shared/preparation.py','preparation_graph = {}\n','preparation_graph'),
     ('runtime/shared/delivery.py','architecture_packet = {}\n','architecture_packet'),
+    ('runtime/shared/handoff.py','contract = "git-diff-v1"\n','git-diff-v1'),
+    ('runtime/dk-pr-review/scripts/delivery.py','contract = "git-diff-v2"\n','git-diff-v2'),
 ])
 def test_nested_execution_policy_is_rejected(distribution,relative,source,marker):
     installed,module=distribution
@@ -40,5 +42,6 @@ def test_execution_examples_in_test_fixtures_remain_allowed(distribution):
     installed,module=distribution
     for relative in ('tests/fixtures/legacy.py','runtime/shared/tests/fixtures/legacy.py'):
         path=installed/relative;path.parent.mkdir(parents=True,exist_ok=True)
-        path.write_text('argv = ["codex", "exec", "--ephemeral"]\ncommand = "codex exec"\n')
+        path.write_text('argv = ["codex", "exec", "--ephemeral"]\ncommand = "codex exec"\n'
+                        'contracts = ["git-diff-v1", "git-diff-v2"]\n')
     assert module.check()['valid']
