@@ -4,11 +4,13 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
 import pytest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'runtime'))
+import state
 from state import Store, capture, read
 
 REPO='github.com/acme/project'
@@ -21,7 +23,14 @@ def git(root,*args):
 
 
 @pytest.fixture
-def case(tmp_path):
+def case(tmp_path, monkeypatch):
+    # The process probe measures an eligible checkout, independently of the
+    # caller's includes, Git directories and execution configuration.
+    for name in list(os.environ):
+        if name.startswith('GIT_'):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv('GIT_CONFIG_NOSYSTEM', '1')
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', os.devnull)
     checkout=tmp_path/'repo';checkout.mkdir()
     git(checkout,'init','-q')
     git(checkout,'config','user.name','Test')
@@ -118,6 +127,7 @@ def test_squash_keeps_content_reviews_but_refreshes_history_and_head_checks(case
     git(checkout,'commit','--amend','-qm','regrouped message')
     new=git(checkout,'rev-parse','HEAD')
     for spec in (content,history,head_check):spec['git']['head']=new
+    assert [task['reusable'] for task in store.status([content,history,head_check])['tasks']] == [True,False,False]
     assert store.start(content)['action']=='reuse'
     assert store.start(history)['action']=='invoke'
     assert store.start(head_check)['action']=='invoke'
@@ -260,6 +270,632 @@ def test_missing_resources_cannot_trap_an_interrupted_claim_or_reset_budgets(cas
     assert retained['unfinished']==[] and retained['runs']['run']['cycles']==['c1']
     entry=read(store.manifest)['entries'][first['claim']['key']]
     assert entry['attempts'][0]['status']=='interrupted' and entry['invalidated']
+
+
+def require_git_context_paths(checkout):
+    variables = git(checkout, 'var', '-l').splitlines()
+    for name in ('GIT_ATTR_SYSTEM', 'GIT_ATTR_GLOBAL', 'GIT_CONFIG_GLOBAL'):
+        if not any(line.startswith(name+'=') for line in variables):
+            pytest.skip('This Git does not expose the paths needed for safe capture sharing')
+
+
+@pytest.mark.parametrize('linked', [False, True])
+def test_status_batch_process_count_comparison(case, tmp_path, monkeypatch, linked):
+    """Reproduce the issue's two completed-reviewer recipe, without model calls."""
+    a, store = case
+    require_git_context_paths(a['git']['checkout'])
+    if linked:
+        checkout = tmp_path/'linked'
+        git(a['git']['checkout'], 'worktree', 'add', '--detach', '-q', str(checkout), a['git']['head'])
+        a['git']['checkout'] = str(checkout)
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    done(store, a); done(store, b)
+    retained = read(store.manifest)
+    original_git = state.git
+    calls = []
+    def counted(*args):
+        calls.append(args)
+        return original_git(*args)
+    monkeypatch.setattr(state, 'git', counted)
+    def probe():
+        calls.clear()
+        assert all(t['reusable'] for t in store.status([a, b])['tasks'])
+        assert store.start(a)['action'] == store.start(b)['action'] == 'reuse'
+        assert all(t['reusable'] for t in store.status([a, b])['tasks'])
+        assert read(store.manifest) == retained
+        return len(calls)
+    # Independent captures reproduce the pre-optimization implementation.
+    with monkeypatch.context() as legacy:
+        legacy.setattr(state._CaptureContext, 'git', lambda self, source: state._capture_git(source))
+        before = probe()
+    after = probe()
+    assert before == 42 and after == 28
+    print(f'capture-related Git processes: independent={before}, status-batched={after}')
+
+
+def test_status_batch_mixed_modes_process_count_comparison(case, monkeypatch):
+    a, store = case
+    checkout = Path(a['git']['checkout'])
+    require_git_context_paths(checkout)
+    (checkout/'code').write_text('third distinct tree\n')
+    git(checkout, 'commit', '-qam', 'third commit')
+    a['git'].update(base=a['git']['head'], head=git(checkout, 'rev-parse', 'HEAD'))
+    specs = []
+    for mode in ('content', 'history', 'head_sensitive'):
+        spec = deepcopy(a); spec['task']['id'] = mode
+        if mode != 'content': spec['git'][mode] = True
+        specs.append(spec); done(store, spec)
+    retained = read(store.manifest)
+    calls = []
+    original = state.git
+    def counted(*args):
+        calls.append(args)
+        return original(*args)
+    monkeypatch.setattr(state, 'git', counted)
+    def probe():
+        calls.clear()
+        assert all(task['reusable'] for task in store.status(specs)['tasks'])
+        assert all(store.start(spec)['action'] == 'reuse' for spec in specs)
+        assert all(task['reusable'] for task in store.status(specs, compact=True)['tasks'])
+        assert read(store.manifest) == retained
+        return len(calls)
+    with monkeypatch.context() as legacy:
+        legacy.setattr(state._CaptureContext, 'git', lambda self, source: state._capture_git(source))
+        before = probe()
+    after = probe()
+    assert before == 66 and after == 54
+    print(f'mixed-mode capture-related Git processes: independent={before}, status-batched={after}')
+
+
+@pytest.mark.parametrize('kind', ['config', 'attributes'])
+def test_status_captures_git_reported_system_paths(case, tmp_path, monkeypatch, kind):
+    """Emulate an installation whose system paths use another prefix."""
+    a, store = case
+    require_git_context_paths(a['git']['checkout'])
+    system_config = tmp_path/'prefix/etc/gitconfig'
+    system_config.parent.mkdir(parents=True)
+    system_config.write_text('[diff]\n\tnoprefix = false\n')
+    attributes = system_config.with_name('gitattributes')
+    attributes.write_text('code -diff\n')
+    monkeypatch.delenv('GIT_CONFIG_NOSYSTEM')
+    original = state.git
+    global_attributes = original(a['git']['checkout'], 'var', 'GIT_ATTR_GLOBAL').strip()
+    def installation(checkout, *args):
+        # Real Git consumes these files; its path receipt represents the
+        # alternate prefix without requiring a second compiled Git binary.
+        prefix = ['-c', 'core.attributesfile='+str(attributes)] if kind == 'attributes' else []
+        result = subprocess.check_output(['git', '-C', str(checkout), *prefix, *args],
+                                         env={**os.environ, 'GIT_CONFIG_SYSTEM': str(system_config)},
+                                         stderr=subprocess.PIPE)
+        if args == ('var', '-l') and kind == 'attributes':
+            result = b'\n'.join(
+                b'GIT_ATTR_SYSTEM='+os.fsencode(attributes) if line.startswith(b'GIT_ATTR_SYSTEM=')
+                else b'GIT_ATTR_GLOBAL='+global_attributes if line.startswith(b'GIT_ATTR_GLOBAL=')
+                else line for line in result.split(b'\n'))
+        return result
+    monkeypatch.setattr(state, 'git', installation)
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    done(store, a); done(store, b)
+    def specs():
+        yield a
+        if kind == 'config': system_config.write_text('[diff]\n\tnoprefix = true\n')
+        else: attributes.write_text('code diff\n')
+        yield b
+    tasks = store.status(specs())['tasks']
+    assert tasks[0]['reusable'] and not tasks[1]['reusable']
+
+
+def test_relative_xdg_config_home_declines_capture_sharing(case, monkeypatch):
+    spec, store = case
+    monkeypatch.setenv('XDG_CONFIG_HOME', 'relative-config')
+    assert state._git_context(spec['git']) is None
+    assert not store.status([spec])['tasks'][0]['reusable']
+
+
+@pytest.mark.parametrize('history,head_sensitive', [(False, False), (True, False), (False, True), (True, True)])
+def test_batch_capture_matches_independent_fingerprints_and_provenance(case, monkeypatch, history, head_sensitive):
+    a, store = case
+    a['git'].update(history=history, head_sensitive=head_sensitive)
+    b = deepcopy(a)
+    b['skill']['identity'] = 'reviewer:b'
+    b['task'] = {'id': 'other', 'instructions': 'Different assigned instructions'}
+    b['options'] = {'strict': True}
+    b['cacheable'] = False
+    expected = [capture(a), capture(b)]
+    observed = []
+    original = state.capture
+    def collect(spec, **kwargs):
+        value = original(spec, **kwargs)
+        observed.append(value)
+        return value
+    monkeypatch.setattr(state, 'capture', collect)
+    store.status([a, b])
+    assert observed == expected
+    observed[0]['components']['inputs']['git']['trees']['head'] = 'altered'
+    assert observed[1]['components']['inputs']['git']['trees']['head'] != 'altered'
+
+
+@pytest.mark.parametrize('field', ['target', 'base', 'head', 'history', 'head_sensitive', 'checkout'])
+def test_status_batch_separates_different_git_inputs(case, tmp_path, monkeypatch, field):
+    a, store = case
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    if field in {'target', 'base', 'head'}:
+        b['git'][field] = a['git']['base'] if field == 'head' else a['git']['head']
+    elif field == 'checkout':
+        other = tmp_path/'other'
+        git(tmp_path, 'clone', '-q', a['git']['checkout'], str(other))
+        b['git']['checkout'] = str(other)
+    else:
+        b['git'][field] = True
+    expected = [capture(a), capture(b)]
+    observed = []
+    original = state.capture
+    def collect(spec, **kwargs):
+        value = original(spec, **kwargs)
+        observed.append(value)
+        return value
+    monkeypatch.setattr(state, 'capture', collect)
+    store.status([a, b])
+    assert observed == expected
+
+
+@pytest.mark.parametrize('ref', ['HEAD', 'refs/heads/moving'])
+def test_status_resolves_mutable_refs_freshly_inside_one_batch(case, ref):
+    a, store = case
+    checkout = a['git']['checkout']
+    if ref == 'refs/heads/moving':
+        git(checkout, 'update-ref', ref, a['git']['head'])
+    a['git']['head'] = ref
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    done(store, a); done(store, b)
+    def specs():
+        yield a
+        git(checkout, 'update-ref', ref, a['git']['base'])
+        yield b
+    tasks = store.status(specs())['tasks']
+    assert tasks[0]['reusable']
+    assert not tasks[1]['reusable']
+
+
+@pytest.mark.parametrize('revision', ['abbreviated', 'expression'])
+def test_status_does_not_share_unpinned_git_calculations(case, monkeypatch, revision):
+    spec, store = case
+    head = spec['git']['head']
+    spec['git']['head'] = head[:12] if revision == 'abbreviated' else head+'^0'
+    calls = []
+    original = state.git
+    def counted(*args):
+        calls.append(args)
+        return original(*args)
+    monkeypatch.setattr(state, 'git', counted)
+    store.status([spec, deepcopy(spec)])
+    assert len(calls) == 14
+
+
+@pytest.mark.parametrize('packed', [False, True])
+def test_status_does_not_share_hex_ref_names(case, monkeypatch, packed):
+    spec, store = case
+    checkout = spec['git']['checkout']
+    git(checkout, 'update-ref', 'refs/tags/'+spec['git']['head'], spec['git']['base'])
+    if packed:
+        git(checkout, 'pack-refs', '--all')
+    calls = []
+    original = state.git
+    def counted(*args):
+        calls.append(args)
+        return original(*args)
+    monkeypatch.setattr(state, 'git', counted)
+    store.status([spec, deepcopy(spec)])
+    assert len(calls) == 14
+
+
+def test_packed_ref_lookup_matches_git_at_boundaries_and_peeled_rows(case):
+    spec, store = case
+    checkout = Path(spec['git']['checkout'])
+    for name in ('aaa', 'middle', 'zzz'):
+        git(checkout, 'tag', '-am', name, name, spec['git']['head'])
+    git(checkout, 'update-ref', 'refs/heads/between', spec['git']['head'])
+    git(checkout, 'pack-refs', '--all', '--prune')
+    packed = checkout/'.git/packed-refs'
+    names = [line.split(b' ', 1)[1] for line in packed.read_bytes().splitlines()
+             if line and line[:1] not in {b'#', b'^'}]
+    assert b'\n^' in packed.read_bytes()
+    for name in names + [b'refs/!absent', b'refs/tags/between', b'refs/zzzz-absent']:
+        found = subprocess.run(['git', '-C', str(checkout), 'show-ref', '--verify', os.fsdecode(name)],
+                               capture_output=True).returncode == 0
+        assert state._packed_refs_safe(packed, {name}) is not found
+
+
+def test_status_rechecks_packed_replacements_within_one_batch(case, monkeypatch):
+    a, store = case
+    checkout = Path(a['git']['checkout'])
+    git(checkout, 'pack-refs', '--all', '--prune')
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    before = capture(a)
+    done(store, a); done(store, b)
+    expected = []
+    def specs():
+        yield a
+        git(checkout, 'replace', a['git']['head'], a['git']['base'])
+        git(checkout, 'pack-refs', '--all', '--prune')
+        expected.append(capture(b))
+        yield b
+    observed = []
+    original = state.capture
+    def collect(spec, **kwargs):
+        value = original(spec, **kwargs)
+        observed.append(value)
+        return value
+    monkeypatch.setattr(state, 'capture', collect)
+    tasks = store.status(specs())['tasks']
+    assert expected[0]['fingerprint'] != before['fingerprint']
+    assert observed == [before, expected[0]]
+    assert tasks[0]['reusable'] and not tasks[1]['reusable']
+
+
+def test_status_falls_back_for_unsorted_packed_refs(case, monkeypatch):
+    spec, store = case
+    checkout = Path(spec['git']['checkout'])
+    git(checkout, 'pack-refs', '--all', '--prune')
+    packed = checkout/'.git/packed-refs'
+    header, records = packed.read_bytes().split(b'\n', 1)
+    packed.write_bytes(header.replace(b' sorted ', b' ')+b'\n'+records)
+    assert state._git_context(spec['git']) is None
+    calls = []
+    original = state.git
+    def counted(*args):
+        calls.append(args)
+        return original(*args)
+    monkeypatch.setattr(state, 'git', counted)
+    store.status([spec, deepcopy(spec)])
+    assert len(calls) == 14
+
+
+@pytest.mark.parametrize('kind', ['resource', 'context', 'instruction', 'assigned', 'option', 'missing', 'noncacheable-missing', 'invalid-option'])
+def test_status_batch_keeps_each_tasks_mutable_checks(case, kind):
+    a, store = case
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    if kind == 'noncacheable-missing':
+        b['cacheable'] = False
+    done(store, a); done(store, b)
+    def specs():
+        yield a
+        if kind == 'resource': Path(b['skill']['resources']['entry']).write_text('new reviewer')
+        elif kind == 'context': Path(b['inputs']['context']).write_text('new context')
+        elif kind == 'instruction': Path(b['instructions']['user']).write_text('new instruction')
+        elif kind == 'assigned': b['task']['instructions'] = 'new task'
+        elif kind == 'option': b['options']['strict'] = True
+        elif kind in {'missing', 'noncacheable-missing'}: Path(b['skill']['resources']['entry']).unlink()
+        else: b['git']['history'] = 1
+        yield b
+    if kind in {'missing', 'noncacheable-missing', 'invalid-option'}:
+        with pytest.raises((OSError, ValueError)):
+            store.status(specs())
+    else:
+        tasks = store.status(specs())['tasks']
+        assert tasks[0]['reusable'] and not tasks[1]['reusable']
+
+
+@pytest.mark.parametrize('kind', ['config', 'attributes', 'index-attributes', 'environment', 'replace'])
+def test_status_batch_refreshes_changed_execution_context(case, monkeypatch, kind):
+    a, store = case
+    checkout = Path(a['git']['checkout'])
+    if kind in {'attributes', 'index-attributes'}:
+        (checkout/'.gitattributes').write_text('code -diff\n')
+        if kind == 'index-attributes':
+            git(checkout, 'add', '.gitattributes')
+            (checkout/'.gitattributes').unlink()
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    done(store, a); done(store, b)
+    calculations = []
+    original = state._capture_git
+    def counted(*args, **kwargs):
+        calculations.append(args)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(state, '_capture_git', counted)
+    def specs():
+        yield a
+        if kind == 'config': git(checkout, 'config', 'diff.noprefix', 'true')
+        elif kind == 'attributes': (checkout/'.gitattributes').write_text('code diff\n')
+        elif kind == 'index-attributes': git(checkout, 'rm', '--cached', '-q', '.gitattributes')
+        elif kind == 'environment': monkeypatch.setenv('GIT_CONFIG_COUNT', '1'); monkeypatch.setenv('GIT_CONFIG_KEY_0', 'diff.noprefix'); monkeypatch.setenv('GIT_CONFIG_VALUE_0', 'true')
+        else: git(checkout, 'replace', a['git']['head'], a['git']['base'])
+        yield b
+    tasks = store.status(specs())['tasks']
+    assert tasks[0]['reusable']
+    if kind != 'index-attributes':
+        assert not tasks[1]['reusable']
+    # The Git version may not consult indexed attributes for this tree diff,
+    # but changing the index must still prevent sharing its earlier capture.
+    assert len(calculations) == 2
+
+
+@pytest.mark.parametrize('kind', ['attribute-tree', 'bom-include', 'worktree', 'signature'])
+def test_status_falls_back_for_indirect_git_inputs(case, tmp_path, kind):
+    a, store = case
+    checkout = Path(a['git']['checkout'])
+    if kind == 'attribute-tree':
+        attributes = checkout/'.gitattributes'
+        attributes.write_text('code -diff\n')
+        git(checkout, 'add', '.gitattributes'); git(checkout, 'commit', '-qm', 'binary attributes')
+        first = git(checkout, 'rev-parse', 'HEAD')
+        attributes.write_text('code diff\n')
+        git(checkout, 'commit', '-qam', 'text attributes')
+        second = git(checkout, 'rev-parse', 'HEAD')
+        git(checkout, 'update-ref', 'refs/heads/attributes', first)
+        git(checkout, 'config', 'attr.tree', 'refs/heads/attributes')
+        # Older Git releases do not use attr.tree. They must still bypass
+        # sharing because the same configuration is indirect on newer Git.
+        def change():
+            git(checkout, 'update-ref', 'refs/heads/attributes', second)
+        field = 'diff_sha256'
+    elif kind == 'bom-include':
+        included = tmp_path/'included.gitconfig'
+        included.write_text('[diff]\n\tnoprefix = false\n')
+        config = checkout/'.git/config'
+        config.write_bytes(b'\xef\xbb\xbf[include]\n\tpath = '+os.fsencode(included)+b'\n'+config.read_bytes())
+        def change():
+            included.write_text('[diff]\n\tnoprefix = true\n')
+        field = 'diff_sha256'
+    elif kind == 'worktree':
+        redirected = tmp_path/'redirected'; redirected.mkdir()
+        (redirected/'code').write_text('review me\n')
+        attributes = redirected/'.gitattributes'
+        attributes.write_text('code -diff\n')
+        git(checkout, 'config', 'core.worktree', str(redirected))
+        def change():
+            attributes.write_text('code diff\n')
+        field = 'diff_sha256'
+    else:
+        if not shutil.which('ssh-keygen'):
+            pytest.skip('SSH signature regression requires ssh-keygen')
+        key = tmp_path/'signing-key'
+        subprocess.check_call(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key)])
+        signers = tmp_path/'allowed-signers'
+        signers.write_text('test@example.test '+key.with_suffix('.pub').read_text())
+        for name, value in [('gpg.format', 'ssh'), ('user.signingkey', str(key)),
+                            ('gpg.ssh.allowedSignersFile', str(signers)), ('log.showSignature', 'true')]:
+            git(checkout, 'config', name, value)
+        (checkout/'code').write_text('signed change\n')
+        git(checkout, 'commit', '-S', '-qam', 'signed change')
+        a['git'].update(head=git(checkout, 'rev-parse', 'HEAD'), history=True)
+        def change():
+            signers.write_text('')
+        field = 'history'
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    before = capture(a)['components']['inputs']['git'][field]
+    done(store, a); done(store, b)
+    # The optimization deliberately declines these inputs even when this Git
+    # version uses the original working directory for tree-diff attributes.
+    assert state._git_context(a['git']) is None
+    expected = []
+    def specs():
+        yield a
+        change()
+        expected.append(capture(b)['components']['inputs']['git'][field])
+        yield b
+    tasks = store.status(specs())['tasks']
+    assert tasks[0]['reusable']
+    assert tasks[1]['reusable'] is (before == expected[0])
+    if kind in {'bom-include', 'signature'}:
+        assert expected[0] != before
+
+
+@pytest.mark.parametrize('kind', ['inline-include', 'gitmodules'])
+def test_status_refreshes_indirect_diff_configuration(case, tmp_path, monkeypatch, kind):
+    a, store = case
+    checkout = Path(a['git']['checkout'])
+    if kind == 'inline-include':
+        included = tmp_path/'inline.gitconfig'
+        included.write_text('[diff]\n noprefix = false\n')
+        config = checkout/'.git/config'
+        config.write_bytes(config.read_bytes()+b'[core] [include] path = '+os.fsencode(included)+b'\n')
+        assert git(checkout, 'config', '--get', 'include.path') == str(included)
+        def change():
+            included.write_text('[diff]\n noprefix = true\n')
+    else:
+        git(checkout, 'update-index', '--add', '--cacheinfo', '160000,'+a['git']['base']+',module')
+        git(checkout, 'commit', '-qm', 'first gitlink')
+        base = git(checkout, 'rev-parse', 'HEAD')
+        (checkout/'code').write_text('another ordinary change\n')
+        git(checkout, 'add', 'code')
+        git(checkout, 'update-index', '--cacheinfo', '160000,'+a['git']['head']+',module')
+        git(checkout, 'commit', '-qm', 'second gitlink and ordinary change')
+        a['git'].update(target=base, base=base, head=git(checkout, 'rev-parse', 'HEAD'))
+        modules = checkout/'.gitmodules'
+        modules.write_text('[submodule "module"]\n path = module\n url = local\n ignore = none\n')
+        def change():
+            modules.write_text(modules.read_text().replace('ignore = none', 'ignore = all'))
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    before = capture(a)
+    done(store, a); done(store, b)
+    expected = []
+    def specs():
+        yield a
+        change()
+        expected.append(capture(b))
+        yield b
+    observed = []
+    original = state.capture
+    def collect(spec, **kwargs):
+        value = original(spec, **kwargs)
+        observed.append(value)
+        return value
+    monkeypatch.setattr(state, 'capture', collect)
+    tasks = store.status(specs())['tasks']
+    assert expected[0]['fingerprint'] != before['fingerprint']
+    assert observed == [before, expected[0]]
+    assert tasks[0]['reusable'] and not tasks[1]['reusable']
+
+
+def test_status_refreshes_replacement_refs_with_continued_reftable_config(case, monkeypatch):
+    a, store = case
+    checkout = Path(a['git']['checkout'])
+    migration_help = subprocess.run(['git', '-C', str(checkout), 'refs', 'migrate', '-h'],
+                                    capture_output=True, text=True)
+    if '--ref-format' not in migration_help.stdout+migration_help.stderr:
+        pytest.skip('Git does not support reftable migration')
+    git(checkout, 'refs', 'migrate', '--ref-format=reftable')
+    config = checkout/'.git/config'
+    original_config = config.read_bytes()
+    assert b'reftable' in original_config
+    config.write_bytes(original_config.replace(b'reftable', b'ref\\\ntable', 1))
+    assert git(checkout, 'config', '--get', 'extensions.refStorage') == 'reftable'
+    (checkout/'code').write_text('replacement tree\n')
+    git(checkout, 'commit', '-qam', 'replacement')
+    replacement = git(checkout, 'rev-parse', 'HEAD')
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    before = capture(a)
+    done(store, a); done(store, b)
+    expected = []
+    def specs():
+        yield a
+        git(checkout, 'replace', a['git']['head'], replacement)
+        expected.append(capture(b))
+        yield b
+    observed = []
+    original = state.capture
+    def collect(spec, **kwargs):
+        value = original(spec, **kwargs)
+        observed.append(value)
+        return value
+    monkeypatch.setattr(state, 'capture', collect)
+    tasks = store.status(specs())['tasks']
+    assert expected[0]['fingerprint'] != before['fingerprint']
+    assert observed == [before, expected[0]]
+    assert tasks[0]['reusable'] and not tasks[1]['reusable']
+
+
+def test_status_falls_back_for_cyclic_optional_attributes(case):
+    spec, store = case
+    attributes = Path(spec['git']['checkout'])/'.gitattributes'
+    attributes.symlink_to('.gitattributes')
+    before = capture(spec)
+    done(store, spec)
+    tasks = store.status([spec, deepcopy(spec)])['tasks']
+    assert all(task['reusable'] for task in tasks)
+    assert capture(spec) == before
+
+
+@pytest.mark.parametrize('metadata', ['gitfile', 'commondir'])
+def test_status_preserves_whitespace_in_git_metadata_paths(case, tmp_path, monkeypatch, metadata):
+    a, store = case
+    checkout = Path(a['git']['checkout'])
+    linked = tmp_path/'linked'
+    git(checkout, 'worktree', 'add', '-q', '--detach', str(linked), a['git']['head'])
+    gitfile = linked/'.git'
+    directory = Path(os.fsdecode(gitfile.read_bytes()).removeprefix('gitdir: ').rstrip('\r\n'))
+    if metadata == 'commondir':
+        common = tmp_path/'common '
+        shutil.copytree(checkout/'.git', common)
+        (directory/'commondir').write_bytes(os.fsencode(common)+b'\n')
+    else:
+        moved = tmp_path/'admin '
+        directory.rename(moved)
+        (moved/'commondir').write_bytes(os.fsencode(checkout/'.git')+b'\n')
+        gitfile.write_bytes(b'gitdir: '+os.fsencode(moved)+b'\n')
+        # A trimmed sibling must not be mistaken for the actual Git directory.
+        (tmp_path/'admin').mkdir()
+    a['git']['checkout'] = str(linked)
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    before = capture(a)
+    done(store, a); done(store, b)
+    expected = []
+    def specs():
+        yield a
+        git(linked, 'config', 'diff.noprefix', 'true')
+        expected.append(capture(b))
+        yield b
+    observed = []
+    original = state.capture
+    def collect(spec, **kwargs):
+        value = original(spec, **kwargs)
+        observed.append(value)
+        return value
+    monkeypatch.setattr(state, 'capture', collect)
+    tasks = store.status(specs())['tasks']
+    assert expected[0]['fingerprint'] != before['fingerprint']
+    assert observed == [before, expected[0]]
+    assert tasks[0]['reusable'] and not tasks[1]['reusable']
+
+
+@pytest.mark.parametrize('kind', ['config', 'attributes', 'absent-attributes'])
+def test_status_does_not_cache_context_that_changed_during_capture(case, monkeypatch, kind):
+    a, store = case
+    require_git_context_paths(a['git']['checkout'])
+    checkout = Path(a['git']['checkout'])
+    attributes = checkout/'.gitattributes'
+    if kind == 'config': git(checkout, 'config', 'diff.noprefix', 'false')
+    elif kind == 'attributes': attributes.write_text('code -diff\n')
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    expected = capture(b)
+    original = state._capture_git
+    changed = False
+    def interleaved(source, **kwargs):
+        nonlocal changed
+        if kwargs.get('batched') and not changed:
+            changed = True
+            if kind == 'config': git(checkout, 'config', 'diff.noprefix', 'true')
+            else: attributes.write_text('code diff\n' if kind == 'attributes' else 'code -diff\n')
+            captured = original(source, **kwargs)
+            # Restore the original bytes/absence before the next task. File
+            # versions and parent state still expose this unstable capture.
+            if kind == 'config': git(checkout, 'config', 'diff.noprefix', 'false')
+            elif kind == 'attributes': attributes.write_text('code -diff\n')
+            else: attributes.unlink()
+            return captured
+        return original(source, **kwargs)
+    monkeypatch.setattr(state, '_capture_git', interleaved)
+    observed = []
+    original_capture = state.capture
+    def collect(spec, **kwargs):
+        captured = original_capture(spec, **kwargs)
+        observed.append(captured)
+        return captured
+    monkeypatch.setattr(state, 'capture', collect)
+    store.status([a, b])
+    assert changed
+    assert observed[0]['components']['inputs']['git'] != expected['components']['inputs']['git']
+    assert observed[1] == expected
+
+
+def test_status_declines_cache_hit_when_context_changes_after_snapshot(case, monkeypatch):
+    a, store = case
+    require_git_context_paths(a['git']['checkout'])
+    checkout = Path(a['git']['checkout'])
+    git(checkout, 'config', 'diff.noprefix', 'false')
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    original_context = state._git_context
+    count = 0
+    def interleaved(source, **kwargs):
+        nonlocal count
+        context = original_context(source, **kwargs)
+        count += 1
+        if count == 2:
+            git(checkout, 'config', 'diff.noprefix', 'true')
+        return context
+    monkeypatch.setattr(state, '_git_context', interleaved)
+    observed = []
+    original_capture = state.capture
+    def collect(spec, **kwargs):
+        captured = original_capture(spec, **kwargs)
+        observed.append(captured)
+        return captured
+    monkeypatch.setattr(state, 'capture', collect)
+    store.status([a, b])
+    assert count == 2
+    assert observed[0]['components']['inputs']['git'] != observed[1]['components']['inputs']['git']
+    assert observed[1] == capture(b)
+
+
+def test_git_drift_after_status_still_rejects_completion(case):
+    spec, store = case
+    store.status([spec, deepcopy(spec)])
+    claim = store.start(spec)['claim']
+    spec['git']['head'] = spec['git']['base']
+    with pytest.raises(ValueError, match='changed during'):
+        store.record(spec, claim['id'], b'x', {'complete': True}, 'complete')
+    assert store.status([spec])['tasks'][0]['unfinished']['id'] == claim['id']
 
 
 @pytest.mark.parametrize('condition', ['complete', 'failed', 'incomplete', 'damaged', 'missing',
