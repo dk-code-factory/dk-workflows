@@ -11,6 +11,8 @@ import subprocess
 import uuid
 
 POLICY = 2
+EVIDENCE = ('issues', 'feedback', 'choices', 'user_instructions', 'run_history',
+            'questions', 'prior_preparation', 'rules', 'production', 'tests', 'ci', 'reviewers')
 GOVERNING = {'issues', 'choices', 'user_instructions', 'rules', 'questions', 'decisions',
              'reviewers', 'reviewer-execution', 'reviewer-source', 'architecture', 'architecture-exceptions'}
 GUIDANCE = {'reviewer_addenda', 'worker_instructions', 'completion_criteria'}

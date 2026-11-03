@@ -9,9 +9,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'runtime'))
-from shared import architecture, bindings, compact_compatibility as compatibility, review_execution as execution
+from shared import architecture, bindings, codex_profiles, compact_compatibility as compatibility, review_execution as execution
 from shared.preparation_views import reviewer_view
-from shared.preparation_graph import digest
+from shared.preparation_graph import EVIDENCE, digest
+from test_codex_profiles import profile_install
 from test_review_execution import claude_rows, codex_rows, stream
 
 
@@ -21,9 +22,17 @@ def retain(path, value):
 
 
 @pytest.fixture
-def captures(tmp_path, monkeypatch):
+def captures(tmp_path, monkeypatch, request):
     monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'state'))
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
+    drift = getattr(request, 'param', None)
+    if drift:
+        categories = set(compatibility.SOURCE_CATEGORIES)
+        if drift == 'missing':
+            categories.remove('feedback')
+        else:
+            categories.add('future_category')
+        monkeypatch.setattr(compatibility, 'SOURCE_CATEGORIES', categories)
     repository = tmp_path / 'repository'
     repository.mkdir()
     def git(*args):
@@ -50,7 +59,7 @@ def captures(tmp_path, monkeypatch):
         'decisions': retain(tmp_path / 'source-decisions.json', decisions),
         'manifest': retain(tmp_path / 'source-manifest.json', {'mode': 'standalone'}),
         'context': retain(tmp_path / 'source-context.json', {'url': 'https://example.test/pull/1'})}
-    for category in compatibility.SOURCE_CATEGORIES - {'reviewers'}:
+    for category in set(EVIDENCE) - {'reviewers'}:
         shared_sources[category + '/0'] = retain(tmp_path / (category + '.json'),
             {'verified_absence': True, 'reason': 'Synthetic offline fixture.'})
     for label, skill, host in compatibility.COHORT:
@@ -82,7 +91,7 @@ def captures(tmp_path, monkeypatch):
                             'reviewer_addenda': {reviewer: 'Assigned addendum.'},
                             'worker_instructions': 'Read original history only when needed.'}}
             evidence = {category: [prepared['sources'][category + '/0']['path']]
-                        for category in compatibility.SOURCE_CATEGORIES}
+                        for category in EVIDENCE}
             prepared['sources']['manifest'] = retain(directory / (mode + '-source-manifest.json'),
                 {'mode': 'standalone', 'evidence': evidence})
             handoff = {'contract': contract, **prepared['identity'], 'scope': 'Exact requested scope.',
@@ -434,6 +443,66 @@ def test_provider_specific_procedure_sources_do_not_change_cohort_scope(captures
         hashes.add(handoff['preparation']['sources']['reviewer-source/0/0']['sha256'])
     assert len(hashes) == 3
     assert compare(captures)['status'] == 'observed'
+
+
+@pytest.mark.parametrize('captures', ['missing', 'extra'], indirect=True)
+def test_fixture_source_inventory_exposes_analyzer_schema_drift(captures):
+    report = compare(captures)
+    assert report['status'] == 'incomplete'
+    assert all('incomplete' in row['issues'][0] for row in report['pairs'])
+
+
+@pytest.mark.parametrize('change', ['none', 'settings', 'external-path', 'unknown-extension', 'unproven'])
+def test_profiled_pair_projects_only_proved_workspace_identity(captures, profile_install, change):
+    pair = captures[1]['pairs'][0]
+    workspaces = []
+    profile_text = profile_install['profile'].read_text()
+    for label in ('full', 'compact'):
+        run = pair[label]
+        handoff = compatibility.read(run['handoff'])
+        prepared = (compatibility.read(handoff['full_preparation']) if label == 'compact'
+                    else handoff['preparation'])
+        checkout = captures[0].parent / (label + '-execution-checkout')
+        subprocess.run(['git', 'clone', '--quiet', handoff['checkout'], str(checkout)],
+                       check=True, capture_output=True)
+        workspaces.append(str(checkout))
+        handoff['checkout'] = str(checkout)
+        if change == 'settings' and label == 'compact':
+            profile_install['profile'].write_text('model = "changed-profile-model"\n')
+        if change == 'external-path':
+            instructions = captures[0].parent / (label + '-external-instructions.md')
+            instructions.write_text('Identical instructions at distinct external paths.')
+            profile_install['profile'].write_text(profile_text + '\nmodel_instructions_file = '
+                                                 + json.dumps(str(instructions)) + '\n')
+        snapshot = codex_profiles.resolve_profile('review', checkout)
+        if change == 'unknown-extension':
+            snapshot['future_extension'] = {'workspace': str(checkout)}
+            snapshot['identity_evidence']['exact_sha256'] = codex_profiles.fingerprint(
+                {key: value for key, value in snapshot.items() if key != 'identity_evidence'})
+        if change == 'unproven':
+            snapshot['identity_evidence']['exact_sha256'] = 'invalid-proof'
+        previous = bindings.key(run['binding'])
+        run['binding']['codex_profile'] = 'review'
+        reviewer = bindings.key(run['binding'])
+        descriptor = compatibility.read(run['descriptor'])
+        descriptor['reviewer'] = reviewer
+        descriptor['execution'].update(binding=run['binding'], codex_execution=snapshot)
+        run['descriptor'] = retain(Path(run['descriptor']['path']), descriptor)
+        prepared['reviewers'] = {reviewer: descriptor}
+        prepared['analysis']['reviewer_addenda'][reviewer] = prepared['analysis']['reviewer_addenda'].pop(previous)
+        source = prepared['sources']['reviewers/0']
+        prepared['sources']['reviewers/0'] = retain(Path(source['path']), descriptor)
+        replace_preparation(run, handoff, prepared)
+    assert workspaces[0] != workspaces[1]
+    row = compare(captures)['pairs'][0]
+    assert [row['runs'][label]['execution']['codex_execution']['identity_evidence']['workspace']
+            for label in ('full', 'compact')] == workspaces
+    if change == 'none':
+        assert row['status'] == 'observed', row['issues']
+        assert row['findings'] == {'shared': [], 'full_only': [], 'compact_only': []}
+    else:
+        assert row['status'] == 'incomplete'
+        assert row['issues'] == ['installed version, procedure, sources or execution changed']
 
 
 @pytest.mark.parametrize('change', ['task', 'decisions', 'metadata'])

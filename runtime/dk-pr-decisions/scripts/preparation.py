@@ -26,8 +26,7 @@ from shared.diagnostics import Diagnostic, task
 
 VERSION = 4
 DIMENSIONS = ('correctness', 'remediation_depth', 'performance', 'compatibility', 'complexity')
-EVIDENCE = ('issues', 'feedback', 'choices', 'user_instructions', 'run_history',
-            'questions', 'prior_preparation', 'rules', 'production', 'tests', 'ci', 'reviewers')
+EVIDENCE = graph_api.EVIDENCE
 AGREEMENTS = {'established', 'interpretation', 'proposal'}
 
 

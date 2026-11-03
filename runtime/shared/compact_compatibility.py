@@ -5,8 +5,9 @@ import json
 from pathlib import Path
 
 from shared import architecture, bindings, review_execution
+from shared.codex_profiles import profile_identity
 from shared.preparation_views import reviewer_view
-from shared.preparation_graph import digest as preparation_digest
+from shared.preparation_graph import EVIDENCE, digest as preparation_digest
 
 ROOT = Path(__file__).resolve().parents[2]
 COHORT = [('codex-ad', 'code-review-ad:code-review-ad', 'codex'),
@@ -14,8 +15,7 @@ COHORT = [('codex-ad', 'code-review-ad:code-review-ad', 'codex'),
           ('claude-ad', 'code-review-ad:code-review-ad', 'claude')]
 AUTHORITY = {'authority': 'diagnostic-only', 'adoption_authorized': False,
              'publication_authorized': False, 'live_acceptance': 'pending'}
-SOURCE_CATEGORIES = {'issues', 'feedback', 'choices', 'user_instructions', 'run_history',
-                     'questions', 'prior_preparation', 'rules', 'production', 'tests', 'ci', 'reviewers'}
+SOURCE_CATEGORIES = frozenset(EVIDENCE)
 
 
 def require(condition, message):
@@ -57,6 +57,8 @@ def method(descriptor):
     """Contract selection changes preparation, but cannot change the installed method."""
     value = copy.deepcopy(descriptor['execution'])
     value.get('binding', {}).pop('handoff_contract', None)
+    if isinstance(value.get('codex_execution'), dict):
+        value['codex_execution'] = profile_identity(value['codex_execution'])
     sources = {}
     root = Path(value['root'])
     for ref in descriptor['sources']:
@@ -354,7 +356,7 @@ def compare(path):
                 row['issues'].extend(inspected['issues'])
                 runs.append(inspected)
             full, compact = runs
-            require(full['method'] == compact['method'], 'installed version, procedure, sources or execution changed')
+            require(json_equal(full['method'], compact['method']), 'installed version, procedure, sources or execution changed')
             require(json_equal(full['pins'], compact['pins']), 'paired governing evidence or requested scope changed')
             pins = {k: full['pins'][k] for k in ('base_sha', 'head_sha', 'pr_url', 'scope', 'rules', 'patch', 'decisions', 'sources')}
             pins['shared_analysis'] = {k: v for k, v in full['pins']['analysis'].items() if k != 'reviewer_addenda'}

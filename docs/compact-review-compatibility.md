@@ -177,6 +177,9 @@ never edit preparation descriptors to reuse an incompatible checkpoint. Manifest
 context and reviewer transport captures may change during this refresh. Installed
 method execution and source hashes are compared independently. Unknown preparation
 fields remain subject to the existing compact projection; originals stay hashed.
+Profiled Codex runs compare the existing typed ownership projection so separately
+owned execution checkouts can match. Raw execution snapshots remain in the matrix;
+settings, external paths, unproved ownership and unknown extensions still govern.
 Architecture packets are checked against their retained catalog and preparation
 for recipient, intended paths, rules, revisions and governing scope. Packet
 fingerprints and governing-source capture locations can differ across freshly
