@@ -143,6 +143,10 @@ The rows follow actual prefix order and cite pinned candidate source heads, not
 moving branch tips. Verify the table against the leading commits, source ancestry,
 `-x` trailers and original authorship. Subsequent commit regrouping must preserve
 that validated prefix byte-for-byte and operate only on the PR's own suffix.
+When partitioning a PR that already has a Dependencies table, validate its input
+prefix and keep those commits as intact units. Candidates containing those units
+retain their external source PRs, pinned heads and source SHAs; their copied SHAs
+are updated to the new leading commits, including when another piece copies them.
 Fetch the declared pinned source heads before standalone split/regroup preparation.
 Later prerequisite synchronization is outside this workflow.
 

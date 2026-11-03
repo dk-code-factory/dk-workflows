@@ -170,6 +170,75 @@ def test_transitive_prerequisites_are_unique_ordered_and_have_real_provenance(re
         pr_dependencies.validate_prefix(cwd, base, candidate['head'], bad)
 
 
+def test_existing_external_dependencies_survive_partition_and_later_split(repo, monkeypatch):
+    import importlib.util
+    cwd, remote, state, _, plan, base, _ = repo
+    git(cwd, 'checkout', '-qb', 'external', base)
+    (cwd / 'a').write_text('a\n' * 3)
+    git(cwd, 'add', 'a')
+    git(cwd, 'commit', '-qm', 'External prerequisite', '--author', 'Other <other@example.test>')
+    source = git(cwd, 'rev-parse', 'HEAD')
+    git(cwd, 'checkout', '-q', 'topic')
+    git(cwd, 'reset', '--hard', base)
+    commits = p.replay(cwd, [source] + [unit['commit'] for unit in plan['units'][1:]])
+    for unit, commit in zip(plan['units'], commits):
+        unit['commit'] = commit
+    external = {'url': 'https://github.com/base/repo/pull/99', 'head': source,
+                'commits': [{'source': source, 'copied': commits[0]}]}
+    state['body'] += '\n\n' + pr_dependencies.table([external])
+    git(cwd, 'push', '-q', '--force', str(remote), 'topic')
+    plan['pieces'][0]['units'] = ['a', 'b']
+    plan['pieces'].pop(1)
+    plan['pieces'][1]['depends_on'] = ['original']
+    plan['pieces'][1]['prerequisite_units'] = {'original': ['a']}
+    path = prepare(repo)
+    assert publish(path)['outcome'] == 'published'
+    data = p.load(path)
+    for name, description in [('original', state['body']), ('c', state['drafts'][2]['body'])]:
+        rows = pr_dependencies.parse(description)
+        assert len(rows) == 1
+        assert rows[0]['url'] == external['url'] and rows[0]['head'] == source
+        assert [pair['source'] for pair in rows[0]['commits']] == [source]
+        prefix = pr_dependencies.validate_prefix(cwd, base, data['candidates'][name]['head'], rows)
+        assert len(prefix) == 1
+        assert git(cwd, 'show', '-s', '--format=%an <%ae> %aI', prefix[0]) == git(
+            cwd, 'show', '-s', '--format=%an <%ae> %aI', source)
+    git(cwd, 'reset', '--hard', data['candidates']['original']['head'])
+    git(cwd, 'update-ref', 'refs/remotes/origin/topic', data['candidates']['original']['head'])
+    git(cwd, 'branch', '--set-upstream-to', 'origin/topic', 'topic')
+    script = Path(__file__).resolve().parents[1] / 'scripts/split_guard.py'
+    spec = importlib.util.spec_from_file_location('partition_external_split_guard', script)
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    monkeypatch.chdir(cwd)
+    def run(*argv, **kwargs):
+        if argv[:3] == ('gh', 'pr', 'view'):
+            return json.dumps(p.metadata(cwd, PR))
+        return p.run(cwd, *argv)
+    monkeypatch.setattr(guard, 'run', run)
+    guard.prepare(base, PR)
+    guarded = json.loads(guard.state_path().read_text())
+    assert guarded['dependencies'][0]['url'] == external['url']
+    guard.verify(guarded)
+
+
+def test_existing_dependency_units_cannot_be_remapped_even_for_the_current_author(repo):
+    cwd, remote, state, _, plan, base, _ = repo
+    sources = [unit['commit'] for unit in plan['units']]
+    git(cwd, 'reset', '--hard', base)
+    copies = p.replay(cwd, sources)
+    for unit, commit in zip(plan['units'], copies):
+        unit['commit'] = commit
+    state['body'] += '\n\n' + pr_dependencies.table([
+        {'url': 'https://github.com/base/repo/pull/99', 'head': sources[0],
+         'commits': [{'source': sources[0], 'copied': copies[0]}]}])
+    git(cwd, 'push', '-q', '--force', str(remote), 'topic')
+    plan['units'][0]['commit'] = sources[0]
+    with pytest.raises(ValueError, match='existing prerequisite commits require intact pinned units'):
+        prepare(repo)
+    assert not state['writes']
+
+
 @pytest.mark.parametrize('kind', ['POST', 'PATCH'])
 def test_interrupted_remote_creations_and_description_edits_reconcile_without_duplicates(repo, kind):
     _, _, state, _, _, _, _ = repo

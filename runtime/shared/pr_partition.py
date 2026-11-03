@@ -320,6 +320,11 @@ def validate_plan(cwd, snap, plan):
         commits.append(sha)
     if len(set(commits)) != len(commits):
         raise ValueError('duplicate unit commit')
+    inherited = pr_dependencies.parse(snap['binding']['scope']['body'])
+    pr_dependencies.validate_prefix(cwd, snap['binding']['base'], snap['head'], inherited)
+    prefix = {pair['copied'] for row in inherited for pair in row['commits']}
+    if prefix - set(commits):
+        raise ValueError('existing prerequisite commits require intact pinned units')
     order(pieces)
     assigned = []
     by_unit = {unit['id']: unit for unit in units}
@@ -440,6 +445,8 @@ def selected_pieces(data):
 
 def build(cwd, directory, snap, plan, pieces):
     units = {unit['id']: unit['commit'] for unit in plan['units']}
+    inherited = pr_dependencies.parse(snap['binding']['scope']['body'])
+    unit_ids = {sha: key for key, sha in units.items()}
     by_id = {piece['id']: piece for piece in pieces}
     base, tip = snap['binding']['base'], snap['binding']['default_tip']
     directory.mkdir(parents=True, exist_ok=False)
@@ -456,6 +463,24 @@ def build(cwd, directory, snap, plan, pieces):
             piece = by_id[name]
             git(checkout, 'reset', '--hard', tip)
             rows, copied_units = [], set()
+            needed = set(piece['units'])
+            for dependency in prerequisites(pieces, name):
+                needed.update(prerequisite_units(pieces, name, dependency))
+            inherited_copies = {}
+            # Preserve external source identities while remapping their copies to
+            # this candidate's leading commits, before internal prerequisites.
+            for row in inherited:
+                pairs = []
+                for pair in row['commits']:
+                    unit_id = unit_ids[pair['copied']]
+                    if unit_id not in needed:
+                        continue
+                    copied = replay(checkout, [pair['copied']])[0]
+                    copied_units.add(unit_id)
+                    inherited_copies[unit_id] = copied
+                    pairs.append({'source': pair['source'], 'copied': copied})
+                if pairs:
+                    rows.append({'url': row['url'], 'head': row['head'], 'commits': pairs})
             for dependency in prerequisites(pieces, name):
                 source = built[dependency]
                 pairs = []
@@ -470,6 +495,9 @@ def build(cwd, directory, snap, plan, pieces):
                     rows.append({'piece': dependency, 'head': source['head'], 'commits': pairs})
             own_commits = {}
             for unit_id in piece['units']:
+                if unit_id in inherited_copies:
+                    own_commits[unit_id] = inherited_copies[unit_id]
+                    continue
                 if unit_id in copied_units:
                     raise ValueError('own change is also a prerequisite')
                 own_commits[unit_id] = replay(checkout, [units[unit_id]])[0]
@@ -634,7 +662,9 @@ def verify(path, *, live=True, refresh_policy=False):
         commits = git(cwd, 'rev-list', '--reverse', snap['binding']['default_tip'] + '..' + candidate['head']).splitlines()
         prefix = [pair['copied'] for row in candidate['prerequisites'] for pair in row['commits']]
         piece = next(piece for piece in data['pieces'] if piece['id'] == name)
-        if commits != prefix + [candidate['own_commits'][key] for key in piece['units']]:
+        suffix = [candidate['own_commits'][key] for key in piece['units']
+                  if candidate['own_commits'][key] not in prefix]
+        if commits != prefix + suffix:
             raise ValueError('candidate is not based on the pinned default tip with a frozen prefix')
         for item in candidate['checks']:
             if hashlib.sha256(Path(item['path']).read_bytes()).hexdigest() != item['sha256']:
@@ -872,7 +902,8 @@ def body(data, name, *, complete):
     piece = next(piece for piece in data['pieces'] if piece['id'] == name)
     urls = {'original': data['snapshot']['binding']['pr'], **data['drafts']}
     related = 'Related PRs: ' + ', '.join(urls[key] for key in order(data['pieces']) if key != name and key in urls)
-    rows = [{**row, 'url': urls[row['piece']]} for row in data['candidates'][name]['prerequisites']]
+    rows = [{**row, 'url': row['url'] if 'url' in row else urls[row['piece']]}
+            for row in data['candidates'][name]['prerequisites']]
     output = piece['body'].replace('{{dependencies}}', pr_dependencies.table(rows)).replace('{{related}}', related)
     if '{{' in output or '}}' in output:
         raise ValueError('unresolved description placeholders')
