@@ -118,6 +118,28 @@ def test_only_consumers_of_changed_scope_are_invalidated(case):
     assert store.start(other)['action']=='reuse'
 
 
+def test_supplied_architecture_rules_remain_required_without_a_global_gate(case,tmp_path):
+    spec,store=case
+    rules=tmp_path/'applicable-architecture.md'
+    rules.write_text('The settled value must be an integer.\n')
+    spec['inputs']['architecture_rules']=str(rules)
+    done(store,spec,run='run',cycle='c1')
+    assert store.start(spec,run='run',cycle='c1')['action']=='reuse'
+    rules.write_text('The settled value must be a positive integer.\n')
+    assert not store.status([spec])['tasks'][0]['reusable']
+    claim=store.start(spec,run='run',cycle='c2')['claim']
+    # A changed worker scope/rule set cannot be recorded against stale evidence.
+    rules.write_text('The settled value must be greater than one.\n')
+    with pytest.raises(ValueError,match='changed during'):
+        store.record(spec,claim['id'],b'Stale review',{'complete':True},'complete')
+    rules.unlink()
+    with pytest.raises((ValueError,OSError)):
+        store.start(spec,run='run',cycle='c2')
+    retained=store.status([])
+    assert retained['unfinished'][0]['id']==claim['id']
+    assert retained['runs']['run']['cycles']==['c1','c2']
+
+
 def test_squash_keeps_content_reviews_but_refreshes_history_and_head_checks(case):
     content,store=case
     history=deepcopy(content);history['task']['id']='history-review';history['git']['history']=True
