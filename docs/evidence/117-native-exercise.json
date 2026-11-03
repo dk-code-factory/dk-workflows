@@ -1,0 +1,366 @@
+{
+  "arms": {
+    "after": {
+      "agent": "native_exercise/final_after",
+      "guidance_sha256": {
+        "docs/pr/contracts.md": "aff3cc3824314f6d55cb03920bbd1edec5ba26bd0d7865df8506d08f8c4a0885",
+        "docs/task-state.md": "8313e2ad9ad182c69317d4945eaf57733749f0cdfa1efeeecf9ca2f4b182a17c",
+        "runtime/pr-iter.md": "f9b4cb59beab4356633ed99be64427222e2e95bd37e0fc789734496d0b59730f",
+        "runtime/pr-review.md": "46540c54c0390f8ece99f6aed95100074d551dfcf46bab49231f7a875efe07df"
+      },
+      "metrics": {
+        "failed_operations": 3,
+        "instruction_read_bytes": 23247,
+        "instruction_read_calls": 12,
+        "operation_counts": {
+          "collect": 2,
+          "finish": 1,
+          "invoke": 6,
+          "read": 28,
+          "resolve": 1,
+          "state": 16,
+          "verify": 7
+        },
+        "other_read_bytes": 24102,
+        "other_read_calls": 14,
+        "output_bytes": 69397,
+        "task_invocations": [
+          "scope-partition",
+          "ci",
+          "reviewer-b",
+          "history-review",
+          "series-cleanup",
+          "publication"
+        ]
+      },
+      "operations": [
+        ["read", ["guidance/codex/skills/dk-pr-iter/SKILL.md"], true, 611],
+        ["read", ["guidance/codex/docs/task-state.md"], false, 140],
+        ["read", ["guidance/codex/runtime/pr-iter.md"], false, 140],
+        ["read", ["exercise.json"], true, 3879],
+        ["read", ["pins.json"], true, 272],
+        ["read", ["governing.txt"], true, 49],
+        ["read", ["guidance/runtime/pr-iter.md"], true, 9758],
+        ["read", ["guidance/docs/task-state.md"], true, 8139],
+        ["resolve", [], true, 557],
+        ["collect", [], true, 264],
+        ["state", ["status", "--run", "exercise", "--spec", "reviewer-a", "--spec", "reviewer-b", "--spec", "history-review", "--spec", "optional-review", "--spec", "scope-partition", "--spec", "series-cleanup", "--spec", "ci", "--spec", "publication"], true, 4564],
+        ["read", ["snapshot.json"], true, 383],
+        ["read", ["guidance/runtime/pr-review.md"], true, 4313],
+        ["read", ["specs/reviewer-b.json"], true, 721],
+        ["read", ["specs/history-review.json"], true, 736],
+        ["read", ["specs/scope-partition.json"], true, 724],
+        ["read", ["specs/series-cleanup.json"], true, 722],
+        ["read", ["specs/ci.json"], true, 689],
+        ["read", ["specs/publication.json"], true, 726],
+        ["read", ["state/dk-workflows/v2/092dd926395f9b6ae64e33b226098e62bd116756062b5381cff9a25346f83578/results/75427032161ac589fcf38e537e8fe04ceff9f2052dbdb966483f3493f564156d.json"], true, 933],
+        ["read", ["state/dk-workflows/v2/092dd926395f9b6ae64e33b226098e62bd116756062b5381cff9a25346f83578/results/74c23f1cda492abbdceea3d0597d685beb9aea6557a1c2704b7861d0580ea5c4.json"], true, 892],
+        ["read", ["skills/reviewer-a.md"], true, 47],
+        ["read", ["skills/history-review.md"], true, 51],
+        ["read", ["skills/optional-review.md"], true, 52],
+        ["read", ["skills/reviewer-b.md"], true, 97],
+        ["read", ["skills/publication.md"], true, 48],
+        ["read", ["skills/series.md"], true, 43],
+        ["read", ["skills/ci.md"], true, 39],
+        ["read", ["frozen/interface.py"], true, 13032],
+        ["read", ["sources.json"], true, 383],
+        ["read", ["checkout/code.py"], true, 10],
+        ["state", ["start", "--run", "exercise", "--spec", "scope-partition"], true, 790],
+        ["invoke", ["scope-partition", "<claim-1>"], true, 243],
+        ["verify", [], true, 310],
+        ["state", ["record", "--run", "exercise", "--spec", "scope-partition", "--claim", "<claim-1>", "--original", "$ARM/outputs/<claim-1>.json", "--normalized", "$ARM/outputs/<claim-1>.json", "--status", "complete"], false, 651],
+        ["state", ["record", "--spec", "scope-partition", "--claim", "<claim-1>", "--original", "$ARM/outputs/<claim-1>.json", "--normalized", "$ARM/outputs/<claim-1>.json", "--status", "complete"], true, 243],
+        ["state", ["start", "--run", "exercise", "--spec", "ci"], true, 790],
+        ["invoke", ["ci", "<claim-2>"], true, 230],
+        ["verify", [], true, 310],
+        ["state", ["record", "--spec", "ci", "--claim", "<claim-2>", "--original", "$ARM/outputs/<claim-2>.json", "--normalized", "$ARM/outputs/<claim-2>.json", "--status", "complete"], true, 243],
+        ["state", ["start", "--run", "exercise", "--cycle", "c2", "--spec", "reviewer-a"], true, 512],
+        ["state", ["start", "--run", "exercise", "--cycle", "c2", "--spec", "reviewer-b"], true, 712],
+        ["invoke", ["reviewer-b", "<claim-3>"], true, 217],
+        ["verify", [], true, 310],
+        ["state", ["record", "--spec", "reviewer-b", "--claim", "<claim-3>", "--original", "$ARM/outputs/<claim-3>.json", "--normalized", "$ARM/outputs/<claim-3>.json", "--status", "complete"], true, 242],
+        ["state", ["start", "--run", "exercise", "--cycle", "c2", "--spec", "history-review"], true, 711],
+        ["invoke", ["history-review", "<claim-4>"], true, 221],
+        ["verify", [], true, 310],
+        ["state", ["record", "--spec", "history-review", "--claim", "<claim-4>", "--original", "$ARM/outputs/<claim-4>.json", "--normalized", "$ARM/outputs/<claim-4>.json", "--status", "complete"], true, 242],
+        ["state", ["start", "--run", "exercise", "--spec", "series-cleanup"], true, 789],
+        ["invoke", ["series-cleanup", "<claim-5>"], true, 241],
+        ["verify", [], true, 310],
+        ["state", ["record", "--spec", "series-cleanup", "--claim", "<claim-5>", "--original", "$ARM/outputs/<claim-5>.json", "--normalized", "$ARM/outputs/<claim-5>.json", "--status", "complete"], true, 243],
+        ["state", ["start", "--run", "exercise", "--spec", "publication"], true, 790],
+        ["invoke", ["publication", "<claim-6>"], true, 268],
+        ["verify", [], true, 310],
+        ["state", ["record", "--spec", "publication", "--claim", "<claim-6>", "--original", "$ARM/outputs/<claim-6>.json", "--normalized", "$ARM/outputs/<claim-6>.json", "--status", "complete"], true, 243],
+        ["collect", [], true, 264],
+        ["verify", [], true, 310],
+        ["state", ["status", "--compact", "--run", "exercise", "--spec", "reviewer-a", "--spec", "reviewer-b", "--spec", "history-review", "--spec", "optional-review", "--spec", "scope-partition", "--spec", "series-cleanup", "--spec", "ci", "--spec", "publication"], true, 5259],
+        ["finish", ["<saved native assessment>"], true, 69]
+      ],
+      "trace_sha256": "c2076ecb1f88aa2e80e414f1774a56371889df1245ac458cf7dc10537e76d82e"
+    },
+    "before": {
+      "agent": "native_exercise/final_before",
+      "guidance_sha256": {
+        "docs/pr/contracts.md": "274fc1ed9c3798e074b48f8cc6205385cdda1a9c8205ab83b4ade6499c9dfd24",
+        "docs/task-state.md": "7d3ec451ac1495b37ddfa8fec644a68a0c636ce06088caa5761497f007bf99b9",
+        "runtime/pr-iter.md": "85c675d1095c1d7ccecf440eea75960b0853767c7839a6df9039e038f620a9fd",
+        "runtime/pr-review.md": "b4f46f67d9daf6a2181b3890cd9c0f92ff57fa673f0829a436cbbbff2412add0"
+      },
+      "metrics": {
+        "failed_operations": 3,
+        "instruction_read_bytes": 17966,
+        "instruction_read_calls": 10,
+        "operation_counts": {
+          "collect": 2,
+          "finish": 1,
+          "invoke": 6,
+          "read": 25,
+          "resolve": 1,
+          "state": 14,
+          "verify": 1
+        },
+        "other_read_bytes": 11081,
+        "other_read_calls": 12,
+        "output_bytes": 48280,
+        "task_invocations": [
+          "scope-partition",
+          "ci",
+          "reviewer-b",
+          "history-review",
+          "series-cleanup",
+          "publication"
+        ]
+      },
+      "operations": [
+        ["read", ["guidance/codex/skills/dk-pr-iter/SKILL.md"], true, 611],
+        ["read", ["guidance/codex/docs/task-state.md"], false, 141],
+        ["read", ["guidance/codex/runtime/pr-iter.md"], false, 141],
+        ["read", ["exercise.json"], true, 3880],
+        ["read", ["pins.json"], true, 272],
+        ["read", ["governing.txt"], true, 49],
+        ["read", ["guidance/docs/task-state.md"], true, 7394],
+        ["read", ["guidance/runtime/pr-iter.md"], true, 6130],
+        ["read", ["guidance/runtime/pr-review.md"], true, 3504],
+        ["resolve", [], true, 557],
+        ["collect", [], true, 265],
+        ["state", ["status", "--run", "exercise", "--spec", "reviewer-a", "--spec", "reviewer-b", "--spec", "history-review", "--spec", "optional-review", "--spec", "scope-partition", "--spec", "series-cleanup", "--spec", "ci", "--spec", "publication"], true, 4569],
+        ["read", ["snapshot.json"], true, 383],
+        ["read", ["specs/reviewer-a.json"], true, 724],
+        ["read", ["specs/scope-partition.json"], true, 727],
+        ["read", ["specs/series-cleanup.json"], true, 725],
+        ["read", ["specs/publication.json"], true, 729],
+        ["read", ["skills/series.md"], true, 43],
+        ["read", ["skills/reviewer-b.md"], true, 97],
+        ["read", ["skills/history-review.md"], true, 51],
+        ["read", ["skills/ci.md"], true, 39],
+        ["read", ["skills/publication.md"], true, 48],
+        ["read", ["state/dk-workflows/v2/092dd926395f9b6ae64e33b226098e62bd116756062b5381cff9a25346f83578/results/5415618e68c0acef9202ca7db547a02df9054cd8e96a08a503e82861e55c7229.json"], true, 934],
+        ["read", ["state/dk-workflows/v2/092dd926395f9b6ae64e33b226098e62bd116756062b5381cff9a25346f83578/results/56ce18f4b707e626f346d01f2c55db1c11b5a36f3a40850d4c684e9b3e59485a.json"], true, 893],
+        ["read", ["sources.json"], true, 383],
+        ["read", ["sources"], false, 115],
+        ["read", ["specs/ci.json"], true, 692],
+        ["read", ["specs/history-review.json"], true, 739],
+        ["state", ["start", "--run", "exercise", "--spec", "scope-partition"], true, 792],
+        ["invoke", ["scope-partition", "<claim-1>"], true, 244],
+        ["state", ["record", "--spec", "scope-partition", "--claim", "<claim-1>", "--original", "$ARM/outputs/<claim-1>.json", "--normalized", "$ARM/outputs/<claim-1>.json", "--status", "complete"], true, 244],
+        ["state", ["start", "--run", "exercise", "--spec", "ci"], true, 792],
+        ["invoke", ["ci", "<claim-2>"], true, 231],
+        ["state", ["record", "--spec", "ci", "--claim", "<claim-2>", "--original", "$ARM/outputs/<claim-2>.json", "--normalized", "$ARM/outputs/<claim-2>.json", "--status", "complete"], true, 244],
+        ["state", ["start", "--run", "exercise", "--cycle", "c2", "--spec", "reviewer-b"], true, 714],
+        ["invoke", ["reviewer-b", "<claim-3>"], true, 218],
+        ["state", ["record", "--spec", "reviewer-b", "--claim", "<claim-3>", "--original", "$ARM/outputs/<claim-3>.json", "--normalized", "$ARM/outputs/<claim-3>.json", "--status", "complete"], true, 243],
+        ["state", ["start", "--run", "exercise", "--cycle", "c2", "--spec", "history-review"], true, 715],
+        ["invoke", ["history-review", "<claim-4>"], true, 222],
+        ["state", ["record", "--spec", "history-review", "--claim", "<claim-4>", "--original", "$ARM/outputs/<claim-4>.json", "--normalized", "$ARM/outputs/<claim-4>.json", "--status", "complete"], true, 243],
+        ["state", ["start", "--run", "exercise", "--spec", "series-cleanup"], true, 792],
+        ["invoke", ["series-cleanup", "<claim-5>"], true, 242],
+        ["state", ["record", "--spec", "series-cleanup", "--claim", "<claim-5>", "--original", "$ARM/outputs/<claim-5>.json", "--normalized", "$ARM/outputs/<claim-5>.json", "--status", "complete"], true, 244],
+        ["state", ["start", "--run", "exercise", "--spec", "publication"], true, 792],
+        ["invoke", ["publication", "<claim-6>"], true, 269],
+        ["state", ["record", "--spec", "publication", "--claim", "<claim-6>", "--original", "$ARM/outputs/<claim-6>.json", "--normalized", "$ARM/outputs/<claim-6>.json", "--status", "complete"], true, 244],
+        ["collect", [], true, 265],
+        ["verify", [], true, 311],
+        ["state", ["status", "--run", "exercise", "--spec", "reviewer-a", "--spec", "reviewer-b", "--spec", "history-review", "--spec", "optional-review", "--spec", "scope-partition", "--spec", "series-cleanup", "--spec", "ci", "--spec", "publication"], true, 5314],
+        ["finish", ["<saved native assessment>"], true, 70]
+      ],
+      "trace_sha256": "58859d0c79f0cdf8fefaa832d2a858a452f1cd92cfff686e84c72bd0a795c0d6"
+    }
+  },
+  "comparison": {
+    "freshness_verifications": {
+      "after": 7,
+      "before": 1
+    },
+    "identical_interface_runtime_git_and_source_pins": true,
+    "known_limits": [
+      "Both arms retain the unavailable optional reviewer as incomplete; required readiness is distinct.",
+      "Both arms preserve only the original progress record; new stage results are immutable task outputs and final assessments, not additional progress records.",
+      "This pair does not establish full recipe adherence, external reviewer behavior, complete end-to-end iteration or fewer production reads.",
+      "The frozen runtime predates #115; this isolates guidance and does not measure combined helper adoption.",
+      "An earlier exploratory pilot used a changing interface and omitted failed-read logging. Its results remain private and are excluded from this controlled pair."
+    ],
+    "observed_start_reuse_guard": {
+      "after": "Issued start for reviewer-a and received reuse during review. Its retained result was already read during inspection, so full consumption-order adherence is not established.",
+      "before": "No start for reviewer-a; read retained result during inspection and accepted reusable status."
+    },
+    "outcomes_counters_receipts_blockers_equivalent": true,
+    "performance_gain_claimed": false
+  },
+  "date": "2026-11-03",
+  "equivalent_outcomes": {
+    "counters": {
+      "ci_repairs": {},
+      "ci_reruns": {},
+      "cycles": [
+        "c1",
+        "c2"
+      ],
+      "retries": {}
+    },
+    "finding_disposition": {
+      "disposition": "accepted",
+      "finding": "F1",
+      "reason": "Accept F1 without changing the name; VALUE is the existing public interface.",
+      "source": "https://github.com/fixture/iteration/pull/7#issuecomment-9"
+    },
+    "optional_complete": false,
+    "receipt": {
+      "bytes": 383,
+      "complete": true,
+      "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+      "pr": "https://github.com/fixture/iteration/pull/7",
+      "sha256": "cdf9616c26871fdf6b7a848b68bb3a6b6201720b455e0baf4fe934e54955855e"
+    },
+    "remote_writes": 0,
+    "required_complete": true,
+    "task_outputs": {
+      "ci": {
+        "attempts": 1,
+        "normalized": {
+          "blockers": [],
+          "complete": true,
+          "findings": [],
+          "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+          "result": "success",
+          "task": "ci"
+        },
+        "status": "complete"
+      },
+      "history-review": {
+        "attempts": 2,
+        "normalized": {
+          "blockers": [],
+          "complete": true,
+          "findings": [],
+          "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+          "task": "history-review"
+        },
+        "status": "complete"
+      },
+      "optional-review": {
+        "attempts": 1,
+        "normalized": {
+          "complete": false,
+          "findings": [],
+          "reason": "Fixture optional provider unavailable"
+        },
+        "status": "incomplete"
+      },
+      "publication": {
+        "attempts": 1,
+        "normalized": {
+          "blockers": [],
+          "complete": true,
+          "findings": [],
+          "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+          "remote_writes": 0,
+          "result": "reconciled-no-op",
+          "task": "publication"
+        },
+        "status": "complete"
+      },
+      "reviewer-a": {
+        "attempts": 1,
+        "normalized": {
+          "complete": true,
+          "findings": [
+            {
+              "id": "F1",
+              "text": "Rename the value."
+            }
+          ],
+          "reason": ""
+        },
+        "status": "complete"
+      },
+      "reviewer-b": {
+        "attempts": 2,
+        "normalized": {
+          "blockers": [],
+          "complete": true,
+          "findings": [],
+          "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+          "task": "reviewer-b"
+        },
+        "status": "complete"
+      },
+      "scope-partition": {
+        "attempts": 1,
+        "normalized": {
+          "blockers": [],
+          "complete": true,
+          "findings": [],
+          "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+          "outcome": "retain",
+          "task": "scope-partition"
+        },
+        "status": "complete"
+      },
+      "series-cleanup": {
+        "attempts": 1,
+        "normalized": {
+          "blockers": [],
+          "complete": true,
+          "findings": [],
+          "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+          "outcome": "no-op",
+          "task": "series-cleanup"
+        },
+        "status": "complete"
+      }
+    }
+  },
+  "host": "Codex native collaboration",
+  "interface_sha256": "1a39c8ceec3576c977338ddf8902fe67b0791b869ffc2f7a66e6bb757db62026",
+  "issue": 117,
+  "measurement": "Interface returns only; byte counts exclude printed newlines and include errors and path lengths. Instruction reads include guidance, selected fixture instructions and governing.txt; other reads include evidence, specs, results, source and interface inspection. Supervised initialization and report/audit reads are excluded.",
+  "operation_columns": [
+    "command",
+    "arguments (arm paths and claim IDs normalized)",
+    "success",
+    "returned_bytes"
+  ],
+  "pins": {
+    "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+    "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+    "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+    "runtime": "620f8df51b1066e44faeb69878235adcd3c49317",
+    "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+  },
+  "runtime_file_sha256": {
+    "runtime/state.py": "c459d7e0c4d4feb1770ca2d52ff923aac0e45b12c4ba304b87b124b51d53e883",
+    "scripts/dk.py": "2b96fb680115dc1234cabcd61bfe106f0f1b187e28d8cd5082292f3cb62c2421"
+  },
+  "schema": 1,
+  "scope": "One fresh native coordinator per arm on an offline bounded resumed workflow; domain skills are stand-ins.",
+  "source_sha256": "cdf9616c26871fdf6b7a848b68bb3a6b6201720b455e0baf4fe934e54955855e",
+  "unknown": [
+    "Model identity",
+    "Reasoning effort",
+    "Token counts",
+    "Hidden context reads",
+    "Wall-clock attribution",
+    "External-service behavior",
+    "General native adherence and reviewer recall"
+  ]
+}
