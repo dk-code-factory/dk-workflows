@@ -281,6 +281,7 @@ def test_pr_size_cli_partial_settings_and_reset(tmp_path):
     assert invoke('set', '--added-lines-threshold', '0').returncode != 0
     assert invoke('set', '--evacuate-unrelated', 'yes').returncode != 0
     assert invoke('set').returncode != 0
+    assert invoke('reset', 'unknown_setting', '--scope', 'user').returncode != 0
     result = invoke('reset', 'split_related', '--scope', 'user')
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)['pr_size'] == {'added_lines_threshold': 999,

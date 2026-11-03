@@ -171,6 +171,10 @@ the selected candidates and descriptions after any decline, then call publish ag
 with that hash and the completed review tokens before publication.
 An all-declined plan remains local. Reusing unchanged inputs never asks again.
 
+An original-only plan that changes the target to the default branch also requires
+approval for every enabled manual behavior. Declining retains its existing branch
+and target; self-review alone never grants this publication approval.
+
 Complete the existing split self-review loop for the entire selected series and
 the existing `dk-pr-description` review for all resulting descriptions. Then use
 `publish --state STATE --review-state SPLIT_TOKEN --description-review-state

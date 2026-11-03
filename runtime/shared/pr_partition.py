@@ -218,7 +218,7 @@ def worktree(cwd, directory, base):
     try:
         yield target
     finally:
-        # On conflict/failure keep the checkout for recovery; never delete work.
+        # Keep dirty or conflicted checkouts for recovery; remove clean checkouts.
         if not git(target, 'status', '--porcelain=v1'):
             git(cwd, 'worktree', 'remove', str(target))
 
@@ -678,6 +678,25 @@ def verify(path, *, live=True, refresh_policy=False):
     return data
 
 
+def recover_operations(data, action):
+    """Keep verified draft links and distinguish undispatched operations from uncertainty."""
+    for key, path in data['operations'].items():
+        value = publication.load(path)
+        if value['status'] not in ('prepared', 'verified'):
+            raise ValueError('reconcile all recorded remote operations before ' + action)
+        if value['status'] == 'verified' and value['request']['kind'] == 'partition-create':
+            data['drafts'][key.removeprefix('create-')] = value['receipt']['url']
+
+
+def publication_actions(data, pieces):
+    by_unit = {unit['id']: unit for unit in data['plan']['units']}
+    actions = {('evacuate_unrelated' if by_unit[piece['units'][0]]['scope'] == 'unrelated' else 'split_related')
+               for piece in pieces if piece['id'] != 'original'}
+    if len(pieces) == 1 and data['snapshot']['metadata']['baseRefName'] != data['snapshot']['binding']['default_branch']:
+        actions.update(data['action_ids'])
+    return actions
+
+
 def cancel_policy(path):
     """Honor a whole-PR opt-out without deleting drafts or discarding source work."""
     path = workflow_storage.owned(path)
@@ -690,8 +709,7 @@ def cancel_policy(path):
         policy = pr_partition_policy.load(pr)
         if policy['enabled']:
             raise ValueError('cancellation requires a recorded whole-PR disable decision')
-        if any(publication.load(value)['status'] != 'verified' for value in data['operations'].values()):
-            raise ValueError('reconcile all recorded remote operations before cancelling')
+        recover_operations(data, 'cancelling')
         meta = metadata(data['cwd'], pr)
         host, base_repo, head_repo = resolve(meta, data['cwd'])
         snap = data['snapshot']
@@ -722,8 +740,7 @@ def resume_policy(path, *, candidate_hash, assessment=None, decisions=None):
         policy = pr_partition_policy.load(data['snapshot']['binding']['pr'])
         if not policy['enabled']:
             raise ValueError('explicitly enable this PR before resuming partition publication')
-        if any(publication.load(value)['status'] != 'verified' for value in data['operations'].values()):
-            raise ValueError('reconcile all recorded remote operations before resuming')
+        recover_operations(data, 'resuming')
         verify(path, refresh_policy=True)
         if candidate_hash != data['candidate_hash']:
             raise ValueError('resume must bind the exact verified candidate_hash')
@@ -739,9 +756,7 @@ def resume_policy(path, *, candidate_hash, assessment=None, decisions=None):
             validate_policy_assessment(snap, assessment, decision='partition')
         action_ids = {key: publication.digest({'snapshot': snap['key'], 'plan': data['plan_id'], 'action': key})
                       for key in data['action_ids']}
-        by_unit = {unit['id']: unit for unit in data['plan']['units']}
-        actual = {('evacuate_unrelated' if by_unit[piece['units'][0]]['scope'] == 'unrelated' else 'split_related')
-                  for piece in data['pieces'] if piece['id'] != 'original'}
+        actual = publication_actions(data, data['pieces'])
         manual = {key for key in actual if snap['binding']['settings']['pr_size'][key] == 'manual'}
         supplied = decisions or {}
         if set(supplied) - manual:
@@ -788,9 +803,7 @@ def decide(path, decisions):
                 raise ValueError('publication already started; decisions are frozen')
         return data
     settings = data['snapshot']['binding']['settings']['pr_size']
-    by_unit = {unit['id']: unit for unit in data['plan']['units']}
-    actions = {('evacuate_unrelated' if by_unit[piece['units'][0]]['scope'] == 'unrelated' else 'split_related')
-               for piece in data['plan']['pieces'] if piece['id'] != 'original'}
+    actions = publication_actions(data, data['plan']['pieces'])
     supplied = decisions or {}
     if set(supplied) - actions:
         raise ValueError('decision names an action absent from this plan')

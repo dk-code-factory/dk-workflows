@@ -998,3 +998,80 @@ def test_resuming_unpublished_manual_candidates_does_not_ask_for_approval_twice(
     assert p.resume_policy(path, candidate_hash=candidate_hash, decisions=approval)['outcome'] == 'selection_ready'
     assert p.load(path)['decisions']['split_related'] == 'approved'
     assert publish(path)['outcome'] == 'published' and len(state['drafts']) == 2
+
+
+@pytest.mark.parametrize('cancel', [False, True])
+def test_undispatched_operation_allows_policy_cancel_and_resume(repo, monkeypatch, cancel):
+    cwd, remote, state, _, _, _, _ = repo
+    path = prepare(repo)
+    original_head = p.load(path)['snapshot']['head']
+    execute = publication.execute
+    def interrupt_before_dispatch(*args, **kwargs):
+        raise RuntimeError('interrupted before durable dispatch intent')
+    monkeypatch.setattr(publication, 'execute', interrupt_before_dispatch)
+    with pytest.raises(RuntimeError, match='before durable dispatch'):
+        publish(path)
+    monkeypatch.setattr(publication, 'execute', execute)
+    data = p.load(path)
+    assert len(data['operations']) == 1
+    operation = publication.load(next(iter(data['operations'].values())))
+    assert operation['status'] == 'prepared' and 'intent' not in operation
+    assert not state['writes'] and git(remote, 'rev-parse', 'topic') == original_head
+    policy.configure(PR, 'disable', reason='Keep the undispatched source intact.')
+    assert p.publish(path, reconcile=True)['outcome'] == 'reconciled'
+    if cancel:
+        assert p.cancel_policy(path)['outcome'] == 'cancelled'
+        assert not p.pending_states(cwd, PR)
+    policy.configure(PR, 'enable', reason='Publish the verified candidates now.')
+    assert p.resume_policy(path, candidate_hash=data['candidate_hash'])['outcome'] == 'selection_ready'
+    assert publish(path)['outcome'] == 'published'
+    assert len(state['drafts']) == 2
+
+
+def test_cancel_recovers_draft_link_after_verified_receipt_before_map_write(repo, monkeypatch):
+    _, remote, state, _, _, _, _ = repo
+    path = prepare(repo)
+    original_head = p.load(path)['snapshot']['head']
+    operation = p.operation
+    def interrupt_after_verified_create(*args, **kwargs):
+        result = operation(*args, **kwargs)
+        if args[2] == 'partition-create':
+            raise RuntimeError('interrupted after verified draft receipt')
+        return result
+    monkeypatch.setattr(p, 'operation', interrupt_after_verified_create)
+    with pytest.raises(RuntimeError, match='after verified draft'):
+        publish(path)
+    data = p.load(path)
+    assert not data['drafts'] and len(state['drafts']) == 1
+    create = publication.load(data['operations']['create-b'])
+    assert create['status'] == 'verified'
+    url = create['receipt']['url']
+    writes = list(state['writes'])
+    policy.configure(PR, 'disable', reason='Keep the source and preserve the published draft link.')
+    result = p.cancel_policy(path)
+    assert result['retained_drafts'] == {'b': url}
+    assert p.load(path)['drafts'] == {'b': url}
+    assert state['writes'] == writes and git(remote, 'rev-parse', 'topic') == original_head
+
+
+@pytest.mark.parametrize('decision', ['approved', 'declined'])
+def test_original_only_retarget_requires_bound_manual_approval(repo, decision):
+    _, remote, state, _, plan, _, chain = repo
+    pr_size.configure(chain, 'set', settings={'evacuate_unrelated': 'manual', 'split_related': 'manual'})
+    state['base_name'] = 'release'
+    plan['pieces'][0]['units'] = ['a', 'b', 'c']
+    plan['pieces'] = plan['pieces'][:1]
+    path = prepare(repo)
+    original_head = git(remote, 'rev-parse', 'topic')
+    result = publish(path)
+    assert result['outcome'] == 'awaiting_approval'
+    assert not state['writes'] and git(remote, 'rev-parse', 'topic') == original_head
+    assert set(result['action_ids']) == set(p.BEHAVIORS)
+    decisions = {key: {'action_id': value, 'decision': decision} for key, value in result['action_ids'].items()}
+    assert publish(path, decisions=decisions)['outcome'] == ('published' if decision == 'approved' else 'declined')
+    assert not state['drafts']
+    if decision == 'declined':
+        assert state['base_name'] == 'release' and not state['writes']
+        assert git(remote, 'rev-parse', 'topic') == original_head
+    else:
+        assert state['base_name'] == 'main'

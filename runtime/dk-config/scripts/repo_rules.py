@@ -356,7 +356,8 @@ def main():
             operation.add_argument('--evacuate-unrelated', choices=pr_size.MODES)
             operation.add_argument('--split-related', choices=pr_size.MODES)
         if action == 'reset':
-            operation.add_argument('keys', nargs='*', choices=list(pr_size.DEFAULTS))
+            operation.add_argument('keys', nargs='*', metavar='SETTING',
+                                   help='Settings to reset: ' + ', '.join(pr_size.DEFAULTS) + ' (default: all)')
     exceptions = sub.add_parser('ci-exceptions', help='Manage explicit flaky-test and pipeline exceptions')
     operations = exceptions.add_subparsers(dest='action', required=True)
     for action in ('list', 'add', 'remove', 'reset'):
@@ -373,6 +374,8 @@ def main():
             operation.add_argument('--signature')
             operation.add_argument('--reason', required=True)
     args = parser.parse_args()
+    if args.command == 'pr-size' and args.action == 'reset' and set(args.keys) - pr_size.DEFAULTS.keys():
+        parser.error('unknown PR size setting')
     if args.command == 'architecture':
         import importlib.util
         spec = importlib.util.spec_from_file_location('architecture_cli', SKILLS_ROOT / 'dk-architect/scripts/architecture.py')
