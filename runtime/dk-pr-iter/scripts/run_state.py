@@ -416,7 +416,8 @@ def next_cycle(record, head):
     require_head(head)
     prepared = work_gate(record, head)
     architecture_stage(record, prepared)
-    with bindings.pinned_bindings(prepared['reviewers']):
+    with bindings.pinned_bindings(prepared['reviewers'],
+                                  cwd=prepared.get('workspace')):
         pass
     number = len(record.setdefault("cycles", [])) + 1
     if number > 5:
@@ -492,7 +493,8 @@ def recover_cycle(record, head, record_path, *, scope='', rules=''):
         raise ValueError('review launch state is uncertain; no reserved session')
     binding = candidates[0]
     # Check the pinned bindings before consuming the recovery budget.
-    with bindings.pinned_bindings(prepared['reviewers']):
+    with bindings.pinned_bindings(prepared['reviewers'],
+                                  cwd=prepared.get('workspace')):
         pass
     context = preparation_api.context_for(prepared)
     current = review_sessions.identity(context, prepared, prepared['reviewer_order'], scope, rules)

@@ -121,7 +121,7 @@ def transport(result):
 
 
 def capture(function, *args, telemetry_prompt, telemetry_attempt, telemetry_provider=None,
-            telemetry_output=None, **kwargs):
+            telemetry_output=None, telemetry_execution=None, **kwargs):
     path = trace_path()
     workflow = workflow_usage.context(kwargs.get('env'))
     # Strip instrumentation only from the child environment. Process-wide
@@ -201,6 +201,10 @@ def capture(function, *args, telemetry_prompt, telemetry_attempt, telemetry_prov
                 match = re.search(r'(?m)^reasoning effort: (\S+)\s*$', header)
                 if match:
                     event['effort'] = match[1]
+            if telemetry_execution is not None:
+                from shared.codex_profiles import observed_settings
+                event['codex_execution'] = {'prepared': telemetry_execution,
+                    'observed': observed_settings(output_text(getattr(evidence, 'stderr', None)))}
             if telemetry_output and Path(telemetry_output).exists():
                 event['output'] = Path(telemetry_output).read_text(encoding='utf-8', errors='replace')
             if path:

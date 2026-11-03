@@ -20,7 +20,7 @@ import fcntl
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 from shared.repository_scope import identities
 from shared import ci_exceptions
-from shared.bindings import registry_snapshot
+from shared.bindings import registry_snapshot, execution_directory
 
 DATA = Path(os.environ.get('XDG_DATA_HOME', str(Path.home()/'.local/share'))) / 'codex-repo-rules'
 SKIP = {'.git', 'node_modules', 'vendor', 'dist', 'build', '.venv', '.next', '.cache'}
@@ -393,10 +393,11 @@ def main():
         from shared.bindings import diagnose
         reviewers = reviewer_config(folder, upstream_folder=upstream_folder)
         drafts = drafting_config(folder, upstream_folder=upstream_folder)
-        print(json.dumps({'reviewers': [diagnose(v, reviewers['source']) for v in reviewers['reviewers']],
-            'drafting': {role: ({'binding': 'builtin', 'executor': 'current', 'source': row['source'], 'missing': []}
-                               if row['binding'] == 'builtin' else diagnose(row['binding'], row['source']))
-                         for role, row in drafts.items()}}, ensure_ascii=False))
+        with execution_directory(args.cwd):
+            print(json.dumps({'reviewers': [diagnose(v, reviewers['source']) for v in reviewers['reviewers']],
+                'drafting': {role: ({'binding': 'builtin', 'executor': 'current', 'source': row['source'], 'missing': []}
+                                   if row['binding'] == 'builtin' else diagnose(row['binding'], row['source']))
+                             for role, row in drafts.items()}}, ensure_ascii=False))
         return
     if args.command == 'drafting':
         from shared.bindings import normalize, resolve
@@ -420,7 +421,9 @@ def main():
                 value = read_json(Path(args.binding_file), None) if args.binding_file else (
                     'builtin' if args.provider == 'builtin' else {'skill': args.provider, 'host': args.host})
                 value = normalize(value, drafting=True)
-                if value != 'builtin': resolve(value)
+                if value != 'builtin':
+                    with execution_directory(args.cwd):
+                        resolve(value)
                 config[args.role] = value
             atomic_json(path, config)
         print(json.dumps(drafting_config(folder, upstream_folder=upstream_folder))); return
@@ -439,7 +442,9 @@ def main():
             values = read_json(Path(args.bindings_file), None) if args.bindings_file else [
                 {'skill': name, 'host': args.host} if ':' in name else name for name in args.names]
             values = validate_reviewers(values)
-            for value in values: resolve(value)
+            with execution_directory(args.cwd):
+                for value in values:
+                    resolve(value)
             with locked(path.parent):
                 atomic_json(path, {'identity': key if args.scope == 'repo' else 'user', 'reviewers': values})
         else:

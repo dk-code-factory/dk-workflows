@@ -995,6 +995,7 @@ class IncrementalPreparationTests(unittest.TestCase):
         procedures = [runtime / name / 'procedure.md' for name in (
             'dk-architect', 'dk-architecture-review', 'dk-architecture-enforcer')]
         procedures.append(runtime.parent / 'common/instruction-sources.md')
+        procedures.append(runtime / 'shared/codex_profiles.py')
         for procedure in procedures:
             with self.subTest(procedure=str(procedure)), patch.object(prep, 'file_hash', side_effect=
                     lambda path: '0' * 64 if Path(path) == procedure else file_hash(path)):

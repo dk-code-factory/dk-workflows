@@ -7,10 +7,30 @@ from pathlib import Path
 from shared.preparation_graph import digest
 
 
+def execution_prompt(prompt, previous, replacement):
+    """Replace only a proved standard execution JSON prefix, never instruction text."""
+    if not isinstance(prompt, str):
+        return None
+    try:
+        value, end = json.JSONDecoder().raw_decode(prompt)
+    except ValueError:
+        return None
+    if value != previous or prompt[end:end + 1] != '\n':
+        return None
+    return json.dumps(replacement, sort_keys=True) + prompt[end:]
+
+
 def descriptor(value):
     value = copy.deepcopy(value)
     replacements = {}
     execution = value.get('execution') or {}
+    if isinstance(execution.get('codex_execution'), dict):
+        from shared.codex_profiles import profile_identity
+        updated = {**execution, 'codex_execution': profile_identity(execution['codex_execution'])}
+        prompt = execution_prompt(value.get('effective_prompt'), execution, updated)
+        if prompt is not None:
+            value['execution'], value['effective_prompt'] = updated, prompt
+            execution = updated
     for key in ('root', 'origin_root'):
         if execution.get(key):
             replacements[execution[key]] = '<provider-package>'

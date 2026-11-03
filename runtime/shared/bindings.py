@@ -1,6 +1,7 @@
 """Portable bindings resolved from host registries, never by cache enumeration."""
 from contextlib import contextmanager
 from contextvars import ContextVar
+import copy
 import hashlib
 import json
 import os
@@ -79,6 +80,17 @@ def codex_plugins():
 
 
 _PINNED_BINDINGS = ContextVar('dk_pinned_bindings', default={})
+_EXECUTION_DIRECTORY = ContextVar('dk_execution_directory', default=None)
+_PINNED_PROFILE_CHECKS = ContextVar('dk_pinned_profile_checks', default=None)
+
+
+@contextmanager
+def execution_directory(cwd):
+    token = _EXECUTION_DIRECTORY.set(str(Path(cwd).resolve()))
+    try:
+        yield
+    finally:
+        _EXECUTION_DIRECTORY.reset(token)
 
 
 def validate_version(registry_version, manifest):
@@ -89,35 +101,67 @@ def validate_version(registry_version, manifest):
 
 
 @contextmanager
-def pinned_bindings(descriptors):
+def pinned_bindings(descriptors, *, cwd=None, cache_profiles=True):
+    with execution_directory(cwd or _EXECUTION_DIRECTORY.get() or Path.cwd()):
+        with _pinned_bindings(descriptors, cache_profiles=cache_profiles):
+            yield
+
+
+@contextmanager
+def profile_observation(descriptors, *, cwd):
+    """Fresh short profile checks without replacing the cohort's frozen bindings."""
+    with execution_directory(cwd):
+        with _pinned_bindings(descriptors, keep_bindings=True):
+            yield
+
+
+def verify_retained(name, value):
+    """Validate the supplied retained provider without changing its registry identity."""
     from shared.runtime_bundles import verify, verify_binding
-    pinned = {}
+    canonical = key(value['binding'])
+    alias = name in ALIASES and normalize(name) == normalize(value['binding'])
+    if value.get('executor') == 'command':
+        if name != canonical or value.get('identity') != canonical or not value.get('bundles'):
+            raise ValueError('invalid retained command binding')
+        verify_binding(value)
+        return
+    host = current_host() if value['binding'].get('host', 'current') == 'current' else value['binding']['host']
+    if (value.get('executor') != host or (name != canonical and not alias)
+            or value.get('identity') != canonical or verify(value['root']) != value.get('bundle_digest')):
+        raise ValueError('invalid retained reviewer binding')
+    procedure, manifest = manifest_skill(Path(value['root']), value['executor'],
+                                         *value['binding']['skill'].split(':'))
+    validate_version(value.get('version'), manifest)
+    if str(procedure) != value['procedure']:
+        raise ValueError('retained reviewer procedure or version changed')
+
+
+@contextmanager
+def _pinned_bindings(descriptors, *, cache_profiles=True, keep_bindings=False):
+    pinned, checks = {}, {} if cache_profiles else None
+    cwd = _EXECUTION_DIRECTORY.get()
     for name, descriptor in descriptors.items():
         value = descriptor.get('execution')
         if value is None:
             continue  # Legacy preparation keeps its original registry validation.
-        canonical = key(value['binding'])
-        alias = name in ALIASES and normalize(name) == normalize(value['binding'])
-        if value.get('executor') == 'command':
-            if name != canonical or value.get('identity') != canonical or not value.get('bundles'):
-                raise ValueError('invalid retained command binding')
-            verify_binding(value)
-            pinned[name] = value
-            continue
-        host = current_host() if value['binding'].get('host', 'current') == 'current' else value['binding']['host']
-        if (value.get('executor') != host or (name != canonical and not alias)
-                or value.get('identity') != canonical or verify(value['root']) != value.get('bundle_digest')):
-            raise ValueError('invalid retained reviewer binding')
-        procedure, manifest = manifest_skill(Path(value['root']), value['executor'],
-                                             *value['binding']['skill'].split(':'))
-        validate_version(value.get('version'), manifest)
-        if str(procedure) != value['procedure']:
-            raise ValueError('retained reviewer procedure or version changed')
+        verify_retained(name, value)
+        if 'codex_profile' in value['binding']:
+            from shared.codex_profiles import verify_profile
+            verify_profile(value, cwd)
+            if checks is not None:
+                checks[name] = (copy.deepcopy(value), cwd)
         pinned[name] = value
+    if keep_bindings:
+        current = _PINNED_BINDINGS.get()
+        if any(current.get(name) is not value for name, value in pinned.items()):
+            raise ValueError('profile observation requires the exact retained binding scope')
+        pinned = current
     token = _PINNED_BINDINGS.set(pinned)
+    checked = _PINNED_PROFILE_CHECKS.set(checks)
     try:
         yield
     finally:
+        _PINNED_PROFILE_CHECKS.reset(checked)
         _PINNED_BINDINGS.reset(token)
 
 
@@ -149,6 +193,13 @@ def normalize(value, *, drafting=False):
     extra = {'handoff_contract': contract} if contract != 'git-diff-v1' else {}
     if nested is not None:
         extra['nested_review_roles'] = list(nested)
+    profile = value.get('codex_profile')
+    if 'codex_profile' in value:
+        if not isinstance(profile, str) or not profile.strip() or '\0' in profile:
+            raise ValueError('codex_profile must be a nonempty profile name')
+        if 'command' in value or value.get('host', 'current') == 'claude':
+            raise ValueError('codex_profile requires a native Codex executor')
+        extra['codex_profile'] = profile
     if set(value) - {'handoff_contract', 'nested_review_roles'} == {'command'}:
         argv = value['command']
         if not isinstance(argv, list) or not argv or any(not isinstance(s, str) or not s or '\0' in s for s in argv):
@@ -156,7 +207,7 @@ def normalize(value, *, drafting=False):
         if not any('{handoff}' in arg for arg in argv):
             raise ValueError('command must receive the handoff through a {handoff} argument')
         return {'command': list(argv), **extra}
-    if set(value) - {'skill', 'host', 'handoff_contract', 'nested_review_roles'} or not re.fullmatch(NAME + ':' + NAME, str(value.get('skill', ''))):
+    if set(value) - {'skill', 'host', 'handoff_contract', 'nested_review_roles', 'codex_profile'} or not re.fullmatch(NAME + ':' + NAME, str(value.get('skill', ''))):
         raise ValueError('skill must be plugin-name:skill-name')
     if value['skill'].split(':')[1] in FORBIDDEN:
         raise ValueError('Recursive review orchestration cannot be a provider')
@@ -175,7 +226,10 @@ def key(value):
         return legacy
     if 'command' in value:
         return 'command-' + hashlib.sha256(json.dumps(value['command']).encode()).hexdigest()[:20]
-    return value['skill'] + '@' + value['host']
+    identity = value['skill'] + '@' + value['host']
+    if 'codex_profile' in value:
+        identity += '#codex-profile-' + hashlib.sha256(value['codex_profile'].encode()).hexdigest()[:20]
+    return identity
 
 
 def selection(values):
@@ -217,8 +271,15 @@ def resolve(value):
         if (normalize(value).get('handoff_contract', 'git-diff-v1') !=
                 selected['binding'].get('handoff_contract', 'git-diff-v1')):
             raise ValueError('Reviewer handoff contract changed; refresh preparation')
-        from shared.runtime_bundles import verify_binding
-        verify_binding(selected)
+        verify_retained(key(value), selected)
+        if 'codex_profile' in selected['binding']:
+            cwd = _EXECUTION_DIRECTORY.get()
+            checks = _PINNED_PROFILE_CHECKS.get()
+            if checks is None or checks.get(key(value)) != (selected, cwd):
+                from shared.codex_profiles import verify_profile
+                verify_profile(selected, cwd)
+                if checks is not None:
+                    checks[key(value)] = (copy.deepcopy(selected), cwd)
         return dict(selected)
     binding = normalize(value)
     if 'command' in binding:
@@ -227,6 +288,8 @@ def resolve(value):
             raise ValueError(f'Missing selected command executable: {exe}')
         return {'binding': binding, 'identity': key(binding), 'executor': 'command'}
     host = current_host() if binding['host'] == 'current' else binding['host']
+    if 'codex_profile' in binding and host != 'codex':
+        raise ValueError('codex_profile requires a native Codex executor (resolved host: ' + host + ')')
     namespace, name = binding['skill'].split(':')
     if not shutil.which(host):
         raise ValueError(f'Missing selected host executable: {host}')
@@ -251,8 +314,12 @@ def resolve(value):
     identity, root, record = matches[0]
     procedure, manifest = manifest_skill(root, host, namespace, name)
     validate_version(record.get('version'), manifest)
-    return {'binding': binding, 'identity': key(binding), 'executor': host, 'plugin_id': identity,
-            'root': str(root.resolve()), 'procedure': str(procedure), 'version': record.get('version')}
+    result = {'binding': binding, 'identity': key(binding), 'executor': host, 'plugin_id': identity,
+              'root': str(root.resolve()), 'procedure': str(procedure), 'version': record.get('version')}
+    if 'codex_profile' in binding:
+        from shared.codex_profiles import resolve_profile
+        result['codex_execution'] = resolve_profile(binding['codex_profile'], _EXECUTION_DIRECTORY.get())
+    return result
 
 
 def diagnose(value, source=None):

@@ -29,6 +29,22 @@ class PreparationTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.package = Package(self.temp.name)
 
+    def test_unprofiled_unchanged_refresh_keeps_original_late_clone_path(self):
+        first = self.package.prepare()
+        parent = prep.read(first['artifact'])
+        original, clones = prep.git, []
+        def git(checkout, *args):
+            if args and args[0] == 'clone':
+                clones.append(args)
+            return original(checkout, *args)
+        with patch.object(prep, 'git', side_effect=git):
+            result = prep.prepare(self.package.manifest_path, self.package.versions,
+                                  previous_preparation=first['artifact'],
+                                  analyzer=lambda *_: self.fail('unchanged inputs invoked analysis'))
+        self.assertEqual(result['artifact'], first['artifact'])
+        self.assertEqual(clones, [])
+        self.assertEqual(prep.read(first['artifact']), parent)
+
     def test_legacy_preparation_is_historical_only_and_cannot_supply_current_coverage(self):
         from shared import review_coverage, review_sessions
         package = self.package

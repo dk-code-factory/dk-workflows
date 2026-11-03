@@ -12,7 +12,7 @@ import uuid
 
 POLICY = 2
 GOVERNING = {'issues', 'choices', 'user_instructions', 'rules', 'questions', 'decisions',
-             'reviewers', 'reviewer-source', 'architecture', 'architecture-exceptions'}
+             'reviewers', 'reviewer-execution', 'reviewer-source', 'architecture', 'architecture-exceptions'}
 GUIDANCE = {'reviewer_addenda', 'worker_instructions', 'completion_criteria'}
 
 
@@ -69,7 +69,7 @@ def source_identity(key, source, checkout, content):
             and type(data['agreement_binding'].get('version')) is int
             and data['agreement_binding']['version'] == 1):
         return category + ':decisions:' + data['pr_url']
-    if category == 'reviewers' and isinstance(value, dict) and isinstance(value.get('reviewer'), str):
+    if category in {'reviewers', 'reviewer-execution'} and isinstance(value, dict) and isinstance(value.get('reviewer'), str):
         return category + ':' + value['reviewer']
     if category == 'feedback' and isinstance(value, dict) and value.get('complete') is True:
         pr = value.get('pullRequest', {})
@@ -150,6 +150,12 @@ def semantic(key, content):
         return {k: v for k, v in value.items() if k not in {
             'head', 'fingerprint', 'tree', 'paths', 'scope', 'scope_contents', 'governing_sources'}}
     if key == 'manifest':
+        value = dict(value)
+        associations = value.get('reviewer_execution')
+        if isinstance(associations, list) and all(isinstance(item, dict) and
+                set(item) == {'reviewer', 'path', 'derived_from', 'sha256', 'original_sha256'} and
+                all(isinstance(field, str) for field in item.values()) for item in associations):
+            value.pop('reviewer_execution')
         return {'mode': value['mode'], **{k: v for k, v in value.items()
                                          if k not in {'mode', 'context', 'decisions', 'evidence',
                                                       'source_modes', 'source_origins'}}}
@@ -196,7 +202,7 @@ def semantic(key, content):
                 raise ValueError('typed evidence requires governing and operational objects')
             return {'fields': {k: v for k, v in value.items() if k != 'operational'},
                     'operational_unknown': operational_unknown(value.get('operational', {}))}
-        if category == 'reviewers':
+        if category in {'reviewers', 'reviewer-execution'}:
             from shared.engineering_identity import descriptor
             return descriptor(value)
     return {'opaque_sha256': hashlib.sha256(content).hexdigest()}

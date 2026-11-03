@@ -251,6 +251,7 @@ def describe_reviewer(name):
                Path(__file__).with_name('review-result.schema.json'),
                ROOT/'shared/bindings.py', ROOT/'shared/executors.py', ROOT/'shared/preparation_views.py',
                ROOT/'shared/review_execution.py',
+               ROOT/'shared/codex_profiles.py',
                Path(__file__).parents[1] / 'references/handoff-contracts.md']
     if 'procedure' in resolved:
         initial += [Path(resolved['procedure'])]
@@ -307,11 +308,29 @@ def describe_prepared(context, reviewers, preparation):
     if (run(['git', 'rev-parse', 'HEAD'], checkout).strip() != context['head_sha']
             or run(['git', 'status', '--porcelain=v1'], checkout).strip()):
         raise ValueError('prepared isolated checkout changed; refresh preparation')
-    with bindings.pinned_bindings(preparation['reviewers']):
+    with bindings.pinned_bindings(preparation['reviewers'], cwd=checkout):
         descriptors = [describe_reviewer(provider) for provider in reviewers]
     if any(value != preparation['reviewers'][name] for name, value in zip(names, descriptors)):
         raise ValueError('effective reviewer instructions changed; refresh preparation')
     return {'reviewers': descriptors}
+
+
+def capture_execution(descriptor, checkout):
+    """Rebind native profile evidence to the owned clone, retaining the provider."""
+    import copy
+    from shared.codex_profiles import resolve_profile
+    from shared.engineering_identity import execution_prompt
+    value = copy.deepcopy(descriptor)
+    execution = value.get('execution') or {}
+    if 'codex_profile' not in execution.get('binding', {}):
+        return value
+    bindings.verify_retained(value['reviewer'], execution)
+    updated = dict(execution, codex_execution=resolve_profile(execution['binding']['codex_profile'], checkout))
+    prompt = execution_prompt(value.get('effective_prompt'), execution, updated)
+    if prompt is None:
+        raise ValueError('Profile reviewer requires a matching standard execution prompt prefix')
+    value.update(execution=updated, effective_prompt=prompt)
+    return validate_descriptor(value)
 
 
 def compact_handoff(handoff, reviewer):
@@ -341,7 +360,7 @@ def review(context, reviewers, scope, decisions, rules, preparation, stats=None,
         context = preparation_api.context_for(preparation)
     decisions = validate_decisions(context, decisions)
     preparation = preparation_api.validate(preparation, context, decisions)
-    with bindings.pinned_bindings(preparation['reviewers']), provider_cancellation() as cancellation:
+    with bindings.pinned_bindings(preparation['reviewers'], cwd=context['checkout'], cache_profiles=False), provider_cancellation() as cancellation:
         return _review(context, reviewers, scope, decisions, rules, preparation, stats, session, cancellation)
 
 
@@ -421,9 +440,10 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             contract = bindings.normalize(provider_map[name]).get('handoff_contract', 'git-diff-v1')
             if contract != preparation['reviewers'][name].get('handoff_contract', 'git-diff-v1'):
                 raise ValueError('reviewer handoff contract changed; refresh preparation')
-            if describe_reviewer(provider_map[name]) != preparation['reviewers'][name]:
-                raise ValueError('effective reviewer instructions changed; refresh preparation')
-            skill = skill_path(provider_map[name]) or Path('command')
+            with bindings.profile_observation({name: preparation['reviewers'][name]}, cwd=checkout):
+                if describe_reviewer(provider_map[name]) != preparation['reviewers'][name]:
+                    raise ValueError('effective reviewer instructions changed; refresh preparation')
+                skill = skill_path(provider_map[name]) or Path('command')
             cached = session.cached(name) if session else None
             if cached is not None:
                 validate_findings(cached, lines)
@@ -814,7 +834,8 @@ def _run_cli(args, parser):
     if not config['reviewers']:
         raise ValueError('no PR review agent is configured; use dk-config reviewers set SKILL')
     if args.describe:
-        print(json.dumps({'reviewers': [describe_reviewer(name) for name in config['reviewers']]}, ensure_ascii=True))
+        with bindings.execution_directory(context.get('checkout', context['repository'])):
+            print(json.dumps({'reviewers': [describe_reviewer(name) for name in config['reviewers']]}, ensure_ascii=True))
         return
     decisions = validate_decisions(context, preparation_api.read(preparation_api.source_path(preparation, 'decisions'))
                                   if fresh else json.loads(Path(args.decisions_file).read_text()))
@@ -844,7 +865,7 @@ def _run_cli(args, parser):
         options = legacy.legacy_review_options(args.run_record, context, preparation, names,
                                              scope, rules, args.stats_cycle)
         if 'result' in options:
-            with bindings.pinned_bindings(preparation['reviewers']):
+            with bindings.pinned_bindings(preparation['reviewers'], cwd=context['checkout']):
                 for provider, name in zip(config['reviewers'], names):
                     if describe_reviewer(provider) != preparation['reviewers'][name]:
                         raise ValueError('effective reviewer instructions changed; refresh preparation')
