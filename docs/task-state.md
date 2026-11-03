@@ -45,6 +45,8 @@ IDs and revision expressions always resolve independently. Unsupported Git
 layouts or indirect configuration, replacements, grafts and shallow repositories
 also fall back to independent capture. Ordinary repositories and linked worktrees
 check configuration, environment and affected-path attributes before reuse.
+Alternate attribute sources, configured worktree roots and signature-verifying
+history also fall back. Index context retains a fixed-size content hash.
 
 Reproduce the capture-process comparison with:
 
@@ -55,6 +57,8 @@ python3 -m pytest -q -s tests/test_state.py -k status_batch_process_count_compar
 The probe completes two reviewer specs with identical pinned Git inputs, then
 runs initial status, two independent reuse starts, and final status. It compares
 independent captures (42 Git processes) with batched status captures (28).
+The fixture isolates Git configuration and environment so user includes and
+other deliberately unsupported contexts do not disable the measured fast path.
 Each optimized status uses two changed-path probes plus five Git calculations;
 identical target/base commit and tree queries share a result. Each separate start
 still performs seven Git processes. Counts exclude Store initialization, initial

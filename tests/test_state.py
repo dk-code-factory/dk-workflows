@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -22,7 +23,14 @@ def git(root,*args):
 
 
 @pytest.fixture
-def case(tmp_path):
+def case(tmp_path, monkeypatch):
+    # The process probe measures an eligible checkout, independently of the
+    # caller's includes, Git directories and execution configuration.
+    for name in list(os.environ):
+        if name.startswith('GIT_'):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv('GIT_CONFIG_NOSYSTEM', '1')
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', os.devnull)
     checkout=tmp_path/'repo';checkout.mkdir()
     git(checkout,'init','-q')
     git(checkout,'config','user.name','Test')
@@ -451,6 +459,77 @@ def test_status_batch_refreshes_changed_execution_context(case, monkeypatch, kin
     # The Git version may not consult indexed attributes for this tree diff,
     # but changing the index must still prevent sharing its earlier capture.
     assert len(calculations) == 2
+
+
+@pytest.mark.parametrize('kind', ['attribute-tree', 'bom-include', 'worktree', 'signature'])
+def test_status_falls_back_for_indirect_git_inputs(case, tmp_path, kind):
+    a, store = case
+    checkout = Path(a['git']['checkout'])
+    if kind == 'attribute-tree':
+        attributes = checkout/'.gitattributes'
+        attributes.write_text('code -diff\n')
+        git(checkout, 'add', '.gitattributes'); git(checkout, 'commit', '-qm', 'binary attributes')
+        first = git(checkout, 'rev-parse', 'HEAD')
+        attributes.write_text('code diff\n')
+        git(checkout, 'commit', '-qam', 'text attributes')
+        second = git(checkout, 'rev-parse', 'HEAD')
+        git(checkout, 'update-ref', 'refs/heads/attributes', first)
+        git(checkout, 'config', 'attr.tree', 'refs/heads/attributes')
+        # Older Git releases do not use attr.tree. They must still bypass
+        # sharing because the same configuration is indirect on newer Git.
+        def change():
+            git(checkout, 'update-ref', 'refs/heads/attributes', second)
+        field = 'diff_sha256'
+    elif kind == 'bom-include':
+        included = tmp_path/'included.gitconfig'
+        included.write_text('[diff]\n\tnoprefix = false\n')
+        config = checkout/'.git/config'
+        config.write_bytes(b'\xef\xbb\xbf[include]\n\tpath = '+os.fsencode(included)+b'\n'+config.read_bytes())
+        def change():
+            included.write_text('[diff]\n\tnoprefix = true\n')
+        field = 'diff_sha256'
+    elif kind == 'worktree':
+        redirected = tmp_path/'redirected'; redirected.mkdir()
+        (redirected/'code').write_text('review me\n')
+        attributes = redirected/'.gitattributes'
+        attributes.write_text('code -diff\n')
+        git(checkout, 'config', 'core.worktree', str(redirected))
+        def change():
+            attributes.write_text('code diff\n')
+        field = 'diff_sha256'
+    else:
+        if not shutil.which('ssh-keygen'):
+            pytest.skip('SSH signature regression requires ssh-keygen')
+        key = tmp_path/'signing-key'
+        subprocess.check_call(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key)])
+        signers = tmp_path/'allowed-signers'
+        signers.write_text('test@example.test '+key.with_suffix('.pub').read_text())
+        for name, value in [('gpg.format', 'ssh'), ('user.signingkey', str(key)),
+                            ('gpg.ssh.allowedSignersFile', str(signers)), ('log.showSignature', 'true')]:
+            git(checkout, 'config', name, value)
+        (checkout/'code').write_text('signed change\n')
+        git(checkout, 'commit', '-S', '-qam', 'signed change')
+        a['git'].update(head=git(checkout, 'rev-parse', 'HEAD'), history=True)
+        def change():
+            signers.write_text('')
+        field = 'history'
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    before = capture(a)['components']['inputs']['git'][field]
+    done(store, a); done(store, b)
+    # The optimization deliberately declines these inputs even when this Git
+    # version uses the original working directory for tree-diff attributes.
+    assert state._git_context(a['git']) is None
+    expected = []
+    def specs():
+        yield a
+        change()
+        expected.append(capture(b)['components']['inputs']['git'][field])
+        yield b
+    tasks = store.status(specs())['tasks']
+    assert tasks[0]['reusable']
+    assert tasks[1]['reusable'] is (before == expected[0])
+    if kind in {'bom-include', 'signature'}:
+        assert expected[0] != before
 
 
 def test_git_drift_after_status_still_rejects_completion(case):

@@ -92,7 +92,7 @@ def _git_context(source):
     """
     if any(name in os.environ for name in (
             'GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_OBJECT_DIRECTORY',
-            'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_GLOBAL',
+            'GIT_ALTERNATE_OBJECT_DIRECTORIES',
             'GIT_CONFIG_COUNT', 'GIT_CONFIG_PARAMETERS', 'GIT_REPLACE_REF_BASE',
             'GIT_SHALLOW_FILE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE', 'GIT_NAMESPACE',
             'GIT_ATTR_SOURCE')):
@@ -110,37 +110,53 @@ def _git_context(source):
         common = directory
         if (directory/'commondir').is_file():
             common = (directory/(directory/'commondir').read_text().strip()).resolve()
-        configs = [Path('/etc/gitconfig'), Path('/usr/local/etc/gitconfig'),
-                   Path.home()/'.gitconfig',
-                   Path(os.environ.get('XDG_CONFIG_HOME') or Path.home()/'.config')/'git/config',
-                   common/'config', directory/'config.worktree']
+        configs = []
+        for variable, defaults in (
+                ('GIT_CONFIG_SYSTEM', [Path('/etc/gitconfig'), Path('/usr/local/etc/gitconfig')]),
+                ('GIT_CONFIG_GLOBAL', [Path.home()/'.gitconfig',
+                 Path(os.environ.get('XDG_CONFIG_HOME') or Path.home()/'.config')/'git/config'])):
+            if variable == 'GIT_CONFIG_SYSTEM' and os.environ.get('GIT_CONFIG_NOSYSTEM') == '1':
+                continue
+            if variable in os.environ:
+                path = Path(os.environ[variable])
+                if not path.is_absolute():
+                    return None
+                configs.append(path)
+            else:
+                configs.extend(defaults)
+        configs.extend((common/'config', directory/'config.worktree'))
         snapshots = []
         for path in configs:
             content = path.read_bytes() if path.exists() else None
-            # Includes and reftable repositories require a wider context than
-            # this fast path can establish without more Git processes.
-            if content and (re.search(rb'(?im)^\s*\[\s*include', content)
-                            or any(word in content.lower() for word in
-                                   (b'reftable', b'attributesfile', b'orderfile', b'submodule'))):
+            # Git skips an initial UTF-8 BOM. Indirect configuration, alternate
+            # attribute roots and signature verification need a wider context.
+            normalized = content.removeprefix(b'\xef\xbb\xbf') if content else b''
+            if (re.search(rb'(?im)^\s*\[\s*(?:include|attr)', normalized)
+                    or any(word in normalized.lower() for word in
+                           (b'reftable', b'attributesfile', b'orderfile', b'submodule', b'worktree'))
+                    or (source.get('history') and b'showsignature' in normalized.lower())):
                 return None
             snapshots.append((str(path.resolve()), content))
         for path in (common/'refs/replace', common/'info/grafts', common/'shallow'):
             if path.exists() and (not path.is_dir() or any(path.iterdir())):
                 return None
-        packed = common/'packed-refs'
-        content = packed.read_bytes() if packed.exists() else b''
-        if b' refs/replace/' in content:
-            return None
         # A hex spelling may also name a mutable ref. Do not treat that
         # ambiguous spelling as an immutable object input, even if Git happens
         # to prefer the object on this version.
-        for pin in (source[key] for key in ('target', 'base', 'head')):
-            names = (pin, 'refs/'+pin, 'refs/tags/'+pin, 'refs/heads/'+pin,
-                     'refs/remotes/'+pin, 'refs/remotes/'+pin+'/HEAD')
-            if any((root/name).exists() for root in (directory, common) for name in names):
-                return None
-            if any(line.split()[-1:] == [name.encode()] for line in content.splitlines() for name in names):
-                return None
+        ref_names = {name for pin in (source[key] for key in ('target', 'base', 'head'))
+                     for name in (pin, 'refs/'+pin, 'refs/tags/'+pin, 'refs/heads/'+pin,
+                                  'refs/remotes/'+pin, 'refs/remotes/'+pin+'/HEAD')}
+        if any((root/name).exists() for root in (directory, common) for name in ref_names):
+            return None
+        packed = common/'packed-refs'
+        if packed.exists():
+            encoded_names = {name.encode() for name in ref_names}
+            with packed.open('rb') as refs:
+                for line in refs:
+                    fields = line.split()
+                    if len(fields) == 2 and (fields[1].startswith(b'refs/replace/')
+                                             or fields[1] in encoded_names):
+                        return None
         # A committed diff still reads attributes from the working tree. Probe
         # changed paths, then read only their attribute ancestry, not the tree.
         names = git(checkout, '-c', 'diff.renames=false', 'diff', '--name-only', '-z',
@@ -162,7 +178,11 @@ def _git_context(source):
             snapshots.append((str(path.resolve()), path.read_bytes() if path.exists() else None))
         # Retain indexed attribute state as part of the checkout context, too.
         index = directory/'index'
-        snapshots.append((str(index.resolve()), index.read_bytes() if index.exists() else None))
+        index_hash = None
+        if index.exists():
+            with index.open('rb') as indexed:
+                index_hash = hashlib.file_digest(indexed, 'sha256').digest()
+        snapshots.append((str(index.resolve()), index_hash))
         return (str(checkout), str(directory.resolve()), str(common), tuple(snapshots),
                 tuple(sorted(os.environ.items())))
     except (OSError, ValueError):
