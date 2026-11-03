@@ -84,6 +84,13 @@ def ownership(path):
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
+def iteration_allocation(binding):
+    result = {key: binding[key] for key in ('iteration_run_id', 'cycle', 'attempt')}
+    if binding.get('architecture_stage'):
+        result['architecture_stage'] = binding['architecture_stage']
+    return result
+
+
 def reserve(path, context, allocation, *, activation=None):
     """Persist evidence before delegation, even if the runner never initializes."""
     path = validate_storage(path, context)
@@ -151,7 +158,9 @@ def recoverable_roles(data):
                    or not isinstance(item.get('launch_intents'), list)
                    for index, item in enumerate(history, 1))):
         raise ValueError('role recovery launch intent requires drained execution; ownership is uncertain')
-    roles = [*data['identity']['reviewers'], 'architecture-review']
+    roles = list(data['identity']['reviewers'])
+    if not data.get('iteration_allocation', {}).get('architecture_stage'):
+        roles.append('architecture-review')
     if set(data.get('reviews', {})) != set(roles) or not data.get('results'):
         raise ValueError('role recovery requires every role and its terminal result')
     artifact = coverage.load(data['results'][-1])
@@ -193,7 +202,7 @@ def recoverable_roles(data):
                     full = handoff[field]
                     if hashlib.sha256(Path(full['path']).read_bytes()).hexdigest() != full['sha256']:
                         raise ValueError('role recovery full delivery changed')
-    architecture_delivery = deliveries['architecture-review']
+    architecture_delivery = deliveries.get('architecture-review')
     failed = []
     for role in roles:
         item = data['reviews'][role]
@@ -291,7 +300,7 @@ def recover_unlaunched(path, context, current_identity, prior_binding, replaceme
     path = validate_storage(path, context)
     with ownership(path):
         def recover(data):
-            prior = {key: prior_binding[key] for key in ('iteration_run_id', 'cycle', 'attempt')}
+            prior = iteration_allocation(prior_binding)
             if data.get('iteration_allocation') != prior:
                 raise ValueError('review allocation evidence is missing or changed')
             failed_roles = recoverable_roles(data) if after_dispatch else []
@@ -311,7 +320,7 @@ def recover_unlaunched(path, context, current_identity, prior_binding, replaceme
             same = data.get('identity') == current_identity
             data['prelaunch_recovery'] = {'path': str(proof_path), 'sha256': fingerprint}
             binding = {**replacement_binding, 'session_file': str(path) if same else replacement_binding['session_file']}
-            allocation = {key: binding[key] for key in ('iteration_run_id', 'cycle', 'attempt')}
+            allocation = iteration_allocation(binding)
             payload = {'activation_version': 1, 'proof': data['prelaunch_recovery'],
                 'prior_binding': prior_binding, 'prior_allocation': prior, 'binding': binding,
                 'allocation': allocation, 'identity': current_identity, 'resume': same,
@@ -541,6 +550,13 @@ class Session:
         self.update(save)
 
     def finish(self, result):
+        stage = self.update(lambda data: data.get('iteration_allocation', {}).get('architecture_stage'))
+        if stage:
+            from shared import iteration_architecture
+            iteration_architecture.verify(stage, self.prepared)
+            if result.get('architecture_review') or result.get('architecture_findings'):
+                raise ValueError('iteration cycle cannot contain another architecture review')
+            result = {**result, 'iteration_architecture': stage}
         self.validate_storage()
         self.update(lambda data: require_activation(data, self.path))
         if self.prepared.get('preparation_version', 1) >= 3:
@@ -563,6 +579,9 @@ def result_artifact(session_path, item):
             or session['results'][-1] != item):
         raise ValueError('result is not the latest registered result of this review session')
     artifact = coverage.load(item)
+    stage = session.get('iteration_allocation', {}).get('architecture_stage')
+    if artifact['result'].get('iteration_architecture') != stage:
+        raise ValueError('review result differs from its allocated architecture stage')
     if (artifact.get('version') != session['session_version'] + 1
             or artifact['session_id'] != session.get('id')
             or artifact['session_identity'] != session.get('identity')

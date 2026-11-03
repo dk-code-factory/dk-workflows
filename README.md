@@ -422,3 +422,10 @@ explicit discovery recovery.
 [ci-evidence]: runtime/dk-flaky-tests/references/evidence.md
 
 Version 1.7.0 adds [owned preparation refresh and typed cleanup evidence](runtime/dk-pr-iter/references/operational-refresh.md), concurrent architecture checkpoints, bounded same-cycle infrastructure recovery, persistent CI deadlines and private timing diagnostics. Fresh invocations use the new contracts; active older runs retain their original runtime. Update through the supported host plugin commands above. Reviewer installations, model selection and private configuration are unchanged.
+
+
+PR iteration runs architecture review once after initial feedback fixes, immediately
+before its configured-reviewer loop. Later cycles, CI repairs, commit cleanup and
+completion retain that original result and reviewed head. Current architecture
+rules still reach every worker, and unresolved architecture findings block progress.
+Standalone PR reviews continue to run architecture alongside configured reviewers.

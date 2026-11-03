@@ -25,6 +25,7 @@ def allocated(tmp_path, monkeypatch):
     prepared = prep.read(artifact)
     record = {}
     state.start_run(record)
+    record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
     state.attach_preparation(record, artifact, package.context['url'], package.head)
     state.next_cycle(record, package.head)
     path = tmp_path / 'run.json'

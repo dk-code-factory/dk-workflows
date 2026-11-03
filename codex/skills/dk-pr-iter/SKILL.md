@@ -14,3 +14,8 @@ On preparation refresh, use `run-state refresh-preparation` with the active prev
 Fresh workflows use preparation v4, run contract v3, session v3, review-result v4, role-checkpoint v2 and reconciliation v3 and completion-verification v2. Preserve both preparation and engineering IDs. Use returned private workflow paths for all generated evidence and child handoffs. Operational refresh may preserve engineering identity; validate current evidence and retained reviewer bindings before reuse. Resume legacy active runs only through their retained runtime.
 
 Before coding or review, follow [architecture delivery](../../../runtime/dk-architect/procedure.md). Every child handoff includes its recipient/path packet reference and fingerprint; refresh before expanding scope.
+
+After initial feedback fixes, run the once-only architecture stage before allocating
+review cycle 1. Follow [the stage contract](../../../runtime/dk-pr-iter/references/iteration-architecture.md).
+Retain its result through all cycles, cleanup and completion; do not launch another
+architecture reviewer in those stages. Continue current rule delivery to workers.

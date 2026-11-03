@@ -55,6 +55,7 @@ def iteration_record(tmp_path, context, prepared, cycle=2):
     record = {}
     write(preparation_path, prepared)
     state.start_run(record)
+    record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
     state.attach_preparation(record, preparation_path, context['url'], context['head_sha'])
     for _ in range(cycle):
         state.next_cycle(record, context['head_sha'])

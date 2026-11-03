@@ -33,6 +33,7 @@ def fresh(tmp_path, monkeypatch):
     p = Package(tmp_path)
     record = {}
     state.start_run(record)
+    record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
     base = p.head
     prep.git(p.repo, 'commit', '--allow-empty', '-qm', 'One coherent reviewed change')
     p.head = prep.git(p.repo, 'rev-parse', 'HEAD')
@@ -106,7 +107,8 @@ def cleanup_record(fresh, kind, refs):
     return state.mutate(path, {}, lambda d: state.record_operational(d, 'cleanup', source))
 
 
-def test_pr89_noop_cleanup_preserves_identity_and_zero_later_model_calls(fresh, monkeypatch):
+@pytest.mark.parametrize('once', [False, True])
+def test_pr89_noop_cleanup_preserves_identity_and_zero_later_model_calls(fresh, monkeypatch, once):
     p, original, path, names, calls, base = fresh
     architecture_calls = []
     original_review = architecture.review
@@ -114,6 +116,11 @@ def test_pr89_noop_cleanup_preserves_identity_and_zero_later_model_calls(fresh, 
         architecture_calls.append('architecture')
         return original_review(*args, **kwargs)
     monkeypatch.setattr(architecture, 'review', review)
+    if once:
+        record = read(path, {})
+        record['iteration_run']['architecture_review_mode'] = 'once_before_cycles'
+        write(path, record)
+        state.run_architecture_review(path, p.head)
     result, session = dispatch(fresh)
     assert result['complete'] and sorted(calls) == names
     cleanup_record(fresh, 'handoff', {})
@@ -154,9 +161,16 @@ def test_pr89_noop_cleanup_preserves_identity_and_zero_later_model_calls(fresh, 
     assert len(read(path, {})['cycles']) == 1
 
 
-def test_fifth_clean_review_survives_closure_refresh_two_commit_cleanup_and_completion(fresh, monkeypatch):
+@pytest.mark.parametrize('once', [False, True])
+def test_fifth_clean_review_survives_closure_refresh_two_commit_cleanup_and_completion(fresh, monkeypatch, once):
     from shared.review_loop import encode
     p, original, path, names, calls, base = fresh
+    if once:
+        record = read(path, {})
+        record['iteration_run']['architecture_review_mode'] = 'once_before_cycles'
+        write(path, record)
+        state.run_architecture_review(path, p.head)
+        monkeypatch.setattr(architecture, 'review', lambda *a, **kw: pytest.fail('architecture repeated after pre-loop stage'))
     for _ in range(4):
         assert dispatch(fresh)[0]['complete']
     record = read(path, {})

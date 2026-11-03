@@ -34,6 +34,7 @@ def test_malformed_review_result_cli_has_diagnostic_without_mutating_record(
         'repository': str(tmp_path / 'repository'), 'checkout': str(tmp_path / 'checkout')})
     record = {}
     state.start_run(record)
+    record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
     state.next_cycle(record, head)
     record_path = tmp_path / 'pr-1.json'
     state.review_session(record, head, record_path)

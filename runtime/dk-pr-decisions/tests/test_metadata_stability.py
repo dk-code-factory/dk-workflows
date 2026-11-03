@@ -226,6 +226,7 @@ def test_full_workflow_operational_refresh_resume_and_completion(tmp_path, monke
     prepared = prep.read(first['artifact'])
     record, record_path = {}, tmp_path / 'run.json'
     state_api.start_run(record)
+    record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
     state_api.attach_preparation(record, first['artifact'], package.context['url'], package.head)
     state_api.next_cycle(record, package.head)
     state_api.classify(record, 'feedback', package.head, 'valid', 'source', 'Confirmed')
@@ -477,6 +478,7 @@ def test_invalid_retained_binding_blocks_before_consuming_another_cycle(tmp_path
     result = package.prepare(analysis([name]))
     record = {}
     state_api.start_run(record)
+    record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
     state_api.attach_preparation(record, result['artifact'], package.context['url'], package.head)
     state_api.next_cycle(record, package.head)
     before = copy.deepcopy(record)

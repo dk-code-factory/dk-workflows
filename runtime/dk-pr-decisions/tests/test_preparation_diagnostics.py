@@ -27,6 +27,7 @@ def test_full_run_history_blocks_before_architecture_or_preparation_dispatch(tmp
     spec.loader.exec_module(state)
     record = {}
     state.start_run(record)
+    record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
     package.manifest['mode'] = 'iteration'
     package.write('history.json', state.preparation_history(record))
     package.manifest['evidence']['run_history'] = ['history.json']

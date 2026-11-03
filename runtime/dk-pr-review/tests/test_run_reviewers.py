@@ -105,6 +105,7 @@ class RunnerTests(unittest.TestCase):
         for checkpoint_status, response in outcomes:
             with self.subTest(checkpoint_status=checkpoint_status):
                 session = Mock()
+                session.update.return_value = None
                 session.id = 'fixture-session'
                 session.invocation = 1
                 session.delivery.side_effect = lambda name, path, data: (mod.write(path, data), path)[1]

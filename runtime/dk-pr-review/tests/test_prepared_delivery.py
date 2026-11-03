@@ -218,6 +218,7 @@ class PreparedDeliveryTests(unittest.TestCase):
         for kind in ('exhausted','invalid_evidence','configured_failure'):
             with self.subTest(kind=kind):
                 record={};state.start_run(record)
+                record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
                 state.attach_preparation(record,self.artifact_path,p.context['url'],p.head)
                 for _ in range(5):state.next_cycle(record,p.head)
                 binding=state.review_session(record,p.head,p.root/'run.json')

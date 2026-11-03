@@ -653,10 +653,12 @@ class IncrementalPreparationTests(unittest.TestCase):
         state = module('fresh_lineage_state', 'dk-pr-iter/scripts/run_state.py')
         record = {}
         old_run = state.start_run(record)['id']
+        record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
         state.attach_preparation(record, first['artifact'], package.context['url'], package.head)
         state.next_cycle(record, package.head)
         state.finish_run(record, 'completed', 'Previous request completed')
         state.start_run(record)
+        record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
         package.write('user.json', {'instruction': 'A fresh request refreshes the previous preparation'})
         child = self.refresh(first, retain(parent))
         sibling = self.refresh(first, retain(parent))
@@ -688,6 +690,7 @@ class IncrementalPreparationTests(unittest.TestCase):
         state = module('root_retry_state', 'dk-pr-iter/scripts/run_state.py')
         record = {}
         state.start_run(record)
+        record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
         state.attach_preparation(record, first['artifact'], package.context['url'], package.head)
         state.attach_preparation(record, first['artifact'], package.context['url'], package.head)
         self.assertEqual(len(record['preparations']), 1)
@@ -803,6 +806,7 @@ class IncrementalPreparationTests(unittest.TestCase):
         completion = module('fifth_cycle_completion', 'dk-pr-iter/scripts/completion.py')
         record, record_path = {}, package.root / 'run.json'
         state.start_run(record)
+        record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
         state.attach_preparation(record, first['artifact'], package.context['url'], package.head)
         for cycle in range(1, 6):
             state.next_cycle(record, package.head)

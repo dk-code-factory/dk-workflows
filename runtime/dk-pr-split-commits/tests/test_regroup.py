@@ -293,6 +293,7 @@ def cleanup_receipt(repo, tmp_path):
     record = {}
     record_path = directory / 'run.json'
     state.start_run(record)
+    record['iteration_run'].pop('architecture_review_mode')  # Retained per-cycle contract.
     state.attach_preparation(record, original_path, PR, data['original_head'])
     for _ in range(5): state.next_cycle(record, data['original_head'])
     binding = state.review_session(record, data['original_head'], record_path)
