@@ -272,10 +272,18 @@ def test_missing_resources_cannot_trap_an_interrupted_claim_or_reset_budgets(cas
     assert entry['attempts'][0]['status']=='interrupted' and entry['invalidated']
 
 
+def require_git_context_paths(checkout):
+    variables = git(checkout, 'var', '-l').splitlines()
+    for name in ('GIT_ATTR_SYSTEM', 'GIT_ATTR_GLOBAL', 'GIT_CONFIG_GLOBAL'):
+        if not any(line.startswith(name+'=') for line in variables):
+            pytest.skip('This Git does not expose the paths needed for safe capture sharing')
+
+
 @pytest.mark.parametrize('linked', [False, True])
 def test_status_batch_process_count_comparison(case, tmp_path, monkeypatch, linked):
     """Reproduce the issue's two completed-reviewer recipe, without model calls."""
     a, store = case
+    require_git_context_paths(a['git']['checkout'])
     if linked:
         checkout = tmp_path/'linked'
         git(a['git']['checkout'], 'worktree', 'add', '--detach', '-q', str(checkout), a['git']['head'])
@@ -303,6 +311,85 @@ def test_status_batch_process_count_comparison(case, tmp_path, monkeypatch, link
     after = probe()
     assert before == 42 and after == 28
     print(f'capture-related Git processes: independent={before}, status-batched={after}')
+
+
+def test_status_batch_mixed_modes_process_count_comparison(case, monkeypatch):
+    a, store = case
+    checkout = Path(a['git']['checkout'])
+    require_git_context_paths(checkout)
+    (checkout/'code').write_text('third distinct tree\n')
+    git(checkout, 'commit', '-qam', 'third commit')
+    a['git'].update(base=a['git']['head'], head=git(checkout, 'rev-parse', 'HEAD'))
+    specs = []
+    for mode in ('content', 'history', 'head_sensitive'):
+        spec = deepcopy(a); spec['task']['id'] = mode
+        if mode != 'content': spec['git'][mode] = True
+        specs.append(spec); done(store, spec)
+    retained = read(store.manifest)
+    calls = []
+    original = state.git
+    def counted(*args):
+        calls.append(args)
+        return original(*args)
+    monkeypatch.setattr(state, 'git', counted)
+    def probe():
+        calls.clear()
+        assert all(task['reusable'] for task in store.status(specs)['tasks'])
+        assert all(store.start(spec)['action'] == 'reuse' for spec in specs)
+        assert all(task['reusable'] for task in store.status(specs, compact=True)['tasks'])
+        assert read(store.manifest) == retained
+        return len(calls)
+    with monkeypatch.context() as legacy:
+        legacy.setattr(state._CaptureContext, 'git', lambda self, source: state._capture_git(source))
+        before = probe()
+    after = probe()
+    assert before == 66 and after == 54
+    print(f'mixed-mode capture-related Git processes: independent={before}, status-batched={after}')
+
+
+@pytest.mark.parametrize('kind', ['config', 'attributes'])
+def test_status_captures_git_reported_system_paths(case, tmp_path, monkeypatch, kind):
+    """Emulate an installation whose system paths use another prefix."""
+    a, store = case
+    require_git_context_paths(a['git']['checkout'])
+    system_config = tmp_path/'prefix/etc/gitconfig'
+    system_config.parent.mkdir(parents=True)
+    system_config.write_text('[diff]\n\tnoprefix = false\n')
+    attributes = system_config.with_name('gitattributes')
+    attributes.write_text('code -diff\n')
+    monkeypatch.delenv('GIT_CONFIG_NOSYSTEM')
+    original = state.git
+    global_attributes = original(a['git']['checkout'], 'var', 'GIT_ATTR_GLOBAL').strip()
+    def installation(checkout, *args):
+        # Real Git consumes these files; its path receipt represents the
+        # alternate prefix without requiring a second compiled Git binary.
+        prefix = ['-c', 'core.attributesfile='+str(attributes)] if kind == 'attributes' else []
+        result = subprocess.check_output(['git', '-C', str(checkout), *prefix, *args],
+                                         env={**os.environ, 'GIT_CONFIG_SYSTEM': str(system_config)},
+                                         stderr=subprocess.PIPE)
+        if args == ('var', '-l') and kind == 'attributes':
+            result = b'\n'.join(
+                b'GIT_ATTR_SYSTEM='+os.fsencode(attributes) if line.startswith(b'GIT_ATTR_SYSTEM=')
+                else b'GIT_ATTR_GLOBAL='+global_attributes if line.startswith(b'GIT_ATTR_GLOBAL=')
+                else line for line in result.split(b'\n'))
+        return result
+    monkeypatch.setattr(state, 'git', installation)
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    done(store, a); done(store, b)
+    def specs():
+        yield a
+        if kind == 'config': system_config.write_text('[diff]\n\tnoprefix = true\n')
+        else: attributes.write_text('code diff\n')
+        yield b
+    tasks = store.status(specs())['tasks']
+    assert tasks[0]['reusable'] and not tasks[1]['reusable']
+
+
+def test_relative_xdg_config_home_declines_capture_sharing(case, monkeypatch):
+    spec, store = case
+    monkeypatch.setenv('XDG_CONFIG_HOME', 'relative-config')
+    assert state._git_context(spec['git']) is None
+    assert not store.status([spec])['tasks'][0]['reusable']
 
 
 @pytest.mark.parametrize('history,head_sensitive', [(False, False), (True, False), (False, True), (True, True)])
@@ -540,3 +627,109 @@ def test_git_drift_after_status_still_rejects_completion(case):
     with pytest.raises(ValueError, match='changed during'):
         store.record(spec, claim['id'], b'x', {'complete': True}, 'complete')
     assert store.status([spec])['tasks'][0]['unfinished']['id'] == claim['id']
+
+
+@pytest.mark.parametrize('condition', ['complete', 'failed', 'incomplete', 'damaged', 'missing',
+                                       'invalidated', 'changed', 'unfinished', 'noncacheable'])
+def test_compact_and_full_task_decisions_match(case,condition):
+    spec,store=case
+    if condition=='noncacheable':spec['cacheable']=False
+    claim=store.start(spec,run='run',cycle='c1')['claim']
+    if condition!='unfinished':
+        status=condition if condition in {'failed','incomplete'} else 'complete'
+        store.record(spec,claim['id'],b'original',
+                     {'complete':status=='complete','findings':[{'id':'f1'}]},status,
+                     progress={'dispositions':{'f1':'open'}})
+        if condition in {'damaged','missing'}:
+            path=Path(store.status([spec])['tasks'][0]['result'])
+            if condition=='damaged':path.write_text('{}')
+            else:path.unlink()
+        elif condition=='invalidated':store.invalidate([claim['key']],'Review again')
+        elif condition=='changed':Path(spec['inputs']['context']).write_text('Changed scope')
+    before=store.manifest.read_bytes()
+    full=store.status([spec]);compact=store.status([spec],compact=True)
+    assert compact['tasks']==full['tasks'] and compact['unfinished']==full['unfinished']
+    assert compact['tasks'][0]['reusable']==(condition=='complete')
+    assert {k:v for k,v in compact.items() if k!='runs'}=={k:v for k,v in full.items() if k!='runs'}
+    assert {k:v for k,v in compact['runs']['run'].items()
+            if k not in {'cycle','progress_count','progress_ref'}}=={
+                k:v for k,v in full['runs']['run'].items() if k!='progress'}
+    assert store.manifest.read_bytes()==before
+
+
+def test_selected_compact_run_keeps_other_runs_unfinished_claims_and_cli_full_access(case):
+    spec,store=case
+    done(store,spec,run='selected',cycle='c1')
+    other=deepcopy(spec);other['task']['id']='other-task'
+    claim=store.start(other,run='other',cycle='c1')['claim']
+    specpath=store.root/'spec.json';specpath.write_text(json.dumps(spec))
+    command=[sys.executable,str(ROOT/'scripts/dk.py'),'--repository',REPO,'--pr',PR,
+             'status','--spec',str(specpath)]
+    compact=json.loads(subprocess.check_output(command+['--compact','--run','selected'],text=True))
+    full=json.loads(subprocess.check_output(command+['--run','selected'],text=True))
+    assert list(compact['runs'])==list(full['runs'])==['selected']
+    assert compact['unfinished']==full['unfinished']==[claim]
+    assert full['runs']['selected']['progress']==[]
+    assert compact['runs']['selected']['cycle']=='c1'
+    assert store.start(other,run='other',cycle='c1')['action']=='recover_required'
+    assert set(store.status([],compact=True)['runs'])=={'selected','other'}
+    missing=subprocess.run(command+['--compact','--run','unknown'],capture_output=True,text=True)
+    assert missing.returncode==2 and 'Unknown run id' in json.loads(missing.stdout)['reason']
+    with pytest.raises(ValueError,match='Unknown run id'):store.status([],run='unknown')
+
+
+def test_compact_progress_is_bounded_and_all_original_evidence_remains_retrievable(case):
+    import base64
+    spec,store=case;spec['cacheable']=False
+    run='run/with~escapes'
+    originals=[]
+    first_size=None
+    for i in range(30):
+        claim=store.start(spec,run=run)['claim']
+        original=b'Original output\x00'+bytes([i])
+        progress={'dispositions':{'f1':'accepted'},
+                  'acceptances':[{'instruction':'Accept f1 '+('evidence '*1000),
+                                  'source':f'user message {i}'}]}
+        recorded=store.record(spec,claim['id'],original,{'complete':True,'findings':[{'id':'f1'}]},
+                              'complete',progress=progress)
+        originals.append((recorded['result'],original,progress))
+        if i==0:first_size=len(json.dumps(store.status([],compact=True)))
+    compact=store.status([],compact=True)
+    summary=compact['runs'][run]
+    assert summary['cycle'] is None and summary['progress_count']==30 and 'progress' not in summary
+    assert len(json.dumps(compact))<=first_size+2
+    reference=summary['progress_ref']
+    value=read(reference['manifest'])
+    for token in reference['pointer'].split('/')[1:]:
+        value=value[token.replace('~1','/').replace('~0','~')]
+    assert value==store.status([],run=run)['runs'][run]['progress']
+    assert [p['value'] for p in value]==[p for _,_,p in originals]
+    for path,original,_ in originals:
+        envelope=read(path)
+        assert base64.b64decode(envelope['original'],validate=True)==original
+        assert envelope['normalized']['findings']==[{'id':'f1'}]
+    attempts=read(store.manifest)['entries'][capture(spec)['key']]['attempts']
+    assert [a['result'] for a in attempts]==[Path(path).name for path,_,_ in originals]
+
+
+def test_compact_inspection_and_recovery_preserve_exhausted_budgets(case):
+    spec,store=case;spec['cacheable']=False
+    for i in range(5):done(store,spec,run='run',cycle=f'c{i}')
+    for _ in range(3):done(store,spec,run='run',ci_rerun=True,head='head')
+    for _ in range(5):done(store,spec,run='run',ci_repair=True)
+    first=store.start(spec,run='run',cycle='c4',retry=True)['claim']
+    before=store.manifest.read_bytes()
+    retained=Store(REPO,PR).status([spec],compact=True,run='run')
+    assert retained['unfinished']==[first] and retained['runs']['run']['cycle']=='c4'
+    assert store.manifest.read_bytes()==before
+    resumed=store.start(spec,recover=first['id'],run='run',cycle='c4')
+    store.record(spec,resumed['claim']['id'],b'recovered',{'complete':True},'complete',
+                 progress={'recovery':'Stopped prior agent and reconciled domain writes'})
+    for kwargs,reason in [({'cycle':'c5'},'Five'),({'cycle':'c4','retry':True},'retry'),
+                          ({'ci_rerun':True,'head':'head'},'reruns'),({'ci_repair':True},'attempts')]:
+        with pytest.raises(ValueError,match=reason):store.start(spec,run='run',**kwargs)
+    run=store.status([],compact=True,run='run')['runs']['run']
+    assert run['cycles']==[f'c{i}' for i in range(5)]
+    assert run['ci_reruns']=={'head':3} and run['ci_repairs']=={'0':5}
+    assert list(run['retries'].values())==[1] and run['progress_count']==1
+    assert store.status([],run='run')['runs']['run']['progress'][0]['value']['recovery']

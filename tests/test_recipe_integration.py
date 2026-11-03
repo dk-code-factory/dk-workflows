@@ -163,12 +163,14 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path):
     domain('resolve',lambda:publish({'kind':'resolve-thread','pr':PR,'head':head,'thread_id':'PRRT_fixture','reply_id':reply['receipt']['id']}))
     domain('re-review',lambda:publish({'kind':'request-review','pr':PR,'head':head,'reviewers':['reviewer']}))
     domain('complete',lambda:{'head':head,'coverage':['a','b'],'findings':[],'ci':'success','cleanup':'published'})
-    status=cache('status','--spec',spec('a'),'--spec',spec('b'))
+    status=cache('status','--compact','--run','iteration','--spec',spec('a'),'--spec',spec('b'))
     assert all(t['reusable'] and not t['findings'] for t in status['tasks'])
     run=status['runs']['iteration']
     assert run['cycles']==['c1','c2'] and list(run['retries'].values())==[1]
     assert run['ci_reruns']=={rerun['receipt']['head']:1} and not status['unfinished']
-    assert {p['value']['stage'] for p in run['progress']} >= {'inspect','feedback','partition','ci','cleanup','complete'}
+    assert run['cycle']=='c2' and run['progress_count']>=6 and 'progress' not in run
+    detailed=cache('status','--run','iteration')['runs']['iteration']
+    assert {p['value']['stage'] for p in detailed['progress']} >= {'inspect','feedback','partition','ci','cleanup','complete'}
     before=reviewer_log.read_text()
     for run_id in ('standalone-review','subsequent-iteration'):
         for skill in ('a','b'):assert review(skill,'first',run=run_id)['action']=='reuse'

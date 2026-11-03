@@ -29,6 +29,7 @@ Capture complete target, diff-base and head trees and the binary diff. SHAs and 
 Resource maps hash exact bytes, executable mode, directory paths and symlink targets. Directory traversal excludes only `.git`, `__pycache__` and `.pytest_cache`. Include all resources actually governing the task, including references outside its skill directory. Missing resources fail before a claim. If instruction/config/resource capture is uncertain, use `cacheable:false`; never assert complete capture based on guesswork. Resource or context drift observed at recording rejects completion; the caller must supply fresh snapshots from live sources before recording and before final coverage checks.
 
 - `status --spec A.json --spec B.json` reports reusable results, changed components, missing/incomplete work, unfinished claims and retained run counters/progress. Omitting specs inspects unfinished work and runs.
+- `status --compact --run RUN_ID --spec A.json` is the routine inspection view. It preserves the same task fields (including findings and validated result paths), run budget fields and PR-wide unfinished claims. Each run replaces its progress array with `progress_count` and `progress_ref` (manifest path and JSON Pointer), and adds `cycle`, the last allocated review cycle or null. It does not include progress bodies. Omit `--run` to summarize every run; a selected unknown run is an error in either view. Run selection only filters `runs`, never task coverage or unfinished claims from other runs. Without `--compact`, the response remains the full view; without either new option, its existing shape is unchanged.
 - `start --spec A.json` atomically returns `action:reuse`, `recover_required`, or `invoke`. Only `invoke` permits a new invocation. Claims have no automatic expiry. Ensure a previous agent has stopped, reconcile its domain writes, then use `--recover CLAIM_ID` with the original run to launch a replacement. Unchanged inputs retain the original cycle; changed review inputs require a new cycle within the remaining budget.
 - `record --spec A.json --claim CLAIM_ID --original OUTPUT --normalized RESULT.json --status complete|failed|incomplete` stores immutable original bytes and normalized result. Normalized result requires `complete:true|false`; `findings` is a list. Incomplete and failed use false. Extra skill-owned fields are retained. Save successful siblings immediately. `--progress PROGRESS.json` appends run progress, finding dispositions and exact human acceptances without replacing earlier records.
 - `invalidate --key TASK_KEY --reason TEXT` requires fresh execution. Repeated `--key` selects multiple tasks. For a stopped active claim, pass `--recover CLAIM_ID` to close it without launching work, after reconciling its domain writes. This preserves all counters and records the interrupted attempt; it also works when missing resources prevent recapture.
@@ -45,6 +46,9 @@ IDs and revision expressions always resolve independently. Unsupported Git
 layouts or indirect configuration, replacements, grafts and shallow repositories
 also fall back to independent capture. Ordinary repositories and linked worktrees
 check configuration, environment and affected-path attributes before reuse.
+System and global paths come from the running Git installation. Git versions
+without the required path variables and relative XDG configuration paths use
+independent capture; the process probe skips unsupported Git versions.
 Alternate attribute sources, configured worktree roots and signature-verifying
 history also fall back. Index context retains a fixed-size content hash.
 
@@ -59,10 +63,17 @@ runs initial status, two independent reuse starts, and final status. It compares
 independent captures (42 Git processes) with batched status captures (28).
 The fixture isolates Git configuration and environment so user includes and
 other deliberately unsupported contexts do not disable the measured fast path.
-Each optimized status uses two changed-path probes plus five Git calculations;
-identical target/base commit and tree queries share a result. Each separate start
-still performs seven Git processes. Counts exclude Store initialization, initial
+Each optimized status uses two Git path-variable probes, two changed-path
+probes and three calculations: batched commit resolution, batched tree resolution
+and the binary diff. Each separate start still performs seven Git processes.
+The mixed content/history/head-sensitive probe with three distinct pins measures
+66 independent processes versus 54 with status batching. Reproduce it with
+`python3 -m pytest -q -s tests/test_state.py -k status_batch_mixed_modes_process_count_comparison`.
+Counts exclude Store initialization, initial
 result recording, publication and CI. No reviewers or new cycles launch during
 the measured recipe. This measures subprocess count, not elapsed time or tokens.
+
+
+Compact output is a read projection, not a readiness assessment. Before assessing finding dispositions, exact human acceptances or interrupted-work recovery, read detailed progress with `status --run RUN_ID` (omit `--run` when evidence spans runs). The `progress_ref` JSON Pointer identifies the same array in the retained manifest; `~1` decodes to `/` and `~0` to `~` in run names. Follow each task's validated `result` path to its immutable JSON envelope: `normalized` retains findings and skill-owned fields, and `original` is the exact original output encoded as base64 (`base64.b64decode(envelope['original'], validate=True)`). Older result envelopes remain in the manifest's sibling `results/` directory; full attempt history in `entries` references their filenames. A missing or damaged current envelope yields a null result path and cannot be reused in either view. Status reads hold the same lock and perform the same integrity validation in both views; they never change the manifest, claims or counters. Compact output size does not scale with retained progress bodies, but still reflects the requested tasks, budget maps, runs and all unfinished claims. It does not reduce manifest I/O or replace fresh input, CI and publication checks.
 
 Direct invocation of any external skill bypasses this cache unless its caller explicitly uses these commands. External skills require no custom SDK, execution receipts or workflow lifecycle tokens.

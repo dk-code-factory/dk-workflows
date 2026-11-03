@@ -90,6 +90,10 @@ def _git_context(source):
     Unusual Git layouts and indirection fall back to independent captures. This
     is only a command-local optimization; resource capture never uses this key.
     """
+    if (os.environ.get('XDG_CONFIG_HOME') and not Path(os.environ['XDG_CONFIG_HOME']).is_absolute()
+            or any('\n' in os.environ.get(name, '') or '\r' in os.environ.get(name, '')
+                   for name in ('HOME', 'XDG_CONFIG_HOME', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM'))):
+        return None
     if any(name in os.environ for name in (
             'GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_OBJECT_DIRECTORY',
             'GIT_ALTERNATE_OBJECT_DIRECTORIES',
@@ -110,33 +114,6 @@ def _git_context(source):
         common = directory
         if (directory/'commondir').is_file():
             common = (directory/(directory/'commondir').read_text().strip()).resolve()
-        configs = []
-        for variable, defaults in (
-                ('GIT_CONFIG_SYSTEM', [Path('/etc/gitconfig'), Path('/usr/local/etc/gitconfig')]),
-                ('GIT_CONFIG_GLOBAL', [Path.home()/'.gitconfig',
-                 Path(os.environ.get('XDG_CONFIG_HOME') or Path.home()/'.config')/'git/config'])):
-            if variable == 'GIT_CONFIG_SYSTEM' and os.environ.get('GIT_CONFIG_NOSYSTEM') == '1':
-                continue
-            if variable in os.environ:
-                path = Path(os.environ[variable])
-                if not path.is_absolute():
-                    return None
-                configs.append(path)
-            else:
-                configs.extend(defaults)
-        configs.extend((common/'config', directory/'config.worktree'))
-        snapshots = []
-        for path in configs:
-            content = path.read_bytes() if path.exists() else None
-            # Git skips an initial UTF-8 BOM. Indirect configuration, alternate
-            # attribute roots and signature verification need a wider context.
-            normalized = content.removeprefix(b'\xef\xbb\xbf') if content else b''
-            if (re.search(rb'(?im)^\s*\[\s*(?:include|attr)', normalized)
-                    or any(word in normalized.lower() for word in
-                           (b'reftable', b'attributesfile', b'orderfile', b'submodule', b'worktree'))
-                    or (source.get('history') and b'showsignature' in normalized.lower())):
-                return None
-            snapshots.append((str(path.resolve()), content))
         for path in (common/'refs/replace', common/'info/grafts', common/'shallow'):
             if path.exists() and (not path.is_dir() or any(path.iterdir())):
                 return None
@@ -157,14 +134,46 @@ def _git_context(source):
                     if len(fields) == 2 and (fields[1].startswith(b'refs/replace/')
                                              or fields[1] in encoded_names):
                         return None
+        # Ask this Git installation for its actual paths, including relocatable
+        # system prefixes and global overrides. Older Git without these vars
+        # takes the ordinary independent-capture path.
+        variables = {key: [] for key in ('GIT_CONFIG_SYSTEM', 'GIT_CONFIG_GLOBAL',
+                                         'GIT_ATTR_SYSTEM', 'GIT_ATTR_GLOBAL')}
+        for line in git(checkout, 'var', '-l').splitlines():
+            key, separator, value = line.partition(b'=')
+            name = key.decode(errors='replace')
+            if separator and name in variables:
+                variables[name].append(Path(os.fsdecode(value)))
+        for key, disabled in (('GIT_CONFIG_SYSTEM', 'GIT_CONFIG_NOSYSTEM'),
+                              ('GIT_ATTR_SYSTEM', 'GIT_ATTR_NOSYSTEM')):
+            if (os.environ.get(disabled, '').lower() not in {'1', 'true', 'yes', 'on'}
+                    and len(variables[key]) != 1):
+                return None
+        if not variables['GIT_CONFIG_GLOBAL'] or len(variables['GIT_ATTR_GLOBAL']) != 1:
+            return None
+        if any(not path.is_absolute() for paths in variables.values() for path in paths):
+            return None
+        configs = [*variables['GIT_CONFIG_SYSTEM'], *variables['GIT_CONFIG_GLOBAL'],
+                   common/'config', directory/'config.worktree']
+        snapshots = []
+        for path in configs:
+            content = path.read_bytes() if path.exists() else None
+            # Git skips an initial UTF-8 BOM. Indirect configuration, alternate
+            # attribute roots and signature verification need a wider context.
+            normalized = content.removeprefix(b'\xef\xbb\xbf') if content else b''
+            if (re.search(rb'(?im)^\s*\[\s*(?:include|attr)', normalized)
+                    or any(word in normalized.lower() for word in
+                           (b'reftable', b'attributesfile', b'orderfile', b'submodule', b'worktree'))
+                    or (source.get('history') and b'showsignature' in normalized.lower())):
+                return None
+            snapshots.append((str(path.resolve()), content))
         # A committed diff still reads attributes from the working tree. Probe
         # changed paths, then read only their attribute ancestry, not the tree.
         names = git(checkout, '-c', 'diff.renames=false', 'diff', '--name-only', '-z',
                     '--no-relative', '--no-ext-diff', '--no-textconv', '--no-renames',
                     source['base'], source['head'], '--')
         attributes = {common/'info/attributes', directory/'info/attributes',
-                      Path('/etc/gitattributes'), Path('/usr/local/etc/gitattributes'),
-                      Path(os.environ.get('XDG_CONFIG_HOME') or Path.home()/'.config')/'git/attributes'}
+                      *variables['GIT_ATTR_SYSTEM'], *variables['GIT_ATTR_GLOBAL']}
         for name in names.split(b'\0'):
             if not name:
                 continue
@@ -185,21 +194,27 @@ def _git_context(source):
         snapshots.append((str(index.resolve()), index_hash))
         return (str(checkout), str(directory.resolve()), str(common), tuple(snapshots),
                 tuple(sorted(os.environ.items())))
-    except (OSError, ValueError):
+    except (OSError, ValueError, subprocess.CalledProcessError):
         return None
 
 
-def _capture_git(source, *, deduplicate=False):
+def _capture_git(source, *, batched=False):
     checkout = source['checkout']
-    resolved = {}
-    def resolve(value, kind):
-        key = value, kind
-        if not deduplicate or key not in resolved:
+    def resolve(values, kind):
+        if batched:
+            resolved = git(checkout, 'rev-parse', '--revs-only', '--end-of-options',
+                           *(value+'^{'+kind+'}' for value in values.values())).decode().splitlines()
+            if len(resolved) != len(values) or any(not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', sha)
+                                                   for sha in resolved):
+                raise ValueError('Git did not resolve every pinned '+kind)
+            return dict(zip(values, resolved))
+        resolved = {}
+        for key, value in values.items():
             args = ('--verify',) if kind == 'commit' else ()
             resolved[key] = git(checkout, 'rev-parse', *args, value + '^{'+kind+'}').decode().strip()
-        return resolved[key]
-    commits = {key: resolve(source[key], 'commit') for key in ('target', 'base', 'head')}
-    trees = {key: resolve(sha, 'tree') for key, sha in commits.items()}
+        return resolved
+    commits = resolve({key: source[key] for key in ('target', 'base', 'head')}, 'commit')
+    trees = resolve(commits, 'tree')
     diff = git(checkout, '-c', 'diff.renames=false', 'diff', '--binary', '--full-index',
                '--no-ext-diff', '--no-textconv', '--no-renames', commits['base'], commits['head'], '--')
     inputs = {'trees': trees, 'diff_sha256': hashlib.sha256(diff).hexdigest()}
@@ -231,7 +246,7 @@ class _CaptureContext:
             return _capture_git(source)
         key = context, pins, options
         if key not in self.git_captures:
-            captured = _capture_git(source, deduplicate=True)
+            captured = _capture_git(source, batched=True)
             if tuple(captured[1]['commits'][name] for name in ('target', 'base', 'head')) != pins:
                 return captured
             self.git_captures[key] = captured
@@ -342,15 +357,31 @@ class Store:
                            'invalidated' if entry.get('invalidated') else
                            'changed_inputs' if changed else saved['status'] if saved and saved['status'] != 'complete' else 'missing_or_incomplete_result')}
 
-    def status(self, specs):
+    def status(self, specs, *, compact=False, run=None):
         context = _CaptureContext()
         captures = [capture(spec, _context=context) for spec in specs]
         if any(c['subject'] != self.subject for c in captures):
             raise ValueError('Specs refer to another PR')
         with self.locked() as manifest:
+            if run is not None and run not in manifest['runs']:
+                raise ValueError('Unknown run id: ' + run)
+            runs = manifest['runs'] if run is None else {run: manifest['runs'][run]}
+            if compact:
+                runs = {
+                    name: {
+                        **{key: value for key, value in state.items() if key != 'progress'},
+                        'cycle': state['cycles'][-1] if state['cycles'] else None,
+                        'progress_count': len(state['progress']),
+                        'progress_ref': {
+                            'manifest': str(self.manifest),
+                            'pointer': '/runs/' + name.replace('~', '~0').replace('/', '~1') + '/progress',
+                        },
+                    }
+                    for name, state in runs.items()
+                }
             return {'contract': CONTRACT, 'subject': self.subject, 'manifest': str(self.manifest),
                     'tasks': [self.describe(c, manifest['entries'].get(c['key'], {})) for c in captures],
-                    'runs': manifest['runs'],
+                    'runs': runs,
                     'unfinished': [e['claim'] for e in manifest['entries'].values() if e.get('claim')]}
 
     @staticmethod
