@@ -624,6 +624,111 @@ def test_malformed_retained_impact_requires_recovery_before_scoped_delivery(repo
         a.packet(repo, 'worker', ['src/core.py'], baseline='HEAD', task='Repair core')
 
 
+@pytest.mark.parametrize('text', [None, 7, [], {'detail': 'Legacy conflict'}])
+@pytest.mark.parametrize('paths', [None, ['src/core.py']])
+def test_malformed_retained_conflict_text_keeps_recovery_diagnostics(repo, text, paths):
+    catalog = initialize(repo)
+    conflict = {'text': text, 'sources': ['old.py'], 'patterns': {'scope': '**'}}
+    retained = a.publish(a.folder(repo)[0], {**catalog, 'conflicts': [conflict]})
+    diagnostic = 'task paths are unknown' if paths is None else 'affected paths are unknown'
+    with pytest.raises(ValueError, match=diagnostic):
+        a.packet(repo, 'worker', paths, baseline='HEAD', task='Repair core')
+    assert a.current(repo, baseline=catalog['baseline']) == retained
+
+
+@pytest.mark.parametrize('malformed', [None, {'id': []}, {'id': 'arch-ordinary'}])
+def test_legacy_migration_distinguishes_nonrule_proposals_from_held_rules(repo, malformed):
+    result = model_result(rules=[obligation()])
+    proposal = {'reason': 'Conflicting obligations require user resolution', 'rule': malformed}
+    result['proposals'] = [proposal]
+    result['conflicts'] = [{'text': 'Legacy choice remains pending', 'sources': ['old.py'],
+                            'patterns': ['legacy/**']}]
+    legacy = deepcopy(a.ensure(repo, analyzer=lambda *_: result))
+    legacy.pop('conditional_rules')
+    legacy = a.publish(a.folder(repo)[0], legacy)
+    with pytest.raises(ValueError, match='re-establish each retained obligation'):
+        a.ensure(repo, force=True, analyzer=lambda *_: model_result())
+    refreshed = a.ensure(repo, force=True, analyzer=lambda *_: result)
+    delivered = a.validate_packet(a.packet(repo, 'worker', ['src/core.py'],
+                                          baseline='HEAD', task='Repair core'), repo)
+    assert [item['id'] for item in delivered['rules']] == ['arch-core']
+    assert proposal in refreshed['proposals'] and refreshed['conflicts'] == legacy['conflicts']
+    assert a.load({'path': str(a.folder(repo)[0] / 'catalogs' / (legacy['fingerprint'] + '.json')),
+                   'fingerprint': legacy['fingerprint']}) == legacy
+
+
+@pytest.mark.parametrize('origin', ['documented', 'user-created'])
+def test_legacy_held_rule_edit_supersedes_historical_alternatives(repo, origin):
+    result = model_result(rules=[obligation()])
+    result['conflicts'] = [{'text': 'Legacy choice remains pending', 'sources': ['old.py'],
+                            'patterns': ['legacy/**']}]
+    legacy = deepcopy(a.ensure(repo, analyzer=lambda *_: result))
+    legacy.pop('conditional_rules')
+    legacy = a.publish(a.folder(repo)[0], legacy)
+    chosen = a.edit(repo, obligation(text='Use the explicit replacement.', origin=origin),
+                    user=USER, expected=legacy['fingerprint'])
+    analysis = model_result(rules=[] if origin == 'user-created' else [chosen['rules'][0]])
+    for value in (analysis, result):
+        refreshed = a.ensure(repo, force=True, analyzer=lambda *_: value)
+        assert refreshed['rules'] == chosen['rules'] and not refreshed['conditional_rules']
+        assert refreshed['conflicts'] == legacy['conflicts']
+    delivered = a.validate_packet(a.packet(repo, 'worker', ['src/core.py'],
+                                          baseline='HEAD', task='Repair core'), repo)
+    assert delivered['rules'] == chosen['rules']
+    with pytest.raises(ValueError, match='explicit user resolution'):
+        a.packet(repo, 'worker', ['legacy/store.py'], baseline='HEAD', task='Repair legacy')
+    deleted = a.edit(repo, delete='arch-core', user=USER, expected=refreshed['fingerprint'])
+    refreshed = a.ensure(repo, force=True, analyzer=lambda *_: result)
+    assert not refreshed['rules'] and not refreshed['conditional_rules']
+    assert refreshed['parent'] == deleted['fingerprint']
+
+
+@pytest.mark.parametrize('resolution', ['delete', 'resolve'])
+def test_legacy_duplicate_rule_ids_reestablish_every_alternative_with_stable_provenance(repo, resolution):
+    result = model_result(rules=[obligation()])
+    result['conflicts'] = [{'text': 'Legacy choice remains pending', 'sources': ['old.py'],
+                            'patterns': ['legacy/**']}]
+    legacy = deepcopy(a.ensure(repo, analyzer=lambda *_: result))
+    legacy.pop('conditional_rules')
+    alternative = deepcopy(legacy['proposals'][-1])
+    alternative['rule']['text'] = 'Keep core free from legacy storage.'
+    legacy['proposals'].append(alternative)
+    legacy = a.publish(a.folder(repo)[0], legacy)
+    with pytest.raises(ValueError, match='re-establish each retained obligation'):
+        a.ensure(repo, force=True, analyzer=lambda *_: result)
+    assert a.current(repo, baseline=legacy['baseline']) == legacy
+    supplied = []
+    def reanalyze(prompt, checkout, validate):
+        marker = 'Legacy held obligations to re-establish with these stable IDs: '
+        held, _ = json.JSONDecoder().raw_decode(prompt.split(marker, 1)[1])
+        supplied.extend(held)
+        assert len(held) == 2 and len({item['id'] for item in held}) == 2
+        assert held[0]['id'] == 'arch-core' and held[1]['legacy_id'] == 'arch-core'
+        return validate(model_result(rules=held))
+    refreshed = a.ensure(repo, force=True, analyzer=reanalyze)
+    assert {item['text'] for item in refreshed['conditional_rules']} == {
+        'Keep core independent.', 'Keep core free from legacy storage.'}
+    alias = next(item for item in refreshed['conditional_rules'] if item['id'] != 'arch-core')
+    assert alias['legacy_id'] == 'arch-core'
+    delivered = a.validate_packet(a.packet(repo, 'dk-architecture-review', ['src/core.py'],
+                                          baseline='HEAD', task='Repair core'), repo)
+    assert delivered['rules'] == refreshed['conditional_rules']
+    with pytest.raises(ValueError, match='omits or duplicates'):
+        a.validate_review_result({'complete': True, 'reason': '', 'coverage': []}, delivered, repo, [])
+    with pytest.raises(ValueError, match='explicit user resolution'):
+        a.packet(repo, 'worker', ['legacy/store.py'], baseline='HEAD', task='Repair legacy')
+    if resolution == 'delete':
+        edited = a.edit(repo, delete=alias['id'], user=USER, expected=refreshed['fingerprint'])
+    else:
+        edited = a.edit(repo, obligation('chosen'), user=USER,
+                        expected=refreshed['fingerprint'], resolve_conflicts=True)
+    refreshed = a.ensure(repo, force=True, analyzer=lambda *_: model_result(rules=supplied))
+    assert all(item['id'] != alias['id'] for item in refreshed['rules'] + refreshed['conditional_rules'])
+    assert refreshed['parent'] == edited['fingerprint']
+    assert a.load({'path': str(a.folder(repo)[0] / 'catalogs' / (legacy['fingerprint'] + '.json')),
+                   'fingerprint': legacy['fingerprint']}) == legacy
+
+
 @pytest.mark.parametrize('agent', ['worker', 'coordinator', 'dk-pr-iter', 'dk-architecture-review'])
 @pytest.mark.parametrize('paths', [[], ['src/core.py']])
 def test_unrelated_conflicts_are_retained_without_blocking_or_authorizing_repair(repo, agent, paths):

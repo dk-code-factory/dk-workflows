@@ -324,9 +324,37 @@ def legacy_held(catalog):
     """Identify legacy refresh obligations without adopting arbitrary proposals."""
     if not catalog or 'conditional_rules' in catalog or not catalog['conflicts']:
         return []
-    return [item.get('rule') for item in catalog['proposals']
-            if isinstance(item, dict)
-            and item.get('reason') == 'Conflicting obligations require user resolution']
+    held, identities = [], {}
+    chosen = {item['id'] for item in catalog['rules']}
+    fields = ('text', 'origin', 'patterns', 'agents')
+    reserved = {item.get('rule', {}).get('id') for item in catalog['proposals']
+                if isinstance(item, dict) and isinstance(item.get('rule'), dict)
+                and isinstance(item['rule'].get('id'), str)} | chosen
+    for proposal in catalog['proposals']:
+        if (not isinstance(proposal, dict)
+                or proposal.get('reason') != 'Conflicting obligations require user resolution'):
+            continue
+        try:
+            item = rule(proposal.get('rule'))
+        except ValueError:
+            continue
+        item.pop('legacy_id', None)
+        if item['id'] in chosen:
+            continue
+        original = item['id']
+        semantics = digest({key: item[key] for key in fields})
+        versions = identities.setdefault(original, set())
+        if semantics in versions:
+            continue
+        if versions:
+            item['legacy_id'] = original
+            item['id'] = original + '-legacy-' + semantics
+            while item['id'] in reserved:
+                item['id'] += '-legacy'
+            reserved.add(item['id'])
+        versions.add(semantics)
+        held.append(item)
+    return held
 
 
 def conflict_patterns(conflict):
@@ -358,6 +386,7 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
             return old
         expected = old['fingerprint'] if old else None
     deleted, resolved = refresh_choices(directory, old)
+    retained = legacy_held(old)
     # Analyze an isolated baseline, never PR-derived head guidance or local edits.
     prompt = (PROCEDURE.read_text() + '\nAnalyze this clean target baseline read-only. '
               'Inspect code, tests and guidance before producing rules. Do not change files. '
@@ -375,6 +404,8 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
               'this refines impact without resolving the conflict. '
               'Lifecycle, private-index, permissions and provider setup errors are operational failures, '
               'never repository conflicts. Do not initialize workflows or private state in this read-only analysis. '
+              'Legacy held obligations to re-establish with these stable IDs: ' + json.dumps(retained) + '. '
+              'Preserve every semantic alternative; legacy_id records its original rule identity. '
               'Existing catalog: ' + json.dumps(old) + '\nBaseline: ' + baseline)
     from shared.model_diagnostics import analysis_workspace
     scope = {'operation': 'architecture-catalog', 'repository': key,
@@ -407,8 +438,8 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
         finally:
             _CATALOG_SCOPE.reset(token)
     validate_analysis(value, root, baseline)
-    for held in legacy_held(old):
-        if isinstance(held, dict) and isinstance(held.get('id'), str) and held['id'] in deleted:
+    for held in retained:
+        if held.get('legacy_id', held['id']) in deleted or held['id'] in deleted:
             continue
         fields = ('id', 'text', 'origin', 'patterns', 'agents')
         if (not isinstance(held, dict) or not any(
@@ -449,6 +480,9 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
                    if r['id'] not in deleted] if old else []
     for item in value['rules']:
         item = rule(item)
+        prior = next((held for held in retained if held['id'] == item['id']), None)
+        if prior and 'legacy_id' in prior:
+            item['legacy_id'] = prior['legacy_id']
         item['sources'] = [source(root, baseline, ref) for ref in item['sources']]
         if item['id'] in deleted:
             proposal = {'rule': item, 'reason': 'Excluded obligation requires explicit user reconsideration'}
@@ -584,7 +618,7 @@ def scoped_obligations(catalog, paths):
     blocked = []
     for conflict in catalog['conflicts']:
         patterns = conflict_patterns(conflict)
-        text = conflict.get('text', repr(conflict)) if isinstance(conflict, dict) else str(conflict)
+        text = str(conflict.get('text', repr(conflict))) if isinstance(conflict, dict) else str(conflict)
         if paths is None:
             blocked.append(text + ' (task paths are unknown; declare intended repository-relative paths '
                            'and create a new packet)')
