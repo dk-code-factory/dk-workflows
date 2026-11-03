@@ -95,7 +95,7 @@
     },
     {
       "source": "dk-code-factory/dk-workflows",
-      "version": "1.6.17",
+      "version": "1.7.8",
       "description": "Add optional native Codex profile-v2 bindings with actual owned-workspace execution capture, separately retained supplied/derived evidence, conservative typed relocation identity, native effective settings and drift guards; protect required metadata credentials through source-grounded child environment channels, retain unchanged file-backed values, use bounded short-guard verification and safe owned helper group cleanup, and extend offline/correspondence regressions."
     },
     {
