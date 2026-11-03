@@ -44,6 +44,9 @@ Installed procedure texts may reside in a local plugin checkout; generated
 captures and reports must remain outside Git checkouts, including separate
 reviewed repositories.
 Preparation sources select `snapshot` when present, otherwise `path`.
+The retained source index must include the standard preparation records and
+every evidence category, including explicit absence records. Installed reviewer
+procedure sources remain checked per pair rather than compared across providers.
 
 The manifest object has these fields:
 
@@ -168,6 +171,9 @@ for recipient, intended paths, rules, revisions and governing scope. Packet
 fingerprints and governing-source capture locations can differ across freshly
 prepared runs; the comparison retains their governing content and source
 fingerprints. Retain the original catalog in private architecture storage.
+Retained governing originals must remain readable and match their semantic
+fingerprints. The coordinator scope must match the captured PR, metadata and
+Decisions, even when all recipient packets agree with one another.
 
 When separately authorized and bounded, capture Codex AD while keeping it in the
 cohort, then invoke Claude Toolkit and Claude AD **separately**, using

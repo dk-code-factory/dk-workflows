@@ -13,6 +13,8 @@ COHORT = [('codex-ad', 'code-review-ad:code-review-ad', 'codex'),
           ('claude-ad', 'code-review-ad:code-review-ad', 'claude')]
 AUTHORITY = {'authority': 'diagnostic-only', 'adoption_authorized': False,
              'publication_authorized': False, 'live_acceptance': 'pending'}
+SOURCE_CATEGORIES = {'issues', 'feedback', 'choices', 'user_instructions', 'run_history',
+                     'questions', 'prior_preparation', 'rules', 'production', 'tests', 'ci', 'reviewers'}
 
 
 def require(condition, message):
@@ -59,15 +61,26 @@ def method(descriptor):
 
 
 def source_pins(prepared):
+    sources = prepared['sources']
+    require({'manifest', 'context', 'decisions', 'metadata', 'patch'} <= sources.keys()
+            and SOURCE_CATEGORIES <= {key.split('/')[0] for key in sources if '/' in key},
+            'preparation source index is incomplete')
     pins = {}
-    for name, value in prepared['sources'].items():
+    for name, value in sources.items():
         ref = {'path': value.get('snapshot') or value['path'], 'sha256': value['sha256']}
-        read(ref, json_value=False)
+        read(ref, json_value=False, installed_source=name.startswith('reviewer-source/'))
         # These transport records legitimately change when preparation is refreshed
         # for a different contract. Provider texts are compared separately.
-        if name not in {'manifest', 'context'} and not name.startswith(('reviewers/', 'reviewer-execution/', 'architecture/')):
+        if name not in {'manifest', 'context'} and not name.startswith(
+                ('reviewers/', 'reviewer-execution/', 'reviewer-source/', 'architecture/')):
             pins[name] = value['sha256']
     return pins
+
+
+def governing_originals(references):
+    paths = {key: str(private_path(ref['path'])) for key, ref in references.items()}
+    require(architecture.governing_sources(paths) == references,
+            'architecture governing originals changed')
 
 
 def packets(handoff, recipient):
@@ -83,6 +96,14 @@ def packets(handoff, recipient):
         coordinator = architecture.validate_packet(prepared['packet'], handoff['checkout'],
             agent='coordinator', current_catalog=False, live=False)
         require(coordinator['catalog'] == prepared['catalog'], 'architecture preparation catalog mismatch')
+        governing_originals(prepared.get('governing', {}))
+        governing_originals(coordinator.get('governing_sources', {}))
+        metadata = handoff['preparation']['sources']['metadata']
+        context = {'checkout': handoff['checkout'], 'url': handoff['pr_url'],
+                   'base_sha': handoff['base_sha'], 'head_sha': handoff['head_sha'],
+                   'metadata': metadata.get('snapshot') or metadata['path']}
+        decisions = read(handoff['full_decisions']) if 'full_decisions' in handoff else handoff['decisions']
+        architecture.validate_preparation(prepared, context, decisions, live=False)
     for role, reference in references.items():
         private_path(reference['path'])
         packet = architecture.load(reference)
@@ -92,6 +113,7 @@ def packets(handoff, recipient):
                 'architecture packet governing revisions mismatch')
         architecture.validate_packet(reference, handoff['checkout'], agent=packet['agent'],
             paths=coordinator['paths'], current_catalog=False, live=False)
+        governing_originals(packet.get('governing_sources', {}))
         require(all(packet[key] == coordinator[key] for key in
                     ('repository', 'catalog', 'baseline', 'head', 'tree', 'task', 'scope', 'scope_contents')),
                 'architecture packet preparation scope mismatch')
@@ -162,14 +184,14 @@ def delivery(run, handoff, proof):
             if host == 'codex':
                 item = evidence.get('item', {})
                 session = next((e['thread_id'] for e in events if e.get('type') == 'thread.started'), None)
-                require(session is not None, 'native delivery session marker unavailable')
+                require(isinstance(session, str) and bool(session), 'native delivery session marker unavailable')
                 require(evidence.get('type') == 'item.completed' and item.get('type') == 'collab_tool_call'
                         and item.get('tool') == 'spawn_agent'
                         and item.get('sender_thread_id') == session and record['pointer'] == '/item/prompt',
                         'delivery must cite the direct specialist launch prompt')
             else:
                 session = next((e['session_id'] for e in events if e.get('type') == 'result'), None)
-                require(session is not None, 'native delivery session marker unavailable')
+                require(isinstance(session, str) and bool(session), 'native delivery session marker unavailable')
                 parts = record['pointer'].split('/')
                 require(len(parts) == 6 and parts[1:3] == ['message', 'content']
                         and parts[3].isdigit() and parts[4:] == ['input', 'prompt'], 'invalid native prompt pointer')
@@ -227,9 +249,9 @@ def inspect_run(run, binding, contract):
             'assigned reviewer addendum changed')
     for key in ('base_sha', 'head_sha', 'pr_url'):
         require(prepared['identity'][key] == handoff[key], 'preparation governing revision mismatch: ' + key)
+    sources = source_pins(prepared)
     patch = private_path(handoff['patch']).read_bytes()
     patch_hash = hashlib.sha256(patch).hexdigest()
-    sources = source_pins(prepared)
     require(sources['patch'] == patch_hash, 'patch differs from preparation')
     proof = read(run['execution'])
     # This owns required-role execution and conditional applicability. Never
