@@ -85,7 +85,8 @@ class PreparationTests(unittest.TestCase):
         record_path = package.write('run-record.json', record)
         original = record_path.read_bytes()
         package.manifest['mode'] = 'iteration'
-        package.manifest['evidence']['run_history'] = ['run-record.json']
+        package.write('history.json', state.preparation_history(record))
+        package.manifest['evidence']['run_history'] = ['history.json']
         package.write('manifest.json', package.manifest)
         binary = package.root / 'bin'
         binary.mkdir()

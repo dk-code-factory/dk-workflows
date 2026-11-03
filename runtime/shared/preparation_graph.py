@@ -51,6 +51,10 @@ def source_identity(key, source, checkout, content):
     if source.get('mode') == 'capture' and source.get('origin_identity'):
         return source['origin_identity']
     category = key.split('/')[0]
+    if category == 'prior_preparation':
+        value = decode(content)
+        if isinstance(value, dict) and 'analysis' in value and isinstance(value.get('preparation_id'), str):
+            return category + ':id:' + value['preparation_id']
     if '/' not in key or category in {'prior_preparation', 'reviewer-source'}:
         return key
     repo_path = relative(source['path'], checkout)

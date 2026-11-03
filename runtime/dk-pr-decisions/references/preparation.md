@@ -42,6 +42,17 @@ human instruction, constraint and choice in governing sources. Record generated
 operational status in the typed history instead of appending status prose to those
 instruction files. Generic events and unfamiliar history fields remain governing.
 The full run record remains available for recovery and gate validation.
+Passing that full record as `run_history`, whether live or captured, returns
+`untyped_run_history` before architecture or preparation model calls. Preserve it,
+export `preparation-history` into a new immutable capture, and use
+`run-state refresh-preparation` for the existing attached preparation. Do not
+reset counters or edit the old preparation to repair the manifest.
+
+Prior-preparation packets have identities bound to their preparation IDs. When
+advancing provenance, retain older packets still cited by analysis or graph watches
+alongside the new parent; their citation keys keep their original meanings.
+Removing such an origin returns `preparation_origin_removed`; explicitly assigning
+an old origin to another packet returns `preparation_origin_changed`.
 
 The API v2 envelope returns `data.artifact`, `preparation_id`, `engineering_id`, `readiness` and
 `refresh`. Consumers validate readiness and all current fingerprints, including

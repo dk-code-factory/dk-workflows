@@ -22,6 +22,7 @@ from shared.model_diagnostics import FieldError
 from shared import architecture
 from shared.preparation_views import model_view
 from shared import agreement_binding
+from shared.diagnostics import Diagnostic, task
 
 VERSION = 4
 DIMENSIONS = ('correctness', 'remediation_depth', 'performance', 'compatibility', 'complexity')
@@ -53,6 +54,24 @@ def git(checkout, *args):
         return subprocess.check_output(['git', *args], cwd=checkout, text=True, stderr=subprocess.PIPE).strip()
     except subprocess.CalledProcessError as exc:
         raise ValueError('cannot verify prepared checkout: ' + exc.stderr.strip()) from exc
+
+
+def validate_run_history(source, key):
+    """Reject the coordinator's mutable run database before any model dispatch."""
+    value = read(source)
+    if isinstance(value, dict) and ('iteration_run' in value or
+            {'cycles', 'review_results', 'repairs'} <= value.keys()):
+        raise Diagnostic('untyped_run_history',
+            f'{key} is a full iteration run record, not typed preparation history.',
+            task('Preserve the original run record and all counters, reviews and comparisons. '
+                 'Export run-state preparation-history from that record into a new immutable '
+                 'JSON capture and use that capture for run_history evidence. For an attached '
+                 'current-contract preparation, use run-state refresh-preparation with fresh '
+                 'context, Decisions and complete feedback. Keep original instructions and '
+                 'choices as governing sources; do not reset the run or review budget.', source))
+    # Validate recognized typed envelopes now, before architecture preparation.
+    # Opaque history and unfamiliar fields still govern under the ordinary contract.
+    graph_api.semantic(key, Path(source).read_bytes())
 
 
 def collect(manifest_path, *, on_call=None):
@@ -87,6 +106,8 @@ def collect(manifest_path, *, on_call=None):
         if not isinstance(values, list) or not values or any(not isinstance(v, str) or not v for v in values):
             raise ValueError(f'{category} requires source artifact paths, including explicit absence evidence')
         for index, value in enumerate(values):
+            if category == 'run_history':
+                validate_run_history(path(value), f'{category}/{index}')
             if category == 'feedback':
                 record = read(path(value))
                 if not isinstance(record, dict) or not (record.get('complete') is True or
@@ -702,7 +723,37 @@ def _prepare(manifest_path, output_dir, analyzer=None, *, previous_preparation=N
     paths, changed_sources, selected, unmapped = [], [], set(), []
     force_full = bool(full_analysis or migration)
     if parent and not migration:
+        for key, source in sources.items():
+            if not key.startswith('prior_preparation/'):
+                continue
+            identity = current['sources'][key]['identity']
+            old_key = next((old for old, value in parent['inputs']['sources'].items()
+                            if value['identity'] == identity), None)
+            if old_key is not None:
+                old = read(retained_source(previous_preparation, parent, old_key))
+                new = read(source['path'])
+                if 'analysis' in old and old.get('preparation_id') != new.get('preparation_id'):
+                    raise Diagnostic('preparation_origin_changed',
+                        'A prior-preparation origin was reused for another artifact: ' + old_key,
+                        task('Retain the original cited artifact and give the advancing parent its '
+                             'own origin. Remove the conflicting source_origins override; do not '
+                             'reuse an immutable origin for a different preparation.',
+                             previous_preparation, manifest_path))
         sources, current = graph_api.rebind(sources, current, parent)
+        # An advancing ancestor gets its own origin and citation slot. A caller
+        # must retain any older ancestor still cited by the reviewed contract.
+        cited = {key for node in parent['graph'].values() for key in node['sources']}
+        for conclusion in graph_api.conclusions(parent['analysis']).values():
+            if isinstance(conclusion, dict):
+                cited.update(ref.split('#', 1)[0] for ref in conclusion.get('evidence', []))
+        missing = sorted(key for key in cited if key.startswith('prior_preparation/') and key not in sources)
+        if missing:
+            raise Diagnostic('preparation_origin_removed',
+                'The refresh removed cited immutable preparation origins: ' + ', '.join(missing),
+                task('Keep the original cited prior-preparation artifacts in the manifest alongside '
+                     'the advancing parent. Preserve the selected preparation and its original '
+                     'evidence; do not repurpose citation slots or rewrite reviewed obligations '
+                     'for workflow bookkeeping.', previous_preparation, manifest_path))
         paths, changed_sources = graph_api.changes(parent, current)
         previous_priors = {key: read(retained_source(previous_preparation, parent, key))
                            for key in parent['sources'] if key.startswith('prior_preparation/')}

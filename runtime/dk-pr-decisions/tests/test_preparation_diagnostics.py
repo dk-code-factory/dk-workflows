@@ -18,6 +18,55 @@ from shared.command_results import classification
 from shared.diagnostics import Diagnostic, task
 
 
+@pytest.mark.parametrize('mode', ['live', 'capture'])
+@pytest.mark.parametrize('refresh', [False, True])
+def test_full_run_history_blocks_before_architecture_or_preparation_dispatch(tmp_path, monkeypatch, mode, refresh):
+    package = Package(tmp_path)
+    spec = importlib.util.spec_from_file_location('raw_history_state', ROOT / 'dk-pr-iter/scripts/run_state.py')
+    state = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(state)
+    record = {}
+    state.start_run(record)
+    package.manifest['mode'] = 'iteration'
+    package.write('history.json', state.preparation_history(record))
+    package.manifest['evidence']['run_history'] = ['history.json']
+    package.write('manifest.json', package.manifest)
+    previous = package.prepare()['artifact'] if refresh else None
+    if previous:
+        state.attach_preparation(record, previous, package.context['url'], package.head)
+        for _ in range(4):
+            state.next_cycle(record, package.head)
+    raw = package.write('run-record.json', record)
+    before = raw.read_bytes()
+    package.manifest['evidence']['run_history'] = ['run-record.json']
+    package.manifest['source_modes'] = {'run_history/0': mode}
+    package.write('manifest.json', package.manifest)
+    retained = {path: path.read_bytes() for path in package.versions.rglob('*') if path.is_file()}
+    with monkeypatch.context() as guard:
+        guard.setattr(prep.architecture, 'prepare', Mock(side_effect=AssertionError('architecture dispatched')))
+        model = Mock(side_effect=AssertionError('preparation dispatched'))
+        with pytest.raises(Diagnostic) as caught:
+            prep.prepare(package.manifest_path, package.versions, previous_preparation=previous, analyzer=model)
+        model.assert_not_called()
+    diagnostic = caught.value.envelope()['diagnostic']
+    assert diagnostic['code'] == 'untyped_run_history' and diagnostic['dispatched'] is False
+    assert 'preparation-history' in diagnostic['action']['task']
+    assert 'refresh-preparation' in diagnostic['action']['task']
+    assert diagnostic['action']['artifacts'] == [str(raw)]
+    assert raw.read_bytes() == before and len(record['cycles']) == (4 if refresh else 0)
+    assert {path: path.read_bytes() for path in package.versions.rglob('*') if path.is_file()} == retained
+    # The real CLI returns the same actionable code before invoking any provider.
+    argv = [sys.executable, str(ROOT / 'dk-pr-decisions/scripts/decisions.py'), 'prepare',
+            '--input-manifest', str(package.manifest_path), '--output-dir', str(package.versions)]
+    if previous:
+        argv += ['--previous-preparation', previous]
+    result = subprocess.run(argv, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 1, result.stdout + result.stderr
+    error = json.loads(result.stdout)['error']
+    assert error['code'] == 'untyped_run_history'
+    assert error['action'] == diagnostic['action'] and raw.read_bytes() == before
+
+
 @pytest.fixture(autouse=True)
 def private_temp_root(tmp_path, monkeypatch):
     # Emergency evidence remains under pytest's ownership on assertion failures.
@@ -49,7 +98,8 @@ def test_cli_retains_both_rejections_and_restart_budget_then_recovers(tmp_path, 
     state.start_run(history)
     history.update(cycles=[{'number': 2, 'head': package.head}], repairs=[{'cycle': 2, 'number': 1}])
     record = package.write('run-record.json', history)
-    package.manifest['evidence']['run_history'] = ['run-record.json']
+    package.write('history.json', state.preparation_history(history))
+    package.manifest['evidence']['run_history'] = ['history.json']
     package.write('manifest.json', package.manifest)
     before = record.read_bytes()
     invalid = response()

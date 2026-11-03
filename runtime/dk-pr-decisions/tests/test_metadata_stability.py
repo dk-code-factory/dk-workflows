@@ -527,3 +527,45 @@ def test_artifact_storage_and_verified_lineage_do_not_change_engineering_identit
     grown = prep.prepare(package.manifest_path, package.versions, previous_preparation=first['artifact'])
     assert grown['refresh']['model_call_count'] == 0
     assert grown['engineering_id'] == first['engineering_id']
+
+
+def test_advancing_prior_preparation_preserves_origins_and_cited_ancestors(tmp_path):
+    package = Package(tmp_path)
+    first = package.prepare()
+    package.manifest['evidence']['prior_preparation'] = [first['artifact']]
+    package.write('manifest.json', package.manifest)
+    cited = analysis()
+    cited['boundaries']['correctness'][0]['evidence'].append('prior_preparation/0#analysis')
+    # Include both a prose citation and an explicit dependency watch.
+    initial = response(cited)
+    initial['graph'][0]['sources'].append('prior_preparation/0')
+    second = prep.prepare(package.manifest_path, package.versions, analyzer=lambda *_: initial)
+    parent = prep.read(second['artifact'])
+    original = parent['sources']['prior_preparation/0']
+    assert original['origin_identity'] == 'prior_preparation:id:' + first['preparation_id']
+    package.manifest['evidence']['prior_preparation'] = [second['artifact']]
+    package.write('manifest.json', package.manifest)
+    with pytest.raises(RuntimeError) as caught:
+        prep.prepare(package.manifest_path, package.versions, previous_preparation=second['artifact'],
+                     analyzer=lambda *_: pytest.fail('removed origin reached analyst'))
+    assert caught.value.code == 'preparation_origin_removed'
+    assert 'prior_preparation/0' in str(caught.value)
+    package.manifest['source_origins'] = {'prior_preparation/0': original['origin_identity']}
+    package.write('manifest.json', package.manifest)
+    with pytest.raises(RuntimeError) as caught:
+        prep.prepare(package.manifest_path, package.versions, previous_preparation=second['artifact'],
+                     analyzer=lambda *_: pytest.fail('repurposed origin reached analyst'))
+    assert caught.value.code == 'preparation_origin_changed'
+    package.manifest.pop('source_origins')
+    # Advancing provenance keeps the old source under its original citation ID.
+    package.manifest['evidence']['prior_preparation'] = [second['artifact'], first['artifact']]
+    package.write('manifest.json', package.manifest)
+    third = prep.prepare(package.manifest_path, package.versions, previous_preparation=second['artifact'],
+                         analyzer=lambda *_: pytest.fail('lineage needs no analyst'))
+    current = prep.read(third['artifact'])
+    assert third['refresh']['model_call_count'] == 0
+    assert third['engineering_id'] == second['engineering_id']
+    assert current['analysis'] == parent['analysis'] and current['graph'] == parent['graph']
+    assert current['sources']['prior_preparation/0']['origin_identity'] == original['origin_identity']
+    assert current['sources']['prior_preparation/0']['sha256'] == original['sha256']
+    assert current['sources']['prior_preparation/1']['origin_identity'] == 'prior_preparation:id:' + second['preparation_id']
