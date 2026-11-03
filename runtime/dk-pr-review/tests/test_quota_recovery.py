@@ -215,3 +215,77 @@ def test_unknown_reset_resolution_preserves_other_roles_known_deadline(main_call
     assert result['quota_recovery']['status'] == 'waiting'
     assert result['quota_recovery']['resume_after'] == '2099-01-01T00:00:00+00:00'
     assert result['quota_recovery']['restarts'] == 0
+
+
+@pytest.mark.parametrize('message,expected', [
+    ('try again in 2 days', 172900), ('try again in 1 week', 604900),
+    ('try again in 2 fortnights', None), ('try again in tomorrow', None),
+    ('Retry-After: 1000000000000', None), ('Retry-After: 120', 220),
+])
+def test_relative_reset_units_and_finite_timestamp_bounds(message, expected):
+    assert recovery.reset_time(message, 100) == expected
+
+
+def test_finite_out_of_range_reset_returns_resolvable_checkpoint(main_call):
+    with patch.object(runner, 'run_skill_reviewer', return_value=quota('Retry-After: 1000000000000')):
+        result = main_call()
+    assert not result['complete'] and result['quota_recovery']['status'] == 'waiting'
+    assert result['quota_recovery']['resume_after'] is None
+    with patch.object(runner, 'run_skill_reviewer', return_value={'findings': []}):
+        resumed = main_call('--session-file', result['review_session']['path'], '--resume',
+                            '--quota-reset-at', '2000-01-01T00:00:00Z')
+    assert resumed['complete']
+
+
+def test_deferred_legacy_resume_keeps_registration(main_call, pinned, tmp_path, monkeypatch):
+    from test_review_entrypoints import iteration_record, state
+    from test_stats_capture import prepare_current
+    context, decisions, prepared, names, git = pinned
+    prepared['mode'] = 'iteration'
+    prepare_current(context, decisions, prepared)
+    path = iteration_record(tmp_path, context, prepared)
+    original = json.loads(path.read_text())
+    with patch.object(runner, 'run_skill_reviewer', return_value=quota('try again at noon')):
+        first = main_call('--run-record', path)
+    argv = first['quota_recovery']['resume_argv']
+    assert '--run-record' in argv and '--session-file' not in argv and '--resume' not in argv
+    with patch.object(runner, 'run_skill_reviewer', return_value={'findings': []}):
+        result = main_call(*argv[2:], '--quota-reset-at', '2000-01-01T00:00:00Z')
+    record = json.loads(path.read_text())
+    assert result['complete'] and record['cycles'] == original['cycles']
+    assert record['review_sessions'] == original['review_sessions']
+    assert len(record['review_results']) == 2
+    reference, artifact = state.current_review(record, prepared)
+    assert reference == result['review_artifact'] and artifact['result']['complete']
+    assert not review_coverage.load(first['review_artifact'])['result']['complete']
+
+
+def test_interrupted_started_recovery_rechecks_remote_scope_on_resume(main_call, pinned, tmp_path, monkeypatch):
+    context, decisions, prepared, names, git = pinned
+    path = tmp_path / 'interrupted-quota.json'
+    calls = 0
+    def provider(name, *args):
+        nonlocal calls
+        if name == names[0]:
+            calls += 1
+            if calls == 1:
+                return quota()
+            raise KeyboardInterrupt()
+        return {'findings': []}
+    with patch.object(runner, 'run_skill_reviewer', side_effect=provider):
+        with pytest.raises(KeyboardInterrupt):
+            main_call('--session-file', path)
+    saved = json.loads(path.read_text())
+    assert saved['quota_recovery']['status'] == 'started'
+    assert saved['quota_recovery']['restarts'] == 1 and len(saved['results']) == 1
+    monkeypatch.setattr(recovery, 'live_evidence', lambda context:
+                        (_ for _ in ()).throw(ValueError('remote PR evidence changed')))
+    with patch.object(runner, 'run_skill_reviewer') as providers:
+        with pytest.raises(ValueError, match='remote PR evidence changed'):
+            main_call('--session-file', path, '--resume')
+    providers.assert_not_called()
+    assert json.loads(path.read_text())['results'] == saved['results']
+    monkeypatch.setattr(recovery, 'live_evidence', lambda context: None)
+    with patch.object(runner, 'run_skill_reviewer', return_value={'findings': []}):
+        result = main_call('--session-file', path, '--resume')
+    assert result['complete'] and result['quota_recovery']['restarts'] == 1

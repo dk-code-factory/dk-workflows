@@ -894,8 +894,11 @@ def _run_cli(args, parser):
         reviewer_recovery.resolve_reset(session, args.quota_reset_at)
     resume_argv = [sys.executable, str(Path(__file__).resolve()), '--context', str(Path(args.context).resolve()),
                    '--decisions-file', str(Path(args.decisions_file).resolve()),
-                   '--preparation-file', str(Path(args.preparation_file).resolve()),
-                   '--session-file', str(session.path), '--resume']
+                   '--preparation-file', str(Path(args.preparation_file).resolve())]
+    if args.run_record:
+        resume_argv += ['--run-record', str(Path(args.run_record).resolve())]
+    else:
+        resume_argv += ['--session-file', str(session.path), '--resume']
     for flag, value in (('--scope-file', args.scope_file), ('--rules-file', args.rules_file),
                         ('--stats-cycle', args.stats_cycle), ('--stats-attempt', args.stats_attempt)):
         if value is not None:
@@ -932,6 +935,10 @@ def execute_session(session, context, reviewers, scope, decisions, rules, prepar
             session = Session(context, preparation, names, path=session.path,
                               resume=True, scope=scope, rules=rules)
         with session.execution():
+            if recovery and recovery['status'] == 'started':
+                # A previously reserved recovery may have been interrupted for
+                # any length of time. Recheck the remote scope on that resume.
+                reviewer_recovery.live_evidence(context)
             pending = [name for name in names if session.cached(name) is None]
             stats = for_iteration(context, preparation, names, stats_cycle,
                 session.id + ':' + str(session.invocation) + ':' + (stats_attempt or '1')) if pending else None

@@ -14,24 +14,42 @@ BACKOFF_SECONDS = 60
 MAX_WAIT_SECONDS = 60
 
 
+def supported_timestamp(value):
+    """Check the timestamp range used by the durable checkpoint renderer."""
+    if not math.isfinite(value):
+        return None
+    try:
+        datetime.fromtimestamp(value, timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+    return value
+
+
 def reset_time(message, now):
     """Unknown advertised reset times must never become immediate retries."""
-    relative = re.search(r'(?:retry[- ]after[: ]+|try again in\s+)(\d+(?:\.\d+)?)\s*'
-                         r'(seconds?|secs?|minutes?|mins?|hours?|hrs?)?\b', message, re.I)
+    relative = re.search(r'(retry[- ]after[: ]+|try again in\s+)(\d+(?:\.\d+)?)\s*'
+                         r'([a-z]+)?', message, re.I)
     if relative:
-        unit = (relative[2] or 'seconds').lower()
-        multiplier = 3600 if unit.startswith(('hour', 'hr')) else 60 if unit.startswith(('min',)) else 1
-        deadline = now + float(relative[1]) * multiplier
-        return deadline if math.isfinite(deadline) else None
+        unit = (relative[3] or '').lower()
+        units = {'s': 1, 'sec': 1, 'secs': 1, 'second': 1, 'seconds': 1,
+                 'm': 60, 'min': 60, 'mins': 60, 'minute': 60, 'minutes': 60,
+                 'h': 3600, 'hr': 3600, 'hrs': 3600, 'hour': 3600, 'hours': 3600,
+                 'd': 86400, 'day': 86400, 'days': 86400,
+                 'w': 604800, 'week': 604800, 'weeks': 604800}
+        if not unit and relative[1].lower().startswith('retry'):
+            unit = 'seconds'  # Numeric Retry-After values are seconds.
+        if unit not in units:
+            return None
+        return supported_timestamp(now + float(relative[2]) * units[unit])
     absolute = re.search(r'(\d{4}-\d\d-\d\d[T ]\d\d:\d\d(?::\d\d)?(?:Z|[+-]\d\d:\d\d))', message)
     if absolute:
         try:
-            return datetime.fromisoformat(absolute[1].replace('Z', '+00:00')).timestamp()
-        except ValueError:
+            return supported_timestamp(datetime.fromisoformat(absolute[1].replace('Z', '+00:00')).timestamp())
+        except (OverflowError, OSError, ValueError):
             return None
     # Codex reports a local wall time without a zone. It is unsafe to infer the
     # provider's zone from the coordinator's environment.
-    if re.search(r'try again at|resets? (?:at|on)|retry[- ]after', message, re.I):
+    if re.search(r'try again (?:at|in)|resets? (?:at|on|in)|retry[- ]after', message, re.I):
         return None
     return now
 
@@ -93,11 +111,14 @@ def resolve_reset(session, value):
     reset = datetime.fromisoformat(value.replace('Z', '+00:00'))
     if reset.tzinfo is None:
         raise ValueError('--quota-reset-at requires an ISO-8601 timestamp with timezone')
+    timestamp = supported_timestamp(reset.timestamp())
+    if timestamp is None:
+        raise ValueError('--quota-reset-at is outside the supported timestamp range')
     def retain(data):
         state = data.get('quota_recovery')
         if not state or state['status'] not in {'waiting', 'exhausted'} or state['not_before'] is not None:
             raise ValueError('--quota-reset-at requires an unresolved advertised reset')
-        state['not_before'] = max(reset.timestamp(), state['known_not_before'])
+        state['not_before'] = max(timestamp, state['known_not_before'])
         state['resolved_reset'] = value
     session.update(retain)
 
