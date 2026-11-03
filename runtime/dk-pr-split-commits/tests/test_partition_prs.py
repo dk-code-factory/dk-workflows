@@ -254,6 +254,40 @@ def test_interrupted_remote_creations_and_description_edits_reconcile_without_du
     assert sum(method == 'POST' for method, _ in state['writes']) == 2
 
 
+@pytest.mark.parametrize('field', ['title', 'body'])
+@pytest.mark.parametrize('interrupted', [False, True])
+def test_draft_metadata_race_before_cross_link_edit_blocks_without_overwriting(repo, monkeypatch, field, interrupted):
+    _, remote, state, _, _, _, _ = repo
+    path = prepare(repo)
+    original_head = p.load(path)['snapshot']['head']
+    operation = p.operation
+    created = {}
+    def edit_after_creation(*args, **kwargs):
+        result = operation(*args, **kwargs)
+        if args[1] == 'create-c' and not created:
+            draft = state['drafts'][2]
+            created.update(draft)
+            draft[field] = 'Human edit after draft creation'
+            if interrupted:
+                raise RuntimeError('interrupted before cross-link edit')
+        return result
+    monkeypatch.setattr(p, 'operation', edit_after_creation)
+    if interrupted:
+        with pytest.raises(RuntimeError, match='before cross-link edit'):
+            publish(path)
+    with pytest.raises(Diagnostic, match='description head, base, title or body changed'):
+        publish(path)
+    assert state['drafts'][2][field] == 'Human edit after draft creation'
+    assert git(remote, 'rev-parse', 'topic') == original_head
+    assert len(state['drafts']) == 2
+    assert all(method == 'POST' for method, _ in state['writes'])
+    edit = publication.load(p.load(path)['operations']['edit-b'])
+    assert edit['status'] == 'prepared' and 'intent' not in edit
+    state['drafts'][2][field] = created[field]
+    assert publish(path)['outcome'] == 'published'
+    assert sum(method == 'POST' for method, _ in state['writes']) == 2
+
+
 @pytest.mark.parametrize('branch_name', ['b', 'original'])
 def test_interrupted_branch_pushes_reconcile_without_repeating_any_push(repo, monkeypatch, branch_name):
     _, _, state, _, _, _, _ = repo

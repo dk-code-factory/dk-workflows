@@ -1113,9 +1113,16 @@ def publish(path, decisions=None, review_state=None, description_review_state=No
             fields = {'title': piece['title'], 'body': body(data, name, complete=True),
                       'base': binding['default_branch']}
             key = 'edit-' + name
-            expected = metadata(cwd, url)
-            expected = {key: expected[key] for key in ('title', 'body', 'headRefOid', 'baseRefName')}
             desired_head = data['candidates'][name]['head']
+            if name == 'original':
+                expected = metadata(cwd, url)
+                expected = {key: expected[key] for key in ('title', 'body', 'headRefOid', 'baseRefName')}
+            else:
+                # The creation request owns this baseline; a later live edit cannot refresh it.
+                created = publication.load(data['operations']['create-' + name], 'partition-create')
+                initial = created['request']['approved']['fields']
+                expected = {'title': initial['title'], 'body': initial['body'],
+                            'headRefOid': desired_head, 'baseRefName': initial['base']}
             def ready(value, verified):
                 require_complete(load(path)['reviews']['description'], 'dk-pr-description')
                 live = metadata(cwd, url)
