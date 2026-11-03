@@ -107,6 +107,17 @@ def require_head(head):
         raise ValueError("head must be a full lowercase SHA")
 
 
+def partition_ready(run_record, head):
+    """Iteration callers must settle partitioning before opening a CI observer."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('ci_partition_run_state', Path(__file__).with_name('run_state.py'))
+    state = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(state)
+    record = json.loads(Path(run_record).read_text())
+    prepared = state.work_gate(record, head)
+    return state.partition_ready(record, prepared)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--pr", required=True)
@@ -118,10 +129,13 @@ def main():
     parser.add_argument("--no-checks-grace", type=int, default=60)
     parser.add_argument('--rerun-operation', help='Verified ci-rerun publication operation authorizing one new attempt window')
     parser.add_argument('--retry-denied', action='store_true', help='Explicitly retry observation after repairing denied read access')
+    parser.add_argument('--run-record', help='Iteration record; enforce its partition gate before observing CI')
     args = parser.parse_args()
     if args.classification_timeout <= 0:
         parser.error("classification timeout must be positive")
     try:
+        if args.run_record:
+            partition_ready(args.run_record, args.head)
         with for_pr(args.pr, args.head, args.repo, timeout=args.timeout,
                     rerun=args.rerun_operation, retry_denied=args.retry_denied) as observation:
             result = wait(args.pr, args.head, args.repo, args.timeout, args.interval,

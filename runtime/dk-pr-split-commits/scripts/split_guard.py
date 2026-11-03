@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 from shared.review_loop import require_complete
 from shared.commit_message_lines import validate_commits
-from shared import series_assessment, cleanup_precheck
+from shared import series_assessment, cleanup_precheck, pr_dependencies
 from shared.pr_identity import resolve
 from shared.github_reads import run as github_run
 from shared import publication
@@ -88,7 +88,7 @@ def prepare(base, pr_arg=None, mode='split'):
         os.replace(state_path(), archive)
     branch,remote,remote_branch,sha=current()
     target=[pr_arg] if pr_arg else []
-    pr=json.loads(run('gh','pr','view',*target,'--json','number,url,headRefName,headRefOid,isCrossRepository,headRepository'))
+    pr=json.loads(run('gh','pr','view',*target,'--json','number,url,headRefName,headRefOid,isCrossRepository,headRepository,body'))
     host,base_repo,head_repo=pr_identity(pr)
     if pr['isCrossRepository'] and pr_arg != pr['url']:
         raise RuntimeError('fork PR requires its explicit PR URL')
@@ -98,16 +98,20 @@ def prepare(base, pr_arg=None, mode='split'):
     base_sha=git('merge-base',base,'HEAD')
     commits=git('rev-list','--reverse',f'{base_sha}..HEAD').splitlines()
     if not commits: raise RuntimeError('PR has no commits to split')
+    dependencies = pr_dependencies.parse(pr.get('body', ''))
+    prefix = pr_dependencies.validate_prefix(Path.cwd(), base_sha, sha, dependencies)
     author=git('config','user.email').lower()
     others=[]
     for commit in commits:
-        if git('show','-s','--format=%ae',commit).lower()!=author:
+        if commit not in prefix and git('show','-s','--format=%ae',commit).lower()!=author:
             others.append(commit[:12])
     if others: raise RuntimeError('commits by another author: '+', '.join(others))
     data={'branch':branch,'remote':remote,'remote_branch':remote_branch,'remote_sha':sha,
           'original_head':sha,'original_tree':git('rev-parse','HEAD^{tree}'),
           'base':base_sha,'pr':pr['number'],'pr_url':pr['url'],'host':host,
           'base_repo':base_repo,'head_repo':head_repo,'author':author,'mode':mode}
+    if dependencies:
+        data.update(dependencies=dependencies, prerequisite_prefix=prefix)
     data['recovery_ref'] = f'refs/pr-split-recovery/{sha}'
     git('update-ref',data['recovery_ref'],sha)
     if mode == 'regroup':
@@ -134,9 +138,13 @@ def verify(data):
     if len(commits)<minimum:
         raise RuntimeError('regroup requires at least one logical commit' if minimum == 1
                            else 'split requires at least two logical commits')
-    if any(git('show','-s','--format=%ae',c).lower()!=data['author'] for c in commits):
+    prefix = pr_dependencies.validate_prefix(Path.cwd(), data['base'], git('rev-parse', 'HEAD'),
+                                             data.get('dependencies', []))
+    if prefix != data.get('prerequisite_prefix', []):
+        raise RuntimeError('validated prerequisite prefix changed')
+    if any(git('show','-s','--format=%ae',c).lower()!=data['author'] for c in commits[len(prefix):]):
         raise RuntimeError('rewritten series has unexpected author')
-    message_errors = validate_commits(commits, Path.cwd())
+    message_errors = validate_commits(commits[len(prefix):], Path.cwd())
     if message_errors:
         raise RuntimeError('rewritten commit messages exceed 80 characters:\n' + '\n'.join(message_errors))
     check_remote(data['remote'],data['host'],data['head_repo'],data['head_repo'] != data['base_repo'])

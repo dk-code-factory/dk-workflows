@@ -368,6 +368,7 @@ def test_stage_adapter_never_allocates_review_budget(storage, monkeypatch):
     monkeypatch.setattr(mod, 'work_gate', lambda *a: (_ for _ in ()).throw(ValueError('preparation missing')))
     assert mod.next_stage(record, head, storage / 'run')['stage'] == 'preparation'
     monkeypatch.setattr(mod, 'work_gate', lambda *a: {})
+    monkeypatch.setattr(mod, 'partition_ready', lambda *a: {'outcome': 'below_threshold'})
     monkeypatch.setattr(mod, 'current_review', lambda *a: (_ for _ in ()).throw(ValueError('no review')))
     record['preparation'] = {'path': 'prepared.json'}
     expected = copy.deepcopy(record)

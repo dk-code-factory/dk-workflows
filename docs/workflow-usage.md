@@ -93,3 +93,13 @@ The supplied evidence remains an observation; it grants no publication or review
 authority. Only actual `run_state` terminal observations establish the iteration
 outcome. Standalone workflows retain their coverage and lifecycle status without
 inventing an iteration completion record.
+
+## PR partitions
+
+The `partition-prs` route exposes `check`, `prepare`, `verify`, `publish` and
+`reconcile`; use common `--cwd` and `--pr` before the route. It returns retained
+artifact receipts like `split`. `config pr-size list|set|reset` manages per-setting
+threshold/mode inheritance. `run-state partition-assessment --head SHA --state FILE`
+registers its prepared evidence, and `partition-gate --head SHA` prevents pending
+partitions from reaching CI/review/completion. See the
+[partition contract](../runtime/dk-pr-split-commits/references/partition-prs.md).

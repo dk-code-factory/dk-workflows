@@ -54,3 +54,20 @@ CI evaluator and flake registry. This differs from the head-first lookup for rul
 and reviewers. Merely adding this capability does not authorize seeding exceptions.
 
 Command providers receive the evidence handoff through their configured `{handoff}` argument. They receive output instructions on standard input, including validator errors and the prior response on a correction attempt; `DK_PROVIDER_ATTEMPT` starts at 0. Return the declared JSON contract on standard output and diagnostics on standard error. The handoff stays unchanged during correction.
+
+## PR size
+
+Use `pr-size list|set|reset` for private `pr_size` settings. Built-in defaults are
+`added_lines_threshold: 1000`, `evacuate_unrelated: automatic`,
+`split_related: automatic`. Each setting independently inherits fork → upstream →
+user → default. Listing reports every effective value, source and file.
+`set --added-lines-threshold N --evacuate-unrelated MODE --split-related MODE`
+accepts any nonempty subset; N must be a positive integer and MODE is `automatic`,
+`manual` or `disabled`. `reset [SETTING ...]` removes selected overrides (or all
+when omitted). Writes default to repository scope; `--scope user` manages user
+defaults. `list --scope upstream` inspects inherited repository values; edit them
+from an upstream checkout. Never seed settings without an explicit request.
+
+Automatic prepares, verifies and publishes; manual prepares a concrete plan and
+local candidates before asking about publication; disabled skips that assessment
+and action. See [partitioning](../dk-pr-split-commits/references/partition-prs.md).

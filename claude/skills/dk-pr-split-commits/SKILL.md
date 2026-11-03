@@ -1,6 +1,6 @@
 ---
 name: dk-pr-split-commits
-description: Delegate splitting or full-series cleanup of a pull request's commits to one separate agent, preserving the final tree and pushing the rewritten series when requested.
+description: Delegate splitting or full-series cleanup of a pull request's commits to one separate agent, preserving the final tree, or partitioning oversized PR scope into verified draft PRs under iteration settings.
 ---
 
 Use Claude Code native agents and tools. `${CLAUDE_PLUGIN_ROOT}` is this plugin root. Do not require Codex for native execution. When shared instructions name a skill with a dollar prefix, use the corresponding Claude native skill in this plugin namespace.
@@ -10,3 +10,7 @@ Begin the lifecycle with `python3 PLUGIN_ROOT/scripts/dk.py --host claude begin 
 Read [the shared procedure](../../../runtime/dk-pr-split-commits/procedure.md) and perform the requested workflow. Resolve paths beginning with `PLUGIN_ROOT/` against this plugin's root. Preserve the shared procedure's validation and publication guards.
 
 Before coding or review, follow [architecture delivery](../../../runtime/dk-architect/procedure.md). Every child handoff includes its recipient/path packet reference and fingerprint; refresh before expanding scope.
+
+For a PR partition handoff, retain the same single-worker ownership contract and
+use [the partition path](../../../runtime/dk-pr-split-commits/references/partition-prs.md).
+The separate `partition-prs` helper does not change standalone split/regroup guards.

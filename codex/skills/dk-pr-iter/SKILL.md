@@ -1,6 +1,6 @@
 ---
 name: dk-pr-iter
-description: Verify and fix actionable PR feedback from inline threads, review bodies, and general comments, publish fixes, wait for CI, and run bounded fresh-agent review cycles when asked to iterate a pull request through review.
+description: Verify and fix actionable PR feedback from inline threads, review bodies, and general comments, publish fixes, evacuate unrelated work and split oversized PRs into drafts under private settings, wait for CI, and run bounded fresh-agent review cycles when asked to iterate a pull request through review.
 ---
 
 Use this Codex session and native subagents when available. Use the loaded skill location to resolve the plugin root; do not depend on the working directory.
@@ -19,3 +19,8 @@ After initial feedback fixes, run the once-only architecture stage before alloca
 review cycle 1. Follow [the stage contract](../../../runtime/dk-pr-iter/references/iteration-architecture.md).
 Retain its result through all cycles, cleanup and completion; do not launch another
 architecture reviewer in those stages. Continue current rule delivery to workers.
+
+After preparation and every published code change, check the additions size gate
+before CI, review allocation or completion. At 1,000 added lines by default,
+follow [PR partitioning](../../../runtime/dk-pr-iter/references/iteration-partition.md).
+Use one split worker; preserve review budgets and refresh scope after publication.

@@ -320,6 +320,7 @@ def prepared_boundaries(monkeypatch):
     # These existing tests isolate CI/series/counter policy. Preparation's real
     # gates and resume interactions are exercised in test_preparation.py.
     monkeypatch.setattr(state, 'work_gate', lambda record, head: {'readiness': 'ready', 'reviewers': {}})
+    monkeypatch.setattr(state, 'partition_ready', lambda *args: {'outcome': 'below_threshold'})
     monkeypatch.setattr(completion, 'current_preparation', lambda *a: {'mode': 'iteration'})
     monkeypatch.setattr(completion.run_state_api, 'verify_review', lambda *a, **kw: {})
     monkeypatch.setattr(completion, 'live_preparation_scope', lambda *a: {'body': '', 'headRefOid': SHA})
@@ -906,3 +907,17 @@ def test_completion_reports_terminal_and_phase_progress_before_blocking_timeout(
     assert output['gate'] == 'ci_not_green' and output['ci']['classification']['timed_out']
     assert not any(output[key] for key in ('review_ready', 'cleanup_ready', 'completion_ready'))
     assert observations == [raw_result, raw_result]
+
+
+def test_ci_waiter_blocks_before_observation_when_partition_is_pending(monkeypatch, capsys):
+    def pending(*args):
+        raise ValueError('PR partition is pending')
+    monkeypatch.setattr(ci, 'partition_ready', pending)
+    def unexpected(*args, **kwargs):
+        raise AssertionError('CI observer opened before partition completion')
+    monkeypatch.setattr(ci, 'for_pr', unexpected)
+    monkeypatch.setattr(sys, 'argv', ['ci-wait', '--pr', PR, '--head', SHA, '--run-record', 'run.json'])
+    with pytest.raises(SystemExit) as exit:
+        ci.main()
+    assert exit.value.code == 2
+    assert 'PR partition is pending' in capsys.readouterr().err

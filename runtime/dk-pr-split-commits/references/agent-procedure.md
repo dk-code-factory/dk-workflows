@@ -1,5 +1,10 @@
 # Split procedure for the delegated agent
 
+For a PR partition handoff, follow [partition-prs](partition-prs.md) instead of the
+tree-preserving rewrite below, retaining single-worker ownership. For split/regroup,
+validate any Dependencies table before rewriting; preserve its prerequisite prefix
+and authorship, and regroup only the own-commit suffix.
+
 Read [architecture delivery](../../dk-architect/procedure.md) and retain your
 `series-cleanup` (or selected skill ID) packet reference/fingerprint. Include all
 old/new rename and deletion paths when declaring file scope, or use unknown scope

@@ -1,5 +1,9 @@
 ## Preflight
 
+Run [the PR size gate](iteration-partition.md) after preparation and every published
+code change, before starting CI, allocating a review or completing. Finish pending
+partition publication first; refresh original scope and preserve all existing budgets.
+
 Read [waiting and communication](waiting-communication.md) before long preparation
 or helper stages and follow it throughout this workflow.
 

@@ -90,6 +90,11 @@ Use `dk-config` in plain English to inspect or change settings. There is no defa
     {"skill": "pr-review-toolkit:review-pr", "host": "claude"},
     {"command": ["review-helper", "--handoff", "{handoff}"]}
   ],
+  "pr_size": {
+    "added_lines_threshold": 1000,
+    "evacuate_unrelated": "automatic",
+    "split_related": "automatic"
+  },
   "drafting": {
     "commit_message": "builtin",
     "pr_description": {"skill": "my-plugin:describe-pr", "host": "codex"},
@@ -521,3 +526,32 @@ Standalone PR reviews continue to run architecture alongside configured reviewer
 The offline [compact review compatibility report](docs/compact-review-compatibility.md)
 compares retained full and compact provider evidence. Synthetic checks do not
 establish live compatibility or enable compact reviewer bindings.
+
+### Automatic PR scope evacuation and splitting
+
+`dk-pr-iter` checks the complete final diff after preparation and published code
+changes, before CI, review allocation and completion. At **1,000 added lines or
+more**, it first evacuates unrelated work into separate drafts, then assesses
+coherent splitting of the remaining scope. The primary deliverable stays in the
+original PR, and all resulting PRs target the base repository default branch.
+Tests, documentation, generated text and copied prerequisites count; deletions
+never offset additions. Indivisible changes remain with recorded reasons.
+
+Use `dk.py --host codex --cwd REPO config pr-size list`, or
+`config pr-size set --added-lines-threshold 1000 --evacuate-unrelated automatic
+--split-related manual`. Both modes independently support `automatic`, `manual`
+and `disabled`, inheriting fork → upstream → user → default. `--scope user` sets
+user defaults; `pr-size reset [SETTING ...]` restores inheritance. Manual mode
+prepares verified local candidates before asking for action-bound approval; a
+decline retains that work in original and is cached.
+
+The stable `partition-prs check|prepare|verify|publish|reconcile` route owns local
+change-preservation proofs, prerequisite DAGs and guarded recoverable publication.
+See [the worker contract](runtime/dk-pr-split-commits/references/partition-prs.md)
+for manifests and approval files. Prerequisites are copied once with `-x`, listed
+in a fixed Dependencies table and frozen during later regrouping. All local
+candidates verify before publication; new drafts/branches are observed before
+removing source work. Interrupted writes reconcile through live reads without
+duplicate pushes or PRs. After partitioning, iteration refreshes original scope,
+Decisions, feedback and preparation, preserving review budgets and requiring
+current-head review and CI. New drafts receive local tests only.
