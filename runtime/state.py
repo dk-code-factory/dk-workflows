@@ -10,6 +10,7 @@ import json
 import mmap
 import os
 import re
+import stat
 import subprocess
 import tempfile
 import time
@@ -142,7 +143,48 @@ def _packed_refs_safe(path, names):
             return all(lower_bound(name) != name for name in names)
 
 
-def _git_context(source):
+class _GitContextGuard:
+    """Observe context versions without retaining a path-based content cache."""
+    def __init__(self):
+        self.environment = tuple(sorted(os.environ.items()))
+        self.versions = {}
+
+    @staticmethod
+    def version(path):
+        def stamp(value):
+            return (value.st_dev, value.st_ino, value.st_mode, value.st_nlink,
+                    value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+        try:
+            own = path.lstat()
+        except FileNotFoundError:
+            return None
+        target = None
+        if stat.S_ISLNK(own.st_mode):
+            try:
+                target = stamp(path.stat())
+            except FileNotFoundError:
+                pass
+        return stamp(own), target
+
+    def watch(self, path):
+        path = Path(path).absolute()
+        # Ancestors also detect creation/removal of absent inputs and temporary
+        # symlink or directory replacement that restores the original bytes.
+        for candidate in (path, path.resolve()):
+            for item in (candidate, *candidate.parents):
+                if item not in self.versions:
+                    self.versions[item] = self.version(item)
+        return path
+
+    def stable(self):
+        try:
+            return (self.environment == tuple(sorted(os.environ.items()))
+                    and all(self.version(path) == version for path, version in self.versions.items()))
+        except (OSError, ValueError, RuntimeError):
+            return False
+
+
+def _git_context(source, *, _guard=None):
     """Cheap context check for ordinary repositories and linked worktrees.
 
     Unusual Git layouts and indirection fall back to independent captures. This
@@ -159,20 +201,23 @@ def _git_context(source):
             'GIT_SHALLOW_FILE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE', 'GIT_NAMESPACE',
             'GIT_ATTR_SOURCE')):
         return None
-    checkout = Path(source['checkout']).resolve()
+    guard = _guard or _GitContextGuard()
     try:
-        directory = checkout/'.git'
+        checkout = guard.watch(source['checkout']).resolve()
+        directory = guard.watch(checkout/'.git')
         if directory.is_file():
             value = os.fsdecode(directory.read_bytes().rstrip(b'\r\n'))
             if not value.startswith('gitdir: '):
                 return None
-            directory = (checkout/value[8:]).resolve()
+            directory = guard.watch(checkout/value[8:]).resolve()
         if not directory.is_dir():
             return None
         common = directory
-        if (directory/'commondir').is_file():
-            common = (directory/os.fsdecode((directory/'commondir').read_bytes().rstrip(b'\r\n'))).resolve()
+        metadata = guard.watch(directory/'commondir')
+        if metadata.is_file():
+            common = guard.watch(directory/os.fsdecode(metadata.read_bytes().rstrip(b'\r\n'))).resolve()
         for path in (common/'refs/replace', common/'info/grafts', common/'shallow'):
+            guard.watch(path)
             if path.exists() and (not path.is_dir() or any(path.iterdir())):
                 return None
         # A hex spelling may also name a mutable ref. Do not treat that
@@ -181,9 +226,9 @@ def _git_context(source):
         ref_names = {name for pin in (source[key] for key in ('target', 'base', 'head'))
                      for name in (pin, 'refs/'+pin, 'refs/tags/'+pin, 'refs/heads/'+pin,
                                   'refs/remotes/'+pin, 'refs/remotes/'+pin+'/HEAD')}
-        if any((root/name).exists() for root in (directory, common) for name in ref_names):
+        if any(guard.watch(root/name).exists() for root in (directory, common) for name in ref_names):
             return None
-        packed = common/'packed-refs'
+        packed = guard.watch(common/'packed-refs')
         if packed.exists() and not _packed_refs_safe(packed, {name.encode() for name in ref_names}):
             return None
         # Ask this Git installation for its actual paths, including relocatable
@@ -191,6 +236,18 @@ def _git_context(source):
         # takes the ordinary independent-capture path.
         variables = {key: [] for key in ('GIT_CONFIG_SYSTEM', 'GIT_CONFIG_GLOBAL',
                                          'GIT_ATTR_SYSTEM', 'GIT_ATTR_GLOBAL')}
+        # Local/global configuration can influence Git's path-variable receipt.
+        # Register known paths before invoking Git, then the discovered paths
+        # before reading their contents.
+        for path in (common/'config', directory/'config.worktree'):
+            guard.watch(path)
+        if 'GIT_CONFIG_GLOBAL' not in os.environ:
+            for path in (Path.home()/'.gitconfig',
+                         Path(os.environ.get('XDG_CONFIG_HOME') or Path.home()/'.config')/'git/config'):
+                guard.watch(path)
+        for name in ('GIT_CONFIG_SYSTEM', 'GIT_CONFIG_GLOBAL'):
+            if name in os.environ:
+                guard.watch(os.environ[name])
         for line in git(checkout, 'var', '-l').splitlines():
             key, separator, value = line.partition(b'=')
             name = key.decode(errors='replace')
@@ -209,6 +266,7 @@ def _git_context(source):
                    common/'config', directory/'config.worktree']
         snapshots = []
         for path in configs:
+            guard.watch(path)
             content = path.read_bytes() if path.exists() else None
             # Git skips an initial UTF-8 BOM. Indirect configuration, alternate
             # attribute roots and signature verification need a wider context.
@@ -236,14 +294,18 @@ def _git_context(source):
                 attributes.add(parent/'.gitattributes')
                 parent = parent.parent
         for path in sorted(attributes):
+            guard.watch(path)
             snapshots.append((str(path.resolve()), path.read_bytes() if path.exists() else None))
         # Indexed attributes and checkout submodule configuration also affect diffs.
         for path in (directory/'index', checkout/'.gitmodules'):
+            guard.watch(path)
             file_hash = None
             if path.exists():
                 with path.open('rb') as source_file:
                     file_hash = hashlib.file_digest(source_file, 'sha256').digest()
             snapshots.append((str(path.resolve()), file_hash))
+        if not guard.stable():
+            return None
         return (str(checkout), str(directory.resolve()), str(common), tuple(snapshots),
                 hashlib.sha256(names).digest(),
                 tuple(sorted(os.environ.items())))
@@ -292,9 +354,10 @@ class _CaptureContext:
         pins = tuple(source[key] for key in ('target', 'base', 'head'))
         options = tuple(source.get(key, False) for key in ('history', 'head_sensitive'))
         context = None
+        guard = _GitContextGuard()
         if (all(isinstance(pin, str) and re.fullmatch(r'(?:[0-9a-f]{40}|[0-9a-f]{64})', pin)
                 for pin in pins) and all(type(value) is bool for value in options)):
-            context = _git_context(source)
+            context = _git_context(source, _guard=guard)
         if context is None:
             return _capture_git(source)
         key = context, pins, options
@@ -302,8 +365,13 @@ class _CaptureContext:
             captured = _capture_git(source, batched=True)
             if tuple(captured[1]['commits'][name] for name in ('target', 'base', 'head')) != pins:
                 return captured
-            self.git_captures[key] = captured
-        return deepcopy(self.git_captures[key])
+            if guard.stable():
+                self.git_captures[key] = captured
+            return deepcopy(captured)
+        captured = self.git_captures[key]
+        if not guard.stable():
+            return _capture_git(source)
+        return deepcopy(captured)
 
 
 def capture(spec, *, _context=None):

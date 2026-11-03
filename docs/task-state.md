@@ -53,6 +53,9 @@ Alternate attribute sources, configured worktree roots and signature-verifying
 history also fall back. Index context retains a fixed-size content hash.
 Sorted packed refs use fresh binary searches for ambiguous names and replacements;
 unsupported packed-ref formats fall back rather than enumerate all refs.
+Observed context files and their ancestry retain identity/version guards until
+capture or reuse completes. Detected mutation declines sharing, including a
+file restored to its earlier bytes or an optional file created and removed.
 
 Reproduce the capture-process comparison with:
 

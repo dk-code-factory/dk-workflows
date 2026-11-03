@@ -819,6 +819,75 @@ def test_status_preserves_whitespace_in_git_metadata_paths(case, tmp_path, monke
     assert tasks[0]['reusable'] and not tasks[1]['reusable']
 
 
+@pytest.mark.parametrize('kind', ['config', 'attributes', 'absent-attributes'])
+def test_status_does_not_cache_context_that_changed_during_capture(case, monkeypatch, kind):
+    a, store = case
+    require_git_context_paths(a['git']['checkout'])
+    checkout = Path(a['git']['checkout'])
+    attributes = checkout/'.gitattributes'
+    if kind == 'config': git(checkout, 'config', 'diff.noprefix', 'false')
+    elif kind == 'attributes': attributes.write_text('code -diff\n')
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    expected = capture(b)
+    original = state._capture_git
+    changed = False
+    def interleaved(source, **kwargs):
+        nonlocal changed
+        if kwargs.get('batched') and not changed:
+            changed = True
+            if kind == 'config': git(checkout, 'config', 'diff.noprefix', 'true')
+            else: attributes.write_text('code diff\n' if kind == 'attributes' else 'code -diff\n')
+            captured = original(source, **kwargs)
+            # Restore the original bytes/absence before the next task. File
+            # versions and parent state still expose this unstable capture.
+            if kind == 'config': git(checkout, 'config', 'diff.noprefix', 'false')
+            elif kind == 'attributes': attributes.write_text('code -diff\n')
+            else: attributes.unlink()
+            return captured
+        return original(source, **kwargs)
+    monkeypatch.setattr(state, '_capture_git', interleaved)
+    observed = []
+    original_capture = state.capture
+    def collect(spec, **kwargs):
+        captured = original_capture(spec, **kwargs)
+        observed.append(captured)
+        return captured
+    monkeypatch.setattr(state, 'capture', collect)
+    store.status([a, b])
+    assert changed
+    assert observed[0]['components']['inputs']['git'] != expected['components']['inputs']['git']
+    assert observed[1] == expected
+
+
+def test_status_declines_cache_hit_when_context_changes_after_snapshot(case, monkeypatch):
+    a, store = case
+    require_git_context_paths(a['git']['checkout'])
+    checkout = Path(a['git']['checkout'])
+    git(checkout, 'config', 'diff.noprefix', 'false')
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    original_context = state._git_context
+    count = 0
+    def interleaved(source, **kwargs):
+        nonlocal count
+        context = original_context(source, **kwargs)
+        count += 1
+        if count == 2:
+            git(checkout, 'config', 'diff.noprefix', 'true')
+        return context
+    monkeypatch.setattr(state, '_git_context', interleaved)
+    observed = []
+    original_capture = state.capture
+    def collect(spec, **kwargs):
+        captured = original_capture(spec, **kwargs)
+        observed.append(captured)
+        return captured
+    monkeypatch.setattr(state, 'capture', collect)
+    store.status([a, b])
+    assert count == 2
+    assert observed[0]['components']['inputs']['git'] != observed[1]['components']['inputs']['git']
+    assert observed[1] == capture(b)
+
+
 def test_git_drift_after_status_still_rejects_completion(case):
     spec, store = case
     store.status([spec, deepcopy(spec)])
