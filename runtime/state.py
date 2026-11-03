@@ -7,6 +7,7 @@ import base64
 import fcntl
 import hashlib
 import json
+import mmap
 import os
 import re
 import subprocess
@@ -84,6 +85,63 @@ def resource(path):
     return visit(path, set())
 
 
+def _packed_refs_safe(path, names):
+    """Fresh bounded lookups in Git's sorted packed-ref representation.
+
+    Unknown formats decline sharing. Mapping avoids a Python copy of the file;
+    each binary-search step reads one ref and its optional peeled row.
+    """
+    if not path.is_file():
+        return False
+    with path.open('rb') as source:
+        header = source.readline(256)
+        if not header:
+            return True
+        if (not header.endswith(b'\n') or not header.startswith(b'# pack-refs with: ')
+                or b'sorted' not in header[len(b'# pack-refs with: '):].split()):
+            return False
+        with mmap.mmap(source.fileno(), 0, access=mmap.ACCESS_READ) as data:
+            start, end = len(header), len(data)
+            if data[-1:] != b'\n':
+                return False
+
+            def record(offset):
+                stop = data.find(b'\n', offset)
+                if stop < 0:
+                    raise ValueError('Unterminated packed ref')
+                oid, separator, name = data[offset:stop].partition(b' ')
+                if (not separator or not re.fullmatch(rb'[0-9a-f]{40}|[0-9a-f]{64}', oid)
+                        or not name.startswith(b'refs/')):
+                    raise ValueError('Unsupported packed ref')
+                following = stop + 1
+                if data[following:following+1] == b'^':
+                    stop = data.find(b'\n', following)
+                    if stop < 0:
+                        raise ValueError('Unterminated peeled ref')
+                    following = stop + 1
+                return name, following
+
+            def lower_bound(wanted):
+                low, high = start, end
+                while low < high:
+                    middle = (low + high)//2
+                    boundary = data.rfind(b'\n', low, middle)
+                    offset = low if boundary < 0 else boundary + 1
+                    if data[offset:offset+1] == b'^':
+                        boundary = data.rfind(b'\n', low, offset - 1)
+                        offset = low if boundary < 0 else boundary + 1
+                    name, following = record(offset)
+                    if name < wanted:
+                        low = following
+                    else:
+                        high = offset
+                return record(low)[0] if low < end else b''
+
+            if lower_bound(b'refs/replace/').startswith(b'refs/replace/'):
+                return False
+            return all(lower_bound(name) != name for name in names)
+
+
 def _git_context(source):
     """Cheap context check for ordinary repositories and linked worktrees.
 
@@ -126,14 +184,8 @@ def _git_context(source):
         if any((root/name).exists() for root in (directory, common) for name in ref_names):
             return None
         packed = common/'packed-refs'
-        if packed.exists():
-            encoded_names = {name.encode() for name in ref_names}
-            with packed.open('rb') as refs:
-                for line in refs:
-                    fields = line.split()
-                    if len(fields) == 2 and (fields[1].startswith(b'refs/replace/')
-                                             or fields[1] in encoded_names):
-                        return None
+        if packed.exists() and not _packed_refs_safe(packed, {name.encode() for name in ref_names}):
+            return None
         # Ask this Git installation for its actual paths, including relocatable
         # system prefixes and global overrides. Older Git without these vars
         # takes the ordinary independent-capture path.

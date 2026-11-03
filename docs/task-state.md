@@ -51,6 +51,8 @@ without the required path variables and relative XDG configuration paths use
 independent capture; the process probe skips unsupported Git versions.
 Alternate attribute sources, configured worktree roots and signature-verifying
 history also fall back. Index context retains a fixed-size content hash.
+Sorted packed refs use fresh binary searches for ambiguous names and replacements;
+unsupported packed-ref formats fall back rather than enumerate all refs.
 
 Reproduce the capture-process comparison with:
 

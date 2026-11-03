@@ -489,6 +489,68 @@ def test_status_does_not_share_hex_ref_names(case, monkeypatch, packed):
     assert len(calls) == 14
 
 
+def test_packed_ref_lookup_matches_git_at_boundaries_and_peeled_rows(case):
+    spec, store = case
+    checkout = Path(spec['git']['checkout'])
+    for name in ('aaa', 'middle', 'zzz'):
+        git(checkout, 'tag', '-am', name, name, spec['git']['head'])
+    git(checkout, 'update-ref', 'refs/heads/between', spec['git']['head'])
+    git(checkout, 'pack-refs', '--all', '--prune')
+    packed = checkout/'.git/packed-refs'
+    names = [line.split(b' ', 1)[1] for line in packed.read_bytes().splitlines()
+             if line and line[:1] not in {b'#', b'^'}]
+    assert b'\n^' in packed.read_bytes()
+    for name in names + [b'refs/!absent', b'refs/tags/between', b'refs/zzzz-absent']:
+        found = subprocess.run(['git', '-C', str(checkout), 'show-ref', '--verify', os.fsdecode(name)],
+                               capture_output=True).returncode == 0
+        assert state._packed_refs_safe(packed, {name}) is not found
+
+
+def test_status_rechecks_packed_replacements_within_one_batch(case, monkeypatch):
+    a, store = case
+    checkout = Path(a['git']['checkout'])
+    git(checkout, 'pack-refs', '--all', '--prune')
+    b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
+    before = capture(a)
+    done(store, a); done(store, b)
+    expected = []
+    def specs():
+        yield a
+        git(checkout, 'replace', a['git']['head'], a['git']['base'])
+        git(checkout, 'pack-refs', '--all', '--prune')
+        expected.append(capture(b))
+        yield b
+    observed = []
+    original = state.capture
+    def collect(spec, **kwargs):
+        value = original(spec, **kwargs)
+        observed.append(value)
+        return value
+    monkeypatch.setattr(state, 'capture', collect)
+    tasks = store.status(specs())['tasks']
+    assert expected[0]['fingerprint'] != before['fingerprint']
+    assert observed == [before, expected[0]]
+    assert tasks[0]['reusable'] and not tasks[1]['reusable']
+
+
+def test_status_falls_back_for_unsorted_packed_refs(case, monkeypatch):
+    spec, store = case
+    checkout = Path(spec['git']['checkout'])
+    git(checkout, 'pack-refs', '--all', '--prune')
+    packed = checkout/'.git/packed-refs'
+    header, records = packed.read_bytes().split(b'\n', 1)
+    packed.write_bytes(header.replace(b' sorted ', b' ')+b'\n'+records)
+    assert state._git_context(spec['git']) is None
+    calls = []
+    original = state.git
+    def counted(*args):
+        calls.append(args)
+        return original(*args)
+    monkeypatch.setattr(state, 'git', counted)
+    store.status([spec, deepcopy(spec)])
+    assert len(calls) == 14
+
+
 @pytest.mark.parametrize('kind', ['resource', 'context', 'instruction', 'assigned', 'option', 'missing', 'noncacheable-missing', 'invalid-option'])
 def test_status_batch_keeps_each_tasks_mutable_checks(case, kind):
     a, store = case
