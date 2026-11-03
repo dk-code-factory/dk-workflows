@@ -116,7 +116,8 @@ def retain(path, value):
 def load(reference):
     if (not isinstance(reference, dict) or set(reference) != {'path', 'fingerprint'}
             or not isinstance(reference['path'], str) or not Path(reference['path']).is_absolute()
-            or not re.fullmatch(r'[0-9a-f]{64}', reference.get('fingerprint', ''))):
+            or not isinstance(reference['fingerprint'], str)
+            or not re.fullmatch(r'[0-9a-f]{64}', reference['fingerprint'])):
         raise ValueError('Missing or invalid architecture evidence reference')
     value = unseal(read(Path(reference['path']), {}))
     if value['fingerprint'] != reference['fingerprint']:
@@ -785,7 +786,7 @@ def validate_packet(reference, root, *, agent=None, paths=None, current_catalog=
     if live and current_catalog and current(root, value['repository'], baseline=value['baseline'])['fingerprint'] != catalog['fingerprint']:
         raise ValueError('Architecture catalog changed; refresh rule packet')
     inherited = None
-    if value.get('parent'):
+    if value['schema_version'] == 2:
         inherited = validate_packet(value['parent'], root, current_catalog=current_catalog, live=live)
         validate_child(value, inherited, value['parent'])
     if value['rules'] != inherited_rules(catalog, value['agent'], value['paths'], inherited):
@@ -901,7 +902,15 @@ def handoff(value, context, agent, paths=None, *, inherit_provider=True):
 
 
 def delivery_scope(value):
-    """Comparable delivery content; retained governing paths may relocate."""
+    """Compare validated packets, preserving their source checkout anchor."""
+    checkout = value.get('checkout')
+    if (isinstance(checkout, dict) and set(checkout) == {'path', 'repository'}
+            and isinstance(checkout['path'], str) and Path(checkout['path']).is_absolute()
+            and not Path(checkout['path']).exists()):
+        # A durable clone retains its deleted source path but cannot rediscover
+        # that source's remote. Both packets must independently pass live lineage
+        # validation; only this unavailable operational label may differ.
+        value = {**value, 'checkout': {**checkout, 'repository': 'path:' + checkout['path']}}
     return {**{key: item for key, item in value.items()
                if key not in {'fingerprint', 'governing_sources'}},
             'governing_sources': {key: reference['fingerprint']

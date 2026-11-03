@@ -75,14 +75,17 @@ audience-matching rule; an explicit [] means no file work. Include old/new renam
 paths and deletions. Validate with `architecture validate-packet --packet FILE
 --agent ID --paths-file FILE` before edits. Expansion requires a fresh packet.
 The coordinator pre-exports declared nested review packets before read-only
-provider launch. Nested packets retain their exact parent reference and the union
-of inherited obligations and recipient-selected rules; their paths cannot exceed
+provider launch. Schema-2 nested packets require a valid, non-null exact parent
+reference and retain the union of inherited obligations and recipient-selected
+rules; their paths cannot exceed
 the parent budget. Top-level coordinator delivery retains recipient filtering.
 New packets seal the source checkout independently of the pinned PR repository
 identity. Validation follows its local Git clone origins, including the terminal
 source path after that source is removed; matching commits in an unrelated
 checkout do not establish this lineage. Retained handoffs preserve the source
-anchor.
+anchor. After source removal, independently validated deliveries may compare its
+former remote identity with the path fallback for that same absent anchor; all
+other delivery content and exact nested parent references remain binding.
 Providers read their declared packet map. An exact unchanged delivery can be
 reused without directory, permission or lock writes. Missing packets, undeclared
 recipients, changed evidence and expanded scope require fresh coordinator delivery

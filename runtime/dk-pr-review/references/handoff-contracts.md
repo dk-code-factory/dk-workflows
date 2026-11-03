@@ -99,6 +99,8 @@ a replacement installed version or start another lifecycle inside the sandbox.
 An eligible interrupted session may keep its original top-level packet when an
 operational preparation refresh relocates governing snapshots. Both packets must
 validate, every delivery field must agree, and governing slot fingerprints must
-match. Original packets, paths and checkpoints remain immutable. Every nested
-packet still names the exact retained top-level parent; relocation does not permit
+match. If the source checkout was removed, its former remote label may compare
+with the path fallback only for the same absent checkout anchor; both packets must
+still pass live lineage validation. Original packets, paths and checkpoints remain
+immutable. Every nested packet still names the exact retained top-level parent; relocation does not permit
 substituting a parent or changing its inherited scope.

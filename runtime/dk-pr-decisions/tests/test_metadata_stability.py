@@ -408,6 +408,57 @@ def test_durable_captures_survive_export_and_checkout_removal_live_rules_still_b
         prep.gate(result['artifact'], pr_url=package.context['url'], head_sha=package.head)
 
 
+def test_interrupted_review_resumes_after_remote_source_removal_and_refresh(tmp_path, monkeypatch):
+    from shared import architecture
+    package = Package(tmp_path)
+    names = ['example', 'second']
+    prep.git(package.repo, 'remote', 'add', 'origin', 'https://github.com/example/source.git')
+    instruction = package.write('instruction.json', {'procedure': 'Review the supported transform'})
+    package.write('reviewer.json', descriptor(names[0], instruction))
+    package.manifest['evidence']['reviewers'].append(str(package.write('second.json', descriptor(names[1], instruction))))
+    package.manifest['source_modes'] = {name + '/0': 'capture' for name in prep.EVIDENCE
+                                       if name not in {'reviewers', 'rules', 'user_instructions'}}
+    package.write('manifest.json', package.manifest)
+    first = package.prepare(analysis(names))
+    prepared = prep.read(first['artifact'])
+    original_packet = architecture.load(prepared['architecture']['packet'])
+    assert original_packet['checkout']['repository'] == 'remote:github.com/example/source'
+    monkeypatch.setattr(runner, 'describe_reviewer', lambda name: prepared['reviewers'][name])
+    monkeypatch.setattr(runner, 'skill_path', lambda _: instruction)
+    context = prep.context_for(prepared)
+    session = review_sessions.Session(context, prepared, names)
+    reviewer = interrupt_after_checkpoint(names[0], {'findings': []},
+                                          lambda: session.cached(names[0]) is not None)
+    with session.execution(), patch.object(runner, 'run_skill_reviewer', side_effect=reviewer):
+        with pytest.raises(KeyboardInterrupt):
+            runner.review(context, names, '', package.decisions, '', prepared, session=session)
+    old = read(session.path, {})
+    checkpoint = Path(old['reviews'][names[0]]['checkpoint']['path'])
+    checkpoint_bytes = checkpoint.read_bytes()
+    deliveries = {name: (Path(item['path']), Path(item['path']).read_bytes())
+                  for name, item in old['deliveries'].items()}
+    assert names[1] in deliveries
+    shutil.rmtree(package.repo)
+    with patch.object(prep, 'analyze') as model:
+        fresh = prep.prepare(prepared['recovery_manifest']['path'], package.versions,
+                             previous_preparation=first['artifact'])
+    model.assert_not_called()
+    assert fresh['engineering_id'] == first['engineering_id']
+    prepared = prep.read(fresh['artifact'])
+    refreshed_packet = architecture.load(prepared['architecture']['packet'])
+    assert refreshed_packet['checkout'] == {'path': str(package.repo), 'repository': 'path:' + str(package.repo)}
+    context = prep.context_for(prepared)
+    resumed = review_sessions.Session(context, prepared, names, path=session.path, resume=True)
+    with resumed.execution(), patch.object(runner, 'run_skill_reviewer', return_value={'findings': []}) as calls:
+        result = runner.review(context, names, '', package.decisions, '', prepared, session=resumed)
+        resumed.finish(result)
+    assert result['complete'], result.get('reason', result)
+    assert calls.call_count == 1 and result['reused_reviewers'] == names[:1]
+    assert checkpoint.read_bytes() == checkpoint_bytes
+    assert all(path.read_bytes() == raw for path, raw in deliveries.values())
+    assert architecture.load(prep.read(first['artifact'])['architecture']['packet']) == original_packet
+
+
 @pytest.mark.parametrize('category', ['issues', 'choices', 'user_instructions', 'rules', 'questions', 'feedback', 'run_history'])
 def test_each_governing_source_invalidates_interrupted_reuse(tmp_path, category):
     package = Package(tmp_path)

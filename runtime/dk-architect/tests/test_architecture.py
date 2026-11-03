@@ -1782,6 +1782,57 @@ def test_nested_delivery_rejects_resealed_scope_and_inheritance_changes(repo, fi
         a.provider_packet(reference, repo, 'Spec', ['src/core.py'], parent=parent)
 
 
+@pytest.mark.parametrize('parent_value', [None, False, '', 0, [], {},
+    {'path': '/missing-parent'}, {'fingerprint': '0' * 64},
+    {'path': 'relative.json', 'fingerprint': '0' * 64},
+    {'path': '/missing-parent', 'fingerprint': None},
+    {'path': '/missing-parent', 'fingerprint': 42},
+    {'path': '/missing-parent', 'fingerprint': 'invalid'},
+    {'path': '/missing-parent', 'fingerprint': '0' * 64}],
+    ids=['null', 'false', 'empty-string', 'zero', 'list', 'empty-object', 'missing-hash',
+         'missing-path', 'relative-path', 'null-hash', 'numeric-hash', 'bad-hash', 'missing-file'])
+@pytest.mark.parametrize('consumer', ['validate', 'provider'])
+def test_schema2_rejects_malformed_parent_without_expected_parent(repo, parent_value, consumer):
+    initialize(repo, [obligation(), obligation('child', agents=['Spec'])])
+    parent = deliver(repo, paths=['src/core.py'])
+    child = a.handoff({'packet': parent}, {'checkout': str(repo)}, 'Spec', ['src/core.py'])
+    value = a.load(child)
+    # A child cannot hide inherited-only rules by replacing its parent with null
+    # or another malformed reference. Neither consumer supplies an expected parent.
+    value.update(parent=parent_value, rules=[rule for rule in value['rules'] if rule['id'] == 'arch-child'])
+    invalid = a.seal({key: item for key, item in value.items() if key != 'fingerprint'})
+    reference = a.retain(Path(child['path']).with_name(invalid['fingerprint'] + '.json'), invalid)
+    with pytest.raises(ValueError):
+        if consumer == 'validate':
+            a.validate_packet(reference, repo)
+        else:
+            a.provider_packet(reference, repo, 'Spec', ['src/core.py'])
+
+
+def test_parent_schema_guard_preserves_legacy_and_nested_inheritance(repo):
+    initialize(repo, [obligation(), obligation('child', agents=['Spec'])])
+    parent = deliver(repo, paths=['src/core.py'])
+    # Legacy top-level packets need neither a checkout anchor nor a parent.
+    legacy = a.seal({key: item for key, item in a.load(parent).items()
+                     if key not in {'fingerprint', 'checkout'}})
+    reference = a.retain(Path(parent['path']).with_name(legacy['fingerprint'] + '.json'), legacy)
+    assert a.provider_packet(reference, repo, 'worker') == reference
+    child = a.handoff({'packet': parent}, {'checkout': str(repo)}, 'Spec', ['src/core.py'])
+    grandchild = a.handoff({'packet': child}, {'checkout': str(repo)}, 'nested', ['src/core.py'])
+    assert a.provider_packet(grandchild, repo, 'nested') == grandchild
+    assert [rule['id'] for rule in a.validate_packet(grandchild, repo)['rules']] == ['arch-core', 'arch-child']
+    value = a.load(child)
+    for schema, keep_parent in ((2, False), (1, True)):
+        changed = {key: item for key, item in value.items() if key != 'fingerprint'}
+        changed['schema_version'] = schema
+        if not keep_parent:
+            changed.pop('parent')
+        invalid = a.seal(changed)
+        bad = a.retain(Path(child['path']).with_name(invalid['fingerprint'] + '.json'), invalid)
+        with pytest.raises(ValueError, match='schema and parent provenance'):
+            a.validate_packet(bad, repo)
+
+
 def test_delivery_rejects_same_commits_from_unrelated_repository(repo, tmp_path):
     initialize(repo, [obligation()])
     packet = deliver(repo, paths=['src/core.py'])
@@ -1849,6 +1900,22 @@ def test_delivery_scope_preserves_fields_but_ignores_governing_snapshot_relocati
     for field in ('agent', 'task', 'scope', 'rules', 'paths', 'checkout'):
         changed = {**right, field: None}
         assert a.delivery_scope(left) != a.delivery_scope(changed)
+
+
+def test_delivery_scope_normalizes_only_deleted_source_repository_label(repo, tmp_path):
+    initialize(repo, [obligation()])
+    value = a.load(deliver(repo, paths=['src/core.py']))
+    source = tmp_path / 'removed-source'
+    remote = {**value, 'checkout': {'path': str(source), 'repository': 'remote:github.com/o/r'}}
+    fallback = {**value, 'checkout': {'path': str(source), 'repository': 'path:' + str(source)}}
+    assert a.delivery_scope(remote) == a.delivery_scope(fallback)
+    for changed in ({'path': str(tmp_path / 'other-source'), 'repository': 'remote:github.com/o/r'},
+                    {**fallback['checkout'], 'unknown': 'additional provenance'}):
+        assert a.delivery_scope(remote) != a.delivery_scope({**fallback, 'checkout': changed})
+    assert a.delivery_scope(remote) != a.delivery_scope({**fallback, 'unknown': 'new requirement'})
+    # While the source exists, its remote remains part of exact delivery.
+    source.mkdir()
+    assert a.delivery_scope(remote) != a.delivery_scope(fallback)
 
 
 def test_checkout_provenance_is_operational_but_raw_lineage_remains_required(repo):
