@@ -308,7 +308,7 @@ def describe_prepared(context, reviewers, preparation):
     if (run(['git', 'rev-parse', 'HEAD'], checkout).strip() != context['head_sha']
             or run(['git', 'status', '--porcelain=v1'], checkout).strip()):
         raise ValueError('prepared isolated checkout changed; refresh preparation')
-    with bindings.pinned_bindings(preparation['reviewers']):
+    with bindings.pinned_bindings(preparation['reviewers'], cwd=checkout):
         descriptors = [describe_reviewer(provider) for provider in reviewers]
     if any(value != preparation['reviewers'][name] for name, value in zip(names, descriptors)):
         raise ValueError('effective reviewer instructions changed; refresh preparation')
