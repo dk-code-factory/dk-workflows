@@ -1,7 +1,7 @@
 {
   "name": "dk-workflows",
-  "version": "1.8.1",
-  "description": "Portable repository workflows, configurable reviewers, and guarded drafting.",
+  "version": "2.0.0",
+  "description": "Thin agent-led PR review and iteration coordination.",
   "author": {
     "name": "Dmitry Kropachev"
   },

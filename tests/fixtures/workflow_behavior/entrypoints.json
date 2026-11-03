@@ -1,7 +1,0 @@
-{
-  "iteration": {"roles": ["fixer", "reply", "reviewer"], "ci": true, "unknown": []},
-  "review": {"roles": ["reviewer"], "ci": false, "unknown": ["ci", "handoffs"]},
-  "decisions": {"roles": [], "ci": false, "unknown": ["ci", "handoffs"]},
-  "feedback": {"roles": ["fixer", "reply"], "ci": false, "unknown": ["ci", "handoffs"]},
-  "reply": {"roles": ["reply"], "ci": false, "unknown": ["ci", "handoffs"]}
-}
