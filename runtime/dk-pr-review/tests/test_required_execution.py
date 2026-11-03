@@ -208,6 +208,67 @@ def test_native_pass_completion_caches_proof_and_rechecks_it(native, monkeypatch
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize('correction', [False, True])
+def test_conditional_method_provider_repair_resumes_same_slot_with_retained_proof(native, monkeypatch, correction):
+    package, provider, name, prepared = native
+    monkeypatch.setitem(review_execution._CONDITIONAL, provider['skill'], ('Specialist', ['Optional']))
+    calls = []
+    invocation_attempt = []
+    invoke = runner.invoke
+    def invoke_slot(*args, attempt=0):
+        invocation_attempt.append(attempt)
+        return invoke(*args, attempt=attempt)
+    monkeypatch.setattr(runner, 'invoke', invoke_slot)
+    def run(argv, input, **kwargs):
+        collector = review_execution.active()
+        assert collector['invocation'] in input
+        attempt = invocation_attempt[-1]
+        calls.append((input, attempt))
+        if len(calls) == (2 if correction else 1):
+            return subprocess.CompletedProcess(argv, 1, '', 'authentication failed')
+        Path(argv[argv.index('-o') + 1]).write_text('invalid' if correction and len(calls) == 1 else '{"findings":[]}')
+        trace = events(missing=correction and len(calls) == 3)
+        if not correction or len(calls) == 1:
+            binding = collector['binding']
+            applicability = {field: binding[field] for field in ('head_sha', 'base_sha', 'descriptor_sha256')}
+            applicability.update(invocation=collector['invocation'], roles={
+                'Optional': {'required': False, 'reason': 'The pinned fixture has no optional specialist scope.'}})
+            rows = [json.loads(line) for line in trace.splitlines()]
+            rows[3]['item']['agents_states']['specialist']['message'] = (
+                'DK_REVIEW_APPLICABILITY_JSON=' + json.dumps(applicability))
+            trace = '\n'.join(json.dumps(row) for row in rows)
+        return subprocess.CompletedProcess(argv, 0, trace, '')
+    monkeypatch.setattr(executors, 'run_provider', run)
+    session = Session(package.context, prepared, [name])
+    with session.execution():
+        failed = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=session)
+    assert not failed['complete'] and failed['outcome'] == 'provider_failed', failed
+    assert 'authentication failed' in failed['reason']
+    prior_reference = failed['reviewer_execution'][name]['reference']
+    prior_bytes = Path(prior_reference['path']).read_bytes()
+    prior = json.loads(prior_bytes)
+    assert prior['assessment']['status'] == 'unavailable'
+    restored = Session(package.context, prepared, [name], path=session.path, resume=True)
+    with restored.execution():
+        recovered = runner.review(package.context, [provider], '', package.decisions, '', prepared, session=restored)
+        assert recovered['complete'], recovered
+        reference = restored.finish(recovered)
+    review_coverage.verify(reference, prepared)
+    assert calls[-1] == calls[-2]
+    assert [attempt for _, attempt in calls] == ([0, 1, 1] if correction else [0, 0])
+    saved_reference = recovered['reviewer_execution'][name]['reference']
+    saved = json.loads(Path(saved_reference['path']).read_text())
+    assert saved['invocation'] == prior['invocation']
+    assert saved['assessment']['status'] == 'complete'
+    assert saved['assessment']['completed'] == ['Specialist']
+    assert len(saved['attempts']) == len(calls)
+    records = [json.loads(Path(item['path']).read_text()) for item in saved['attempts']]
+    assert [item['returncode'] for item in records] == ([0, 1, 0] if correction else [1, 0])
+    assert records[-2]['stderr'] == 'authentication failed'
+    assert saved_reference['path'] != prior_reference['path']
+    assert Path(prior_reference['path']).read_bytes() == prior_bytes
+
+
 def test_one_correction_preserves_original_native_execution(native, monkeypatch):
     package, provider, name, prepared = native
     calls = transport(monkeypatch, ['invalid', '{"findings":[]}'], [events(), events(missing=True)])

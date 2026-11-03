@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 import tempfile
 import time
+import uuid
 from contextlib import contextmanager, nullcontext
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutureWaitTimeout
 from contextvars import copy_context
@@ -481,6 +482,8 @@ def _review(context, reviewers, scope, decisions, rules, preparation, stats=None
             job['path'] = directory / f'{index}.json'
             if session:
                 job['handoff']['response_budget'] = session.id + ':' + name
+                if name != 'architecture-review':
+                    job['handoff']['review_execution_invocation'] = uuid.uuid4().hex
                 job['path'] = session.delivery(name, job['path'], job['handoff'])
                 job['handoff'] = preparation_api.read(job['path'])
                 if job['handoff']['contract'] == 'git-diff-v2':

@@ -66,11 +66,18 @@ re-read all referenced hashes and recompute the assessment. Native model work is
 not relaunched to obtain missing evidence, and correction/review budgets do not
 change.
 
+The immutable session delivery retains the invocation identity across same-slot
+provider repair. Native attempts survive correction transport failures, and each
+result snapshot remains immutable. A later successful transport supersedes an
+earlier failed transport only in the same response slot; both raw attempts remain
+in history. This does not grant another JSON correction or review cycle.
+
 A complete supported native stream proving an omitted required pass is reported
 as missing execution. Absent, malformed or unsupported host evidence and unknown
 conditional applicability are unavailable evidence. Existing provider failure,
 usage exhaustion and interruption handling remains distinct. Unsupported root
-collaboration status/state containers and root assistant/user message containers
+completed-item envelopes, collaboration status/state containers, empty native
+session identities and root assistant/user message containers
 are unavailable evidence, even after earlier successful pass completions. Foreign
 and nested events cannot supply completion; unrelated metadata is ignored. No live
 provider-compatibility or general recall claim follows from offline transport

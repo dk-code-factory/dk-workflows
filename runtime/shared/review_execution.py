@@ -204,9 +204,28 @@ def collect(binding, descriptor, handoff_path, checkout):
     if not required:
         yield None
         return
+    invocation = handoff.get('review_execution_invocation', uuid.uuid4().hex)
+    if not isinstance(invocation, str) or not re.fullmatch(r'[0-9a-f]{32}', invocation):
+        raise ValueError('unsupported specialist execution invocation')
     collector = {'binding': identity(binding, descriptor, handoff, handoff_path),
-                 'required': required, 'invocation': uuid.uuid4().hex, 'attempts': [],
+                 'required': required, 'invocation': invocation, 'attempts': [],
                  'directory': allocate(repository=checkout)}
+    if 'review_execution_invocation' in handoff:
+        reserved = collector['directory']
+        reserved.rmdir()
+        directory = reserved.parent / 'review-execution-invocations' / invocation
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        collector['directory'] = directory
+        collector['state'] = directory / 'collection.json'
+        if collector['state'].exists():
+            saved = json.loads(collector['state'].read_text())
+            if (saved.get('version') != 1 or saved.get('invocation') != invocation
+                    or saved.get('binding') != collector['binding'] or not isinstance(saved.get('attempts'), list)):
+                raise ValueError('retained specialist execution collection identity mismatch')
+            collector['attempts'] = saved['attempts']
+            assess(collector['attempts'], invocation, collector['binding'], required)
+        else:
+            _save_collection(collector)
     token = _CURRENT.set(collector)
     try:
         yield collector
@@ -218,6 +237,11 @@ def active():
     return _CURRENT.get()
 
 
+def _save_collection(collector):
+    if 'state' in collector:
+        write(collector['state'], {key: collector[key] for key in ('invocation', 'binding', 'attempts')} | {'version': 1})
+
+
 def record(host, stdout, stderr, returncode, attempt):
     collector = active()
     if collector is None:
@@ -225,7 +249,7 @@ def record(host, stdout, stderr, returncode, attempt):
     value = {'version': 1, 'invocation': collector['invocation'], 'binding': collector['binding'],
              'host': host, 'attempt': attempt, 'stdout': stdout, 'stderr': stderr,
              'returncode': returncode}
-    path = collector['directory'] / f'attempt-{len(collector["attempts"])}.json'
+    path = collector['directory'] / ('attempt-' + uuid.uuid4().hex + '.json')
     try:
         write(path, value)
         fingerprint = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -234,6 +258,12 @@ def record(host, stdout, stderr, returncode, attempt):
             'Required specialist execution evidence could not be retained: ' + str(exc),
             task('Repair private specialist execution evidence storage.', path), outcome='error') from exc
     collector['attempts'].append({'path': str(path), 'sha256': fingerprint})
+    try:
+        _save_collection(collector)
+    except OSError as exc:
+        raise EvidenceFailure('review_execution_unavailable',
+            'Required specialist execution collection could not be retained: ' + str(exc),
+            task('Repair private specialist execution evidence storage.', path), outcome='error') from exc
 
 
 def _events(raw):
@@ -256,14 +286,19 @@ def _role(prompt):
 
 def codex_passes(raw):
     rows = _events(raw)
-    starts = [r for r in rows if r.get('type') == 'thread.started' and isinstance(r.get('thread_id'), str)]
-    if len(starts) != 1 or not any(r.get('type') == 'turn.completed' for r in rows):
+    starts = [r for r in rows if r.get('type') == 'thread.started']
+    if (len(starts) != 1 or not isinstance(starts[0].get('thread_id'), str) or not starts[0]['thread_id']
+            or not any(r.get('type') == 'turn.completed' for r in rows)):
         raise ValueError('incomplete or unsupported Codex event stream')
     root = starts[0]['thread_id']
     launched, completed, reports = {}, set(), {}
     for row in rows:
-        item = row.get('item', {})
-        if row.get('type') != 'item.completed' or not isinstance(item, dict) or item.get('type') != 'collab_tool_call':
+        if row.get('type') != 'item.completed':
+            continue
+        item = row.get('item')
+        if not isinstance(item, dict) or not isinstance(item.get('type'), str) or not item['type']:
+            raise ValueError('unsupported Codex completed item envelope')
+        if item['type'] != 'collab_tool_call':
             continue
         sender = item.get('sender_thread_id')
         if not isinstance(sender, str) or not sender:
@@ -434,6 +469,7 @@ def assess(attempts, invocation, expected, required):
     observed, unknown = [], []
     if expected.get('method_profile', {}).get('status') == 'unsupported':
         unknown.append(expected['method_profile']['reason'])
+    records = []
     for ref in attempts:
         path = Path(ref['path'])
         raw = path.read_bytes()
@@ -444,8 +480,16 @@ def assess(attempts, invocation, expected, required):
             raise ValueError('specialist execution evidence identity mismatch')
         if item.get('host') != expected.get('executor'):
             raise ValueError('specialist execution evidence executor identity mismatch')
+        if type(item.get('attempt')) is not int or item['attempt'] not in (0, 1):
+            raise ValueError('specialist execution evidence response slot unavailable')
+        records.append(item)
+    for index, item in enumerate(records):
         if item.get('returncode') != 0:
-            unknown.append('provider failure')
+            # A repaired transport resumes this same response slot. Keep the
+            # failed raw attempt, but only a later success in that slot replaces it.
+            if not any(later['attempt'] == item['attempt'] and later.get('returncode') == 0
+                       for later in records[index + 1:]):
+                unknown.append('provider failure')
             continue
         parser = {'codex': codex_passes, 'claude': claude_passes}.get(item.get('host'))
         if parser is None:
@@ -501,7 +545,7 @@ def finish(collector, result):
     assessment = assess(collector['attempts'], collector['invocation'], collector['binding'], collector['required'])
     value = {'version': 1, 'invocation': collector['invocation'], 'binding': collector['binding'],
              'attempts': collector['attempts'], 'assessment': assessment, 'original_result': result}
-    path = collector['directory'] / 'specialist-execution.json'
+    path = collector['directory'] / ('specialist-execution-' + uuid.uuid4().hex + '.json')
     write(path, value)
     return {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
 

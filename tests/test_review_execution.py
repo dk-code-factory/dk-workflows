@@ -338,6 +338,12 @@ def test_unsupported_marked_claude_launch_is_unavailable_after_completed_roles(p
 
 def malformed_execution_events():
     events = []
+    events.append(('codex', {'type': 'item.completed'}))
+    for item in (None, [], 'unsupported', 0, False, {}, {'type': None}, {'type': []}, {'type': ''},
+                 [{'type': 'collab_tool_call', 'tool': 'spawn_agent', 'sender_thread_id': 'root',
+                   'receiver_thread_ids': ['extra-child'], 'prompt': 'DK_REVIEW_PASS=Audit',
+                   'status': 'completed', 'agents_states': {}}]):
+        events.append(('codex', {'type': 'item.completed', 'item': item}))
     for tool in ('spawn_agent', 'wait', 'send_input', 'close_agent'):
         item = {'type': 'collab_tool_call', 'tool': tool, 'sender_thread_id': 'root',
                 'receiver_thread_ids': ['extra-child' if tool == 'spawn_agent' else 'child-0'],
@@ -418,6 +424,24 @@ def test_malformed_execution_events_cannot_reuse_prior_completion(proof, host, e
     assert evidence['original_result'] == original
     assert evidence['assessment']['status'] == 'unavailable'
     assert evidence['assessment']['unknown']
+
+
+@pytest.mark.parametrize('identity', [{}, {'thread_id': ''}, {'thread_id': None}, {'thread_id': []},
+                                      {'thread_id': {}}, {'thread_id': 0}, {'thread_id': False}])
+@pytest.mark.parametrize('earlier_completion', [False, True])
+def test_codex_malformed_session_identity_is_unavailable(proof, identity, earlier_completion):
+    repository, path, descriptor = proof
+    binding = {'skill': 'fixture:review', 'host': 'codex', 'nested_review_roles': ['Audit']}
+    rows = [{'type': 'thread.started', **identity}, {'type': 'turn.completed', 'usage': {}}]
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        if earlier_completion:
+            execution.record('codex', stream(codex_rows(['Audit'])), '', 0, 0)
+        execution.record('codex', stream(rows), '', 0, int(earlier_completion))
+        reference = execution.finish(collector, {'findings': []})
+    with pytest.raises(ValueError, match='execution unavailable'):
+        execution.verify(reference, binding, descriptor, path)
+    assessment = json.loads(Path(reference['path']).read_text())['assessment']
+    assert assessment['status'] == 'unavailable' and assessment['unknown']
 
 
 @pytest.mark.parametrize('host', ['codex', 'claude'])
@@ -606,6 +630,86 @@ def test_collector_scopes_do_not_leak_and_restore_parent_after_failure(proof):
                 raise RuntimeError('stop')
         assert execution.active() is outer
     assert execution.active() is None
+
+
+@pytest.mark.parametrize('change', ['head_sha', 'response_budget', 'descriptor', 'raw_attempt'])
+def test_resumed_collection_rejects_scope_drift_or_changed_retained_attempt(proof, change):
+    repository, path, descriptor = proof
+    handoff = json.loads(path.read_text())
+    handoff['review_execution_invocation'] = 'a' * 32
+    path.write_text(json.dumps(handoff))
+    with execution.collect(BINDING, descriptor, path, repository) as collector:
+        execution.record('codex', stream(codex_rows([*ROLES, 'Performance'])), '', 0, 0)
+        reference = execution.finish(collector, {'findings': []})
+    if change in ('head_sha', 'response_budget'):
+        handoff[change] += '-changed'
+        path.write_text(json.dumps(handoff))
+    elif change == 'descriptor':
+        descriptor['execution']['bundle_digest'] = 'different-package'
+    else:
+        saved = json.loads(Path(reference['path']).read_text())
+        Path(saved['attempts'][0]['path']).write_text('{}')
+    with pytest.raises(ValueError, match='identity mismatch|evidence changed'):
+        with execution.collect(BINDING, descriptor, path, repository):
+            pytest.fail('changed scope or proof authorized collection reuse')
+
+
+def test_collection_save_failure_and_resume_preserve_raw_attempt_and_snapshot(proof, monkeypatch):
+    repository, path, descriptor = proof
+    handoff = json.loads(path.read_text())
+    handoff['review_execution_invocation'] = 'b' * 32
+    path.write_text(json.dumps(handoff))
+    write = execution.write
+    def fail_collection(path, value):
+        if Path(path).name == 'collection.json':
+            raise OSError('collection journal unavailable')
+        return write(path, value)
+    with execution.collect(BINDING, descriptor, path, repository) as collector:
+        with monkeypatch.context() as patch:
+            patch.setattr(execution, 'write', fail_collection)
+            with pytest.raises(execution.EvidenceFailure, match='collection could not be retained'):
+                execution.record('codex', stream(codex_rows([*ROLES, 'Performance'])), 'original transport', 0, 0)
+        assert json.loads(collector['state'].read_text())['attempts'] == []
+        before = execution.finish(collector, {'findings': []})
+    snapshot_bytes = Path(before['path']).read_bytes()
+    prior = json.loads(snapshot_bytes)
+    raw_reference = prior['attempts'][0]
+    raw_bytes = Path(raw_reference['path']).read_bytes()
+    execution.verify(before, BINDING, descriptor, path)
+
+    with execution.collect(BINDING, descriptor, path, repository) as collector:
+        assert collector['attempts'] == []
+        execution.record('codex', stream(codex_rows([*ROLES, 'Performance'], message='Repaired transport review.')),
+                         'resumed transport', 0, 0)
+        after = execution.finish(collector, {'findings': []})
+    current = json.loads(Path(after['path']).read_text())
+    assert current['attempts'][0]['path'] != raw_reference['path']
+    assert Path(raw_reference['path']).read_bytes() == raw_bytes
+    assert hashlib.sha256(raw_bytes).hexdigest() == raw_reference['sha256']
+    assert Path(before['path']).read_bytes() == snapshot_bytes
+    execution.verify(before, BINDING, descriptor, path)
+    execution.verify(after, BINDING, descriptor, path)
+
+
+@pytest.mark.parametrize('failed_slot,repaired_slot', [(0, 0), (0, 1), (1, 0), (1, 1)])
+def test_only_later_success_in_same_slot_supersedes_transport_failure(proof, failed_slot, repaired_slot):
+    repository, path, descriptor = proof
+    with execution.collect(BINDING, descriptor, path, repository) as collector:
+        execution.record('codex', '', 'authentication failed', 1, failed_slot)
+        before = execution.finish(collector, None)
+        execution.record('codex', stream(codex_rows([*ROLES, 'Performance'])), '', 0, repaired_slot)
+        after = execution.finish(collector, {'findings': []})
+    prior = json.loads(Path(before['path']).read_text())
+    assert prior['assessment']['status'] == 'unavailable'
+    saved = json.loads(Path(after['path']).read_text())
+    assert len(saved['attempts']) == 2
+    if failed_slot == repaired_slot:
+        execution.verify(after, BINDING, descriptor, path)
+        assert saved['assessment']['status'] == 'complete'
+    else:
+        with pytest.raises(ValueError, match='execution unavailable:.*provider failure'):
+            execution.verify(after, BINDING, descriptor, path)
+    assert json.loads(Path(before['path']).read_text()) == prior
 
 
 def test_unfinished_second_child_cannot_hide_behind_completed_child_of_same_role(proof):
