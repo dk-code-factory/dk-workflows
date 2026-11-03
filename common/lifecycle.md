@@ -22,7 +22,10 @@ catalog analysis. It does not select configured reviewers, drafting bindings or
 architecture reviewer/enforcer roles with explicit packets. Their bindings and all
 review, CI, evidence and completion gates remain in force.
 
-There is no automatic failover or retry. On quota exhaustion, either wait for that
+Internal analysis has no automatic failover or retry. Configured PR reviewers and
+the standalone architecture reviewer use the bounded, same-provider
+[session quota recovery](../runtime/dk-pr-review/references/sessions.md#quota-recovery).
+For internal analysis quota exhaustion, either wait for that
 provider or manually rerun the original helper with the alternate selector. Keep
 the retained runtime, invocation, sources and correction budget. A journaled
 provider failure with no response resumes its existing response slot; a rejected

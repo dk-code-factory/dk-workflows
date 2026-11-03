@@ -28,7 +28,7 @@ name, move only its JSON to a nonreserved filename in the same external director
 preserve its checkpoint and result files, then explicitly resume with identical evidence.
 
 The session checkpoints each completed reviewer in immutable private storage before
-continuing. Resume reuses only completed checkpoints; interrupted reviewers execute again. Iteration failures require bounded cycle-recover for typed infrastructure failures, or the existing quota allowance; arbitrary incomplete responses cannot authorize another attempt. A per-session execution lock rejects
+continuing. Resume reuses only completed checkpoints; interrupted reviewers execute again. Iteration failures require bounded cycle-recover for typed infrastructure failures, or the quota recovery below; arbitrary incomplete responses cannot authorize another attempt. A per-session execution lock rejects
 concurrent coordinators. Missing, changed or unwritable session evidence blocks
 review; analytics failure merely warns and retains replay inputs.
 
@@ -160,3 +160,46 @@ Invalid retained bindings block cycle allocation before counters advance; consum
 cycles are never refunded or reset.
 
 Architecture executes concurrently with configured reviewers and checkpoints independently. The result retains separate architecture_accounting and structured role_failures diagnostics. Same-cycle recovery reuses completed roles and immutable deliveries, preserving response slots and correction budgets across operational refreshes. Reconciliation v3 distinguishes exact_identity proof from semantic_judgment; unchanged-head coverage skips reconciliation when the current gate passes.
+
+
+## Quota recovery
+
+The runner automatically restarts usage-exhausted configured reviewers and the
+standalone architecture reviewer once in the original session. Other provider
+failures, incomplete responses and guard failures do not authorize that restart.
+A mixed result with an exhausted reviewer stays incomplete. Keep every configured
+reviewer; do not substitute providers or infer failure acceptance.
+
+Retain the first immutable result before retrying. The session's `quota_recovery`
+checkpoint records original reasons, the original result, the reset deadline and
+restart history. The restart preserves reviewer bindings, original deliveries,
+completed checkpoints, execution evidence, response slots, correction attempts and
+iteration allocation. It does not allocate a new review cycle. Optional statistics
+retain separate session invocation identities for both attempts.
+
+Wait 60 seconds by default. Honor a longer advertised relative or timezone-qualified
+ISO-8601 reset. Wait at most 60 seconds inside one runner call; a longer wait returns
+an incomplete result and its durable checkpoint with `resume_after` and an exact
+`resume_argv`. A reset such as Codex's local date without a timezone remains unresolved;
+never infer the provider's zone. Verify that zone and append `--quota-reset-at` with
+a timezone-qualified ISO-8601 timestamp when resuming. That option resolves only an
+unknown reset; it cannot shorten a known advertised deadline or reset the budget.
+No background scheduler is installed by the runner. The calling workflow retains
+its authorization and may schedule the supplied resume command, or report the
+checkpoint and when/how execution can resume if quota remains unavailable.
+
+Before a restart, validate retained preparation and live remote head, base, title
+and body. Recheck source, Decisions, provider and checkout guards before launch.
+If evidence changed, refresh context, Decisions and preparation and review the
+current evidence in a fresh session within the caller's existing cycle budget.
+Preserve the old session, original result and attempt history. An exhausted budget
+remains a visible coverage limitation. Never reset it for recovery.
+
+Persistent quota returns `complete: false` with `quota_recovery.status: exhausted`;
+there is no immediate retry loop. An interruption during backoff keeps the pending
+checkpoint. Resume honors the original deadline. Once the recovered review completes,
+continue already authorized verification and posting/approval using the ordinary
+publication guards. Completed sessions cannot execute again; mutation reconciliation
+still prevents duplicate publication. A deferred or exhausted checkpoint supplies
+no completed-review coverage or publication authority. Internal analysis recovery
+retains its separate [provider policy](../../../common/lifecycle.md).

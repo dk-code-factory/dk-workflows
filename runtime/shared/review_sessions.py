@@ -415,6 +415,8 @@ class Session:
         with ownership(self.path):
             def begin(data):
                 require_activation(data, self.path)
+                if data.get('quota_recovery', {}).get('status') in {'waiting', 'exhausted'}:
+                    raise ValueError('quota recovery is waiting; resume through the review runner')
                 if data['status'] not in {'active', 'incomplete'}:
                     raise ValueError('review session finished; start a fresh review')
                 history = data.get('execution_history', [])

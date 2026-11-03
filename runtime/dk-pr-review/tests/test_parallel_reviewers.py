@@ -112,7 +112,7 @@ def test_real_commands_overlap_correct_and_keep_handoffs_and_traces_separate(com
 
 
 @pytest.mark.parametrize('behaviors,expected', [
-    (('ok', 'fail'), 'provider_failed'), (('ok', 'exhaust'), 'completed'),
+    (('ok', 'fail'), 'provider_failed'), (('ok', 'exhaust'), 'usage_exhausted'),
     (('exhaust', 'exhaust'), 'usage_exhausted')])
 def test_real_commands_keep_mixed_outcomes(commands, behaviors, expected):
     context, decisions, prep, providers, names, root = commands(behaviors)
@@ -120,7 +120,7 @@ def test_real_commands_keep_mixed_outcomes(commands, behaviors, expected):
     (root / 'second-finished').write_text('release')
     result = runner.review(context, providers, '', decisions, '', prep)
     assert result['outcome'] == expected, result
-    if expected != 'usage_exhausted':
+    if behaviors[0] == 'ok':
         assert result['findings'] == [{**finding(), 'reviewers': names[:1]}]
     else:
         assert result['findings'] == [] and len(result['skipped_reviewers']) == 2

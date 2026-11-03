@@ -209,7 +209,7 @@ def verify(item, prepared, *, accepted_failures=(), reconciliation=None, checkou
     failed = failures(result)
     failed_names = [f['reviewer'] for f in failed]
     skipped_names = [s['reviewer'] for s in skipped]
-    required = set(failed_names) | (set(skipped_names) if not completed else set())
+    required = set(failed_names) | (set(skipped_names) if not result['complete'] else set())
     accepted = set(accepted_failures)
     if (type(result.get('complete')) is not bool
             or (failed and result['complete'])
