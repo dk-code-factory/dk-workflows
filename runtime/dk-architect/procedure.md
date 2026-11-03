@@ -30,6 +30,14 @@ evidence-backed rules. Uncertain conventions remain proposals. Report conflicts;
 changes to existing obligations require explicit user resolution. Never enable
 autoapproval or broaden conditions without an exact user instruction and source.
 
+Conflicts require text and nonempty repository sources (path/start/end citations;
+legacy path strings remain accepted). Include `patterns` covering every affected
+path, including consumers, rather than only the cited documents. An empty pattern
+list means repository-wide impact; omitted patterns mean impact is unknown.
+Lifecycle, private-index, permissions and provider setup failures are operational
+errors: recover them in the coordinator and retry analysis, never record them as
+repository conflicts or initialize private state in read-only analysis.
+
 `architecture inspect --baseline SHA` returns that baseline's complete current
 catalog; `list` is equivalent. `--catalog HASH` selects a live catalog by its
 fingerprint instead. Both selectors may be supplied only when they identify the
@@ -68,6 +76,22 @@ paths and deletions. Validate with `architecture validate-packet --packet FILE
 --agent ID --paths-file FILE` before edits. Expansion requires a fresh packet.
 Nested agents repeat delivery using their own identity and paths. Workers request
 authorization before breaching a delivered rule; silence grants no permission.
+
+Packet creation checks conflict and stale-rule impact against the declared paths,
+including for recipients that receive the full catalog. Explicitly disjoint
+conflicts and stale rules are retained in `deferred_obligations` and in the
+immutable catalog. This records separate outstanding work; it does not schedule
+a repair or a follow-up issue, authorize changing those paths, resolve conflicts,
+or approve rule deviations. Relevant conflicts still require explicit resolution.
+Unknown conflict impact or unknown task paths block with the concrete uncertainty;
+inspect the cited conflict and refresh its impact evidence before requesting a
+product decision. Source citations alone never establish affected paths. Relevant
+stale evidence requires refresh or explicit resolution. Scope expansion requires
+a new packet and repeats these gates; validation checks the retained deferrals.
+To establish previously unknown impact during refresh, preserve the exact conflict
+text and sources and add patterns. The conflict remains pending and its original
+catalog remains immutable. Omitting it later cannot clear the conflict or its
+established impact; changing established impact retains both assessments.
 
 Use `architecture export --baseline SHA --agent ID --task TASK --paths-file FILE
 --scope-file FILE` (or select its current `--catalog HASH`) for agents outside DK

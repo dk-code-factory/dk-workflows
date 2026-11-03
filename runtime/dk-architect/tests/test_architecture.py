@@ -479,6 +479,159 @@ def test_uncertain_and_conflicting_conventions_are_not_adopted(repo):
     deliver(repo)
 
 
+def scoped_conflict_catalog(repo, **changes):
+    initialize(repo, [obligation()])
+    result = model_result(rules=[obligation()])
+    conflict = {'text': 'Legacy storage guidance disagrees',
+                'sources': [{'path': 'old.py', 'start': 1, 'end': 1}],
+                'patterns': ['legacy/**'], **changes}
+    result['conflicts'] = [conflict]
+    return a.ensure(repo, force=True, analyzer=lambda *_: result)
+
+
+@pytest.mark.parametrize('agent', ['worker', 'coordinator', 'dk-pr-iter', 'dk-architecture-review'])
+@pytest.mark.parametrize('paths', [[], ['src/core.py']])
+def test_unrelated_conflicts_are_retained_without_blocking_or_authorizing_repair(repo, agent, paths):
+    catalog = scoped_conflict_catalog(repo)
+    reference = a.packet(repo, agent, paths, baseline='HEAD', task='Repair core', scope={'issue': 'Core repair'})
+    delivered = a.validate_packet(reference, repo, agent=agent, paths=paths)
+    assert delivered['deferred_obligations'] == {'conflicts': catalog['conflicts'], 'stale_rules': []}
+    assert delivered['rules'] == a.selected(catalog, agent, paths)
+    assert a.current(repo, baseline=catalog['baseline']) == catalog
+    with pytest.raises(ValueError, match='scope expanded'):
+        a.validate_packet(reference, repo, paths=['legacy/store.py'])
+    with pytest.raises(ValueError, match='Legacy storage guidance disagrees.*explicit user resolution'):
+        a.packet(repo, agent, ['legacy/store.py'], baseline='HEAD', task='Repair core')
+
+
+@pytest.mark.parametrize('patterns,paths', [
+    (['legacy/**'], None), (['legacy/**'], ['legacy/store.py']),
+    ([], ['src/core.py']), ([], []),
+])
+def test_relevant_and_unknown_scope_conflicts_remain_blocked(repo, patterns, paths):
+    scoped_conflict_catalog(repo, patterns=patterns)
+    with pytest.raises(ValueError, match='Legacy storage guidance disagrees'):
+        a.packet(repo, 'worker', paths, baseline='HEAD', task='Repair core')
+
+
+def test_legacy_conflict_citations_do_not_silently_define_impact(repo):
+    catalog = scoped_conflict_catalog(repo)
+    result = model_result()
+    result['conflicts'] = [{'text': 'Core consumers may be affected', 'sources': ['old.py']}]
+    a.ensure(repo, force=True, analyzer=lambda *_: result)
+    with pytest.raises(ValueError, match='Core consumers may be affected.*affected paths are unknown'):
+        a.packet(repo, 'worker', ['src/core.py'], baseline='HEAD', task='Repair core')
+    assert a.load({'path': str(a.folder(repo)[0] / 'catalogs' / (catalog['fingerprint'] + '.json')),
+                   'fingerprint': catalog['fingerprint']}) == catalog
+
+
+def test_scoped_packet_cannot_omit_deferred_obligations(repo):
+    scoped_conflict_catalog(repo)
+    reference = a.packet(repo, 'worker', ['src/core.py'], baseline='HEAD', task='Repair core')
+    value = a.load(reference)
+    value.pop('fingerprint')
+    value['deferred_obligations']['conflicts'] = []
+    forged = a.seal(value)
+    forged_reference = a.retain(a.folder(repo)[0] / 'packets' / (forged['fingerprint'] + '.json'), forged)
+    with pytest.raises(ValueError, match='deferred obligations differ'):
+        a.validate_packet(forged_reference, repo)
+
+
+def test_refresh_can_establish_unknown_impact_without_clearing_the_conflict(repo):
+    conflict = {'text': 'Legacy guidance disagrees', 'sources': ['old.py']}
+    result = model_result()
+    result['conflicts'] = [conflict]
+    original = a.ensure(repo, analyzer=lambda *_: result)
+    with pytest.raises(ValueError, match='affected paths are unknown'):
+        a.packet(repo, 'worker', ['src/core.py'], baseline='HEAD', task='Repair core')
+    result['conflicts'] = [{**conflict, 'patterns': ['legacy/**']}]
+    refined = a.ensure(repo, force=True, analyzer=lambda *_: result)
+    assert refined['conflicts'] == result['conflicts']
+    reference = a.packet(repo, 'worker', ['src/core.py'], baseline='HEAD', task='Repair core')
+    assert a.validate_packet(reference, repo)['deferred_obligations']['conflicts'] == refined['conflicts']
+    # A later incomplete analysis must not restore unknown impact or clear it.
+    result['conflicts'] = [conflict]
+    assert a.ensure(repo, force=True, analyzer=lambda *_: result)['conflicts'] == refined['conflicts']
+    assert a.load({'path': str(a.folder(repo)[0] / 'catalogs' / (original['fingerprint'] + '.json')),
+                   'fingerprint': original['fingerprint']}) == original
+    with pytest.raises(ValueError, match='explicit user resolution'):
+        a.packet(repo, 'worker', ['legacy/store.py'], baseline='HEAD', task='Repair legacy')
+
+
+def test_impact_refinement_cannot_reopen_an_explicitly_resolved_conflict(repo):
+    conflict = {'text': 'Legacy guidance disagrees', 'sources': ['old.py']}
+    result = model_result()
+    result['conflicts'] = [conflict]
+    catalog = a.ensure(repo, analyzer=lambda *_: result)
+    a.edit(repo, obligation(), user=USER, expected=catalog['fingerprint'], resolve_conflicts=True)
+    result['conflicts'] = [{**conflict, 'patterns': ['legacy/**']}]
+    catalog = a.ensure(repo, force=True, analyzer=lambda *_: result)
+    assert not catalog['conflicts']
+    assert any(p.get('conflict') == result['conflicts'][0] for p in catalog['proposals'])
+
+
+@pytest.mark.parametrize('changed', ['src/core.py', 'legacy/store.py'])
+def test_preparation_and_nested_handoffs_gate_the_actual_diff_scope(repo, tmp_path, changed):
+    catalog = scoped_conflict_catalog(repo)
+    ctx, decisions = context(repo, tmp_path)
+    path = repo / changed
+    path.parent.mkdir(exist_ok=True)
+    path.write_text('changed = True\n')
+    run(repo, 'add', '.')
+    run(repo, 'commit', '-qm', 'repair')
+    ctx['head_sha'] = run(repo, 'rev-parse', 'HEAD')
+    decisions['head_sha'] = ctx['head_sha']
+    if changed.startswith('legacy/'):
+        with pytest.raises(ValueError, match='Legacy storage guidance disagrees'):
+            a.prepare(ctx, decisions)
+        return
+    prepared = a.prepare(ctx, decisions)
+    delivered = a.validate_preparation(prepared, ctx, decisions)
+    assert delivered['rules'] == catalog['rules']
+    assert delivered['deferred_obligations']['conflicts'] == catalog['conflicts']
+    worker = a.handoff(prepared, ctx, 'worker', [changed])
+    a.validate_packet(worker, repo, agent='worker', paths=[changed])
+    with pytest.raises(ValueError, match='Legacy storage guidance disagrees'):
+        a.handoff(prepared, ctx, 'worker', ['legacy/store.py'])
+
+
+def test_stale_rule_gate_uses_impact_even_for_full_catalog_recipients(repo):
+    catalog = initialize(repo, [obligation()])
+    catalog = a.publish(a.folder(repo)[0], {**catalog, 'stale_rules': ['arch-core']})
+    reference = a.packet(repo, 'coordinator', ['old.py'], baseline='HEAD', task='Repair legacy')
+    value = a.validate_packet(reference, repo)
+    assert value['rules'] == catalog['rules']
+    assert value['deferred_obligations'] == {'conflicts': [], 'stale_rules': ['arch-core']}
+    for paths in (None, ['src/core.py']):
+        with pytest.raises(ValueError, match='arch-core.*stale rule evidence'):
+            a.packet(repo, 'worker', paths, baseline='HEAD', task='Repair core')
+
+
+@pytest.mark.parametrize('conflict', [
+    {'text': 'Lifecycle initialization failed', 'sources': []},
+    {'text': 'Private index is unavailable'},
+    {'text': 'Provider setup failed', 'sources': ['missing-provider-log']},
+    {'text': 'Invalid impact', 'sources': ['old.py'], 'patterns': 'legacy/**'},
+])
+def test_operational_or_invalid_analysis_cannot_publish_repository_conflicts(repo, conflict):
+    original = initialize(repo, [obligation()])
+    result = model_result()
+    result['conflicts'] = [conflict]
+    with pytest.raises(ValueError):
+        a.ensure(repo, force=True, analyzer=lambda *_: result)
+    assert a.current(repo, baseline=original['baseline']) == original
+    a.packet(repo, 'worker', ['src/core.py'], baseline='HEAD', task='Repair core')
+
+
+def test_analysis_setup_failure_propagates_without_becoming_an_obligation(repo):
+    original = initialize(repo)
+    def unavailable(*_):
+        raise PermissionError('Read-only lifecycle setup failed; initialize in coordinator')
+    with pytest.raises(PermissionError, match='initialize in coordinator'):
+        a.ensure(repo, force=True, analyzer=unavailable)
+    assert a.current(repo, baseline=original['baseline']) == original
+
+
 def test_user_deletion_survives_refresh_until_explicit_readdition(repo):
     original = initialize(repo, [obligation()])
     deleted = a.edit(repo, delete='arch-core', user=USER, expected=original['fingerprint'])

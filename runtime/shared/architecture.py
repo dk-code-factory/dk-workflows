@@ -211,6 +211,19 @@ def validate_analysis(value, root, baseline):
                 source(root, baseline, ref)
     if any(not isinstance(value[key], list) for key in ('rules', 'proposals', 'conflicts')):
         raise ValueError('Architect rules, proposals and conflicts must be lists')
+    for conflict in value['conflicts']:
+        if (not isinstance(conflict, dict) or not isinstance(conflict.get('text'), str)
+                or not conflict['text'].strip() or not isinstance(conflict.get('sources'), list)
+                or not conflict['sources']):
+            raise ValueError('Architecture analysis conflict requires repository evidence; '
+                             'recover lifecycle/private-index/provider setup failures and retry analysis')
+        for ref in conflict['sources']:
+            source(root, baseline, {'path': ref} if isinstance(ref, str) else ref)
+        if 'patterns' in conflict:
+            if not isinstance(conflict['patterns'], list):
+                raise ValueError('Architecture conflict patterns must be a list')
+            for pattern in conflict['patterns']:
+                relative(pattern, pattern=True)
     ids = set()
     for item in value['rules']:
         checked = rule(item)
@@ -330,6 +343,13 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
               '{id:arch-NAME,revision:1,text,origin:documented|inferred,sources,patterns:[],agents:[],auto_approve:false,approval_when:""}. '
               'Only adopt established evidence-backed rules; uncertain conventions are proposals. '
               'Report conflicting obligations in conflicts and propose resolutions, never silently weaken old rules. '
+              'Each conflict requires text and repository sources:[{path,start,end}]. '
+              'Include patterns covering ALL paths affected by the conflicting obligations, including consumers, '
+              'not just citation locations; [] means repository-wide. Omit patterns if impact is uncertain. '
+              'To establish unknown impact on refresh, retain the conflict text/sources and add patterns; '
+              'this refines impact without resolving the conflict. '
+              'Lifecycle, private-index, permissions and provider setup errors are operational failures, '
+              'never repository conflicts. Do not initialize workflows or private state in this read-only analysis. '
               'Existing catalog: ' + json.dumps(old) + '\nBaseline: ' + baseline)
     from shared.model_diagnostics import analysis_workspace
     scope = {'operation': 'architecture-catalog', 'repository': key,
@@ -370,6 +390,17 @@ def ensure(root, baseline=None, *, identity=None, force=False, analyzer=None):
     for item in value['proposals']:
         proposals[digest(item)] = deepcopy(item)
     for item in value['conflicts']:
+        if 'patterns' in item:
+            # Establish previously unknown impact without dropping the pending
+            # decision or changing already-established scope. History stays sealed.
+            unknown = {key: val for key, val in item.items() if key != 'patterns'}
+            conflicts.pop(digest(unknown), None)
+            if digest(unknown) in resolved:
+                resolved.add(digest(item))
+        elif any('patterns' in existing and
+                 {key: val for key, val in existing.items() if key != 'patterns'} == item
+                 for existing in conflicts.values() if isinstance(existing, dict)):
+            continue
         conflicts[digest(item)] = deepcopy(item)
     for fingerprint in [key for key in conflicts if key in resolved]:
         proposal = {'conflict': conflicts.pop(fingerprint),
@@ -490,6 +521,32 @@ def selected(catalog, agent, paths):
                  or any(matches(pattern, path) for pattern in r['patterns'] for path in paths))]
 
 
+def scoped_obligations(catalog, paths):
+    """Defer only explicitly disjoint obligations; citations do not define impact."""
+    deferred = {'conflicts': [], 'stale_rules': []}
+    blocked = []
+    for conflict in catalog['conflicts']:
+        patterns = conflict.get('patterns') if isinstance(conflict, dict) else None
+        text = conflict.get('text', repr(conflict)) if isinstance(conflict, dict) else str(conflict)
+        if patterns is None or paths is None:
+            blocked.append(text + ' (affected paths are unknown; establish impact with architecture refresh)')
+        elif not patterns or any(matches(pattern, path) for pattern in patterns for path in paths):
+            blocked.append(text + ' (conflict affects the declared paths; explicit user resolution required)')
+        else:
+            deferred['conflicts'].append(deepcopy(conflict))
+    for rule_id in catalog['stale_rules']:
+        obligation = next((r for r in catalog['rules'] if r['id'] == rule_id), None)
+        if (obligation is None or paths is None or not obligation['patterns']
+                or any(matches(pattern, path) for pattern in obligation['patterns'] for path in paths)):
+            blocked.append(rule_id + ' (stale rule evidence; refresh or explicitly resolve this obligation)')
+        else:
+            deferred['stale_rules'].append(rule_id)
+    if blocked:
+        raise ValueError('Architecture obligations require explicit user resolution or impact/evidence recovery: '
+                         + '; '.join(blocked))
+    return deferred
+
+
 def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, governing=None, identity=None, catalog=None):
     if not agent or not task:
         raise ValueError('Agent identity and task/PR scope required')
@@ -503,15 +560,15 @@ def packet(root, agent, paths, *, task, baseline=None, head=None, scope=None, go
                           catalog=supplied['fingerprint'])
     else:
         catalog = current(root, identity, baseline=baseline)
-    if catalog['conflicts'] or catalog['stale_rules']:
-        raise ValueError('Architecture obligations require explicit user resolution')
+    rules = selected(catalog, agent, paths)
+    deferred = scoped_obligations(catalog, paths)
     head = git(root, 'rev-parse', '--verify', (head or 'HEAD') + '^{commit}').strip()
     value = seal({'schema_version': 1, 'kind': 'architecture-packet', 'repository': catalog['repository'],
                   'catalog': catalog['fingerprint'], 'baseline': catalog['baseline'],
                   'agent': agent, 'paths': paths, 'task': task, 'head': head,
                   'tree': git(root, 'rev-parse', head + '^{tree}').strip(), 'scope': digest(scope),
                   'scope_contents': scope, 'governing_sources': governing or {},
-                  'rules': selected(catalog, agent, paths)})
+                  'rules': rules, 'deferred_obligations': deferred})
     directory, _ = folder(root, catalog['repository'])
     return retain(directory / 'packets' / (value['fingerprint'] + '.json'), value)
 
@@ -526,6 +583,9 @@ def validate_packet(reference, root, *, agent=None, paths=None, current_catalog=
         raise ValueError('Architecture catalog changed; refresh rule packet')
     if value['rules'] != selected(catalog, value['agent'], value['paths']):
         raise ValueError('Architecture packet rule coverage differs')
+    deferred = scoped_obligations(catalog, value['paths'])
+    if value.get('deferred_obligations', {'conflicts': [], 'stale_rules': []}) != deferred:
+        raise ValueError('Architecture packet deferred obligations differ')
     if digest(value.get('scope_contents')) != value['scope']:
         raise ValueError('Architecture packet scope evidence differs')
     governing = value.get('governing_sources', {})
