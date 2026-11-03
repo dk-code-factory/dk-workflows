@@ -152,6 +152,46 @@ def test_malformed_quota_gets_schema_correction(pinned, tmp_path, malformed):
     assert 'Correction:' in provider.call_args.args[3]
 
 
+def test_deeply_nested_reply_gets_ordinary_json_correction(pinned, tmp_path):
+    import sys
+    handoff = tmp_path / 'nested-correction.json'
+    handoff.write_text(json.dumps({'patch': pinned[0]['patch'], 'response_budget': 'nested-response'}))
+    depth = sys.getrecursionlimit() + 100
+    nested = '[' * depth + '0' + ']' * depth
+    with patch.object(runner, 'invoke', side_effect=[nested, '{"findings":[]}']) as provider:
+        result = runner.run_skill_reviewer(pinned[3][0], Path('SKILL.md'), handoff, pinned[0]['checkout'])
+    assert result == {'findings': []}
+    assert [call.kwargs['attempt'] for call in provider.call_args_list] == [0, 1]
+    assert 'Correction:' in provider.call_args.args[3]
+
+
+@pytest.mark.parametrize('hint,unresolved', [
+    ('Retry-After: 3600' + 'x' * 10000, True),
+    ('Retry-After: 3600; try again at ' + 'x' * 10000, True),
+    ('Retry-After: 3600', False),
+])
+def test_truncated_quota_diagnostic_preserves_reset_guards(main_call, pinned, monkeypatch, hint, unresolved):
+    import time
+    from shared import executors
+    monkeypatch.setattr(recovery, 'BACKOFF_SECONDS', 60)
+    monkeypatch.setattr(recovery, 'MAX_WAIT_SECONDS', 0)
+    before = time.time()
+    detail = 'x' * 10000 + ' usage limit reached; ' + hint
+    with pytest.raises(runner.ProviderExhausted) as failure:
+        executors.provider_failure(detail)
+    reason = str(failure.value)
+    assert len(reason) <= executors.MAX_PROVIDER_ERROR_CHARS
+    assert '[provider output truncated]' in reason
+    with patch.object(runner, 'run_skill_reviewer', return_value=quota(reason)) as providers:
+        result = main_call()
+    state = result['quota_recovery']
+    assert not result['complete'] and state['status'] == 'waiting' and state['restarts'] == 0
+    assert providers.call_count == len(pinned[3])
+    assert (state['not_before'] is None) == unresolved
+    if not unresolved or hint.startswith('Retry-After: 3600;'):
+        assert state['known_not_before'] >= before + 3600
+
+
 def test_reset_parser_and_interruptible_wait_preserve_checkpoint(pinned, monkeypatch):
     assert recovery.reset_time('Retry-After: 120', 100) == 220
     assert recovery.reset_time('try again in 2 minutes', 100) == 220

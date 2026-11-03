@@ -12,6 +12,7 @@ import re
 import uuid
 
 from shared import bindings
+from shared.review_responses import is_quota_response
 from shared.diagnostics import Diagnostic, task
 from shared.private_state import write
 from shared.workflow_storage import allocate
@@ -471,11 +472,9 @@ def failed_attempt(item):
         return True
     try:
         response = json.loads(item.get('response', ''))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, RecursionError):
         return False
-    return (isinstance(response, dict) and set(response) == {'status', 'findings', 'message'}
-            and response['status'] == 'tokens_exhausted' and response['findings'] == []
-            and isinstance(response['message'], str) and bool(response['message'].strip()))
+    return is_quota_response(response)
 
 
 def assess(attempts, invocation, expected, required):

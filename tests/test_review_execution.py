@@ -1043,6 +1043,24 @@ def test_native_structured_quota_is_replaced_only_by_same_slot_success(
             execution.verify(after, binding, descriptor, path)
 
 
+@pytest.mark.parametrize('host', ['codex', 'claude'])
+def test_corrected_deeply_nested_response_retains_native_execution(proof, host):
+    repository, path, descriptor = proof
+    binding = {'skill': 'fixture:review', 'host': host, 'nested_review_roles': ['Audit']}
+    descriptor['execution']['executor'] = host
+    depth = sys.getrecursionlimit() + 100
+    nested = '[' * depth + '0' + ']' * depth
+    rows = codex_rows(['Audit']) if host == 'codex' else claude_rows(['Audit'])
+    with execution.collect(binding, descriptor, path, repository) as collector:
+        execution.record(host, stream(rows), '', 0, 0, response=nested)
+        execution.record(host, stream(rows), '', 0, 1, response='{"findings":[]}')
+        reference = execution.finish(collector, {'findings': []})
+    execution.verify(reference, binding, descriptor, path)
+    saved = json.loads(Path(reference['path']).read_text())
+    assert len(saved['attempts']) == 2
+    assert json.loads(Path(saved['attempts'][0]['path']).read_text())['response'] == nested
+
+
 @pytest.mark.parametrize('failed_slot,repaired_slot', [(0, 0), (0, 1), (1, 0), (1, 1)])
 @pytest.mark.parametrize('error_field', ['is_error', 'subtype'])
 def test_claude_quota_error_envelope_requires_same_slot_success(

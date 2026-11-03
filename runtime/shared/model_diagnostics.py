@@ -12,6 +12,7 @@ import tempfile
 
 from shared.diagnostics import Diagnostic, task
 from shared.private_state import read, write
+from shared.review_responses import is_quota_response
 from shared.repository_scope import inside_checkout
 from shared.workflow_storage import allocate
 
@@ -287,9 +288,7 @@ def retained(path, identity):
                 except (ValueError, RecursionError):
                     response = None
                 quota_failure = (item['provider_error']['type'] == 'ProviderExhausted'
-                    and isinstance(response, dict) and set(response) == {'status', 'findings', 'message'}
-                    and response['status'] == 'tokens_exhausted' and response['findings'] == []
-                    and isinstance(response['message'], str) and bool(response['message'].strip()))
+                                 and is_quota_response(response))
             if ('validation' in item and ('response' not in item or 'provider_error' in item)
                     or 'provider_error' in item and 'response' in item and not quota_failure
                     or 'field' in item.get('validation', {}) and not isinstance(item['validation']['field'], str)):

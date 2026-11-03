@@ -350,8 +350,20 @@ def provider_failure(detail, prompt=None, fallback='Provider execution failed'):
                          r'(?:out of|no|insufficient) (?:credits|tokens)|tokens? exhausted', detail, re.I)
     detail = detail.strip() or fallback
     if len(detail) > MAX_PROVIDER_ERROR_CHARS:
-        half = (MAX_PROVIDER_ERROR_CHARS - 40) // 2
-        detail = detail[:half] + '\n[provider output truncated]\n' + detail[-half:]
+        reset = ''
+        if exhausted and not authentication:
+            # Recovery consumes this diagnostic; retain reset guards before truncation.
+            from datetime import datetime, timezone
+            from shared.reviewer_recovery import reset_deadlines
+            now = time.time()
+            deadline, known = reset_deadlines(detail, now)
+            if known > now:
+                reset += '\nRetry-After: ' + datetime.fromtimestamp(known, timezone.utc).isoformat()
+            if deadline is None:
+                reset += '\nRetry-After: unknown'
+        marker = '\n[provider output truncated]\n'
+        half = (MAX_PROVIDER_ERROR_CHARS - len(marker) - len(reset)) // 2
+        detail = detail[:half] + marker + detail[-half:] + reset
     if exhausted and not authentication:
         raise ProviderExhausted(detail)
     raise RuntimeError(detail)

@@ -65,6 +65,11 @@
   "owned_changes": [
     {
       "source": "dk-code-factory/dk-workflows",
+      "version": "1.7.11",
+      "description": "Recover usage-exhausted review roles once in their original session, preserve reset deadlines and interrupted checkpoints, and retain native proof and JSON correction budgets through recovery."
+    },
+    {
+      "source": "dk-code-factory/dk-workflows",
       "version": "1.7.10",
       "description": "Add diagnostic-only offline comparison of retained full and compact native reviewer evidence, with explicit cohort and governing-scope checks, isolated regressions and pending live acceptance."
     },

@@ -32,6 +32,7 @@ from shared.runtime_bundles import retained_binding, retain
 from shared.review_sessions import Session
 from shared.preparation_views import reviewer_view
 from shared.executors import invoke, ProviderExhausted, ProviderCancelled, provider_cancellation
+from shared.review_responses import is_quota_response
 
 ROOT = next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())
 _spec = importlib.util.spec_from_file_location('decision_api', ROOT/'dk-pr-decisions/scripts/decisions.py')
@@ -103,13 +104,9 @@ def run_skill_reviewer(name, skill, handoff_path, checkout):
             # Preserve the current response slot and its correction attempt.
             try:
                 value = json.loads(raw)
-            except ValueError:
+            except (ValueError, RecursionError):
                 return raw
-            if isinstance(value, dict) and value.get('status') == 'tokens_exhausted':
-                try:
-                    validate_response(value, changed)
-                except ValueError:
-                    return raw
+            if is_quota_response(value):
                 raise ProviderExhausted(value['message'])
             return raw
         try:
