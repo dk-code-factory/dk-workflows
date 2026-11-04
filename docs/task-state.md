@@ -60,6 +60,13 @@ Use `record --progress PROGRESS.json` for append-only stage outcomes, finding di
 
 Claims never expire. Establish that the prior agent stopped and reconcile its domain writes before recovery. Use `start --recover CLAIM_ID`, or repeated `start-batch --recover TASK_KEY=CLAIM_ID`, retaining the original run and unchanged-input cycle. Changed review inputs require a new cycle. To close a stopped claim without launching replacement work, use `invalidate --key TASK_KEY --reason TEXT --recover CLAIM_ID`; this also works when missing resources prevent recapture. Repeated `--key` invalidates several tasks.
 
+Native reviewers follow [native reviewer handoffs](native-review.md). Retain the
+host handle and terminal outcome in operational progress. The coordinator checks
+host execution and skill completion before recording success; the store rejects
+empty or whitespace-only original output for complete work, including reuse of
+older empty results. It does not verify host events or infer skill completion
+from report text. Failed/incomplete attempts may retain empty output.
+
 ## Retained budgets
 
 Pass `--run RUN_ID --cycle CYCLE_ID` for iteration reviewers. All reviewers in one pass share a stable cycle; resume retains it. The first actual invocation reserves the cycle atomically; reuse reserves none. New review work after fixes uses a new cycle, up to five total.

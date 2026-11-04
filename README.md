@@ -1,6 +1,6 @@
 # dk-workflows
 
-Version 2.3.0. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
+Version 2.3.1. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
 
 The coordinators are `dk-pr-review`, `dk-pr-iter` and `dk-config`. Bundled domain skills cover:
 
@@ -8,7 +8,7 @@ The coordinators are `dk-pr-review`, `dk-pr-iter` and `dk-config`. Bundled domai
 - Feedback and publication: `dk-pr-read-comments`, `dk-pr-address-reviews`, `dk-pr-reply-review`, `dk-pr-post-review`, `dk-pr-publish`.
 - Scope, CI and settings: `dk-pr-split-commits`, `dk-ci`, `dk-flaky-tests`, `dk-pr-config`.
 
-Install through this plugin’s marketplace or the organization catalog. External reviewers are installed and selected separately; there is no default reviewer. Native agents resolve and invoke skills, which own their procedures and completion reports. [Architecture](https://github.com/dk-code-factory/dk-architecture) is independent and is never invoked automatically.
+Install through this plugin’s marketplace or the organization catalog. External reviewers are installed and selected separately; there is no default reviewer. Native agents resolve and invoke skills, which own their procedures and completion reports. [Native reviewer handoffs](docs/native-review.md) retain host handles and require successful execution plus a complete report. [Architecture](https://github.com/dk-code-factory/dk-architecture) is independent and is never invoked automatically.
 
 Standalone review and iteration share task identities and cached results. Fingerprints cover canonical PR identity, complete consumed Git content/context, installed resources, assigned instructions, options and the contract version. Generate specs with `spec --definition` and claim reviewer passes with `start-batch`. Each task retains its own result, claim and recovery path. Completed findings remain reusable analysis; failed, incomplete or damaged artifacts do not satisfy coverage. Squash-only cleanup can retain content reviews while refreshing head-specific checks. Use `status --explain` for reuse diagnostics.
 

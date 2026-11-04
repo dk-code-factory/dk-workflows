@@ -24,6 +24,10 @@ def digest(value):
                                      ensure_ascii=True, allow_nan=False).encode()).hexdigest()
 
 
+def has_output_content(original):
+    return bool(original.decode('utf-8', errors='surrogateescape').strip())
+
+
 def read(path):
     return json.loads(Path(path).read_text())
 
@@ -542,6 +546,7 @@ class Store:
                     or result['status'] not in {'complete','failed','incomplete'}
                     or type(result['normalized']['complete']) is not bool
                     or (result['status'] == 'complete') != result['normalized']['complete']
+                    or (result['status'] == 'complete' and not has_output_content(original))
                     or hashlib.sha256(original).hexdigest() != result['original_sha256']
                     or result['fingerprint'] != reference['fingerprint']
                     or result['key'] != entry['key']):
@@ -775,6 +780,8 @@ class Store:
                 or not isinstance(normalized.get('findings', []), list)
                 or (status == 'complete') != normalized['complete']):
             raise ValueError('Explicit completion status and normalized complete/findings are required')
+        if status == 'complete' and not has_output_content(original):
+            raise ValueError('A complete task requires nonempty original output')
         with self.locked() as manifest:
             entry = manifest['entries'].get(captured['key'], {})
             claim = entry.get('claim')
