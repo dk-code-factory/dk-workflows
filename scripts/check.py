@@ -65,7 +65,8 @@ def check(base=None):
             if 'tests' in relative.parts or '__pycache__' in relative.parts:continue
             if relative.as_posix() in {'scripts/check.py','scripts/version.py','scripts/test.py'}:continue
             text=path.read_text()
-            for forbidden in ('codex exec','claude -p','--ephemeral','shared.executors','preparation_graph','architecture_packet'):
+            for forbidden in ('codex exec','claude -p','--ephemeral','shared.executors','preparation_graph','architecture_packet',
+                              'git-diff-v1','git-diff-v2'):
                 assert forbidden not in text,'Unexpected core execution/domain integration: '+str(relative)+': '+forbidden
     if base:
         previous=json.loads(subprocess.check_output(['git','show',base+':.codex-plugin/plugin.json'],text=True,cwd=ROOT))
