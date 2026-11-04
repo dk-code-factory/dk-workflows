@@ -67,6 +67,63 @@ def identity(repository, pr):
     return {'repository': repository, 'pr': f'https://{repository}/pull/{int(parts[4])}'}
 
 
+def make_spec(*, repository, pr, skill_identity, resources, responsibility,
+              assigned_instructions, instructions, inputs, options, git=None,
+              governing_inputs_complete=False, cacheable=None):
+    """Build an ordinary task spec from explicit inputs, without capturing them.
+
+    Callers supply the complete governing resource/input maps. Generation does
+    not discover resources, resolve Git refs, or add invocation/progress data.
+    The normal command boundaries still capture and validate live resources.
+    """
+    subject = identity(repository, pr)
+    for name, value in (('skill identity', skill_identity), ('responsibility', responsibility),
+                        ('assigned instructions', assigned_instructions)):
+        if not isinstance(value, str) or not value:
+            raise ValueError('Nonempty ' + name + ' is required')
+
+    def paths(values):
+        if not isinstance(values, dict) or any(not isinstance(key, str) for key in values):
+            raise ValueError('Expected a label-to-resource-path map')
+        result = {}
+        for key, value in values.items():
+            path = os.fspath(value)
+            if not isinstance(path, str) or not path:
+                raise ValueError('Resource paths must be nonempty strings')
+            result[key] = path
+        return result
+
+    resources, instructions, inputs = paths(resources), paths(instructions), paths(inputs)
+    if type(governing_inputs_complete) is not bool:
+        raise ValueError('governing_inputs_complete must be boolean')
+    if cacheable is None:
+        cacheable = bool(resources) and governing_inputs_complete
+    if type(cacheable) is not bool:
+        raise ValueError('cacheable must be boolean')
+    if cacheable and (not resources or not governing_inputs_complete):
+        raise ValueError('Cache requires captured resources and complete governing inputs; use cacheable:false otherwise')
+    if not isinstance(options, dict):
+        raise ValueError('options must be an object')
+    spec = {**subject, 'skill': {'identity': skill_identity, 'resources': resources},
+            'task': {'id': responsibility, 'instructions': assigned_instructions},
+            'instructions': instructions, 'inputs': inputs, 'options': deepcopy(options),
+            'governing_inputs_complete': governing_inputs_complete, 'cacheable': cacheable}
+    if git is not None:
+        if not isinstance(git, dict):
+            raise ValueError('git must be an object')
+        source = deepcopy(git)
+        source['checkout'] = os.fspath(source['checkout'])
+        for key in ('checkout', 'target', 'base', 'head'):
+            if not isinstance(source[key], str) or not source[key]:
+                raise ValueError('Git ' + key + ' must be a nonempty string')
+        for option in ('history', 'head_sensitive'):
+            if type(source.get(option, False)) is not bool:
+                raise ValueError(option + ' must be boolean')
+        spec['git'] = source
+    digest(spec)  # Reject values that cannot survive the JSON task-spec contract.
+    return spec
+
+
 def resource(path):
     """Hash exact installed resource bytes, including directory names and symlink targets."""
     path = Path(path).absolute()
@@ -346,7 +403,7 @@ def _capture_git(source, *, batched=False):
 
 
 class _CaptureContext:
-    """Share only identical immutable Git calculations within one status call."""
+    """Share only identical immutable Git calculations within one command."""
     def __init__(self):
         self.git_captures = {}
 
@@ -609,48 +666,105 @@ class Store:
             state['ci_reruns'][head] = state['ci_reruns'].get(head, 0) + 1
         return state
 
+    def _start_captured(self, manifest, captured, *, recover=None, run=None, cycle=None,
+                        retry=False, ci_repair=False, ci_rerun=False, head=None):
+        """Stage one start in the caller's locked manifest; never persist here."""
+        entry = manifest['entries'].setdefault(captured['key'], {'key': captured['key'], 'attempts': []})
+        previous = self.describe(captured, entry)
+        if entry.get('claim'):
+            if recover != entry['claim']['id']:
+                return {'action': 'recover_required', **previous}
+            if run != entry['claim']['run'] or (
+                    captured['fingerprint'] == entry['claim']['fingerprint']
+                    and cycle != entry['claim']['cycle']):
+                raise ValueError('Recovery must retain the original run and unchanged-input cycle budgets')
+            entry['attempts'][-1]['status'] = 'interrupted'
+            entry['attempts'][-1]['recovery'] = 'explicit recovery by coordinating agent'
+            del entry['claim']
+        elif recover:
+            raise ValueError('Recovery id is not the active claim')
+        if previous['reusable']:
+            return {'action': 'reuse', **previous}
+        state = self.budget(manifest, run=run, cycle=cycle, retry=retry, ci_repair=ci_repair,
+                            ci_rerun=ci_rerun, head=head, task=captured['key'])
+        if cycle and not (ci_repair or ci_rerun):
+            tasks = state['review_tasks'].setdefault(cycle, {})
+            previous_fingerprint = tasks.get(captured['key'])
+            if previous_fingerprint and previous_fingerprint != captured['fingerprint']:
+                raise ValueError('Changed review inputs require a new cycle; retain the existing budget')
+            if previous_fingerprint and not (retry or recover):
+                raise ValueError('Repeated same-cycle execution requires explicit retry or claim recovery')
+            if retry and not previous_fingerprint:
+                raise ValueError('Same-cycle retry requires a recorded original task attempt')
+            tasks[captured['key']] = captured['fingerprint']
+        claim = {'id': uuid.uuid4().hex, 'key': captured['key'], 'fingerprint': captured['fingerprint'],
+                 'cacheable': captured['cacheable'], 'started': time.time(), 'run': run, 'cycle': cycle,
+                 'provenance': captured['provenance']}
+        entry.update(claim=claim, components=captured['components'])
+        entry['attempts'].append({**claim, 'status': 'started'})
+        return {'action': 'invoke', 'claim': claim, 'manifest': str(self.manifest),
+                'changed': previous['changed']}
+
     def start(self, spec, *, recover=None, run=None, cycle=None, retry=False,
               ci_repair=False, ci_rerun=False, head=None):
         captured = capture(spec)
         if captured['subject'] != self.subject:
             raise ValueError('Spec refers to another PR')
         with self.locked() as manifest:
-            entry = manifest['entries'].setdefault(captured['key'], {'key': captured['key'], 'attempts': []})
-            previous = self.describe(captured, entry)
-            if entry.get('claim'):
-                if recover != entry['claim']['id']:
-                    return {'action': 'recover_required', **previous}
-                if run != entry['claim']['run'] or (
-                        captured['fingerprint'] == entry['claim']['fingerprint']
-                        and cycle != entry['claim']['cycle']):
-                    raise ValueError('Recovery must retain the original run and unchanged-input cycle budgets')
-                entry['attempts'][-1]['status'] = 'interrupted'
-                entry['attempts'][-1]['recovery'] = 'explicit recovery by coordinating agent'
-                del entry['claim']
-            elif recover:
-                raise ValueError('Recovery id is not the active claim')
-            if previous['reusable']:
-                return {'action': 'reuse', **previous}
-            state = self.budget(manifest, run=run, cycle=cycle, retry=retry, ci_repair=ci_repair,
-                                ci_rerun=ci_rerun, head=head, task=captured['key'])
-            if cycle and not (ci_repair or ci_rerun):
-                tasks = state['review_tasks'].setdefault(cycle, {})
-                previous_fingerprint = tasks.get(captured['key'])
-                if previous_fingerprint and previous_fingerprint != captured['fingerprint']:
-                    raise ValueError('Changed review inputs require a new cycle; retain the existing budget')
-                if previous_fingerprint and not (retry or recover):
-                    raise ValueError('Repeated same-cycle execution requires explicit retry or claim recovery')
-                if retry and not previous_fingerprint:
-                    raise ValueError('Same-cycle retry requires a recorded original task attempt')
-                tasks[captured['key']] = captured['fingerprint']
-            claim = {'id': uuid.uuid4().hex, 'key': captured['key'], 'fingerprint': captured['fingerprint'],
-                     'cacheable': captured['cacheable'], 'started': time.time(), 'run': run, 'cycle': cycle,
-                     'provenance': captured['provenance']}
-            entry.update(claim=claim, components=captured['components'])
-            entry['attempts'].append({**claim, 'status': 'started'})
-            write(self.manifest, manifest)
-            return {'action': 'invoke', 'claim': claim, 'manifest': str(self.manifest),
-                    'changed': previous['changed']}
+            result = self._start_captured(manifest, captured, recover=recover, run=run,
+                                          cycle=cycle, retry=retry, ci_repair=ci_repair,
+                                          ci_rerun=ci_rerun, head=head)
+            if result['action'] == 'invoke':
+                write(self.manifest, manifest)
+            return result
+
+    def start_batch(self, specs, *, recover=None, run=None, cycle=None, retry=False,
+                    ci_repair=False, ci_rerun=False, head=None):
+        """Claim a set of tasks atomically, sharing only command-local Git work.
+
+        All captures and checks must succeed before one manifest replacement.
+        An unfinished task without explicit recovery returns recover_required
+        while eligible siblings can proceed. Validation and budget errors commit
+        no batch changes.
+        If the response is lost, status exposes every committed claim; callers
+        must reconcile those claims rather than silently retry an invocation.
+        """
+        context = _CaptureContext()
+        captures = [capture(spec, _context=context) for spec in specs]
+        if not captures:
+            raise ValueError('A batch requires at least one task spec')
+        if any(item['subject'] != self.subject for item in captures):
+            raise ValueError('Specs refer to another PR')
+        keys = {item['key'] for item in captures}
+        if len(keys) != len(captures):
+            raise ValueError('Duplicate task keys in batch')
+        if recover is None:
+            recover = {}
+        if (not isinstance(recover, dict)
+                or any(not isinstance(key, str) or not isinstance(value, str) or not value
+                       for key, value in recover.items())):
+            raise ValueError('Batch recovery requires a task-key-to-claim-id map')
+        if recover.keys() - keys:
+            raise ValueError('Recovery key is not a task in this batch')
+        with self.locked() as manifest:
+            # Explicit recovery mistakes reject the whole batch before staging
+            # sibling starts. A missing recovery request is a normal outcome.
+            for key, claim_id in recover.items():
+                active = manifest['entries'].get(key, {}).get('claim')
+                if not active or active['id'] != claim_id:
+                    raise ValueError('Recovery id is not the active claim')
+            tasks = []
+            for captured in captures:
+                result = self._start_captured(
+                    manifest, captured, recover=recover.get(captured['key']), run=run,
+                    cycle=cycle, retry=retry, ci_repair=ci_repair, ci_rerun=ci_rerun, head=head)
+                tasks.append({**result, 'key': captured['key'],
+                              'task': captured['components']['task']['id']})
+            if any(task['action'] == 'invoke' for task in tasks):
+                write(self.manifest, manifest)
+            return {'tasks': tasks, 'manifest': str(self.manifest),
+                    'unfinished': [entry['claim'] for entry in manifest['entries'].values()
+                                   if entry.get('claim')]}
 
     def record(self, spec, claim_id, original, normalized, status, *, progress=None):
         captured = capture(spec)

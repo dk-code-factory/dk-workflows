@@ -28,21 +28,66 @@ Capture complete target, diff-base and head trees and the binary diff. SHAs and 
 
 Resource maps hash exact bytes, executable mode, directory paths and symlink targets. Directory traversal excludes only `.git`, `__pycache__` and `.pytest_cache`. Include all resources actually governing the task, including references outside its skill directory. Missing resources fail before a claim. If instruction/config/resource capture is uncertain, use `cacheable:false`; never assert complete capture based on guesswork. Reading unchanged shared guidance once within the current agent context does not waive these checks. Reread changed resources and affected references, and reload necessary guidance after context loss. Resource or context drift observed at recording rejects completion; the caller must supply fresh snapshots from live sources before recording and before final coverage checks.
 
+Generate ordinary specs with `spec --definition /private/reviewer-definition.json`.
+The definition supplies these explicit fields; canonical repository and PR come
+from the command's global arguments:
+
+```json
+{
+  "skill_identity": "my-reviewer:review",
+  "resources": {"skill": "/installed/reviewer/SKILL.md", "runtime": "/installed/reviewer/runtime"},
+  "responsibility": "content-review",
+  "assigned_instructions": "Review the complete pinned PR against the supplied scope and rules; return findings and completion.",
+  "instructions": {"user": "/private/user-instructions.txt", "rules": "/private/rules.txt"},
+  "inputs": {"context": "/private/review-context.json"},
+  "git": {"checkout": "/review/checkout", "target": "TARGET_SHA", "base": "DIFF_BASE_SHA", "head": "HEAD_SHA", "history": false, "head_sensitive": false},
+  "options": {},
+  "governing_inputs_complete": true
+}
+```
+
+Save stdout outside the repository as the task spec. Python callers may use
+`state.make_spec(repository=..., pr=..., **definition)`. Generation copies the
+supplied values and normalizes PR identity without reading files, resolving refs
+or claiming work. It adds no run, cycle, reviewer-order or progress fields.
+Completeness defaults to false; cacheability defaults to true only with an
+explicit completeness assertion and nonempty resource map. An explicit
+`cacheable:true` requires both. This helper cannot discover omitted governing
+resources; uncertain capture must remain noncacheable. Existing handcrafted
+specs stay compatible and equivalent generated specs retain their task keys,
+fingerprints and provenance. Standalone and iteration use the same definitions;
+partition and cleanup use separate responsibilities.
+
 - `status --spec A.json --spec B.json` reports reusable results, changed components, missing/incomplete work, unfinished claims and retained run counters/progress. Omitting specs inspects unfinished work and runs.
 - `status --compact --run RUN_ID --spec A.json` is the routine inspection view. It preserves the same task fields (including findings and validated result paths), run budget fields and PR-wide unfinished claims. Each run replaces its progress array with `progress_count` and `progress_ref` (manifest path and JSON Pointer), and adds `cycle`, the last allocated review cycle or null. It does not include progress bodies. Omit `--run` to summarize every run; a selected unknown run is an error in either view. Run selection only filters `runs`, never task coverage or unfinished claims from other runs. Without `--compact`, the response remains the full view; without either new option, its existing shape is unchanged.
 - `status --explain --spec A.json` adds an `explanation` to each supplied task, and can be combined with `--compact` and `--run`. `changes` identifies added, removed or changed captured fields with JSON Pointers, including resource labels/files, instructions, inputs, nested options and consumed Git trees/history/commits. Existing content and Git hashes appear as `hash`; other values appear as `sha256` of their canonical captured JSON, avoiding instruction, option and discussion bodies. Added/removed subtrees receive one identity at their root. Each task retains its key/id; only that supplied task's captured inputs are compared.
 - `start --spec A.json` atomically returns `action:reuse`, `recover_required`, or `invoke`. Only `invoke` permits a new invocation. Claims have no automatic expiry. Ensure a previous agent has stopped, reconcile its domain writes, then use `--recover CLAIM_ID` with the original run to launch a replacement. Unchanged inputs retain the original cycle; changed review inputs require a new cycle within the remaining budget.
+- `start-batch --spec A.json --spec B.json` returns ordered `tasks`, each with its key, task id and individual `action:reuse`, `recover_required` or `invoke`, plus `manifest` and all PR-wide `unfinished` claims. Reuse includes the validated result reference; recovery-required includes the existing claim as `unfinished`; invocation includes its new `claim`. Only each task's `invoke` authorizes that task. One batch accepts common `--run`, `--cycle`, `--retry`, `--ci-repair`, `--ci-rerun` and `--head` options, charged per actual invocation. Batch only tasks eligible for the same options; use a separate batch or the compatible single start for a selective retry. Explicit recovery uses repeated `--recover TASK_KEY=CLAIM_ID` entries, retaining the original run and unchanged-input cycle. Native agents still invoke skills and record each result individually and immediately.
 - `record --spec A.json --claim CLAIM_ID --original OUTPUT --normalized RESULT.json --status complete|failed|incomplete` stores immutable original bytes and normalized result. Normalized result requires `complete:true|false`; `findings` is a list. Incomplete and failed use false. Extra skill-owned fields are retained. Save every successful task immediately, including successful siblings when another fails. Keep generated stage/progress records out of original instruction files and consumed source snapshots; record the original output as well as its normalized result. `--progress PROGRESS.json` appends run progress, finding dispositions and exact human acceptances without replacing earlier records.
 - `invalidate --key TASK_KEY --reason TEXT` requires fresh execution. Repeated `--key` selects multiple tasks. For a stopped active claim, pass `--recover CLAIM_ID` to close it without launching work, after reconciling its domain writes. This preserves all counters and records the interrupted attempt; it also works when missing resources prevent recapture.
 
 For iteration, use `start --run RUN_ID --cycle CYCLE_ID` for reviewers. Reuse never allocates a cycle. All reviewers in one pass share a cycle; resuming keeps it. New work after fixes uses a new cycle. The five-cycle limit is retained atomically before invocation. `--retry` records one eligible same-cycle retry per task. Use `--ci-repair` for five-per-cycle repair counters (omit cycle for cycle zero) and `--ci-rerun --head SHA` for three-per-head transient reruns. These counters are reserved before invoking the domain skill. Original attempts and append-only progress retain interruptions and human acceptances.
 
+Prefer `start-batch --run RUN_ID --cycle CYCLE_ID` for a reviewer pass. All specs
+are captured before mutation, then all claim, recovery and budget checks run
+under one PR lock before one durable manifest replacement. Invalid specs,
+duplicate task keys, wrong PRs, unused/invalid recovery mappings and exhausted
+budgets reject the entire batch without saving new claims or counters. No staged
+task is authorized when capture or validation fails.
+A task blocked by an unfinished claim is a normal `recover_required` outcome:
+eligible siblings may still receive `invoke` or `reuse`. Save successful results
+even when a sibling fails or needs recovery. A lost response or storage failure
+has an uncertain outcome: inspect `status` for committed claims and reconcile
+before retrying. Claims never expire automatically, and concurrency cannot
+authorize two invocations for the same task. A batch neither erases prior
+successful outcomes nor hides unfinished claims belonging to other runs.
+
 A reusable result may contain findings. The helper validates completion and artifact integrity; the coordinating agent assesses dispositions and readiness. Failed, incomplete, damaged, explicitly invalidated or unfinished results cannot satisfy coverage. Concurrent callers serialize on a per-PR lock; the loser sees the unfinished claim. Artifacts are immutable and content-addressed. Do not edit manifests, erase a claim or create a new run to bypass a limit.
 
-One `status` batch shares Git calculations for identical full commit IDs,
+One `status` or `start-batch` command shares Git calculations for identical full commit IDs,
 checkout context and Git options. Each task still captures its own resources,
 instructions, input files and options, including `cacheable:false` tasks. A new
-status, start or record gets a fresh capture boundary. Mutable refs, abbreviated
+status, start, start-batch or record gets a fresh capture boundary. Mutable refs, abbreviated
 IDs and revision expressions always resolve independently. Unsupported Git
 layouts or indirect configuration, replacements, grafts and shallow repositories
 also fall back to independent capture. Ordinary repositories and linked worktrees
@@ -78,6 +123,22 @@ The mixed content/history/head-sensitive probe with three distinct pins measures
 Counts exclude Store initialization, initial
 result recording, publication and CI. No reviewers or new cycles launch during
 the measured recipe. This measures subprocess count, not elapsed time or tokens.
+
+The batch-start comparison uses that same two-completed-reviewer recipe with
+one initial status, one `start-batch` and one final status:
+
+```sh
+python3 -m pytest -q -s tests/test_batch_state.py -k start_batch_process_count_comparison
+```
+
+It measures 42 Git processes with independent captures and single starts,
+28 with status batching and single starts, and 21 with status and start batching,
+in ordinary and linked worktrees. The recipe requires four helper commands with
+single starts and three with batch start. Setup and record commands are excluded;
+the deterministic spec generator itself uses no Git processes. Tasks still
+check their own resources and instructions, even when noncacheable. Later
+recording and final status remain separate fresh boundaries. No elapsed-time
+or token savings are claimed.
 
 
 Compact output is a read projection, not a readiness assessment. Before assessing finding dispositions, exact human acceptances or interrupted-work recovery, read detailed progress with `status --run RUN_ID` (omit `--run` when evidence spans runs). The `progress_ref` JSON Pointer identifies the same array in the retained manifest; `~1` decodes to `/` and `~0` to `~` in run names. Follow each task's validated `result` path to its immutable JSON envelope: `normalized` retains findings and skill-owned fields, and `original` is the exact original output encoded as base64 (`base64.b64decode(envelope['original'], validate=True)`). Older result envelopes remain in the manifest's sibling `results/` directory; full attempt history in `entries` references their filenames. A missing or damaged current envelope yields a null result path and cannot be reused in either view. Status reads hold the same lock and perform the same integrity validation in both views; they never change the manifest, claims or counters. Compact output size does not scale with retained progress bodies, but still reflects the requested tasks, budget maps, runs and all unfinished claims. It does not reduce manifest I/O or replace fresh input, CI and publication checks.

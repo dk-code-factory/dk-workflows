@@ -94,13 +94,15 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
     context=save('context.json',{'scope':'Return two.','decisions':['Return two.'],'instructions':'Fix this PR.'})
     applicable_rules=save('applicable-rules.json',{'rules':['The settled value must be an integer.']})
     def spec(skill,task='content-review',current=None,cacheable=True):
-        value={'repository':REPO,'pr':PR,'skill':{'identity':'fixture:'+skill,'resources':{'skill':str(installed/(skill+'.md'))}},
-               'task':{'id':task,'instructions':'Perform '+task+' against the complete pinned scope and instructions.'},
-               'inputs':{'context':str(context),'rules':str(applicable_rules)},
-               'options':{},'cacheable':cacheable,'governing_inputs_complete':True,
-               'git':{'checkout':str(checkout),'target':base,'base':base,'head':current or git('rev-parse','HEAD')}}
+        definition={'skill_identity':'fixture:'+skill,'resources':{'skill':str(installed/(skill+'.md'))},
+                    'responsibility':task,
+                    'assigned_instructions':'Perform '+task+' against the complete pinned scope and instructions.',
+                    'instructions':{},'inputs':{'context':str(context),'rules':str(applicable_rules)},
+                    'options':{},'cacheable':cacheable,'governing_inputs_complete':True,
+                    'git':{'checkout':str(checkout),'target':base,'base':base,'head':current or git('rev-parse','HEAD')}}
         if skill in ('a','b'):
-            value['skill']['resources']['implementation']=str(FIXTURE/'reviewer.py')
+            definition['resources']['implementation']=str(FIXTURE/'reviewer.py')
+        value=cache('spec','--definition',save('definition.json',definition))
         return save(skill+'-'+task+'.json',value)
     def record(task,claim,value,progress=None):
         output=save('output-'+claim['id']+'.json',value)
@@ -130,12 +132,17 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
     domain('partition',lambda:{'outcome':'retain','added_lines_threshold':1000,'reason':'Below the configured gate'})
     # Pending checks do not gate review/fix cycles or commit cleanup.
     reviewer_log=tmp_path/'reviewer-launches.jsonl'
-    def review(skill,cycle,*,recover=None,retry=False,fail=False,run='iteration'):
-        task=spec(skill)
-        args=['--spec',task,'--run',run,'--cycle',cycle]
-        if recover:args+=['--recover',recover]
+    def start_reviews(skills,cycle,*,recover=None,retry=False,run='iteration'):
+        tasks={skill:spec(skill) for skill in skills}
+        args=['--run',run,'--cycle',cycle]
+        for task in tasks.values():args+=['--spec',task]
+        for key,claim in (recover or {}).items():args+=['--recover',key+'='+claim]
         if retry:args+=['--retry']
-        started=cache('start',*args)
+        batch=cache('start-batch',*args)
+        assert len(batch['tasks'])==len(tasks)
+        return {skill:(task,started) for (skill,task),started in zip(tasks.items(),batch['tasks'])}
+    def review(skill,cycle,*,claimed=None,retry=False,fail=False,run='iteration'):
+        task,started=claimed or start_reviews((skill,),cycle,retry=retry,run=run)[skill]
         if started['action']=='reuse':return started
         assert started['action']=='invoke'
         output=tmp_path/('review-'+started['claim']['id']+'.json')
@@ -144,11 +151,15 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
         execute(argv,env=env)
         value=json.loads(output.read_text());record(task,started['claim'],value)
         return value
-    assert review('a','c1')['findings']
-    interrupted=cache('start','--spec',spec('b'),'--run','iteration','--cycle','c1')
-    assert cache('start','--spec',spec('b'),'--run','iteration','--cycle','c1')['action']=='recover_required'
-    assert review('a','c1')['action']=='reuse'
-    assert review('b','c1',recover=interrupted['claim']['id'],fail=True)['complete'] is False
+    initial=start_reviews(('a','b'),'c1')
+    assert review('a','c1',claimed=initial['a'])['findings']
+    interrupted=initial['b'][1]
+    # Successful a is recorded immediately while sibling b remains unfinished.
+    resumed=start_reviews(('a','b'),'c1')
+    assert resumed['b'][1]['action']=='recover_required'
+    assert review('a','c1',claimed=resumed['a'])['action']=='reuse'
+    recovered=start_reviews(('b',),'c1',recover={interrupted['key']:interrupted['claim']['id']})
+    assert review('b','c1',claimed=recovered['b'],fail=True)['complete'] is False
     assert review('b','c1',retry=True)['findings']
     def fix():
         old=git('rev-parse','HEAD');(checkout/'code.py').write_text('VALUE = 2\n')
@@ -158,7 +169,9 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
         push(old,new);return {'head':new,'disposition':{'value':'fixed'}}
     head=domain('fix-findings',fix)['head']
     domain('partition-after-fix',lambda:{'outcome':'retain','reason':'Reviewed fix remains within scope'})
-    assert not review('a','c2')['findings'] and not review('b','c2')['findings']
+    refreshed=start_reviews(('a','b'),'c2')
+    assert not review('a','c2',claimed=refreshed['a'])['findings']
+    assert not review('b','c2',claimed=refreshed['b'])['findings']
     reviewed_tree=git('rev-parse','HEAD^{tree}')
     def cleanup():
         old=git('rev-parse','HEAD');git('reset','--soft',base);git('commit','-qm','Coherent value change')
@@ -201,7 +214,9 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
         domain('partition-after-ci-repair',lambda:{'outcome':'retain','reason':'CI repair remains within scope'})
         changed=cache('status','--spec',spec('a'),'--spec',spec('b'))
         assert all(not task['reusable'] for task in changed['tasks'])
-        assert not review('a','c3')['findings'] and not review('b','c3')['findings']
+        repaired=start_reviews(('a','b'),'c3')
+        assert not review('a','c3',claimed=repaired['a'])['findings']
+        assert not review('b','c3',claimed=repaired['b'])['findings']
         reviewed_tree=git('rev-parse','HEAD^{tree}')
         head=domain('cleanup',cleanup)['head']
         for skill in ('a','b'):assert review(skill,'c3')['action']=='reuse'
