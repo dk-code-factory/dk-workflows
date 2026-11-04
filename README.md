@@ -1,6 +1,6 @@
 # dk-workflows
 
-Version 3.2.0. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
+Version 3.2.1. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
 
 Use `dk-pr-iter` as the universal entry point: it recognizes your accounts and routes your PRs to `dk-pr-fix` and other authors' PRs to `dk-pr-review`. Invoke either workflow directly when the intended responsibility is explicit. Fixing preserves the review/fix, commit cleanup and final CI stages. Incoming review verifies candidate findings independently before posting; automatic approval and merging each require separate authorization or enabled policy.
 
@@ -41,3 +41,7 @@ Private workflow state lives outside repositories under XDG_STATE_HOME in `dk-wo
 Read [task state](docs/task-state.md), [workflow configuration](docs/configuration.md), [PR contracts](docs/pr/contracts.md), [publication recovery](docs/pr/publication.md) and [acceptance](docs/acceptance.md). Git capture implementation and measurements are in the [developer reference](docs/capture-performance.md).
 
 Edit skill prompts under `codex/skills/`, then run `python3 scripts/sync_skills.py` to update the Claude distribution. `python3 scripts/check.py` validates both copies, links, Python syntax and versions. `python3 scripts/test.py` runs all bundled suites offline using real Git and fixture GitHub/native-skill transports. Run controlled native-agent exercises for material recipe changes; offline fixtures do not establish native adherence. `python3 scripts/version.py X.Y.Z` synchronizes release metadata.
+
+Install `pytest`, `pytest-subtests` and `pytest-xdist` to run `python3 scripts/test.py --workers 2`, as CI does. Recipe scenarios run in parallel after the other workflow tests, keeping Git capture process-count probes separate from concurrent test activity. The other suites retain separate serial processes. Every suite reports its 20 slowest test phases. The default test command remains serial and does not require `pytest-xdist`.
+
+CI checks package validity and PR release versions before installing test dependencies. New PR commits cancel superseded validation runs; main validations remain independent. Releases verify tag identity and main ancestry first, then reuse successful main validation only for the exact tagged commit. Missing, malformed or inaccessible evidence falls back to the complete test suite before publication.
