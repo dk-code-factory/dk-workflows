@@ -1,12 +1,50 @@
 """Bound transient retries to known read-only GitHub CLI operations."""
 import json
+import os
 from pathlib import Path
 import random
 import re
+import selectors
 import subprocess
 import time
 
 from shared.ci_deadline import ACTIVE_BUDGET
+
+
+def _bounded_run(argv, *, stdout_limit, timeout, **kwargs):
+    """Read binary output with a byte cap and the caller's subprocess deadline."""
+    if kwargs != {'capture_output': True}:
+        raise ValueError('bounded GitHub reads require binary captured output')
+    deadline = time.monotonic() + timeout
+    output, errors = bytearray(), bytearray()
+    with subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+        try:
+            with selectors.DefaultSelector() as ready:
+                ready.register(process.stdout, selectors.EVENT_READ, output)
+                ready.register(process.stderr, selectors.EVENT_READ, errors)
+                while ready.get_map():
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(argv, timeout)
+                    for key, _ in ready.select(remaining):
+                        chunk = os.read(key.fd, 65536)
+                        if not chunk:
+                            ready.unregister(key.fileobj)
+                            continue
+                        destination = key.data
+                        if destination is output:
+                            if len(output) + len(chunk) > stdout_limit:
+                                raise RuntimeError('GitHub output exceeds collection limit')
+                            output.extend(chunk)
+                        else:
+                            # Keep diagnostics bounded even if the transport is noisy.
+                            errors.extend(chunk[:max(0, 65536-len(errors))])
+            process.wait(timeout=max(0, deadline-time.monotonic()))
+        except BaseException:
+            process.kill()
+            process.wait()
+            raise
+    return subprocess.CompletedProcess(argv, process.returncode, bytes(output), bytes(errors))
 
 
 def read_only(argv, input_text=None):
@@ -69,8 +107,11 @@ def transient(result):
 
 def run(argv, **kwargs):
     """Keep original result/exception semantics; never retry publication or schema errors."""
+    stdout_limit = kwargs.pop('stdout_limit', None)
+    runner = subprocess.run if stdout_limit is None else lambda argv, **options: _bounded_run(
+        argv, stdout_limit=stdout_limit, **options)
     if not read_only(argv, kwargs.get('input')):
-        return subprocess.run(argv, **kwargs)
+        return runner(argv, **kwargs)
     classification = ACTIVE_BUDGET.get()
     if classification is not None:
         kwargs['timeout'] = min(kwargs.get('timeout') or 60, classification.remaining())
@@ -84,7 +125,7 @@ def run(argv, **kwargs):
         options = dict(kwargs, timeout=remaining)
         failure = None
         try:
-            result = subprocess.run(argv, **options)
+            result = runner(argv, **options)
         except subprocess.TimeoutExpired as exc:
             failure = exc
         else:

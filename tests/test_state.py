@@ -59,6 +59,19 @@ def done(store,spec,**kwargs):
     return started
 
 
+def test_git_labelled_file_invalidates_reuse_and_inflight_results(case):
+    spec, store = case
+    context = Path(spec['inputs'].pop('context'))
+    spec['inputs']['git'] = str(context)
+    done(store, spec)
+    context.write_text('changed governing context')
+    assert not store.status([spec])['tasks'][0]['reusable']
+    claim = store.start(spec)['claim']
+    context.write_text('changed again during review')
+    with pytest.raises(ValueError, match='changed'):
+        store.record(spec, claim['id'], b'stale review', {'complete': True}, 'complete')
+
+
 def test_unchanged_reruns_across_sessions_and_iteration_launch_zero_reviewers(case):
     spec,store=case
     done(store,spec)

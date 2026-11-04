@@ -50,6 +50,17 @@ def thread(
 
 
 class FetchUnresolvedReviewThreadsTest(unittest.TestCase):
+    def test_equal_timestamp_reply_does_not_replace_original_root(self):
+        timestamp = '2026-01-01T00:00:00Z'
+        comments = fetcher.normalize_comments([comment('Z_ROOT', timestamp, 'Fix retry'),
+                                               comment('A_REPLY', timestamp, 'Acknowledged')])
+        comments = fetcher.deduplicate_comments(comments + comments, 'T1')
+        item = fetcher.prepare_items([{'id': 'T1', 'isResolved': False, 'comments': comments}])[0]
+        self.assertEqual(item['commentReference'], 'Z_ROOT')
+        self.assertEqual(item['text'], 'Fix retry')
+        self.assertEqual(item['url'], 'https://example.test/Z_ROOT')
+        self.assertEqual([c['reference'] for c in item['conversation']], ['Z_ROOT', 'A_REPLY'])
+
     def setUp(self) -> None:
         self.metadata = {
             "owner": "owner",

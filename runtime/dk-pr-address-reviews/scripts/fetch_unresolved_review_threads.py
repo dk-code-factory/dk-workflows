@@ -314,7 +314,7 @@ def deduplicate_comments(comments: list[dict[str, Any]], thread_id: str) -> list
         by_reference[reference] = comment
     return sorted(
         by_reference.values(),
-        key=lambda item: (string_or_empty(item.get("createdAt")), item["reference"]),
+        key=lambda item: string_or_empty(item.get("createdAt")),
     )
 
 

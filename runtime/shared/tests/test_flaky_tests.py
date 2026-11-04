@@ -3,6 +3,7 @@ import copy
 import io
 import json
 import multiprocessing
+import os
 import subprocess
 from pathlib import Path
 import sys
@@ -41,6 +42,62 @@ def archive(text, steps=None):
             member = zipfile.ZipInfo(f'{JOB}/{number}_Tests.txt', date_time=(2026, 1, 1, 0, 0, 0))
             bundle.writestr(member, value)
     return stream.getvalue()
+
+
+def test_binary_archive_read_enforces_limit_during_transport(tmp_path, monkeypatch):
+    from shared import flaky_actions, github_reads
+    original = github_reads._bounded_run
+    calls = []
+    completed = tmp_path/'completed'
+    def bounded(argv, **options):
+        calls.append(options['stdout_limit'])
+        # Completing this write requires draining far beyond the small test cap.
+        producer = ('import os, pathlib, sys; os.write(1, b"x" * 1000000); '
+                    'pathlib.Path(sys.argv[1]).touch()')
+        return original([sys.executable, '-c', producer, str(completed)], **options)
+    monkeypatch.setattr(github_reads, '_bounded_run', bounded)
+    monkeypatch.setattr(flaky_actions, 'MAX_ARCHIVE_BYTES', 8)
+    with pytest.raises(RuntimeError, match='collection limit'):
+        GitHub(REPO).request('actions/runs/10/attempts/1/logs', binary=True)
+    assert calls == [8]
+    assert not completed.exists()
+
+
+def test_bounded_transport_preserves_bytes():
+    from shared.github_reads import _bounded_run
+    result = _bounded_run([sys.executable, '-c',
+                           'import os; os.write(1, b"archive"); os.write(2, b"detail")'],
+                          stdout_limit=7, timeout=5, capture_output=True)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b'archive', b'detail')
+
+
+def test_bounded_transport_reaps_timeout(monkeypatch):
+    from shared import github_reads
+    original = subprocess.Popen
+    processes = []
+    def start(*args, **kwargs):
+        process = original(*args, **kwargs)
+        processes.append(process)
+        return process
+    monkeypatch.setattr(subprocess, 'Popen', start)
+    with pytest.raises(subprocess.TimeoutExpired):
+        github_reads._bounded_run([sys.executable, '-c', 'import time; time.sleep(2)'],
+                                  stdout_limit=8, timeout=0.1, capture_output=True)
+    assert len(processes) == 1
+    assert processes[0].returncode not in (None, 0)
+
+
+@pytest.mark.parametrize('binary', [False, True])
+def test_offline_guard_rejects_unmocked_github_transport(tmp_path, monkeypatch, binary):
+    executable = tmp_path/'gh'
+    executed = tmp_path/'executed'
+    executable.write_text('#!'+sys.executable+'\nfrom pathlib import Path\nPath('
+                          +repr(str(executed))+').touch()\nprint("{}")\n')
+    executable.chmod(0o755)
+    monkeypatch.setenv('PATH', str(tmp_path)+os.pathsep+os.environ['PATH'])
+    with pytest.raises(AssertionError, match='Unmocked network or model call'):
+        GitHub(REPO).request('actions/runs/10/attempts/1/logs', binary=binary)
+    assert not executed.exists()
 
 
 class FakeAPI:
