@@ -6,6 +6,8 @@ Supply the canonical PR and repository, pinned head, target and diff base as nee
 
 For feedback, Decisions and feedback read analysis, follow [shared PR evidence](supplied-evidence.md). For managed tasks, follow [task state](../task-state.md). Use separate task identities for distinct responsibilities, including partition and commit cleanup.
 
+Implementation and review tasks also consume [scoped preferences](../preferences.md#workflow-handoffs-and-reuse). Preserve complete records, applicable paths and condition decisions in downstream handoffs and managed inputs. Direct feedback implementation resolves its own preferences when no current complete caller selection is available. Refresh selection before expanding task paths or acting on changed relevant preferences or condition context.
+
 Return original output and explicit completion. Structured results use `{complete:bool, findings:[], artifacts:[], blockers:[]}` plus fields owned by the skill. Include consumed sources, verification, unresolved work, and publication operation and receipt paths. Failed or incomplete work uses `complete:false`. Completed analysis may contain findings. Assess finding dispositions and workflow readiness separately.
 
 Publish only within the caller's permissions. Follow [publication and recovery](publication.md). Cached analysis, supplied evidence and prior completion reports never authorize remote actions or replace current publication checks.

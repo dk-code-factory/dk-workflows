@@ -31,6 +31,8 @@ Capture all governing inputs:
 - [Cycle hook receipts](cycle-hooks.md) are scoped to a specific occurrence, so `hook-spec` deliberately includes run, cycle, phase and hook id in their task identity and options. Claim them with the run only, without reviewer budget flags. Their reuse confirms that occurrence completed; it never supplies reviewer or CI coverage.
 - Every governing installed resource, including indirect references outside the skill directory. Capture exact bytes, executable modes, directory paths and symlink targets. Traversal excludes only `.git`, `__pycache__` and `.pytest_cache`. Missing resources block claims.
 
+- The [scoped preference handoff](preferences.md#workflow-handoffs-and-reuse) in `inputs.preferences`: complete selected records, applicable paths, consumed condition context and applicability decisions. Refresh selection before claims, recording and final coverage checks. Fingerprint the task-specific handoff rather than the catalog revision; relevant changes refresh affected work while unchanged selections and decisions permit reuse.
+
 Reuse unchanged guidance already read in the current context. Check resource identity at each boundary. Reread changed guidance and references. Reload necessary guidance after context loss. Capture checks still apply. Recording and final coverage checks require fresh snapshots of live sources. Observed resource or context changes reject completion. Fingerprints compare explicit inputs, not equivalent meanings.
 
 ## Inspect, claim and invoke
