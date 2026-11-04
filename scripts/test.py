@@ -14,7 +14,7 @@ def main():
     suites += [[path] for path in sorted(ROOT.glob('runtime/*/tests'))
                if any(path.rglob('test_*.py'))]
     env = {**os.environ, 'PYTHONDONTWRITEBYTECODE':'1',
-           'PYTHONPATH':os.pathsep.join([str(ROOT/'runtime'), str(ROOT/'runtime/dk-pr-address-reviews/scripts')])}
+           'PYTHONPATH':os.pathsep.join([str(ROOT/'runtime'), str(ROOT/'runtime/dk-pr-feedback-address/scripts')])}
     with tempfile.TemporaryDirectory(prefix='dk-workflows-tests-') as temporary:
         for index, suite in enumerate(suites):
             command = [sys.executable, '-m', 'pytest', '-q', *map(str, suite), '--tb=short',

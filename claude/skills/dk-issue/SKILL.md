@@ -7,4 +7,4 @@ Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task con
 
 Read issue templates, maintainer conventions and evidence. Describe the trigger, observed and expected behavior, reproduction steps and relevant validation. Preserve the user's exact constraints. Review the draft before authorized creation or editing. Save the intended change and reconcile uncertain writes before retrying. A PR workflow does not authorize creating issues.
 
-Use [the field conventions](../../../runtime/dk-issue-description/references/field-schema.md) when repository formatting rules leave a choice open.
+Use [the field conventions](../../../runtime/dk-issue/references/field-schema.md) when repository formatting rules leave a choice open.

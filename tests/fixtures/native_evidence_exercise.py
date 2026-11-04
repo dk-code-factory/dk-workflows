@@ -149,7 +149,9 @@ def inside(root, name):
 
 
 def production(root):
-    sys.path.insert(0, str(root/'frozen/runtime/dk-pr-address-reviews/scripts'))
+    # Locate the helper within the selected frozen revision.
+    script = next((root/'frozen/runtime').glob('*/scripts/pr_evidence.py'))
+    sys.path.insert(0, str(script.parent))
     import pr_evidence
     return pr_evidence
 
