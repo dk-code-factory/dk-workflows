@@ -265,7 +265,7 @@ def test_public_completion_cannot_claim_failed_or_incomplete_success(case):
             store.record(spec,claim['id'],b'x',normalized,status)
 
 
-@pytest.mark.parametrize('original', [b'', b' \t\r\n'])
+@pytest.mark.parametrize('original', [b'', b' \t\r\n', '\u00a0'.encode(), ' \u2003\n'.encode()])
 def test_empty_review_output_cannot_establish_coverage(case, original):
     spec, store = case
     claim = store.start(spec, run='run', cycle='c1')['claim']
@@ -280,7 +280,7 @@ def test_empty_review_output_cannot_establish_coverage(case, original):
     assert store.status([])['runs']['run']['cycles'] == ['c1']
 
 
-@pytest.mark.parametrize('original', [b'', b' \t\r\n'])
+@pytest.mark.parametrize('original', [b'', b' \t\r\n', '\u00a0'.encode(), ' \u2003\n'.encode()])
 def test_legacy_empty_complete_result_is_not_reused(case, original):
     import base64
     import hashlib
@@ -301,6 +301,17 @@ def test_legacy_empty_complete_result_is_not_reused(case, original):
     assert not store.status([spec])['tasks'][0]['reusable']
     assert store.start(spec)['action'] == 'invoke'
     assert old_path.exists()
+
+
+@pytest.mark.parametrize('original', ['\u00a0\u5b8c\u4e86\u2003'.encode(), b'\xff\n'])
+def test_complete_report_content_retains_original_bytes(case, original):
+    import base64
+
+    spec, store = case
+    claim = store.start(spec)['claim']
+    result = store.record(spec, claim['id'], original, {'complete': True}, 'complete')
+    assert base64.b64decode(read(result['result'])['original']) == original
+    assert store.start(spec)['action'] == 'reuse'
 
 
 def test_changed_inputs_cannot_be_relaunched_under_an_existing_cycle(case):
