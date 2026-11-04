@@ -2,6 +2,8 @@
 
 Required behavior: unchanged reruns invoke zero reviewers; failed or interrupted tasks retain completed siblings; five review/fix cycles with retained same-cycle retries; tree-preserving commit cleanup; fresh publication reconciliation after interruption; exact-head CI; existing partition settings and explicit human acceptances.
 
+[Scoped preferences](preferences.md) have deterministic file, directory, glob, exclusion and rename matching, atomic personal/repository admission with stale-revision rejection, and separate implementation/review modes. Native admission settles contradictions with the user before saving. Coordinators evaluate conditions and preserve complete records and applicable paths downstream. Task-specific selections and decisions are fingerprinted; relevant changes refresh affected work and unchanged selections preserve review reuse. Preference unit, handoff and full-recipe fixtures cover the storage and consumption boundaries; they do not establish independent native semantic-admission adherence.
+
 Agents resolve and invoke native skills; selected skills own internal passes and completion reports. Domain skills own GitHub and publication. Architecture work is independently selected. The cache applies only to invocations explicitly managed by workflows.
 
 [Native reviewer handoffs](native-review.md) retain host handles and terminal

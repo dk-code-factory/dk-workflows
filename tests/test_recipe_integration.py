@@ -145,11 +145,29 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
     for name in ('domain','a','b'):(installed/(name+'.md')).write_text('Native fixture skill '+name)
     context=save('context.json',{'scope':'Return two.','decisions':['Return two.'],'instructions':'Fix this PR.'})
     applicable_rules=save('applicable-rules.json',{'rules':['The settled value must be an integer.']})
+    def preference_command(action, *args):
+        return command(ROOT/'scripts/preferences.py', '--checkout', checkout, action, *args)
+    preference_changes=save('preference-changes.json',{'upsert':[{
+        'owner':{'type':'user'},'prompt':'Check that the settled return value is an integer.',
+        'scope':{'include':[{'type':'file','path':'code.py'}],
+                 'condition':'When the settled scope specifies a return value.'}}]})
+    admitted=preference_command('prepare','--file',preference_changes)
+    preference_command('commit','--file',save('preference-admitted.json',admitted))
+    def preference_handoff(mode):
+        paths=git('diff','--name-only',base,'HEAD').splitlines()
+        selection=preference_command('resolve','--mode',mode,'--paths',save('task-paths.json',paths))
+        # Native coordinator stand-in: the fixture's settled scope has a return value.
+        decisions=[{'id':entry['record']['id'],'applicable':True,'paths':entry['paths'],
+                    'reason':'The settled scope specifies returning two.'} for entry in selection['records']
+                   if entry['requires_condition']]
+        return save('preferences-'+mode+'.json',{'selection':selection,'condition_context':{'scope':'Return two.'},
+                                               'decisions':decisions})
     def spec(skill,task='content-review',current=None,cacheable=True):
         definition={'skill_identity':'fixture:'+skill,'resources':{'skill':str(installed/(skill+'.md'))},
                     'responsibility':task,
                     'assigned_instructions':'Perform '+task+' against the complete pinned scope and instructions.',
-                    'instructions':{},'inputs':{'context':str(context),'rules':str(applicable_rules)},
+                    'instructions':{},'inputs':{'context':str(context),'rules':str(applicable_rules),
+                    'preferences':str(preference_handoff('review' if skill in ('a','b') else 'implementation'))},
                     'options':{},'cacheable':cacheable,'governing_inputs_complete':True,
                     'git':{'checkout':str(checkout),'target':base,'base':base,'head':current or git('rev-parse','HEAD')}}
         if skill in ('a','b'):
@@ -198,10 +216,16 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
         if started['action']=='reuse':return started
         assert started['action']=='invoke'
         output=tmp_path/('review-'+started['claim']['id']+'.json')
-        argv=[sys.executable,FIXTURE/'reviewer.py','--skill',skill,'--checkout',checkout,'--log',reviewer_log,'--output',output]
+        handoff=json.loads(task.read_text())['inputs']['preferences']
+        argv=[sys.executable,FIXTURE/'reviewer.py','--skill',skill,'--checkout',checkout,'--log',reviewer_log,'--output',output,
+              '--preferences',handoff]
         if fail:argv+=['--fail']
         execute(argv,env=env)
-        value=json.loads(output.read_text());record(task,started['claim'],value)
+        value=json.loads(output.read_text())
+        assert value['preferences']==json.loads(Path(handoff).read_text())
+        assert value['preferences']['selection']['records'][0]['paths']==['code.py']
+        assert value['preferences']['decisions'][0]['applicable'] is True
+        record(task,started['claim'],value)
         return value
     initial=start_reviews(('a','b'),'c1')
     assert review('a','c1',claimed=initial['a'])['findings']

@@ -18,7 +18,7 @@ Before work, resolve every selected installation through native tools, including
 
 Place the global `--upstream HOST/OWNER/REPO` option before `show` or `preflight` when inheriting those settings. Pass the same upstream identity to `scripts/pr_route.py --pr PR_URL --upstream HOST/OWNER/REPO` so routing uses the same personal accounts.
 
-Use `dk-config` for workflow settings and bundled [PR policies](pr/configuration.md). The two helpers keep their existing private stores, schemas and precedence. Selected external skills own their settings. Renaming a skill does not update saved selections, clear work or move state. Update explicitly selected old identities through `dk-config`.
+Use `dk-config` for workflow settings and bundled [PR policies](pr/configuration.md). Scoped implementation and review preference requests route to `dk-preferences` under [the preference contract](preferences.md). Preferences have a separate shared personal/repository catalog; saved rules remain separate and are not converted. The settings helpers keep their existing private stores, schemas and precedence. Selected external skills own their settings. Renaming a skill does not update saved selections, clear work or move state. Update explicitly selected old identities through `dk-config`.
 
 `identities` lists additional personal accounts as `{"host":"github.com","id":123}`. Verify each account on its host before saving its immutable numeric id. Each scope replaces the list from lower scopes. The authenticated account needs no saved entry. Never compare numeric account ids across hosts.
 
