@@ -56,6 +56,36 @@ def test_legacy_aliases_map_to_native_skills_and_internal_options_are_not_silent
     assert result['unresolved_bindings'][0]['nested_review_roles']==['OldInternalRole']
 
 
+@pytest.mark.parametrize('contract', ['git-diff-v1', 'git-diff-v2', 'git-diff-v3'])
+def test_retired_handoff_cohort_requires_explicit_native_selection(tmp_path, contract):
+    # Issue #82's Codex AD plus separate Claude Toolkit and AD bindings must
+    # never become native compatibility declarations by losing their contract.
+    bindings = [
+        {'skill': 'code-review-ad', 'host': 'codex', 'handoff_contract': contract},
+        {'skill': 'code-review-claude-pr-review-toolkit', 'host': 'claude', 'handoff_contract': contract},
+        {'skill': 'code-review-claude-ad', 'host': 'claude', 'handoff_contract': contract},
+        {'command': ['run-claude-skill', '{handoff}'], 'handoff_contract': contract},
+    ]
+    source = tmp_path/'v1-reviewers.json'
+    source.write_text(json.dumps({'reviewers': bindings}))
+    original = source.read_bytes()
+    result = subprocess.run([sys.executable, str(ROOT/'scripts/config.py'),
+                             '--repository', 'github.com/owner/repo', 'migrate',
+                             '--reviewers', str(source)], text=True, capture_output=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    migrated = json.loads(result.stdout)
+    assert migrated['proposed']['reviewers'] == []
+    assert migrated['unresolved_bindings'] == bindings
+    assert source.read_bytes() == original
+    assert not config.path('github.com/owner/repo').exists()
+    for binding in bindings:
+        with pytest.raises(ValueError, match='Reviewer requires'):
+            config.validate({'reviewers': [binding]})
+        if 'skill' in binding:
+            with pytest.raises(ValueError, match='Reviewer requires'):
+                config.validate({'reviewers': [{'skill': binding['skill'], 'handoff_contract': contract}]})
+
+
 def test_temporary_pr_plugin_bindings_resolve_to_bundled_skills_without_rewriting_private_files():
     settings={'skills':{'reply':'dk-pr-skills:dk-pr-reply-review'},
               'reviewers':[{'skill':'review:external'}],
