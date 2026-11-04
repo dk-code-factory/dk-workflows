@@ -31,7 +31,8 @@ class GitHub:
     def request(self, endpoint, binary=False):
         command = ['gh', 'api', '--hostname', self.host, f'repos/{self.name}/{endpoint}']
         try:
-            completed = github_run(command, capture_output=True, timeout=60)
+            options = {'stdout_limit': MAX_ARCHIVE_BYTES} if binary else {}
+            completed = github_run(command, capture_output=True, timeout=60, **options)
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(str(exc)) from exc
         except OSError as exc:

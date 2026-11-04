@@ -43,6 +43,33 @@ def archive(text, steps=None):
     return stream.getvalue()
 
 
+def test_binary_archive_read_enforces_limit_during_transport(monkeypatch):
+    from shared import flaky_actions, github_reads
+    original = github_reads._bounded_run
+    calls = []
+    def bounded(argv, **options):
+        calls.append(options['stdout_limit'])
+        # A finite local producer would emit far more than the small test cap.
+        return original([sys.executable, '-c', 'import os; os.write(1, b"x" * 1000000)'],
+                        **options)
+    monkeypatch.setattr(github_reads, '_bounded_run', bounded)
+    monkeypatch.setattr(flaky_actions, 'MAX_ARCHIVE_BYTES', 8)
+    with pytest.raises(RuntimeError, match='collection limit'):
+        GitHub(REPO).request('actions/runs/10/attempts/1/logs', binary=True)
+    assert calls == [8]
+
+
+def test_bounded_transport_preserves_bytes_and_reaps_timeout():
+    from shared.github_reads import _bounded_run
+    result = _bounded_run([sys.executable, '-c',
+                           'import os; os.write(1, b"archive"); os.write(2, b"detail")'],
+                          stdout_limit=7, timeout=5, capture_output=True)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b'archive', b'detail')
+    with pytest.raises(subprocess.TimeoutExpired):
+        _bounded_run([sys.executable, '-c', 'import time; time.sleep(10)'],
+                     stdout_limit=8, timeout=0.1, capture_output=True)
+
+
 class FakeAPI:
     def __init__(self, text=FAIL, body=None, head=SHA, attempts=1):
         self.repo = REPO

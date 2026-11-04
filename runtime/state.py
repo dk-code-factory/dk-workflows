@@ -456,8 +456,12 @@ def capture(spec, *, _context=None):
     governing = files(spec.get('instructions', {}))
     provenance = {}
     if 'git' in spec:
-        inputs['git'], provenance = (_context.git(spec['git']) if _context is not None
-                                     else _capture_git(spec['git']))
+        git_inputs, provenance = (_context.git(spec['git']) if _context is not None
+                                  else _capture_git(spec['git']))
+        if 'git' in inputs:
+            # Input labels are unrestricted; retain a resource named git too.
+            git_inputs = {**git_inputs, 'resource': inputs['git']}
+        inputs['git'] = git_inputs
     fingerprint_inputs = {'contract': CONTRACT, **subject, 'task': task, 'skill': {
         'identity': skill['identity'], 'resources': resources}, 'instructions': governing,
         'inputs': inputs, 'options': spec.get('options', {})}

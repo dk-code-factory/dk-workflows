@@ -20,6 +20,28 @@ PR='https://github.com/owner/repo/pull/7'
 REPO='github.com/owner/repo'
 
 
+@pytest.mark.parametrize('url', ['ssh://git@github.com/owner/repo.git',
+                               'git://github.com/owner/repo.git',
+                               'http://github.com/owner/repo.git'])
+def test_offline_git_transport_rejects_other_network_schemes(tmp_path, url):
+    remote = tmp_path/'remote.json'
+    remote.write_text('{}')
+    wrapper = tmp_path/'git'
+    wrapper.write_text((FIXTURE/'remote_cli.py').read_text())
+    executed = tmp_path/'executed'
+    real_git = tmp_path/'real-git'
+    real_git.write_text('#!'+sys.executable+'\nfrom pathlib import Path\nPath('+repr(str(executed))+').touch()\n')
+    real_git.chmod(0o755)
+    env = {**os.environ, 'DK_RECIPE_REMOTE': str(remote),
+           'DK_RECIPE_FIXTURE': str(ROOT/'tests/pr/fixtures/github_remote.py'),
+           'DK_RECIPE_BARE': str(tmp_path/'bare'), 'DK_RECIPE_GIT': str(real_git)}
+    result = subprocess.run([sys.executable, str(wrapper), 'ls-remote', '--refs', url],
+                            env=env, text=True, capture_output=True, timeout=10)
+    assert result.returncode == 1
+    assert 'external Git access' in result.stderr
+    assert not executed.exists()
+
+
 @pytest.mark.parametrize('final_ci_outcome',['success','rerun','repair'])
 def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_outcome):
     def execute(argv, *, env=None, ok=True, cwd=None):

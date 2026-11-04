@@ -13,6 +13,17 @@ spec=importlib.util.spec_from_file_location('domain_publish',ROOT/'scripts/publi
 publisher=importlib.util.module_from_spec(spec);spec.loader.exec_module(publisher)
 
 
+def test_prepare_rejects_state_inside_plugin_even_for_another_checkout(tmp_path, monkeypatch):
+    checkout = tmp_path/'other-repository'
+    subprocess.run(['git', 'init', '-q', str(checkout)], check=True)
+    forbidden = ROOT/'private-audit-state'
+    monkeypatch.setenv('XDG_STATE_HOME', str(forbidden))
+    with pytest.raises(ValueError, match='outside the plugin and repository'):
+        publisher.prepare({'kind': 'edit-pr', 'checkout': str(checkout),
+                           'pr': 'https://github.com/owner/repo/pull/7'})
+    assert not forbidden.exists()
+
+
 def test_timeout_bytes_are_retained_without_losing_recovery_diagnostics():
     operation = publication.prepare('reply', 'target', {}, {}, ['publisher'])['operation']
     sends = []

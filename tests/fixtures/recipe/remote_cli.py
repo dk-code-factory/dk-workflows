@@ -15,7 +15,7 @@ try:
     if Path(sys.argv[0]).name=='git':
         arguments=sys.argv[1:]
         arguments=[os.environ['DK_RECIPE_BARE'] if arg=='https://github.com/owner/repo.git' else arg for arg in arguments]
-        if any('https://' in arg or arg.startswith('git@') for arg in arguments):
+        if any('://' in arg or arg.startswith('git@') for arg in arguments):
             raise AssertionError('Fixture attempted external Git access')
         result=subprocess.run([os.environ['DK_RECIPE_GIT'],*arguments],text=True,capture_output=True)
         if result.returncode:

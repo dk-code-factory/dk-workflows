@@ -3,7 +3,6 @@
 import argparse
 import json
 import fcntl
-import os
 import tempfile
 from pathlib import Path
 import subprocess
@@ -135,10 +134,8 @@ def prepare(request):
         raise ValueError('Publication request must be an object')
     # Recover even if the previous agent lost the printed operation path. The
     # semantic payload is domain-owned; no workflow run/cycle participates.
-    base = Path(os.environ.get('XDG_STATE_HOME') or Path.home()/'.local/state')/'dk-pr-skills/v2/operations'
-    from shared.repository_scope import inside_checkout
-    if not base.is_absolute() or inside_checkout(base,request.get('checkout') or Path.cwd()):
-        raise ValueError('Publication state must be outside repositories')
+    from shared.workflow_storage import operations_root
+    base = operations_root(repository=request.get('checkout'))
     base.mkdir(parents=True,exist_ok=True,mode=0o700)
     if not isinstance(request,dict):
         raise ValueError('Publication request must be an object')

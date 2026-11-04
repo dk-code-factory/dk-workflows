@@ -1,6 +1,6 @@
 # dk-workflows
 
-Version 2.3.2. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
+Version 2.3.3. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
 
 The coordinators are `dk-pr-review`, `dk-pr-iter` and `dk-config`. Bundled domain skills cover:
 
