@@ -12,7 +12,9 @@ Run `python3 PLUGIN_ROOT/scripts/config.py --repository HOST/OWNER/REPO show|set
 
 There is no default reviewer. PR roles default to bundled skills; users may select other installed skills. `run_reviewers`, `read_feedback` and `post_review` select the coordinator, feedback collector and review publisher. Partition and cleanup use separate `dk-pr-split` and `dk-pr-commits` skills.
 
-Before work, resolve every selected installation through native tools, including optional reviewers. Pass the identity list to `preflight --available FILE.json`. Missing or ambiguous installations block work until installed or explicitly deselected. Save resolved resource paths and options. Read each skill's guidance when invoking it. Preflight proves availability only. Each skill owns its options, internal passes and completion report.
+Before work, resolve every selected installation through native tools, including optional reviewers. Pass a JSON array of resolved skill identity strings to `preflight --available FILE.json`. Require `ready:true` in the returned JSON. Missing selections return `ready:false` and `missing_selected_skills` with exit 0; command success alone does not establish availability. Resolve ambiguous installations before supplying the list. Missing or ambiguous installations block work until installed or explicitly deselected. Save resolved resource paths and options. Read each skill's guidance when invoking it. Preflight proves availability only. Each skill owns its options, internal passes and completion report.
+
+Place the global `--upstream HOST/OWNER/REPO` option before `show` or `preflight` when inheriting those settings. Pass the same upstream identity to `scripts/pr_route.py --pr PR_URL --upstream HOST/OWNER/REPO` so routing uses the same personal accounts.
 
 Use `dk-config` for workflow settings and bundled [PR policies](pr/configuration.md). The two helpers keep their existing private stores, schemas and precedence. Selected external skills own their settings. Renaming a skill does not update saved selections, clear work or move state. Update explicitly selected old identities through `dk-config`.
 

@@ -5,6 +5,10 @@ description: Find flaky tests linked to open issues and verify CI exceptions for
 
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
-Use `runtime/dk-ci/scripts/flaky_tests.py` to search within its limits, list records and synchronize them. Save the repository, head, job, attempt, test and proof that the linked issue is open. Missing logs, inaccessible or closed issues, unsupported reports and unknown failures block acceptance. A known flaky test cannot exempt an entire job.
+Run `python3 PACKAGE_ROOT/runtime/dk-ci/scripts/flaky_tests.py --repo HOST/OWNER/REPO --cwd REPO discover`, using the PR's base repository. Discovery defaults to 30 days, 100 runs and 500 issues; narrow these with `--days`, `--max-runs` and `--max-issues`. Replace `discover` with `list` or `sync` to refresh saved issue evidence; `list --history` also includes observations.
 
-Report configured CI exceptions separately, with each id, reason, scope and source. Create issues or rerun jobs only when authorized.
+Read JSON on stdout. `list` and `sync` return `entries`, `checked_at`, `unavailable_issues` and `issue_errors`; discovery nests these under `verification` and also reports `missing`, `limits_reached` and `evidence_file`. All commands include `unlinked_candidates` and `registry_file`. Exit 0 does not establish that every failure is covered. Helper errors exit 2 with text on stderr.
+
+Save the repository, head, job, attempt, test and proof that the linked issue is open. Missing logs, inaccessible or closed issues, unsupported reports and unknown failures block acceptance. A known flaky test cannot exempt an entire job.
+
+Configured exceptions are separate from flake records. Read them with `python3 PACKAGE_ROOT/scripts/pr_config.py --cwd REPO --pr PR_URL ci-exceptions list`. Report each exception's id and reason from `entries`, with the returned `source` scope and `file`. Create issues or rerun jobs only when authorized.

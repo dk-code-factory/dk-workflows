@@ -44,11 +44,15 @@ Reuse unchanged guidance already read in the current context. Check resource ide
 
 Without specs, status inspects runs and unfinished work. Run selection filters runs only; coverage and unfinished claims remain PR-wide. An unknown run is an error. Compact output omits progress bodies. Follow its references and validated original result paths. See [status details](status-diagnostics.md) for decoding.
 
-Start returns each task's key, id and action:
+For a new run, omit `--run` from status until a start actually invokes a task with that run id. Reuse alone does not create a run. Continue passing the chosen run id to starts so later invocations retain its budgets.
+
+Both start commands return an `action` for each task:
 
 - `reuse`: read the validated original result, including findings.
 - `invoke`: save the new claim and invoke the native skill with pinned inputs.
 - `recover_required`: resolve the unfinished claim before invoking this task. Other eligible tasks may proceed.
+
+For single-task `start`, `invoke` returns `claim`, `manifest` and `changed`; use `claim.key` for the task key and `claim.id` for recording or recovery. `reuse` and `recover_required` instead include top-level `key` and `task`, plus `result` or `unfinished` respectively. `start-batch` wraps results in `tasks` and includes top-level `key` and `task` in every item, regardless of action.
 
 Batch results preserve order and include the manifest and all unfinished PR claims. Capture, validation or budget errors save no new claims or counters. The batch captures every spec before mutation, checks claims and budgets under one PR lock, then replaces the manifest once. A lost response or storage failure leaves the outcome uncertain. Inspect status and reconcile before retrying.
 
