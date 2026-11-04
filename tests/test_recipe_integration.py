@@ -42,6 +42,36 @@ def test_offline_git_transport_rejects_other_network_schemes(tmp_path, url):
     assert not executed.exists()
 
 
+@pytest.mark.parametrize('url', ['example.org:owner/repo.git',
+                               'alice@example.org:owner/repo.git'])
+def test_offline_git_transport_rejects_scp_and_preserves_local_paths(tmp_path, url):
+    remote = tmp_path/'remote.json'
+    remote.write_text('{}')
+    wrapper = tmp_path/'git'
+    wrapper.write_text((FIXTURE/'remote_cli.py').read_text())
+    executed = tmp_path/'ssh-executed'
+    ssh = tmp_path/'ssh'
+    ssh.write_text('#!'+sys.executable+'\nfrom pathlib import Path\nPath('
+                   +repr(str(executed))+').touch()\nraise SystemExit(1)\n')
+    ssh.chmod(0o755)
+    real_git = shutil.which('git')
+    bare = tmp_path/'bare'
+    subprocess.run([real_git, 'init', '--bare', '-q', str(bare)], check=True, timeout=10)
+    env = {**os.environ, 'DK_RECIPE_REMOTE': str(remote),
+           'DK_RECIPE_FIXTURE': str(ROOT/'tests/pr/fixtures/github_remote.py'),
+           'DK_RECIPE_BARE': str(bare), 'DK_RECIPE_GIT': real_git,
+           'GIT_SSH_COMMAND': str(ssh)}
+    result = subprocess.run([sys.executable, str(wrapper), 'ls-remote', '--refs', url],
+                            cwd=tmp_path, env=env, text=True, capture_output=True, timeout=10)
+    assert result.returncode != 0
+    assert "transport 'ssh' not allowed" in result.stderr
+    assert not executed.exists()
+    for local in (str(bare), './bare'):
+        result = subprocess.run([sys.executable, str(wrapper), 'ls-remote', '--refs', local],
+                                cwd=tmp_path, env=env, text=True, capture_output=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize('final_ci_outcome',['success','rerun','repair'])
 def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_outcome):
     def execute(argv, *, env=None, ok=True, cwd=None):

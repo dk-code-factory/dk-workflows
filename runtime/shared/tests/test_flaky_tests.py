@@ -3,6 +3,7 @@ import copy
 import io
 import json
 import multiprocessing
+import os
 import subprocess
 from pathlib import Path
 import sys
@@ -68,6 +69,19 @@ def test_bounded_transport_preserves_bytes_and_reaps_timeout():
     with pytest.raises(subprocess.TimeoutExpired):
         _bounded_run([sys.executable, '-c', 'import time; time.sleep(10)'],
                      stdout_limit=8, timeout=0.1, capture_output=True)
+
+
+@pytest.mark.parametrize('binary', [False, True])
+def test_offline_guard_rejects_unmocked_github_transport(tmp_path, monkeypatch, binary):
+    executable = tmp_path/'gh'
+    executed = tmp_path/'executed'
+    executable.write_text('#!'+sys.executable+'\nfrom pathlib import Path\nPath('
+                          +repr(str(executed))+').touch()\nprint("{}")\n')
+    executable.chmod(0o755)
+    monkeypatch.setenv('PATH', str(tmp_path)+os.pathsep+os.environ['PATH'])
+    with pytest.raises(AssertionError, match='Unmocked network or model call'):
+        GitHub(REPO).request('actions/runs/10/attempts/1/logs', binary=binary)
+    assert not executed.exists()
 
 
 class FakeAPI:

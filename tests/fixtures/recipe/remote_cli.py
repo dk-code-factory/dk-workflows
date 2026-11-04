@@ -17,7 +17,8 @@ try:
         arguments=[os.environ['DK_RECIPE_BARE'] if arg=='https://github.com/owner/repo.git' else arg for arg in arguments]
         if any('://' in arg or arg.startswith('git@') for arg in arguments):
             raise AssertionError('Fixture attempted external Git access')
-        result=subprocess.run([os.environ['DK_RECIPE_GIT'],*arguments],text=True,capture_output=True)
+        result=subprocess.run([os.environ['DK_RECIPE_GIT'],*arguments],text=True,capture_output=True,
+                              env={**os.environ,'GIT_ALLOW_PROTOCOL':'file'})
         if result.returncode:
             sys.stdout.write(result.stdout);sys.stderr.write(result.stderr);raise SystemExit(result.returncode)
         if 'push' in arguments:
