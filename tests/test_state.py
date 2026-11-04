@@ -1243,3 +1243,42 @@ def test_explain_git_option_changes(case,option,field,enabled):
     assert not task['reusable']
     assert len(changes)==1 and changes[0]['path']=='/inputs/git/'+field
     assert changes[0]['change']==('added' if enabled else 'removed')
+
+
+def test_git_capture_includes_changes_outside_the_current_subdirectory(case):
+    spec, _ = case
+    checkout = Path(spec['git']['checkout'])
+    nested = checkout/'nested'
+    nested.mkdir()
+    git(checkout, 'config', 'diff.relative', 'true')
+    expected = capture(spec)['components']['inputs']['git']
+    spec['git']['checkout'] = str(nested)
+    assert capture(spec)['components']['inputs']['git'] == expected
+
+
+def test_store_can_run_from_a_non_repository_home(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    store = Store(REPO, PR)
+    assert store.root.is_relative_to(tmp_path/'state')
+    assert store.status([])['unfinished'] == []
+
+
+@pytest.mark.parametrize('layout', ['bare', 'linked'])
+def test_store_rejects_state_inside_shared_git_storage(tmp_path, monkeypatch, layout):
+    metadata = tmp_path/'metadata.git'
+    if layout == 'bare':
+        git(tmp_path, 'init', '--bare', '-q', str(metadata))
+        checkout = tmp_path/'outside'
+        checkout.mkdir()
+    else:
+        checkout = tmp_path/'checkout'
+        git(tmp_path, 'init', '-q', str(checkout))
+        git(checkout, '-c', 'user.name=Test', '-c', 'user.email=test@example.test',
+            'commit', '--allow-empty', '-qm', 'base')
+        linked = tmp_path/'linked'
+        git(checkout, 'worktree', 'add', '-q', '--detach', str(linked))
+        metadata = checkout/'.git'
+        checkout = linked
+    monkeypatch.setenv('XDG_STATE_HOME', str(metadata/'state'))
+    with pytest.raises(ValueError, match='outside'):
+        Store(REPO, PR, checkout=checkout)

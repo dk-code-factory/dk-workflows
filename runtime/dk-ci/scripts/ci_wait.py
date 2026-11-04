@@ -25,6 +25,9 @@ def gh_json(args):
     result = github_run(["gh", *args], capture_output=True, text=True, check=False)
     if result.returncode == 4 or result.returncode and re.search(r'HTTP 40[13]|permission denied|not authenticated|authentication failed|Resource not accessible', result.stderr, re.I):
         raise PermissionDenied(result.stderr.strip())
+    allowed = {0, 1, 8} if args[:2] == ['pr', 'checks'] else {0}
+    if result.returncode not in allowed:
+        raise RuntimeError(result.stderr.strip() or f"gh exited {result.returncode}")
     if not result.stdout.strip():
         # gh v2.86.0 reports absent checks as an error before exporting JSON.
         # Accept its exit 1 and the pending exit 8 required by the CI contract.
