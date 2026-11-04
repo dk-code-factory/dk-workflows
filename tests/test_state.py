@@ -946,6 +946,17 @@ def test_compact_and_full_task_decisions_match(case,condition):
             if k not in {'cycle','progress_count','progress_ref'}}=={
                 k:v for k,v in full['runs']['run'].items() if k!='progress'}
     assert store.manifest.read_bytes()==before
+    for compact_view in (False, True):
+        explained=store.status([spec],compact=compact_view,explain=True)
+        task=explained['tasks'][0]
+        explanation=task.pop('explanation')
+        assert explained==store.status([spec],compact=compact_view)
+        expected={'complete':None, 'failed':'failed_result', 'incomplete':'incomplete_result',
+                  'damaged':'damaged_result', 'missing':'missing_result_artifact',
+                  'invalidated':'explicit_invalidation', 'changed':'changed_inputs',
+                  'unfinished':'unfinished_claim', 'noncacheable':'noncacheable_task'}[condition]
+        assert (expected in explanation['blockers']) if expected else not explanation['blockers']
+    assert store.manifest.read_bytes()==before
 
 
 def test_selected_compact_run_keeps_other_runs_unfinished_claims_and_cli_full_access(case):
@@ -1024,3 +1035,162 @@ def test_compact_inspection_and_recovery_preserve_exhausted_budgets(case):
     assert run['ci_reruns']=={'head':3} and run['ci_repairs']=={'0':5}
     assert list(run['retries'].values())==[1] and run['progress_count']==1
     assert store.status([],run='run')['runs']['run']['progress'][0]['value']['recovery']
+
+
+@pytest.mark.parametrize('kind,path', [
+    ('resource', '/skill/resources/runtime/children/review.md/sha256'),
+    ('instruction', '/instructions/user/sha256'),
+    ('input', '/inputs/context/sha256'),
+    ('option', '/options/provider/model'),
+    ('assigned', '/task/instructions'),
+    ('head', '/inputs/git/trees/head'),
+    ('base', '/inputs/git/trees/base'),
+    ('target', '/inputs/git/trees/target'),
+])
+def test_explain_identifies_exact_consumed_field_without_exposing_bodies(case,tmp_path,kind,path):
+    spec,store=case
+    runtime=tmp_path/'runtime';runtime.mkdir()
+    (runtime/'review.md').write_text('original reviewer resource')
+    spec['skill']['resources']['runtime']=str(runtime)
+    spec['options']={'provider':{'model':'private original model'}}
+    before=deepcopy(capture(spec))
+    done(store,spec,run='run',cycle='c1')
+    if kind=='resource':(runtime/'review.md').write_text('private new reviewer body')
+    elif kind=='instruction':Path(spec['instructions']['user']).write_text('private new instruction')
+    elif kind=='input':Path(spec['inputs']['context']).write_text('private new discussion body')
+    elif kind=='option':spec['options']['provider']['model']='private new model'
+    elif kind=='assigned':spec['task']['instructions']='private new assigned instructions'
+    else:
+        checkout=spec['git']['checkout']
+        (Path(checkout)/'code').write_text('new code\n')
+        git(checkout,'commit','-qam','new tree')
+        spec['git'][kind]=git(checkout,'rev-parse','HEAD')
+    after=capture(spec)
+    retained=store.manifest.read_bytes()
+    task=store.status([spec],explain=True)['tasks'][0]
+    explanation=task['explanation']
+    change=next(row for row in explanation['changes'] if row['path']==path)
+    assert change['change']=='changed'
+    assert change['old']!=change['new']
+    assert explanation['previous_capture_fingerprint']==before['fingerprint']
+    assert explanation['current_fingerprint']==after['fingerprint']
+    reference=explanation['previous_capture']
+    old=read(reference['manifest'])
+    for part in reference['pointer'].split('/')[1:]:old=old[part.replace('~1','/').replace('~0','~')]
+    assert old==before['components']
+    if kind=='resource':
+        assert change['old']['hash']==before['components']['skill']['resources']['runtime']['children']['review.md']['sha256']
+    assert 'private new' not in json.dumps(explanation)
+    assert store.manifest.read_bytes()==retained
+    assert not task['reusable'] and task['task']==spec['task']['id']
+
+
+def test_explain_additions_removals_escaped_labels_and_consumer_isolation(case,tmp_path):
+    a,store=case
+    b=deepcopy(a);b['skill']['identity']='reviewer:b';b['inputs']={}
+    b['skill']['resources']={'own':str(tmp_path/'b.md')}
+    Path(b['skill']['resources']['own']).write_text('other reviewer')
+    a['options']={'provider':{'remove':True,'strict':True}}
+    done(store,a);done(store,b)
+    removed=a['inputs'].pop('context')
+    a['inputs']['scope/~new']=removed
+    a['options']['provider'].pop('remove')
+    a['options']['provider']['strict']=1  # JSON distinguishes true from 1.
+    a['options']['provider']['sha256']='private option text'
+    Path(a['skill']['resources']['entry']).write_text('changed reviewer')
+    tasks=store.status([a,b],explain=True)['tasks']
+    changes={row['path']:row for row in tasks[0]['explanation']['changes']}
+    assert changes['/inputs/context']['change']=='removed'
+    assert changes['/inputs/scope~1~0new']['change']=='added'
+    assert changes['/options/provider/remove']['change']=='removed'
+    assert changes['/options/provider/strict']['change']=='changed'
+    assert 'private option text' not in json.dumps(tasks[0]['explanation'])
+    assert tasks[1]['reusable'] and tasks[1]['explanation']['changes']==[]
+    assert tasks[1]['explanation']['blockers']==[]
+
+
+def test_explain_history_cleanup_keeps_content_sibling(case):
+    content,store=case
+    history=deepcopy(content);history['task']['id']='history';history['git']['history']=True
+    head=deepcopy(content);head['task']['id']='head';head['git']['head_sensitive']=True
+    specs=[content,history,head]
+    for spec in specs:done(store,spec)
+    checkout=content['git']['checkout']
+    git(checkout,'commit','--amend','-qm','history-only cleanup')
+    for spec in specs:spec['git']['head']=git(checkout,'rev-parse','HEAD')
+    tasks=store.status(specs,explain=True)['tasks']
+    assert [t['reusable'] for t in tasks]==[True,False,False]
+    assert tasks[0]['explanation']['changes']==[]
+    assert [c['path'] for c in tasks[1]['explanation']['changes']]==['/inputs/git/history']
+    changes=tasks[2]['explanation']['changes']
+    assert [c['path'] for c in changes]==['/inputs/git/commits/head']
+    assert changes[0]['new']['hash']==head['git']['head']
+
+
+def test_explain_missing_result_recovery_and_noncacheable_result(case):
+    spec,store=case
+    fresh=store.status([spec],explain=True)['tasks'][0]['explanation']
+    assert fresh['previous_capture'] is None
+    assert fresh['blockers']==['no_previous_capture','missing_result']
+    spec['cacheable']=False
+    done(store,spec,run='run',cycle='c1')
+    spec['cacheable']=True
+    assert store.status([spec],explain=True)['tasks'][0]['explanation']['blockers']==['noncacheable_result']
+    first=store.start(spec,run='run',cycle='c2')['claim']
+    recovered=store.start(spec,recover=first['id'],run='run',cycle='c2')['claim']
+    retained=store.manifest.read_bytes()
+    task=store.status([spec],explain=True)['tasks'][0]
+    assert task['unfinished']==recovered
+    assert 'unfinished_claim' in task['explanation']['blockers']
+    assert store.manifest.read_bytes()==retained
+    assert store.start(spec,run='run',cycle='c2')['action']=='recover_required'
+
+
+def test_explain_distinguishes_last_capture_from_older_result(case):
+    spec,store=case
+    done(store,spec)
+    spec['task']['instructions']='changed instructions'
+    claim=store.start(spec)['claim']
+    # Close a stopped attempt without replacing the previous immutable result.
+    store.invalidate([claim['key']],'stopped',recover=claim['id'])
+    explanation=store.status([spec],explain=True)['tasks'][0]['explanation']
+    assert explanation['changes']==[]
+    assert explanation['previous_capture_fingerprint']==explanation['current_fingerprint']
+    assert explanation['result_fingerprint']!=explanation['current_fingerprint']
+    assert explanation['blockers']==['explicit_invalidation','result_fingerprint_mismatch']
+
+
+def test_explain_cli_parity_and_missing_resource_preserves_claim_and_budget(case):
+    spec,store=case
+    store.start(spec,run='run',cycle='c1')
+    specpath=store.root/'spec.json';specpath.write_text(json.dumps(spec))
+    command=[sys.executable,str(ROOT/'scripts/dk.py'),'--repository',REPO,'--pr',PR,
+             'status','--spec',str(specpath),'--compact','--run','run']
+    ordinary=json.loads(subprocess.check_output(command,text=True))
+    explained=json.loads(subprocess.check_output(command+['--explain'],text=True))
+    assert 'explanation' not in ordinary['tasks'][0]
+    explained['tasks'][0].pop('explanation')
+    assert ordinary==explained
+    Path(spec['skill']['resources']['entry']).unlink()
+    retained=store.manifest.read_bytes()
+    responses=[]
+    for flags in ([],['--explain']):
+        response=subprocess.run(command+flags,text=True,capture_output=True)
+        assert response.returncode==2
+        responses.append(json.loads(response.stdout))
+        assert store.manifest.read_bytes()==retained
+    assert responses[0]==responses[1] and responses[0]['status']=='blocked'
+
+
+@pytest.mark.parametrize('option,field', [('history','history'),('head_sensitive','commits')])
+@pytest.mark.parametrize('enabled', [True,False])
+def test_explain_git_option_changes(case,option,field,enabled):
+    spec,store=case
+    spec['git'][option]=not enabled
+    done(store,spec)
+    spec['git'][option]=enabled
+    task=store.status([spec],explain=True)['tasks'][0]
+    changes=task['explanation']['changes']
+    assert not task['reusable']
+    assert len(changes)==1 and changes[0]['path']=='/inputs/git/'+field
+    assert changes[0]['change']==('added' if enabled else 'removed')
