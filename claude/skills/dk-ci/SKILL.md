@@ -1,8 +1,12 @@
 ---
 name: dk-ci
-description: Observe exact-head PR CI with retained deadlines and classify failures using verified flakes or exceptions.
+description: Check CI for the current PR commit, preserve wait deadlines and classify failures using verified flaky tests or exceptions.
 ---
 
-Resolve PACKAGE_ROOT from this skill’s installation and follow [the shared PR task contract](../../../docs/pr/contracts.md).
+Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
-Use runtime/dk-ci/scripts/ci_wait.py --pr PR_URL --head SHA. One observer per PR/head, retained across interruption. Default wait is 30 minutes with one 30-minute extension while pending. Reuse the same process when tool calls yield; do not start a second observer. Current head and attempts are live inputs. The helper returns success, known_flakes, accepted_exceptions, failure, timeout, no_checks or head_changed. Only the first three can satisfy CI with current supporting evidence. Repair access before --retry-denied. Diagnose failures through dk-ci-flakes and code inspection; callers retain repair/rerun budgets. For a transient rerun, reserve the caller's per-head budget, prepare/publish a ci-rerun request with fresh failed-attempt evidence through scripts/publish.py, and pass its verified operation to ci_wait.py --rerun-operation FILE. This preserves the next attempt window on resume. Never rerun broad workflows as a fallback.
+Run `runtime/dk-ci/scripts/ci_wait.py --pr PR_URL --head SHA`. Keep one observer per PR and head across interruptions. The default wait is 30 minutes, with one 30-minute extension while checks are pending. Resume the same process when a tool yields. Read the current head and check attempts from GitHub.
+
+The helper returns `success`, `known_flakes`, `accepted_exceptions`, `failure`, `timeout`, `no_checks` or `head_changed`. Only the first three satisfy CI, with current evidence. Restore access before using `--retry-denied`. Diagnose failures with `dk-ci-flakes` and code inspection. Preserve the caller's repair and rerun budgets.
+
+Before rerunning a transient failure, reserve the caller's budget for that head. Use `scripts/publish.py` to prepare and publish a `ci-rerun` request with current failed-attempt evidence. Pass the verified operation to `ci_wait.py --rerun-operation FILE` to preserve the next attempt's wait window on resume. Do not rerun whole workflows as a fallback.

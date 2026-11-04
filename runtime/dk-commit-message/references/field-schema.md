@@ -1,39 +1,39 @@
-# Commit message field schema
+# Commit message fields
 
-Use repository-specific names and layout. Preserve these meanings.
+Use the repository's names and layout. Keep these meanings.
 
-## Required meanings
+## Main fields
 
 | Field | Question answered |
 |---|---|
-| Summary | What changed, in one distinguishing line? |
-| Motivation | Why was the change needed, or what constraint shaped it? |
-| References | Which issue, ticket, or PR belongs to it? Omit when none exists. |
+| Summary | What changed, in one specific line? |
+| Motivation | Why was the change needed? Which constraint shaped it? |
+| References | Which issue, ticket or PR relates to it? Omit if none exists. |
 
-Motivation may collapse into the subject only when repository history permits one-line messages for a change this small. Otherwise the body must add information unavailable from the diff.
+Put motivation in the subject only when repository history permits a one-line message for a change this small. Otherwise the body must add information beyond the diff.
 
-## Repository-conditional meanings
+## Conditional fields
 
-Include only with evidence:
+Include only when supported:
 
-- Testing: repository commits consistently record verification.
-- Sign-off: contributor rules, DCO, or hooks require `Signed-off-by`.
-- Breaking change: the repository uses Conventional Commits and this change is breaking.
-- Human co-authors: real pair authorship exists. Never attribute a tool.
+- Testing: repository commits consistently record validation.
+- Sign-off: contributor rules, DCO or hooks require `Signed-off-by`.
+- Breaking change: the repository uses Conventional Commits and the change is breaking.
+- Human co-authors: actual joint authorship exists. Never credit a tool as an author.
 
-## Conservative fallback
+## Fallback
 
-When no style evidence exists:
+Without repository style evidence:
 
-- Use an imperative, sentence-case subject without a period, preferably at most 72 characters.
-- Add a short body only when it supplies motivation or an important consequence.
+- Use an imperative, sentence-case subject without a period, preferably within 72 characters.
+- Add a short body only for motivation or an important consequence.
 - Wrap prose near 72 characters.
-- Put a real issue reference at the end; omit it when unknown.
-- Use plain text, not Markdown headings.
+- End with a real issue reference; omit it when unknown.
+- Use plain text without Markdown headings.
 
-## Reject
+## Leave out
 
-- Generic subjects such as `fix bug`, `update code`, or `misc changes`.
-- Diff narration, unsupported claims, invented issue numbers, or invented test results.
-- Generated-by banners, robot emoji, or tool co-author trailers.
-- Web permalinks when a terminal-friendly `path:line` reference is enough.
+- Generic subjects such as `fix bug`, `update code` or `misc changes`.
+- Diff narration, unsupported claims, invented issues or test results.
+- Generated-by banners, robot emoji or tool co-author trailers.
+- Web links when a terminal `path:line` reference is enough.

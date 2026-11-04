@@ -1,7 +1,7 @@
 # PR decision record
 
-Use a bounded `## Decisions` section in the PR body, one bullet per settled material choice. Include the chosen behavior, necessary rationale/conditions and exact sources when available. Preserve published entries unless the user authorizes revision. Preserve collapsed historical decision blocks verbatim as superseded evidence. Keep new choices distinct from open questions and suggestions.
+Use a bounded `## Decisions` section in the PR body. Write one bullet per settled material choice. Include chosen behavior, needed reasons and conditions, and exact sources when available. Keep published entries unless the user authorizes revision. Preserve collapsed historical blocks verbatim as superseded evidence. Distinguish new choices from open questions and suggestions.
 
-Record material agreements with the exact instruction/discussion source before dependent work. Do not manufacture a URL for a chat answer. A temporary pause remains pending within PR scope unless explicitly excluded. Preserve the reason and any revisit condition. Refresh governing review context after a decision changes.
+Record material agreements with their exact instruction or discussion source before dependent work. Do not invent URLs for chat answers. A temporary pause remains pending in PR scope unless explicitly excluded. Keep the reason and revisit condition. Refresh governing review context after a decision changes.
 
-Follow [language review](../../dk-pr-decisions/references/language.md), at most three passes. Publish authorized updates using the domain publisher with the fresh head/title/body, preserving unrelated sections. Uncertain writes require reconciliation before another attempt.
+Follow [language review](../../dk-pr-decisions/references/language.md) for at most three passes. Publish authorized updates through the PR publisher after checking current head, title and body. Preserve unrelated sections. Reconcile uncertain writes before retrying.

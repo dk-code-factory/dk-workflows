@@ -1,10 +1,12 @@
 ---
 name: dk-pr-decisions
-description: Collect, reconcile and explicitly publish settled PR decisions with source references.
+description: Collect and reconcile settled PR decisions, then publish them when authorized with source references.
 ---
 
-Resolve PACKAGE_ROOT from this skill’s installation and follow [the shared PR task contract](../../../docs/pr/contracts.md).
+Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
-For analysis inputs and live verification, follow [shared PR evidence](../../../docs/pr/supplied-evidence.md).
+Use [shared PR evidence](../../../docs/pr/supplied-evidence.md) for analysis and live verification.
 
-Read complete PR discussion, user instructions and current Decisions. Separate settled choices from suggestions, open questions and generated progress. Retain exact sources; unresolved material scope choices require user input. Propose evidence-backed choices without pretending they are accepted. Review language using runtime/dk-pr-decisions/references/language.md for at most three passes; apply its language criteria directly. Update only the Decisions section when authorized using scripts/publish.py; preserve unrelated title/body text. Return structured decisions, open questions, sources, and original instruction snapshots.
+Read the complete PR discussion, user instructions and current Decisions. Distinguish settled choices from suggestions, open questions and generated progress. Save exact sources. Ask the user about important unresolved scope choices. Base proposals on evidence and label them as proposals.
+
+Follow [decision language review](../../../runtime/dk-pr-decisions/references/language.md) for at most three passes. When authorized, use `scripts/publish.py` to update only Decisions. Preserve the rest of the title and body. Return structured decisions, open questions, sources and original instruction snapshots.

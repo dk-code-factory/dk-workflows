@@ -1,8 +1,8 @@
 ---
 name: dk-pr-fix
-description: Find and fix issues in your PR through review, feedback, publication, commit cleanup and final CI, preserving progress and budgets.
+description: Review and fix your PR, publish changes, organize commits and check final CI while preserving progress and budgets.
 ---
 
-Resolve PLUGIN_ROOT from this installed skill location. Use the current agent and its native skill tools. Establish ownership with `scripts/pr_route.py --pr PR_URL` under [PR routing](../../../runtime/pr.md). Proceed for your PR, or an explicit instruction to maintain another author's PR; otherwise route to `dk-pr-review` before coding or publication. Ownership classification does not establish branch write/rewrite permission.
+Set PLUGIN_ROOT to this plugin's root directory. Use the current agent and native skill tools. Check ownership with `scripts/pr_route.py --pr PR_URL` under [PR routing](../../../runtime/pr.md). Proceed for your PR or when explicitly asked to maintain another author's PR. Otherwise invoke `dk-pr-review` before editing code or publishing. PR ownership alone does not grant permission to write or rewrite the branch.
 
-Read [task state and handoffs](../../../docs/task-state.md) before managing an invocation. Read [the fix recipe](../../../runtime/pr-iter.md) and follow each stage. Preserve the run id and counters on resume. A cache hit can retain findings and never grants publication authority.
+Read [task state and handoffs](../../../docs/task-state.md) before managing a task. Follow each stage of [the fix recipe](../../../runtime/pr-iter.md). Keep the run id and counters on resume. Cached results may contain findings; they never authorize publication.

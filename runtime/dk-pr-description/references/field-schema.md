@@ -1,6 +1,6 @@
 # Pull request sections
 
-Use the repository's headings and section order when available. Keep the meanings below.
+Use the repository's headings and section order when available. Keep these meanings.
 
 ## Main sections
 
@@ -13,7 +13,7 @@ Usually include `Issue` and `Fix`. Leave out sections with nothing to explain.
 
 ## Other sections
 
-Add these only when the PR has facts to report:
+Include only sections with facts to report:
 
 - Decisions: choices that affect behavior or limit the work, and why they were made.
 - Results: outcomes or measurements that are not clear from the fix itself.
@@ -23,7 +23,7 @@ Add these only when the PR has facts to report:
 
 Bold issue and PR numbers central to the change, plus names whose exact identity matters. Include relevant validation when it helps reviewers assess the change or the template requires it.
 
-## If the template and past PRs do not show a format
+## Fallback
 
 - Title: start with a verb and keep it short. If commit titles consistently start with commands such as `Fix` or `Add`, use that form.
 - Body sections: `Issue` and `Fix`.
@@ -33,7 +33,7 @@ Bold issue and PR numbers central to the change, plus names whose exact identity
 
 ## Leave out
 
-- A summary that repeats the title without explaining the change.
+- A summary that only repeats the title.
 - Lists of changed files, a contents list, emoji headings, or text that does not explain the change.
 - Invented facts, issue links, reviewers, screenshots, or release notes.
 - Banners or mentions of the drafting tool.

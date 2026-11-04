@@ -1,10 +1,12 @@
 ---
 name: dk-config
-description: Manage workflow and PR settings, including reviewers, rules, drafting, splitting, CI exceptions, identities and review completion policies.
+description: Manage reviewers, accounts, PR rules, drafting, splitting, CI exceptions and completion settings.
 ---
 
-Resolve PLUGIN_ROOT from this installed skill location. Read [workflow configuration](../../../docs/configuration.md) for reviewer selection, skill roles, personal identities and incoming-review policies. Use `scripts/config.py` for these settings.
+Set PLUGIN_ROOT to this plugin's root directory. Read [workflow configuration](../../../docs/configuration.md). Use `scripts/config.py` for reviewers, skill roles, personal accounts and incoming review policies.
 
-Read [PR configuration](../../../docs/pr/configuration.md) and use `scripts/pr_config.py` for rules, drafting, completion prompts, size/splitting policies and CI exceptions. Use `dk-ci-flakes` for saved flake evidence. Preserve existing private stores, scope precedence, original instructions and per-PR choices; changing skill names does not authorize resetting settings or moving retained state. External domain settings remain owned by the selected external skill. Architecture configuration belongs to the independent dk-architecture package.
+Read [PR configuration](../../../docs/pr/configuration.md). Use `scripts/pr_config.py` for rules, drafting, completion prompts, size and split policies, and CI exceptions. Use `dk-ci-flakes` for saved flaky-test evidence.
 
-Resolve additional personal accounts against their own GitHub host and save immutable numeric account ids. Explain the exact repository/user scope before changing automatic posting, approval or merging settings. Enable only the actions the user requested; do not infer approval or merge permission from permission to post findings. Retain existing values for unrelated settings.
+Preserve private stores, scope precedence, original instructions and per-PR choices. Renaming a skill does not permit resetting settings or moving saved state. The selected external skill owns its settings. The separate `dk-architecture` package owns architecture settings.
+
+Verify additional personal accounts on their GitHub host and save their immutable numeric ids. Explain the repository or user scope before changing automatic posting, approval or merge settings. Enable only requested actions. Permission to post findings does not permit approval or merging. Preserve unrelated settings.

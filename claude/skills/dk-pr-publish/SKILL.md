@@ -1,8 +1,10 @@
 ---
 name: dk-pr-publish
-description: Publish prepared PR changes, including pushes, edits, replies, reviews and authorized merges, with fresh validation and recovery.
+description: Publish prepared PR changes, replies, reviews and authorized merges with current checks and recovery records.
 ---
 
-Resolve PACKAGE_ROOT from this skill’s installation and follow [the shared PR task contract](../../../docs/pr/contracts.md).
+Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
-Use scripts/publish.py for description edits, replies and exact-lease pushes. Read [publication](../../../docs/pr/publication.md). This skill owns GitHub validation and recovery, independently of workflow caching. Use the publisher's resolve-thread, request-review, create-draft-pr, ci-rerun, post-review and merge-pr handlers for the remaining actions. Merging requires separate explicit or policy authorization, completed clean review/verification and current CI; iteration alone never authorizes it. Prepared requests capture exact targets and payloads; preserve the returned operation for read-only reconciliation after uncertainty. A cached analysis result cannot authorize an action.
+Follow [publication and recovery](../../../docs/pr/publication.md). Use `scripts/publish.py` for description edits, replies and pushes with exact leases. Use its `resolve-thread`, `request-review`, `create-draft-pr`, `ci-rerun`, `post-review` and `merge-pr` handlers for other actions. This skill checks GitHub state and handles recovery independently of the workflow cache.
+
+Merging requires separate explicit or saved policy authorization, completed clean review and verification, and current CI. Iteration alone does not authorize merging. Save the exact target, payload and returned operation path. After an uncertain outcome, use that operation for read-only reconciliation. Cached analysis never authorizes an action.
