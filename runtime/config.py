@@ -14,7 +14,7 @@ DEFAULTS = {
         'description': 'dk-workflows:dk-pr-description',
         'reply': 'dk-workflows:dk-pr-feedback-reply',
         'partition': 'dk-workflows:dk-pr-split',
-        'cleanup': 'dk-workflows:dk-pr-commits',
+        'cleanup': 'dk-workflows:dk-commit-split',
         'ci': 'dk-workflows:dk-ci',
         'flaky_tests': 'dk-workflows:dk-ci-flakes',
         'publish': 'dk-workflows:dk-pr-publish',

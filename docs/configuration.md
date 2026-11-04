@@ -10,7 +10,7 @@ Run `python3 PLUGIN_ROOT/scripts/config.py --repository HOST/OWNER/REPO show|set
 }
 ```
 
-There is no default reviewer. PR roles default to bundled skills; users may select other installed skills. `run_reviewers`, `read_feedback` and `post_review` select the coordinator, feedback collector and review publisher. Partition and cleanup use separate `dk-pr-split` and `dk-pr-commits` skills.
+There is no default reviewer. PR roles default to bundled skills; users may select other installed skills. `run_reviewers`, `read_feedback` and `post_review` select the coordinator, feedback collector and review publisher. Partition and cleanup use separate `dk-pr-split` and `dk-commit-split` skills.
 
 `cycle_hooks` defines ordered `before_cycle` and `after_cycle` lists for `dk-pr-fix` and `dk-pr-review`. Entries require a stable `id` and original `instructions`, with optional `skill` and object `options`. Without a skill, the workflow agent carries out the instructions. Each phase inherits separately across user, upstream and repository scopes; a supplied list replaces that phase, and `[]` disables it. Defaults are empty. Selected hook skills also participate in availability preflight. See [cycle hooks](cycle-hooks.md) for examples, exact boundaries and retained task receipts. Hooks remain within the invoking workflow's permissions.
 
