@@ -1,30 +1,37 @@
-"""Small workflow-owned settings. Domain settings remain references to their owner."""
+"""Workflow settings managed alongside PR policies by the dk-config skill."""
 from pathlib import Path
 import os
+import re
 from state import digest, read
 
 DEFAULTS = {
     'reviewers': [],
     'skills': {
-        'feedback': 'dk-workflows:dk-pr-address-reviews',
+        'feedback': 'dk-workflows:dk-pr-feedback-address',
         'decisions': 'dk-workflows:dk-pr-decisions',
         'description': 'dk-workflows:dk-pr-description',
-        'reply': 'dk-workflows:dk-pr-reply-review',
-        'partition': 'dk-workflows:dk-pr-split-commits',
-        'cleanup': 'dk-workflows:dk-pr-split-commits',
+        'reply': 'dk-workflows:dk-pr-feedback-reply',
+        'partition': 'dk-workflows:dk-pr-split',
+        'cleanup': 'dk-workflows:dk-pr-commits',
         'ci': 'dk-workflows:dk-ci',
-        'flaky_tests': 'dk-workflows:dk-flaky-tests',
+        'flaky_tests': 'dk-workflows:dk-ci-flakes',
         'publish': 'dk-workflows:dk-pr-publish',
+        'read_feedback': 'dk-workflows:dk-pr-feedback-read',
+        'run_reviewers': 'dk-workflows:dk-pr-reviewers-run',
+        'post_review': 'dk-workflows:dk-pr-review-post',
     },
     'iteration': {'max_cycles': 5, 'same_cycle_retries': 1, 'ci_repairs_per_cycle': 5,
                   'ci_reruns_per_head': 3},
     'domain_settings': {},
+    'identities': [],
+    'incoming_review': {'post': True, 'approve': False, 'merge': False,
+                        'merge_method': 'squash'},
 }
 
 
 def validate(settings):
     if not isinstance(settings, dict) or set(settings) - DEFAULTS.keys():
-        raise ValueError('Only reviewers, skills, iteration and domain_settings belong to workflows')
+        raise ValueError('Unknown workflow setting')
     if not isinstance(settings.get('reviewers', []), list):
         raise ValueError('Reviewers must be a list')
     for key in ('skills', 'domain_settings'):
@@ -49,6 +56,23 @@ def validate(settings):
     for owner, reference in settings.get('domain_settings', {}).items():
         if not isinstance(owner, str) or not isinstance(reference, str) or not reference:
             raise ValueError('Domain settings must be owner-to-reference strings')
+    identities = settings.get('identities', [])
+    if (not isinstance(identities, list) or any(
+            not isinstance(identity, dict) or set(identity) != {'host', 'id'}
+            or not isinstance(identity['host'], str)
+            or not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?', identity['host'])
+            or type(identity['id']) is not int or identity['id'] <= 0
+            for identity in identities)):
+        raise ValueError('Personal identities require a GitHub host and positive numeric account id')
+    for identity in identities:
+        identity['host'] = identity['host'].lower()
+    if len({(v['host'], v['id']) for v in identities}) != len(identities):
+        raise ValueError('Personal identities must be unique per host/account')
+    policy = settings.get('incoming_review', {})
+    if (not isinstance(policy, dict) or set(policy) - DEFAULTS['incoming_review'].keys()
+            or any(type(value) is not bool for key, value in policy.items() if key != 'merge_method')
+            or policy.get('merge_method', 'squash') not in {'squash', 'merge'}):
+        raise ValueError('Incoming-review policy requires boolean actions and squash or merge method')
     return settings
 
 
@@ -70,7 +94,7 @@ def effective(repository, upstream=None):
             continue
         settings = validate(read(source))
         for key, value in settings.items():
-            if key in {'skills', 'domain_settings'}:
+            if key in {'skills', 'domain_settings', 'incoming_review'}:
                 result[key].update(value)
             else:
                 result[key] = value

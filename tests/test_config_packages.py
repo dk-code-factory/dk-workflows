@@ -48,7 +48,7 @@ def test_bundled_helpers_work_from_a_copied_plugin_without_an_external_repositor
 
 def test_default_roles_resolve_to_bundled_skills():
     skills={p.parent.name for p in (ROOT/'codex/skills').glob('*/SKILL.md')}
-    assert len(skills)==16
+    assert len(skills)==18
     for identity in config.DEFAULTS['skills'].values():
         owner,name=identity.split(':',1)
         assert owner=='dk-workflows' and name in skills

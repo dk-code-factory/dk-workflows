@@ -100,3 +100,64 @@ def test_review_request_already_satisfied_does_not_send_again(remote):
     operation=publisher.prepare(fixture.request('request-review'))['operation']
     assert publisher.publish(operation)['status']=='verified'
     assert not remote.state['writes']
+
+
+@pytest.mark.parametrize('method', ['squash', 'merge'])
+def test_merge_binds_reviewed_head_and_reconciles_exact_commit(remote, method):
+    request = fixture.request('merge-pr')
+    request['merge_method'] = method
+    operation = publisher.prepare(request)['operation']
+    result = publisher.publish(operation)
+    assert result['receipt']['head'] == fixture.HEAD
+    assert result['receipt']['base'] == 'b'*40
+    assert result['receipt']['merge_method'] == method
+    assert publisher.publish(operation)['status'] == 'verified'
+    assert remote.state['writes'] == {'merge-pr': 1}
+
+
+@pytest.mark.parametrize('failure', ['pending-ci', 'missing-ci', 'unapproved', 'target',
+                                     'draft', 'unknown-mergeability', 'own-pr'])
+def test_merge_readiness_failures_block_all_writes(remote, failure):
+    if failure == 'pending-ci': remote.state['checks'][0]['bucket'] = 'pending'
+    if failure == 'missing-ci': remote.state['checks'] = []
+    if failure == 'unapproved': remote.state['merge_gate']['reviewDecision'] = 'REVIEW_REQUIRED'
+    if failure == 'target': remote.state['branches']['main'] = 'd'*40
+    if failure == 'draft': remote.state['pull']['draft'] = True
+    if failure == 'unknown-mergeability': remote.state['pull']['mergeable'] = None
+    if failure == 'own-pr': remote.state['pr_author']['id'] = remote.state['actor_id']
+    with pytest.raises(ValueError): publisher.prepare(fixture.request('merge-pr'))
+    assert not remote.state['writes']
+
+
+def test_merge_target_change_after_preparation_blocks_dispatch(remote):
+    operation = publisher.prepare(fixture.request('merge-pr'))['operation']
+    remote.state['branches']['main'] = 'd'*40
+    with pytest.raises(Diagnostic): publisher.publish(operation)
+    assert not remote.state['writes']
+    assert publication.load(operation)['status'] == 'prepared'
+
+
+@pytest.mark.parametrize('drift', ['actor', 'target', 'method'])
+def test_unexpected_merge_receipt_remains_uncertain_and_never_resends(remote, drift):
+    operation = publisher.prepare(fixture.request('merge-pr'))['operation']
+    remote.state['lose_response'] = ['merge-pr']
+    with pytest.raises(Diagnostic): publisher.publish(operation)
+    if drift == 'actor': remote.state['pull']['merged_by']['id'] = 99
+    if drift == 'target': remote.state['merge_commit']['parents'][0]['sha'] = 'd'*40
+    if drift == 'method': remote.state['merge_commit']['parents'].append({'sha': fixture.HEAD})
+    for _ in range(2):
+        with pytest.raises(Diagnostic): publisher.publish(operation, reconcile=True)
+    assert remote.state['writes'] == {'merge-pr': 1}
+    assert publication.load(operation)['status'] == 'pending'
+
+
+def test_self_approval_is_blocked_and_actor_drift_blocks_dispatch(remote):
+    request = fixture.request('post-review')
+    request['event'] = 'APPROVE'
+    remote.state['pr_author']['id'] = remote.state['actor_id']
+    with pytest.raises(ValueError, match='own PR'): publisher.prepare(request)
+    remote.state['pr_author']['id'] = 2
+    operation = publisher.prepare(request)['operation']
+    remote.state['actor_id'] = 3
+    with pytest.raises(Diagnostic): publisher.publish(operation)
+    assert not remote.state['writes']

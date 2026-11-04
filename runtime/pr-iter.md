@@ -25,7 +25,7 @@ Follow these stages. Each result includes original output, completion, evidence 
    - Repeat when diff, target, scope or partition policy changes. After partition publication, synchronize the original PR’s scope, Decisions and description and refresh affected downstream work without resetting budgets.
 4. **Review and fix.**
    - Inputs: synchronized description/Decisions, pinned target/base/head trees/diff, governing context, reviewer resources and options.
-   - Follow [the review recipe](pr-review.md) using the retained run and one shared cycle id per pass. Reuse allocates no cycle; resume retains the cycle. Assess findings through feedback skills and retain dispositions and exact acceptances.
+   - Follow [the review recipe](pr-reviewers.md) using the retained run and one shared cycle id per pass. Reuse allocates no cycle; resume retains the cycle. Assess findings through feedback skills and retain dispositions and exact acceptances.
    - Result: original reviewer outputs, explicit completion, findings, evidence and blockers. Fix actionable work, then refresh scope and affected inputs for the next pass; completed unchanged siblings remain reusable.
    - Allow five review/fix cycles. Record a usage/session-limited reviewer’s incomplete output before its one explicit same-cycle `--retry`; resolve other failure blockers before retrying. Stop with preserved state if fresh inputs need a sixth cycle.
 5. **Clean the series.**
