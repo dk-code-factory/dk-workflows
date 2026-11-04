@@ -405,6 +405,37 @@ def capture(spec, *, _context=None):
             'provenance': provenance, 'cacheable': cacheable, 'subject': subject}
 
 
+def _pointer(parts):
+    return ''.join('/' + str(part).replace('~', '~0').replace('/', '~1') for part in parts)
+
+
+def _component_changes(old, new, parts=()):
+    """Compare captured values, exposing identities rather than instruction bodies."""
+    if digest(old) == digest(new):
+        return
+
+    def summary(value, path):
+        # Content/Git hashes are already safe, useful identities. All other
+        # values (including assigned instructions and option strings) are hashed.
+        if ((path and path[0] in {'skill', 'instructions', 'inputs'} and path[-1] == 'sha256'
+             or path[:2] == ('inputs', 'git'))
+                and isinstance(value, str) and re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', value)):
+            return {'hash': value}
+        return {'sha256': digest(value)}
+
+    if isinstance(old, dict) and isinstance(new, dict):
+        for key in sorted(old.keys() | new.keys()):
+            path = (*parts, key)
+            if key not in old:
+                yield {'path': _pointer(path), 'change': 'added', 'new': summary(new[key], path)}
+            elif key not in new:
+                yield {'path': _pointer(path), 'change': 'removed', 'old': summary(old[key], path)}
+            else:
+                yield from _component_changes(old[key], new[key], path)
+    else:
+        yield {'path': _pointer(parts), 'change': 'changed', 'old': summary(old, parts), 'new': summary(new, parts)}
+
+
 class Store:
     def __init__(self, repository, pr, *, checkout=None):
         self.subject = identity(repository, pr)
@@ -438,13 +469,16 @@ class Store:
             yield manifest
 
     def saved(self, entry):
+        return self._load_saved(entry)[0]
+
+    def _load_saved(self, entry):
         reference = entry.get('result')
         if not reference:
-            return None
+            return None, 'missing_result'
         try:
             path = self.root/'results'/reference['file']
             if path.parent.resolve() != (self.root/'results').resolve():
-                return None
+                return None, 'damaged_result'
             result = read(path)
             original = base64.b64decode(result['original'], validate=True)
             if (digest(result) != reference['hash'] or result.get('contract') != CONTRACT
@@ -454,13 +488,15 @@ class Store:
                     or hashlib.sha256(original).hexdigest() != result['original_sha256']
                     or result['fingerprint'] != reference['fingerprint']
                     or result['key'] != entry['key']):
-                return None
-            return {'path': str(path), **result}
+                return None, 'damaged_result'
+            return {'path': str(path), **result}, None
+        except FileNotFoundError:
+            return None, 'missing_result_artifact'
         except (ValueError, OSError, KeyError, TypeError):
-            return None
+            return None, 'damaged_result'
 
-    def describe(self, captured, entry):
-        saved = self.saved(entry)
+    def describe(self, captured, entry, *, explain=False):
+        saved, result_problem = self._load_saved(entry)
         changed = []
         old = entry.get('components', {})
         for key, value in captured['components'].items():
@@ -468,7 +504,7 @@ class Store:
                 changed.append(key)
         reusable = bool(captured['cacheable'] and not entry.get('invalidated') and not entry.get('claim')
                         and saved and saved['status'] == 'complete' and saved.get('cacheable') is True and saved['fingerprint'] == captured['fingerprint'])
-        return {'key': captured['key'], 'task': captured['components']['task']['id'],
+        described = {'key': captured['key'], 'task': captured['components']['task']['id'],
                 'reusable': reusable, 'changed': changed,
                 'unfinished': entry.get('claim'), 'attempts': len(entry.get('attempts', [])),
                 'result': saved['path'] if saved else None, 'completion': saved['status'] if saved else None,
@@ -477,8 +513,40 @@ class Store:
                 'reason': ('reusable' if reusable else 'unfinished' if entry.get('claim') else
                            'invalidated' if entry.get('invalidated') else
                            'changed_inputs' if changed else saved['status'] if saved and saved['status'] != 'complete' else 'missing_or_incomplete_result')}
+        if explain:
+            blockers = []
+            if not captured['cacheable']:
+                blockers.append('noncacheable_task')
+            if entry.get('claim'):
+                blockers.append('unfinished_claim')
+            if entry.get('invalidated'):
+                blockers.append('explicit_invalidation')
+            if 'components' not in entry:
+                blockers.append('no_previous_capture')
+            elif digest(old) != captured['fingerprint']:
+                blockers.append('changed_inputs')
+            if result_problem:
+                blockers.append(result_problem)
+            elif saved:
+                if saved['status'] != 'complete':
+                    blockers.append(saved['status'] + '_result')
+                if saved.get('cacheable') is not True:
+                    blockers.append('noncacheable_result')
+                if saved['fingerprint'] != captured['fingerprint']:
+                    blockers.append('result_fingerprint_mismatch')
+            described['explanation'] = {
+                'blockers': blockers,
+                'changes': list(_component_changes(old, captured['components'])),
+                'previous_capture': {'manifest': str(self.manifest),
+                                     'pointer': _pointer(('entries', captured['key'], 'components'))}
+                                    if 'components' in entry else None,
+                'current_fingerprint': captured['fingerprint'],
+                'previous_capture_fingerprint': digest(old) if 'components' in entry else None,
+                'result_fingerprint': saved['fingerprint'] if saved else None,
+            }
+        return described
 
-    def status(self, specs, *, compact=False, run=None):
+    def status(self, specs, *, compact=False, run=None, explain=False):
         context = _CaptureContext()
         captures = [capture(spec, _context=context) for spec in specs]
         if any(c['subject'] != self.subject for c in captures):
@@ -501,7 +569,7 @@ class Store:
                     for name, state in runs.items()
                 }
             return {'contract': CONTRACT, 'subject': self.subject, 'manifest': str(self.manifest),
-                    'tasks': [self.describe(c, manifest['entries'].get(c['key'], {})) for c in captures],
+                    'tasks': [self.describe(c, manifest['entries'].get(c['key'], {}), explain=explain) for c in captures],
                     'runs': runs,
                     'unfinished': [e['claim'] for e in manifest['entries'].values() if e.get('claim')]}
 

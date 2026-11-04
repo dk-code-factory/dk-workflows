@@ -18,6 +18,7 @@ def main():
     p = sub.add_parser('status')
     p.add_argument('--spec', type=Path, action='append', default=[])
     p.add_argument('--compact', action='store_true', help='Replace run progress with counts and references')
+    p.add_argument('--explain', action='store_true', help='Add precise captured-field changes and reuse blockers')
     p.add_argument('--run', help='Select a retained run; unfinished claims remain PR-wide')
     p = sub.add_parser('start')
     p.add_argument('--spec', type=Path, required=True)
@@ -42,7 +43,7 @@ def main():
     args = parser.parse_args()
     store = Store(args.repository, args.pr, checkout=args.checkout)
     if args.command == 'status':
-        result = store.status([read(p) for p in args.spec], compact=args.compact, run=args.run)
+        result = store.status([read(p) for p in args.spec], compact=args.compact, run=args.run, explain=args.explain)
     elif args.command == 'start':
         result = store.start(read(args.spec), recover=args.recover, run=args.run, cycle=args.cycle,
                              retry=args.retry, ci_repair=args.ci_repair, ci_rerun=args.ci_rerun, head=args.head)
