@@ -72,8 +72,8 @@ Prefer `start-batch --run RUN_ID --cycle CYCLE_ID` for a reviewer pass. All spec
 are captured before mutation, then all claim, recovery and budget checks run
 under one PR lock before one durable manifest replacement. Invalid specs,
 duplicate task keys, wrong PRs, unused/invalid recovery mappings and exhausted
-budgets reject the entire batch without saving new claims or counters. The CLI
-returns the existing blocked error with exit code 2; no staged task is authorized.
+budgets reject the entire batch without saving new claims or counters. No staged
+task is authorized when capture or validation fails.
 A task blocked by an unfinished claim is a normal `recover_required` outcome:
 eligible siblings may still receive `invoke` or `reuse`. Save successful results
 even when a sibling fails or needs recovery. A lost response or storage failure
