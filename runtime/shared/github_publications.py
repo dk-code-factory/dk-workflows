@@ -2,7 +2,7 @@
 import re
 from urllib.parse import quote, urlencode
 
-KINDS = {'ci-rerun', 'resolve-thread', 'request-review', 'create-draft-pr', 'post-review'}
+KINDS = {'ci-rerun', 'resolve-thread', 'request-review', 'create-draft-pr', 'post-review', 'merge-pr'}
 
 
 def positive(value, name):
@@ -21,10 +21,15 @@ class Handler:
     def __init__(self, request, *, api, metadata, run, endpoint):
         self.request = request
         self.api, self.metadata, self.run = api, metadata, run
+        self.endpoint = endpoint
         self.host, self.root, self.number = endpoint(request['pr'])
 
     def get(self, suffix):
         return self.api(self.request['pr'], self.root + suffix)
+
+    def merger(self):
+        from shared.pr_merge import Merge
+        return Merge(self.request, api=self.api, run=self.run, endpoint=self.endpoint)
 
     def pages(self, suffix):
         separator = '&' if '?' in suffix else '?'
@@ -93,6 +98,17 @@ class Handler:
                                         'base': self.request['base_branch']})
         return self.pages(suffix)
 
+    def approval_identity(self):
+        actor = self.api(self.request['pr'], 'user')
+        author = self.get('/pulls/' + self.number).get('user') or {}
+        if (type(actor.get('id')) is not int or actor['id'] <= 0
+                or type(author.get('id')) is not int or author['id'] <= 0
+                or not actor.get('login')):
+            raise ValueError('Approval requires complete actor and author identities')
+        if actor['id'] == author['id']:
+            raise ValueError('Cannot approve the authenticated account\'s own PR')
+        return {'actor_id': actor['id'], 'author_id': author['id'], 'actor': actor['login']}
+
     def validate_comments(self):
         comments = self.request.get('comments', [])
         if not isinstance(comments, list):
@@ -126,6 +142,8 @@ class Handler:
 
     def prepare(self):
         request = self.request
+        if request['kind'] == 'merge-pr':
+            return self.merger().prepare()
         sha(request.get('head'))
         expected = {'metadata': self.metadata(request['pr'])}
         if expected['metadata'].get('url') != request['pr'] or expected['metadata'].get('headRefOid') != request['head']:
@@ -184,6 +202,8 @@ class Handler:
                 raise ValueError('Review body must be text')
             self.validate_comments()
             request['actor'] = self.api(request['pr'], 'user')['login']
+            if request['event'] == 'APPROVE':
+                expected['approval_identity'] = self.approval_identity()
             expected['review_ids'] = [v['id'] for v in self.pages('/pulls/' + self.number + '/reviews')]
         return expected
 
@@ -198,6 +218,8 @@ class Handler:
 
     def check(self, expected, verified):
         request, kind = self.request, self.request['kind']
+        if kind == 'merge-pr':
+            return self.merger().check(expected, verified)
         if self.metadata(request['pr']) != expected['metadata']:
             raise ValueError('PR head or governing metadata changed')
         if kind == 'ci-rerun':
@@ -218,12 +240,16 @@ class Handler:
             if not verified and self.candidates() != expected['existing']:
                 raise ValueError('PR appeared before creation; inspect it first')
         elif kind == 'post-review' and not verified:
+            if request['event'] == 'APPROVE' and self.approval_identity() != expected['approval_identity']:
+                raise ValueError('Approval actor or author changed')
             if [v['id'] for v in self.pages('/pulls/' + self.number + '/reviews')] != expected['review_ids']:
                 raise ValueError('Reviews changed before publication')
             self.validate_comments()
 
     def send(self, expected, operation_id):
         request, kind = self.request, self.request['kind']
+        if kind == 'merge-pr':
+            return self.merger().send()
         if kind == 'ci-rerun':
             return self.post('/actions/runs/' + str(request['run_id']) + '/rerun-failed-jobs', {})
         if kind == 'resolve-thread':
@@ -246,6 +272,8 @@ class Handler:
 
     def observe(self, expected):
         request, kind = self.request, self.request['kind']
+        if kind == 'merge-pr':
+            return self.merger().observe(expected)
         if kind == 'ci-rerun':
             run = self.get('/actions/runs/' + str(request['run_id']))
             if run['id'] != request['run_id'] or run['head_sha'] != request['head'] or run['run_attempt'] != request['attempt'] + 1:

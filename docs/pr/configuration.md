@@ -1,5 +1,7 @@
 # PR domain configuration
 
+These policies are managed by `dk-config` together with [workflow configuration](../configuration.md). There is no separate PR configuration skill. Keep the existing helper and private storage layout so saved choices remain effective.
+
 Use `python3 PACKAGE_ROOT/scripts/pr_config.py --cwd REPO [--pr PR_URL] COMMAND`. `pr-size list|set|reset` manages thresholds and independent evacuation/split modes. `pr-partition show|enable|disable|instructions|clear-instructions|reset` manages per-PR exact instructions, opt-outs and history. `ci-exceptions list|add|remove|reset` owns explicit test or pipeline matcher settings and reasons at repository/user scope. Exception matchers belong to the PR base repository; other repository guidance follows fork/upstream/user precedence.
 
 `rules show|set|reset` and `drafting show|set|reset` manage domain-owned JSON documents. `completion show|set|reset` manages the original plain-text prompt store. Use --scope repo|user and --file FILE for set. Show uses effective precedence by default and returns the original source path. Preserve rule conflicts and exact original instructions rather than storing a generated summary as authoritative. Drafting values select native skill identities. Completion instructions cannot broaden publication permission.
