@@ -392,7 +392,7 @@ def _capture_git(source, *, batched=False):
     commits = resolve({key: source[key] for key in ('target', 'base', 'head')}, 'commit')
     trees = resolve(commits, 'tree')
     diff = git(checkout, '-c', 'diff.renames=false', 'diff', '--binary', '--full-index',
-               '--no-ext-diff', '--no-textconv', '--no-renames', commits['base'], commits['head'], '--')
+               '--no-ext-diff', '--no-textconv', '--no-relative', '--no-renames', commits['base'], commits['head'], '--')
     inputs = {'trees': trees, 'diff_sha256': hashlib.sha256(diff).hexdigest()}
     for option in ('history', 'head_sensitive'):
         if type(source.get(option, False)) is not bool:
@@ -504,15 +504,13 @@ class Store:
         if not base.is_absolute():
             raise ValueError('XDG_STATE_HOME must be absolute')
         self.root = (base/'dk-workflows/v2'/digest(self.subject)).resolve()
-        roots = [Path(__file__).resolve().parents[1], Path(checkout or Path.cwd()).resolve()]
+        from shared.repository_scope import checkout_roots
+        roots = [Path(__file__).resolve().parents[1], *checkout_roots(checkout or Path.cwd())]
         # Also reject state nested in any other Git checkout.
         probe = self.root
         while not probe.exists():
             probe = probe.parent
-        check = subprocess.run(['git', '-C', str(probe), 'rev-parse', '--show-toplevel'],
-                               capture_output=True, text=True)
-        if check.returncode == 0:
-            roots.append(Path(check.stdout.strip()).resolve())
+        roots.extend(checkout_roots(probe))
         if any(self.root.is_relative_to(p) for p in roots):
             raise ValueError('Workflow state must be outside repositories and the plugin')
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)

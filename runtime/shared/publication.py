@@ -83,8 +83,12 @@ def execute(path, kind, *, check, send, observe, reconcile=False, reconcile_argv
         def retain_failure(exc):
             if not any(hasattr(exc, key) for key in ('response', 'stdout', 'stderr')):
                 return
-            failure = {'message': str(exc), 'stdout': getattr(exc, 'stdout', None),
-                       'stderr': getattr(exc, 'stderr', None), 'response': getattr(exc, 'response', None)}
+            def output(key):
+                value = getattr(exc, key, None)
+                # TimeoutExpired carries bytes even when the subprocess used text=True.
+                return value.decode('utf-8', errors='replace') if isinstance(value, bytes) else value
+            failure = {'message': str(exc), 'stdout': output('stdout'),
+                       'stderr': output('stderr'), 'response': output('response')}
             value['failure'] = failure
             if 'response' not in value and failure['response'] is not None:
                 value['response'] = failure['response']

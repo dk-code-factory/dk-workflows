@@ -90,3 +90,15 @@ def test_rename_detection_binary_and_unusual_paths(tmp_path):
     git(tmp_path, 'add', '.')
     git(tmp_path, 'commit', '-qm', 'rename and copied prerequisite')
     assert pr_size.additions(tmp_path, base, 'HEAD') == 51
+
+
+def test_additions_include_the_whole_repository_from_a_subdirectory(tmp_path):
+    base = init(tmp_path)
+    nested = tmp_path/'nested'
+    nested.mkdir()
+    (nested/'inside').write_text('inside\n')
+    (tmp_path/'outside').write_text('outside\n' * 3)
+    git(tmp_path, 'add', '.')
+    git(tmp_path, 'commit', '-qm', 'changes across directories')
+    git(tmp_path, 'config', 'diff.relative', 'true')
+    assert pr_size.additions(nested, base, 'HEAD') == 4

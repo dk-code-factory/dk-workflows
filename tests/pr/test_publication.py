@@ -13,6 +13,24 @@ spec=importlib.util.spec_from_file_location('domain_publish',ROOT/'scripts/publi
 publisher=importlib.util.module_from_spec(spec);spec.loader.exec_module(publisher)
 
 
+def test_timeout_bytes_are_retained_without_losing_recovery_diagnostics():
+    operation = publication.prepare('reply', 'target', {}, {}, ['publisher'])['operation']
+    sends = []
+    def send(_):
+        sends.append(1)
+        raise subprocess.TimeoutExpired(['send'], 1, output=b'applied\xff', stderr=b'connection lost')
+    with pytest.raises(Diagnostic, match='reconciliation'):
+        publication.execute(operation, 'reply', check=lambda *_: None, send=send,
+                            observe=lambda _: {'id': 7})
+    saved = publication.load(operation)
+    assert saved['status'] == 'pending'
+    assert saved['failure']['stdout'] == 'applied\ufffd'
+    assert saved['failure']['stderr'] == 'connection lost'
+    assert publication.execute(operation, 'reply', check=lambda *_: None, send=send,
+                               observe=lambda _: {'id': 7}, reconcile=True)['status'] == 'verified'
+    assert sends == [1]
+
+
 @pytest.mark.parametrize('kind',['reply-inline','push','edit-pr'])
 def test_lost_response_reconciles_once_and_never_sends_twice(tmp_path,kind):
     remote={'applied':False};sends=[]

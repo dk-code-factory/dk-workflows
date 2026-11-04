@@ -69,3 +69,23 @@ def test_settings_roundtrip_preserves_native_options_and_references(tmp_path):
     for key,value in settings.items():
         assert (all(effective[key][k]==v for k,v in value.items())
                 if isinstance(value,dict) else effective[key]==value)
+
+
+def test_test_runner_skips_empty_runtime_suites(tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location('test_runner', ROOT/'scripts/test.py')
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    (tmp_path/'tests/pr').mkdir(parents=True)
+    (tmp_path/'tests/test_workflow.py').touch()
+    (tmp_path/'runtime/empty/tests/__pycache__').mkdir(parents=True)
+    shared = tmp_path/'runtime/shared/tests'
+    shared.mkdir(parents=True)
+    (shared/'test_shared.py').touch()
+    monkeypatch.setattr(runner, 'ROOT', tmp_path)
+    calls = []
+    monkeypatch.setattr(runner.subprocess, 'run', lambda argv, **kwargs:
+                        calls.append(argv) or subprocess.CompletedProcess(argv, 0))
+    runner.main()
+    assert len(calls) == 3
+    assert str(shared) in calls[-1]
+    assert all(str(tmp_path/'runtime/empty/tests') not in call for call in calls)

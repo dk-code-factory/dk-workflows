@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import re
+import shlex
 import subprocess
 import zipfile
 from pathlib import Path
@@ -119,10 +120,6 @@ def archive_report(archive, job_name, step, job_names):
                 end = next((i for i, line in enumerate(lines) if clean(line) == '##[endgroup]'), None)
                 if end is None:
                     return result(reason='incomplete Actions command preamble')
-                invocation = '\n'.join(clean(line) for line in lines[:end + 1])
-                # Compound commands can contain non-test failures hidden by a report.
-                if any(token in invocation for token in ('&&', '||', ';')):
-                    return result(reason='compound test step requires independent failure coverage')
                 commands = []
                 for line in lines[1:end]:
                     command = clean(line)
@@ -130,6 +127,18 @@ def archive_report(archive, job_name, step, job_names):
                         break
                     if command:
                         commands.append(command)
+                if len(commands) == 1:
+                    # Shell operations may fail independently of the reported tests.
+                    # Tokenize punctuation so quoted filters keep their literal meaning.
+                    lexer = shlex.shlex(commands[0], posix=True, punctuation_chars=';&|<>()')
+                    lexer.whitespace_split = True
+                    try:
+                        tokens = list(lexer)
+                    except ValueError:
+                        return result(reason='invalid test step command quoting')
+                    if (any(re.fullmatch(r'[;&|<>()]+', token) for token in tokens)
+                            or '$(' in commands[0] or '`' in commands[0]):
+                        return result(reason='compound test step requires independent failure coverage')
                 if (len(commands) != 1 or not re.match(
                         r'^(?:pytest\b|python[23]?(?:\.\d+)? -m pytest\b|go test\b|(?:npx )?jest\b)',
                         commands[0])):
