@@ -81,6 +81,6 @@ if __name__ == '__main__':
     os.umask(0o077)
     try:
         main()
-    except (ValueError, KeyError, TypeError, OSError) as exc:
+    except (ValueError, KeyError, TypeError, OSError, RuntimeError) as exc:
         print(json.dumps({'status': 'blocked', 'reason': str(exc)}))
         sys.exit(2)

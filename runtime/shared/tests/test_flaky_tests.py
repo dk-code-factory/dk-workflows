@@ -385,6 +385,24 @@ def test_actions_command_preamble_requires_one_test_command():
     assert not archive_report(archive(FAIL), JOB, step, [JOB, JOB])['complete']
 
 
+@pytest.mark.parametrize('command', [
+    'pytest -v | upload-results', 'pytest -v & deploy', 'pytest -v > results.txt',
+    'pytest -v $(prepare)', 'pytest -v `prepare`',
+])
+def test_shell_operations_cannot_hide_failures_behind_a_test_report(command):
+    from shared.flaky_actions import archive_report
+    text = (f'##[group]Run {command}\n{command}\nshell: /usr/bin/bash -e {{0}}\n'
+            f'##[endgroup]\n{FAIL}\n##[error]Process completed with exit code 1.')
+    assert not archive_report(archive(text), JOB, {'number': 1}, [JOB])['complete']
+
+
+def test_quoted_test_filters_do_not_count_as_shell_pipelines():
+    from shared.flaky_actions import archive_report
+    command = "pytest -v -k 'retry or (timeout and not other)'"
+    text = f'##[group]Run {command}\n{command}\nshell: bash -e {{0}}\n##[endgroup]\n{FAIL}'
+    assert archive_report(archive(text), JOB, {'number': 1}, [JOB])['complete']
+
+
 @pytest.mark.parametrize('bom', ['', '\ufeff'])
 @pytest.mark.parametrize('command,expected', [
     ('go test -json ./...', None),

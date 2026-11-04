@@ -93,7 +93,7 @@ def configure(chain, action, *, scope='repo', settings=None, keys=None):
 def additions(cwd, base, head):
     """NUL-delimited numstat retains rename detection and arbitrary path names."""
     raw = subprocess.check_output(['git', '-C', str(cwd), 'diff', '--no-ext-diff',
-        '--no-textconv', '--find-renames', '--numstat', '-z', base, head])
+        '--no-textconv', '--no-relative', '--find-renames', '--numstat', '-z', base, head, '--'])
     fields, index, total = raw.split(b'\0'), 0, 0
     while index < len(fields) and fields[index]:
         added, deleted, name = fields[index].split(b'\t', 2)
