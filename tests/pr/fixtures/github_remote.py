@@ -9,6 +9,12 @@ HEAD = 'a' * 40
 def initial():
     return {'metadata': {'url': PR, 'headRefOid': HEAD, 'title': 'Fix the value', 'body': 'Scope: return two.\n## Decisions\n- Return two.'},
             'actor': 'author', 'run': {'id': 77, 'head_sha': HEAD, 'run_attempt': 1, 'status': 'completed', 'conclusion': 'failure'},
+            'actor_id': 1, 'pr_author': {'id': 2, 'login': 'contributor'},
+            'merge_gate': {'baseRefOid': 'b'*40, 'state': 'OPEN', 'isDraft': False,
+                           'mergeable': 'MERGEABLE', 'mergeStateStatus': 'CLEAN', 'reviewDecision': 'APPROVED'},
+            'pull': {'state': 'open', 'draft': False, 'merged': False, 'mergeable': True,
+                     'mergeable_state': 'clean', 'base': {'sha': 'b'*40, 'ref': 'main'}},
+            'merge_commit': None,
             'thread': {'id': 'PRRT_fixture', 'isResolved': False, 'viewerCanResolve': True,
                        'comments': [{'id': 'comment-42', 'databaseId': 42, 'url': PR+'#discussion_r42',
                                      'body': 'Verified answer', 'author': {'login': 'author'}}]},
@@ -36,7 +42,7 @@ class Remote:
 
     def api(self, pr, path, *, payload=None):
         if path == 'user':
-            return {'login': self.state['actor']}
+            return {'login': self.state['actor'], 'id': self.state['actor_id']}
         prefix = 'repos/owner/repo'
         if not path.startswith(prefix):
             raise AssertionError('Unexpected fixture API: '+path)
@@ -44,6 +50,23 @@ class Remote:
         suffix = parsed.path
         if suffix == '':
             return {'default_branch': 'main'}
+        if suffix == '/pulls/7':
+            return deepcopy({**self.state['pull'], 'html_url': PR,
+                             'head': {'sha': self.state['metadata']['headRefOid']},
+                             'user': self.state['pr_author']})
+        if suffix == '/pulls/7/merge':
+            assert payload['sha'] == self.state['metadata']['headRefOid']
+            commit_sha = 'e'*40
+            parents = [self.state['branches']['main']]
+            if payload['merge_method'] == 'merge':
+                parents.append(payload['sha'])
+            self.state['merge_commit'] = {'sha': commit_sha, 'parents': [{'sha': v} for v in parents]}
+            self.state['pull'].update(merged=True, state='closed', merge_commit_sha=commit_sha,
+                                      merged_by={'id': self.state['actor_id'], 'login': self.state['actor']})
+            self.state['branches']['main'] = commit_sha
+            return self.changed('merge-pr', {'merged': True, 'sha': commit_sha})
+        if suffix == '/git/commits/' + 'e'*40:
+            return deepcopy(self.state['merge_commit'])
         if suffix.startswith('/git/ref/heads/'):
             from urllib.parse import unquote
             return {'object': {'sha': self.state['branches'][unquote(suffix[len('/git/ref/heads/'):])]}}
@@ -97,7 +120,7 @@ class Remote:
         assert argv[0] == 'gh'
         if argv[1:3] == ['pr','view']:
             fields=argv[argv.index('--json')+1].split(',')
-            return {k:v for k,v in self.metadata(argv[3]).items() if k in fields}
+            return {k:v for k,v in {**self.metadata(argv[3]), **self.state['merge_gate']}.items() if k in fields}
         if argv[1:3] == ['pr','checks']:
             return deepcopy(self.state['checks'])
         if argv[1:3] == ['pr','edit']:
@@ -129,4 +152,5 @@ def request(kind):
     if kind=='request-review':value.update(reviewers=['reviewer'],team_reviewers=['team'])
     if kind=='create-draft-pr':value.update(head_branch='partition',branch_sha='c'*40,base_branch='main',base_sha='b'*40,title='Evacuated scope',body='Independent work')
     if kind=='post-review':value.update(body='Verified findings',comments=[{'path':'code.py','line':1,'side':'RIGHT','body':'Consider the value.'}])
+    if kind=='merge-pr':value.update(base='b'*40,merge_method='squash')
     return value

@@ -31,6 +31,9 @@ All remaining publication actions use the same `prepare`, `publish`, and `reconc
 | request-review | reviewers, team_reviewers | Native login/slug arrays, at least one entry; observe the requested set. Already satisfied requests send no mutation. |
 | create-draft-pr | head_branch, branch_sha, base_branch, base_sha, title, body | Candidate and default target refs unchanged; no existing PR for the branch; observe exactly one matching authored draft and its full payload. |
 | post-review | event, body, comments | Event is COMMENT, APPROVE or REQUEST_CHANGES; comments use path/line/side/body and must map to changed lines in the current diff; observe the exact authored head-bound review and comments. |
+| merge-pr | base, merge_method | Separate merge authorization and complete clean review/verification; live approved, open, non-draft, clean mergeability and successful CI at reviewed head/target; use a head-bound merge request and observe the merged PR, actor and exact merge-commit parents. |
+
+For `merge-pr`, supply the reviewed target SHA as `base` and an explicit `merge_method` of `squash` or `merge`. The caller establishes permission and review/verification coverage. The publisher independently refreshes target/head, actor/author, repository review/merge readiness and successful checks, and sends GitHub's [merge endpoint](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request) with the reviewed head SHA. It never bypasses protections. The endpoint binds the head, not the base atomically; reconciliation also checks the merge commit's parents against the reviewed base and method. Target drift or another actor's merge remains a blocker even if a remote merge occurred. Uncertain outcomes permit reads only; never repeat the merge. This operation does not expand `dk-pr-fix` authority, which excludes merging.
 
 Example CI rerun request:
 

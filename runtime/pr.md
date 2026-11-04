@@ -1,0 +1,7 @@
+# Handle a PR
+
+Resolve the canonical PR URL from the user's input or current checkout before routing. Read the effective workflow settings through `dk-config`. Run `python3 PLUGIN_ROOT/scripts/pr_route.py --pr PR_URL` to compare the PR author's numeric account id with the authenticated account on that host and configured personal identities. Git remotes, repository ownership, commit authorship and write access do not classify personal ownership. Additional accounts, including bot accounts, count as yours only when explicitly configured. Missing or contradictory identity evidence blocks automatic routing.
+
+Report the author, ownership and selected workflow. Invoke `dk-pr-fix` for your PR or `dk-pr-review` for another author's PR. An explicit user instruction to review your PR or maintain another author's PR overrides automatic selection, without changing the author or granting branch permissions. The fixer verifies write/rewrite ownership separately. Never approve the authenticated account's own PR.
+
+Pass original user/repository/private instructions, current Decisions/discussion, resolved identity evidence and exact permitted actions to the selected skill. Reuse the existing run id, task claims, source results and budgets on resume. Recheck identity and the current head before remote work. Saved identity mappings select a route; they grant no publishing, approval or merge permissions. Read-only and narrower user instructions take precedence over saved completion policies.
