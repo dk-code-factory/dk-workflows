@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Bookkeeping only: status, start, record, invalidate. Agents invoke skills."""
+"""Bookkeeping only: generate specs, inspect, claim and record. Agents invoke skills."""
 import argparse
 import json
 import os
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'runtime'))
-from state import Store, read
+from state import Store, make_spec, read
 
 
 def main():
@@ -15,20 +15,29 @@ def main():
     parser.add_argument('--pr', required=True, help='Canonical https PR URL')
     parser.add_argument('--checkout', type=Path, help='Repository whose state must remain external')
     sub = parser.add_subparsers(dest='command', required=True)
+    p = sub.add_parser('spec')
+    p.add_argument('--definition', type=Path, required=True,
+                   help='Explicit make_spec fields, excluding repository and pr')
     p = sub.add_parser('status')
     p.add_argument('--spec', type=Path, action='append', default=[])
     p.add_argument('--compact', action='store_true', help='Replace run progress with counts and references')
     p.add_argument('--explain', action='store_true', help='Add precise captured-field changes and reuse blockers')
     p.add_argument('--run', help='Select a retained run; unfinished claims remain PR-wide')
-    p = sub.add_parser('start')
-    p.add_argument('--spec', type=Path, required=True)
-    p.add_argument('--recover', help='Explicitly recover this interrupted claim id; reconcile domain writes first')
-    p.add_argument('--run', help='Stable iteration run id; retain on resume')
-    p.add_argument('--cycle', help='Stable review-cycle id; shared across reviewers and resume')
-    p.add_argument('--retry', action='store_true', help='One explicitly eligible same-cycle reviewer retry')
-    p.add_argument('--ci-repair', action='store_true')
-    p.add_argument('--ci-rerun', action='store_true')
-    p.add_argument('--head')
+    for name in ('start', 'start-batch'):
+        p = sub.add_parser(name)
+        if name == 'start':
+            p.add_argument('--spec', type=Path, required=True)
+            p.add_argument('--recover', help='Explicitly recover this interrupted claim id; reconcile domain writes first')
+        else:
+            p.add_argument('--spec', type=Path, action='append', required=True)
+            p.add_argument('--recover', action='append', default=[], metavar='TASK_KEY=CLAIM_ID',
+                           help='Explicit task recovery; reconcile domain writes first')
+        p.add_argument('--run', help='Stable iteration run id; retain on resume')
+        p.add_argument('--cycle', help='Stable review-cycle id; shared across reviewers and resume')
+        p.add_argument('--retry', action='store_true', help='One explicitly eligible same-cycle reviewer retry')
+        p.add_argument('--ci-repair', action='store_true')
+        p.add_argument('--ci-rerun', action='store_true')
+        p.add_argument('--head')
     p = sub.add_parser('record')
     p.add_argument('--spec', type=Path, required=True)
     p.add_argument('--claim', required=True)
@@ -41,12 +50,26 @@ def main():
     p.add_argument('--reason', required=True)
     p.add_argument('--recover', help='Close this stopped claim without invoking; reconcile domain writes first')
     args = parser.parse_args()
+    if args.command == 'spec':
+        result = make_spec(repository=args.repository, pr=args.pr, **read(args.definition))
+        print(json.dumps(result, sort_keys=True))
+        return
     store = Store(args.repository, args.pr, checkout=args.checkout)
     if args.command == 'status':
         result = store.status([read(p) for p in args.spec], compact=args.compact, run=args.run, explain=args.explain)
     elif args.command == 'start':
         result = store.start(read(args.spec), recover=args.recover, run=args.run, cycle=args.cycle,
                              retry=args.retry, ci_repair=args.ci_repair, ci_rerun=args.ci_rerun, head=args.head)
+    elif args.command == 'start-batch':
+        recover = {}
+        for value in args.recover:
+            key, separator, claim = value.partition('=')
+            if not separator or not key or not claim or key in recover:
+                raise ValueError('Batch --recover requires unique TASK_KEY=CLAIM_ID entries')
+            recover[key] = claim
+        result = store.start_batch([read(path) for path in args.spec], recover=recover,
+                                   run=args.run, cycle=args.cycle, retry=args.retry,
+                                   ci_repair=args.ci_repair, ci_rerun=args.ci_rerun, head=args.head)
     elif args.command == 'record':
         result = store.record(read(args.spec), args.claim, args.original.read_bytes(), read(args.normalized),
                               args.status, progress=read(args.progress) if args.progress else None)
