@@ -14,7 +14,7 @@ from shared.github_reads import run
 from shared.pr_ownership import classify
 
 
-def route(pr, *, api=None):
+def route(pr, *, upstream=None, api=None):
     parsed = urlsplit(pr)
     parts = parsed.path.strip('/').split('/')
     if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password
@@ -39,7 +39,7 @@ def route(pr, *, api=None):
             or not isinstance(pull['head'].get('sha'), str)
             or not re.fullmatch('[0-9a-f]{40}', pull['head']['sha'])):
         raise ValueError('PR identity is unavailable or inconsistent')
-    settings = config.effective(repository)['settings']
+    settings = config.effective(repository, upstream)['settings']
     return {'pr': canonical, 'repository': repository, 'head': pull['head']['sha'],
             **classify(host, pull.get('user'), api('user'), settings['identities'])}
 
@@ -47,8 +47,9 @@ def route(pr, *, api=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--pr', required=True)
+    parser.add_argument('--upstream', help='HOST/OWNER/REPO used for inherited workflow settings')
     args = parser.parse_args()
-    print(json.dumps(route(args.pr), sort_keys=True))
+    print(json.dumps(route(args.pr, upstream=args.upstream), sort_keys=True))
 
 
 if __name__ == '__main__':

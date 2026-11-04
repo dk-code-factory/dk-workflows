@@ -1,6 +1,9 @@
 """Personal routing uses immutable, host-local identities and preserves policies."""
 import importlib.util
+import json
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -51,6 +54,43 @@ def test_route_reads_canonical_pr_and_effective_personal_identity():
     sources['repos/owner/repo/pulls/7']['html_url'] = pr.replace('/7', '/8')
     with pytest.raises(ValueError, match='inconsistent'):
         router.route(pr, api=api)
+
+
+@pytest.mark.parametrize('repository_identities,expected', [
+    (None, 'mine'),
+    ([], 'others'),
+    ([{'host': 'ghe.example', 'id': 2}], 'others'),
+])
+def test_route_inherits_upstream_identities_with_repository_precedence(repository_identities, expected):
+    repository = 'github.com/fork/repo'
+    upstream = 'github.com/upstream/repo'
+    write(config.path(upstream), {'identities': [{'host': 'github.com', 'id': 2}]})
+    if repository_identities is not None:
+        write(config.path(repository), {'identities': repository_identities})
+    pr = 'https://' + repository + '/pull/7'
+    sources = {'user': {'id': 1, 'login': 'current'},
+               'repos/fork/repo/pulls/7': {'number': 7, 'html_url': pr,
+                    'head': {'sha': 'a'*40}, 'user': {'id': 2, 'login': 'alternate'}}}
+    result = router.route(pr, upstream=upstream, api=sources.__getitem__)
+    assert result['ownership'] == expected
+    assert result['skill'] == ('dk-workflows:dk-pr-fix' if expected == 'mine'
+                               else 'dk-workflows:dk-pr-review')
+
+
+def test_route_cli_applies_explicit_upstream(monkeypatch, capsys):
+    upstream = 'github.com/upstream/repo'
+    write(config.path(upstream), {'identities': [{'host': 'github.com', 'id': 2}]})
+    pr = 'https://github.com/fork/repo/pull/7'
+    sources = {'user': {'id': 1, 'login': 'current'},
+               'repos/fork/repo/pulls/7': {'number': 7, 'html_url': pr,
+                    'head': {'sha': 'a'*40}, 'user': {'id': 2, 'login': 'alternate'}}}
+    monkeypatch.setattr(router, 'run', lambda argv, **kwargs:
+                        subprocess.CompletedProcess(argv, 0, json.dumps(sources[argv[-1]]), ''))
+    monkeypatch.setattr(sys, 'argv', ['pr_route.py', '--pr', pr, '--upstream', upstream])
+    router.main()
+    result = json.loads(capsys.readouterr().out)
+    assert result['ownership'] == 'mine'
+    assert result['repository'] == 'github.com/fork/repo'
 
 
 @pytest.mark.parametrize('pr', ['https://github.com/owner/repo/issues/7',
