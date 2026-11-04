@@ -1,0 +1,234 @@
+{
+  "issue": 127,
+  "runtime": "0393ad669dee3f27fdda8bd5ab2f7a5dfebb2c62",
+  "host": "Codex native agents",
+  "model": "not independently observed",
+  "reasoning_effort": "not independently observed",
+  "units": {
+    "remote_reads": "mocked GitHub helper JSON transport calls, not individual HTTP requests",
+    "remote_returned_bytes": "canonical serialized mocked JSON bytes",
+    "returned_bytes": "serialized interface output bytes, excluding terminal newline"
+  },
+  "limits": [
+    "One bounded pair per interface version; no tokens, hidden context, elapsed-time or production savings measured.",
+    "Only analysis is exercised; publication, final completion, CI and retained budgets remain separate.",
+    "A fixture analysis assessment does not establish code correctness."
+  ],
+  "pilot": {
+    "before": {
+      "metrics": {
+        "acceptance_verifications": 3,
+        "failed_operations": 1,
+        "initial_collections": 1,
+        "remote_reads": 56,
+        "remote_returned_bytes": 16024,
+        "returned_bytes": 70887
+      },
+      "interface_sha256": "3f93df1b17ad925d383671d944c3d02dc5c2536197741eccc504eb959ef635f7",
+      "source_sha256": "7e5da418d333bb0784479c07a2c9fe7c06ed3a3607c196534601d284b37c6aa4",
+      "guidance_hashes": {
+        "docs/pr/contracts.md": "aff3cc3824314f6d55cb03920bbd1edec5ba26bd0d7865df8506d08f8c4a0885",
+        "docs/pr/supplied-evidence.md": "415948aa6b6c8bbd9b617fa1a919da7c5ac884e25d6712745699afca93fef1ec",
+        "runtime/pr-iter.md": "d6f083dd3d956a3b15bf80dd9fdb0a96aba896604a5b68ea868f60808225eda4",
+        "runtime/pr-review.md": "46540c54c0390f8ece99f6aed95100074d551dfcf46bab49231f7a875efe07df"
+      },
+      "operation_counts": {
+        "collect": 1,
+        "finish": 1,
+        "read": 18,
+        "verify": 3,
+        "view": 3
+      }
+    },
+    "after": {
+      "metrics": {
+        "acceptance_verifications": 3,
+        "failed_operations": 1,
+        "initial_collections": 1,
+        "remote_reads": 56,
+        "remote_returned_bytes": 16024,
+        "returned_bytes": 73736
+      },
+      "interface_sha256": "3f93df1b17ad925d383671d944c3d02dc5c2536197741eccc504eb959ef635f7",
+      "source_sha256": "7e5da418d333bb0784479c07a2c9fe7c06ed3a3607c196534601d284b37c6aa4",
+      "guidance_hashes": {
+        "docs/pr/contracts.md": "89ec93b4ef553d2ac908937ef0a154eb6f627d280ca2b01c90b50a291e3f187e",
+        "docs/pr/supplied-evidence.md": "15ee475d0a6925c37605705eee1fde24019c33d60099a0e1e255c70094ba2d6a",
+        "runtime/pr-iter.md": "1f1f918dbdd0c9c77598b6eade47c5b9b91ffbdd23a804f0f52deeb1ddc28bd6",
+        "runtime/pr-review.md": "14aed0f5c209b2855a5aa81a066372057b3dee17876eb6fe1977d1c2e0189bec"
+      },
+      "operation_counts": {
+        "collect": 1,
+        "finish": 1,
+        "read": 18,
+        "verify": 3,
+        "view": 3
+      }
+    },
+    "limitation": "Both native assessments added one terminal newline to the quoted file instruction despite preserving correct original artifacts. The reader was changed to return JSON text with bytes and SHA-256, and a fresh controlled pair was run. Pilot metrics are retained; pilot exact-text adherence is not claimed."
+  },
+  "controlled": {
+    "before": {
+      "metrics": {
+        "acceptance_verifications": 3,
+        "failed_operations": 0,
+        "initial_collections": 1,
+        "remote_reads": 56,
+        "remote_returned_bytes": 16024,
+        "returned_bytes": 82579
+      },
+      "interface_sha256": "a68b7011f6c6b5793c12e090f2ad384b0c5e5206759ad157773e4975b17e5594",
+      "source_sha256": "7e5da418d333bb0784479c07a2c9fe7c06ed3a3607c196534601d284b37c6aa4",
+      "guidance_hashes": {
+        "docs/pr/contracts.md": "aff3cc3824314f6d55cb03920bbd1edec5ba26bd0d7865df8506d08f8c4a0885",
+        "docs/pr/supplied-evidence.md": "415948aa6b6c8bbd9b617fa1a919da7c5ac884e25d6712745699afca93fef1ec",
+        "runtime/pr-iter.md": "d6f083dd3d956a3b15bf80dd9fdb0a96aba896604a5b68ea868f60808225eda4",
+        "runtime/pr-review.md": "46540c54c0390f8ece99f6aed95100074d551dfcf46bab49231f7a875efe07df"
+      },
+      "operation_counts": {
+        "collect": 1,
+        "finish": 1,
+        "read": 21,
+        "verify": 3,
+        "view": 3
+      },
+      "original_assessment_sha256": "3e1150d8223021b50e6f4651444d2fa5433e05557d9cfca2a3888a818e3450c6",
+      "instructions": [
+        {
+          "source": "exercise.json/direct_instructions",
+          "text": "Analyze only. Do not publish, change code or implement deferred work."
+        },
+        {
+          "bytes": 78,
+          "sha256": "eb73f6a9a602112c0be9e3a52dd3c401636bef9803a3570c4474f798f1e32e98",
+          "source": "instructions.txt",
+          "text": "Preserve the public retry limit of three.\r\nDo not implement deferred metrics.\n"
+        },
+        {
+          "source": "coordinator task",
+          "text": "This is analysis only, without code fixes/publication/CI."
+        }
+      ],
+      "analysis_complete": true,
+      "operation_order": [
+        "read exercise.json",
+        "read guidance/runtime/pr-review.md",
+        "read instructions.txt",
+        "read guidance/runtime/pr-iter.md",
+        "read guidance/codex/skills/dk-pr-read-comments/SKILL.md",
+        "read guidance/codex/skills/dk-pr-decisions/SKILL.md",
+        "read guidance/docs/pr/supplied-evidence.md",
+        "read guidance/docs/pr/contracts.md",
+        "read guidance/codex/skills/dk-pr-address-reviews/SKILL.md",
+        "collect ",
+        "read guidance/runtime/dk-pr-decisions/references/language.md",
+        "view feedback receipts/1.json",
+        "view decisions receipts/1.json",
+        "read ARM/state/dk-pr-skills/v2/operations/workflow-n1uu_kau/threads.json",
+        "read ARM/state/dk-pr-skills/v2/operations/workflow-7s191e77/conversation.json",
+        "read ARM/state/dk-pr-skills/v2/operations/workflow-dvw06hye/instructions-0.txt",
+        "read ARM/state/dk-pr-skills/v2/operations/workflow-n1uu_kau/threads.json",
+        "read ARM/state/dk-pr-skills/v2/operations/workflow-7s191e77/conversation.json",
+        "verify receipts/1.json",
+        "read exercise.json",
+        "read instructions.txt",
+        "verify receipts/1.json",
+        "read exercise.json",
+        "read instructions.txt",
+        "view feedback receipts/1.json",
+        "verify receipts/1.json",
+        "read exercise.json",
+        "read instructions.txt",
+        "finish [original assessment retained privately]"
+      ],
+      "outcomes": {
+        "retry_bound": "Actionable correction remains pending; C1 and pullrequestreview-4.",
+        "limit": "Public retry limit three settled; PR Decisions and issuecomment-5.",
+        "configuration": "No configuration settled; issuecomment-5.",
+        "metrics": "Deferred to a separate unspecified issue; C2/C3 and file instructions."
+      }
+    },
+    "after": {
+      "metrics": {
+        "acceptance_verifications": 3,
+        "failed_operations": 0,
+        "initial_collections": 1,
+        "remote_reads": 56,
+        "remote_returned_bytes": 16024,
+        "returned_bytes": 81167
+      },
+      "interface_sha256": "a68b7011f6c6b5793c12e090f2ad384b0c5e5206759ad157773e4975b17e5594",
+      "source_sha256": "7e5da418d333bb0784479c07a2c9fe7c06ed3a3607c196534601d284b37c6aa4",
+      "guidance_hashes": {
+        "docs/pr/contracts.md": "89ec93b4ef553d2ac908937ef0a154eb6f627d280ca2b01c90b50a291e3f187e",
+        "docs/pr/supplied-evidence.md": "15ee475d0a6925c37605705eee1fde24019c33d60099a0e1e255c70094ba2d6a",
+        "runtime/pr-iter.md": "1f1f918dbdd0c9c77598b6eade47c5b9b91ffbdd23a804f0f52deeb1ddc28bd6",
+        "runtime/pr-review.md": "14aed0f5c209b2855a5aa81a066372057b3dee17876eb6fe1977d1c2e0189bec"
+      },
+      "operation_counts": {
+        "collect": 1,
+        "finish": 1,
+        "read": 19,
+        "verify": 3,
+        "view": 3
+      },
+      "original_assessment_sha256": "417bc4a19b6e03081544591ccf2b770f3644b2e93f8ffa447ab2f7a19fc02bcc",
+      "instructions": [
+        {
+          "source": "exercise.json:direct_instructions",
+          "text": "Analyze only. Do not publish, change code or implement deferred work."
+        },
+        {
+          "bytes": 78,
+          "sha256": "eb73f6a9a602112c0be9e3a52dd3c401636bef9803a3570c4474f798f1e32e98",
+          "source": "instructions.txt",
+          "text": "Preserve the public retry limit of three.\r\nDo not implement deferred metrics.\n"
+        }
+      ],
+      "analysis_complete": true,
+      "operation_order": [
+        "read exercise.json",
+        "read guidance/runtime/pr-iter.md",
+        "read guidance/runtime/pr-review.md",
+        "read instructions.txt",
+        "read guidance/docs/pr/supplied-evidence.md",
+        "read guidance/docs/pr/contracts.md",
+        "read guidance/codex/skills/dk-pr-address-reviews/SKILL.md",
+        "read guidance/codex/skills/dk-pr-decisions/SKILL.md",
+        "read guidance/codex/skills/dk-pr-read-comments/SKILL.md",
+        "read guidance/runtime/dk-pr-decisions/references/language.md",
+        "collect ",
+        "view feedback receipts/1.json",
+        "view decisions receipts/1.json",
+        "view feedback receipts/1.json",
+        "read ARM/state/dk-pr-skills/v2/operations/workflow-4g8k70kk/threads.json",
+        "read ARM/state/dk-pr-skills/v2/operations/workflow-1n1_zs1n/conversation.json",
+        "read ARM/state/dk-pr-skills/v2/operations/workflow-2s67x9ej/instructions-0.txt",
+        "verify receipts/1.json",
+        "read instructions.txt",
+        "read exercise.json",
+        "verify receipts/1.json",
+        "read instructions.txt",
+        "read exercise.json",
+        "verify receipts/1.json",
+        "read instructions.txt",
+        "read exercise.json",
+        "finish [original assessment retained privately]"
+      ],
+      "outcomes": {
+        "retry_bound": "Actionable correction remains pending; C1 and pullrequestreview-4.",
+        "limit": "Public retry limit three settled; PR Decisions and issuecomment-5.",
+        "configuration": "No configuration settled; issuecomment-5.",
+        "metrics": "Deferred to a separate unspecified issue; C2/C3 and file instructions."
+      }
+    },
+    "comparison": {
+      "initial_collections": "Both chose existing sharing: one initial collection.",
+      "acceptance": "Both retained three independent full-source verifications.",
+      "sources": "Complete original source texts and URLs retained in both assessments.",
+      "instructions": "Direct text and file text including CRLF and trailing newline match original bytes in both assessments.",
+      "dispositions": "Retry-bound correction remains pending; public limit three and no configuration settled; metrics deferred to a separate unspecified issue.",
+      "savings": "No reduction in initial collections or mocked remote reads observed; no token, time or production savings claimed."
+    }
+  }
+}

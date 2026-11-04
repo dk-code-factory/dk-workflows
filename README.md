@@ -1,6 +1,6 @@
 # dk-workflows
 
-Version 2.2.7. Agent-led PR workflows and bundled PR skills for Codex and Claude Code. Python 3.11+ and Git support deterministic bookkeeping; authenticated gh is required for remote PR actions.
+Version 2.2.8. Agent-led PR workflows and bundled PR skills for Codex and Claude Code. Python 3.11+ and Git support deterministic bookkeeping; authenticated gh is required for remote PR actions.
 
 The coordinating skills are `dk-pr-review`, `dk-pr-iter` and `dk-config`. This same plugin also includes PR drafting, Decisions, feedback reads/fixes, replies, review publication, partitioning/commit cleanup, CI/flaky-test handling, durable publication and PR settings:
 
@@ -20,4 +20,4 @@ Private workflow manifests and immutable outputs live outside repositories under
 
 Read [task state](docs/task-state.md), [workflow configuration/migration](docs/configuration.md), [PR task contracts](docs/pr/contracts.md), [publication recovery](docs/pr/publication.md) and the [acceptance contract](docs/acceptance.md). Saved bindings using the temporary `dk-pr-skills:` prefix resolve to the bundled `dk-workflows:` identities. Existing private settings, publication intents, CI windows and budgets remain available. Active v1 runs still finish through their retained v1 runtime; v2 imports no v1 review caches.
 
-Run `python3 scripts/check.py` and `python3 scripts/test.py`. All suites and fixtures are bundled and run offline without another checkout. The full recipe uses separate processes, real Git, a local remote and fixture GitHub/native-skill transports. Both host manifests use 2.2.7; `scripts/version.py X.Y.Z` updates the synchronized plugin versions.
+Run `python3 scripts/check.py` and `python3 scripts/test.py`. All suites and fixtures are bundled and run offline without another checkout. The full recipe uses separate processes, real Git, a local remote and fixture GitHub/native-skill transports. Both host manifests use 2.2.8; `scripts/version.py X.Y.Z` updates the synchronized plugin versions.
