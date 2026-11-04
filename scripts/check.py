@@ -39,10 +39,10 @@ def package(root):
         assert source.read_bytes()==target.read_bytes(),'Run scripts/sync_skills.py: '+name
     if manifests[0]['name']=='dk-workflows':
         assert entries[0]==['dk-ci', 'dk-ci-flakes', 'dk-commit-message', 'dk-config',
-                            'dk-issue', 'dk-pr', 'dk-pr-commits', 'dk-pr-decisions',
+                            'dk-issue', 'dk-pr-commits', 'dk-pr-decisions',
                             'dk-pr-description', 'dk-pr-feedback-address',
                             'dk-pr-feedback-read', 'dk-pr-feedback-reply', 'dk-pr-fix',
-                            'dk-pr-publish', 'dk-pr-review', 'dk-pr-review-post',
+                            'dk-pr-iter', 'dk-pr-publish', 'dk-pr-review', 'dk-pr-review-post',
                             'dk-pr-reviewers-run', 'dk-pr-split']
     for name in ('.agents/plugins/marketplace.json','.claude-plugin/marketplace.json'):
         catalog=json.loads((root/name).read_text())
