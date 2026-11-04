@@ -1,4 +1,4 @@
-"""Existing private settings keep their meaning and location after extraction."""
+"""Private domain settings preserve source text and scope precedence."""
 import hashlib
 import importlib.util
 import json
@@ -10,7 +10,7 @@ spec=importlib.util.spec_from_file_location('domain_config',ROOT/'scripts/pr_con
 config=importlib.util.module_from_spec(spec);spec.loader.exec_module(config)
 
 
-def test_legacy_user_rules_and_completion_prompts_are_not_lost(monkeypatch,tmp_path):
+def test_user_rules_and_completion_prompts_preserve_exact_sources(monkeypatch,tmp_path):
     monkeypatch.setattr(config,'identities',lambda *_:['remote:github.com/fork/repo','remote:github.com/base/repo'])
     data=Path(os.environ['XDG_DATA_HOME'])
     rules=data/'codex-repo-rules/user/rules.json';rules.parent.mkdir(parents=True)
@@ -38,12 +38,9 @@ def test_drafting_inherits_individual_roles(monkeypatch):
     assert result['value']=={'commit_message':'repo:commit','issue_description':'user:issue'}
 
 
-def test_temporary_drafting_plugin_aliases_use_bundled_skills(monkeypatch):
+def test_structured_drafting_selections_preserve_options(monkeypatch):
     monkeypatch.setattr(config,'identities',lambda *_:['remote:github.com/owner/repo'])
     data=Path(os.environ['XDG_DATA_HOME'])/'codex-repo-rules';data.mkdir(parents=True)
-    path=data/'drafting.json'
-    original={'pr_description':{'skill':'dk-pr-skills:dk-pr-description','host':'current'}}
-    path.write_text(json.dumps(original))
-    selected=config.main(['drafting','show'])
-    assert selected['value']['pr_description']['skill']=='dk-workflows:dk-pr-description'
-    assert json.loads(path.read_text())==original
+    original={'pr_description':{'skill':'custom:description','options':{'style':'concise'}}}
+    (data/'drafting.json').write_text(json.dumps(original))
+    assert config.main(['drafting','show'])['value']==original

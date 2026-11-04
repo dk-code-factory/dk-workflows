@@ -19,7 +19,7 @@ Add these only when the PR has facts to report:
 - Results: outcomes or measurements that are not clear from the fix itself.
 - Scope: work left out of this PR, with a link if an existing issue tracks that work.
 - Risks or breaking changes: known effects on users, APIs, settings, data formats, or workflows.
-- Release, migration, or rollback: steps needed to release, adopt, or undo the change.
+- Release, adoption, or rollback: steps needed to release, adopt, or undo the change.
 
 Bold issue and PR numbers central to the change, plus names whose exact identity matters. Include relevant validation when it helps reviewers assess the change or the template requires it.
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from shared.ci_observation import Observation, PermissionDenied, for_pr
-from shared.private_state import read, root
+from shared.private_state import read
 
 PR='https://github.com/owner/repo/pull/7'
 HEAD='a'*40
@@ -46,9 +46,7 @@ def test_new_head_gets_own_window_and_returning_head_does_not_reset(tmp_path):
         assert observer.current['started']==10
 
 
-def test_v2_ci_never_uses_active_v1_observation_state():
+def test_ci_observation_uses_private_state_home():
     current=for_pr(PR,HEAD)
-    legacy=root('github.com/owner/repo')/'ci-observations/pr-7.json'
-    assert current.path!=legacy
     assert str(current.path).startswith(os.environ['XDG_STATE_HOME'])
     assert 'dk-pr-skills/v2/ci' in str(current.path)

@@ -33,6 +33,10 @@ def package(root):
             assert text.startswith('---\n') and re.search(r'(?m)^name: '+re.escape(path.parent.name)+'$',text)
             assert re.search(r'(?m)^description: .+',text)
     assert entries[0]==entries[1]
+    for name in entries[0]:
+        source=root/'codex/skills'/name/'SKILL.md'
+        target=root/'claude/skills'/name/'SKILL.md'
+        assert source.read_bytes()==target.read_bytes(),'Run scripts/sync_skills.py: '+name
     if manifests[0]['name']=='dk-workflows':
         assert entries[0]==['dk-ci', 'dk-commit-message', 'dk-config', 'dk-flaky-tests', 'dk-issue-description', 'dk-pr-address-reviews', 'dk-pr-config', 'dk-pr-decisions', 'dk-pr-description', 'dk-pr-iter', 'dk-pr-post-review', 'dk-pr-publish', 'dk-pr-read-comments', 'dk-pr-reply-review', 'dk-pr-review', 'dk-pr-split-commits']
     for name in ('.agents/plugins/marketplace.json','.claude-plugin/marketplace.json'):
@@ -65,8 +69,7 @@ def check(base=None):
             if 'tests' in relative.parts or '__pycache__' in relative.parts:continue
             if relative.as_posix() in {'scripts/check.py','scripts/version.py','scripts/test.py'}:continue
             text=path.read_text()
-            for forbidden in ('codex exec','claude -p','--ephemeral','shared.executors','preparation_graph','architecture_packet',
-                              'git-diff-v1','git-diff-v2'):
+            for forbidden in ('codex exec','claude -p','--ephemeral','shared.executors','preparation_graph','architecture_packet'):
                 assert forbidden not in text,'Unexpected core execution/domain integration: '+str(relative)+': '+forbidden
     if base:
         previous=json.loads(subprocess.check_output(['git','show',base+':.codex-plugin/plugin.json'],text=True,cwd=ROOT))

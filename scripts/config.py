@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read/set v2 workflow settings or produce an explicit v1 migration plan."""
+"""Read, set and validate workflow settings."""
 import argparse
 import json
 import os
@@ -19,11 +19,9 @@ def main():
         c=sub.add_parser(action);c.add_argument('--scope',choices=['repo','user'],default='repo')
         if action=='set':c.add_argument('--file',type=Path,required=True)
     c=sub.add_parser('preflight');c.add_argument('--available',type=Path,required=True)
-    c=sub.add_parser('migrate');c.add_argument('--reviewers',type=Path);c.add_argument('--drafting',type=Path)
     a=p.parse_args()
     if a.action=='show':result=config.effective(a.repository,a.upstream)
     elif a.action=='preflight':result=config.preflight(config.effective(a.repository,a.upstream)['settings'],read(a.available))
-    elif a.action=='migrate':result=config.migrate(read(a.reviewers) if a.reviewers else None,read(a.drafting) if a.drafting else None)
     else:
         target=config.path(a.repository if a.scope=='repo' else None)
         if a.action=='set':write(target,config.validate(read(a.file)))

@@ -135,7 +135,7 @@ def main():
                               "check_count": len(result["checks"])},
                              sort_keys=True), file=sys.stderr, flush=True)
             repo = pr_repository(result.get("url") or args.pr, args.repo)
-            result = decide(GitHub(repo), Registry(repo, Path.cwd(), import_legacy=False), result,
+            result = decide(GitHub(repo), Registry(repo, Path.cwd()), result,
                             lambda: observe(args.pr, args.head, args.repo),
                             classification_timeout=args.classification_timeout,
                             on_progress=lambda update: print(json.dumps(update, sort_keys=True),

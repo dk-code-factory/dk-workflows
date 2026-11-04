@@ -2,7 +2,7 @@
 
 Authorize a concrete action from the caller's instructions, prepare its exact payload and expected live identity, then persist intent before dispatch. Reconcile an uncertain write read-only before preparing or attempting any replacement. Never reset pending intent after a timeout. Compare actor, target, exact payload, head/lease and remote receipt. An absent or ambiguous object remains unresolved. A confirmed publication remains recorded even if current readiness has changed; it does not authorize another write.
 
-`python3 PACKAGE_ROOT/scripts/publish.py prepare --file REQUEST.json` stores intent and returns an operation path. `publish --operation FILE` performs fresh validation and sends at most once. `reconcile --operation FILE` only observes; it never sends. Repeated publish on pending or verified state also observes. Keep the operation path in the caller's result and use it on resume. The package-owned `runtime/shared/publication.py` can be reused by other domain publishers with their own check/send/observe callbacks; it requires no workflow tokens.
+`python3 PACKAGE_ROOT/scripts/publish.py prepare --file REQUEST.json` stores intent and returns an operation path. `publish --operation FILE` performs fresh validation and sends at most once. `reconcile --operation FILE` only observes; it never sends. Repeated publish on pending or verified state also observes. Keep the operation path in the caller's result and use it on resume. The package-owned `runtime/shared/publication.py` can be reused by other domain publishers with their own check/send/observe callbacks.
 
 Requests:
 

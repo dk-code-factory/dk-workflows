@@ -1,4 +1,4 @@
-"""Private durable publication storage; retain the legacy namespace for recovery. Nothing here is auto-deleted."""
+"""Private durable publication storage. Nothing here is auto-deleted."""
 import os
 from pathlib import Path
 import tempfile

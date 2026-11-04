@@ -7,7 +7,7 @@ import time
 from contextvars import ContextVar
 from pathlib import Path
 
-from shared.private_state import read, write, root as legacy_root
+from shared.private_state import read, write, root as data_root
 from shared.publication import digest
 from shared import publication
 
@@ -15,9 +15,7 @@ ACTIVE = ContextVar('ci_observation', default=None)
 
 
 def root(repository):
-    # Flake registries keep their domain store; active v1 CI windows are never
-    # resumed or overwritten by this independent v2 observer.
-    legacy_root(repository)  # validates the repository key without touching disk
+    data_root(repository)  # validates the repository key without touching disk
     base = Path(os.environ.get('XDG_STATE_HOME') or Path.home()/'.local/state')
     path = base/'dk-pr-skills/v2/ci'/repository
     from shared.repository_scope import inside_checkout

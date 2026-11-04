@@ -264,9 +264,6 @@ def decide(api, registry, snapshot, refresh_snapshot, auto_discover=True, *,
     try:
         budget.progress('classification', raw_result=snapshot['result'], head=snapshot['head'])
         with budget.activate():
-            if snapshot['result'] == 'failure':
-                budget.progress('initialize_registry')
-                registry.import_legacy()
             decision = _decide(BoundedAPI(api, budget), registry, snapshot, refresh_snapshot,
                                auto_discover, budget, partial)
         budget.remaining()
