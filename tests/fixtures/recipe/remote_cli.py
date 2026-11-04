@@ -30,6 +30,8 @@ try:
             remote.changed('push',None)
         sys.stdout.write(result.stdout)
     else:
+        if sys.argv[1:3]==['pr','checks']:
+            state.setdefault('check_reads',[]).append(state['metadata']['headRefOid'])
         payload=json.loads(sys.stdin.read()) if '--input' in sys.argv else None
         value=remote.run(['gh',*sys.argv[1:]],payload=payload)
         if isinstance(value,str):sys.stdout.write(value)
