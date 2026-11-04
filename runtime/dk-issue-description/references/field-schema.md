@@ -1,40 +1,40 @@
-# Issue field schema
+# Issue fields
 
-Use the selected repository template's names and layout. Preserve these meanings.
+Use the selected repository template's names and layout. Keep these meanings.
 
-## Required meanings
+## Main fields
 
 | Field | Question answered |
 |---|---|
-| Problem | What is wrong, missing, or slow, and why does it matter? |
-| Expected outcome | What observable behavior should occur instead? |
+| Problem | What is wrong, missing or slow? Why does it matter? |
+| Expected outcome | What observable behavior should occur? |
 
-Both must be specific. `It is broken` and `It should work` are insufficient.
+Be specific. `It is broken` and `It should work` are insufficient.
 
-## Repository-conditional meanings
+## Conditional fields
 
-Include only when the template or consistent same-kind issues ask for them:
+Include only when the template or consistent issues of the same type request them:
 
-- Context: exact version, component, platform, or configuration.
+- Context: exact version, component, platform or configuration.
 - Reproduction: minimal numbered steps actually performed.
-- Evidence: relevant logs, traces, screenshots, or measurements.
-- Proposal: solution or design sketch, separate from the problem.
-- Workaround: a verified way around the problem.
+- Evidence: relevant logs, traces, screenshots or measurements.
+- Proposal: solution or design, separate from the problem.
+- Workaround: a verified way to avoid the problem.
 - Acceptance criteria: observable completion conditions.
 
-## Conservative fallback
+## Fallback
 
-When no template or style evidence exists:
+Without a template or style evidence:
 
 - Title: name the affected behavior and failure or desired outcome.
-- Body: `Problem`, `Expected behavior`, and only supported context/evidence.
-- Bug reports may include reproduction steps only when known.
-- Feature requests describe the unavailable capability before proposing implementation.
+- Body: `Problem`, `Expected behavior` and supported context or evidence.
+- Include reproduction steps for bugs only when known.
+- For features, describe the missing capability before proposing implementation.
 
-## Reject
+## Leave out
 
-- Template comments, placeholder text, empty optional sections, or repeated summary.
-- Suspected causes stated as facts.
-- Invented versions, logs, reproduction, benchmarks, labels, or workarounds.
+- Template comments, placeholders, empty optional sections or repeated summaries.
+- Suspected causes presented as facts.
+- Invented versions, logs, reproduction steps, benchmarks, labels or workarounds.
 - Generated-by banners or tool attribution.
-- Browser-dead `path:line` references; use a SHA-pinned raw permalink.
+- Browser-unusable `path:line` references. Use a raw permalink pinned to a commit SHA.

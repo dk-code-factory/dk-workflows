@@ -1,6 +1,8 @@
 ---
 name: dk-pr-review
-description: Review another person's PR, independently verify candidate findings and post confirmed issues, with optional policy-authorized approval or merging.
+description: Review another person's PR, verify findings independently and post confirmed issues. Approve or merge only when separately authorized.
 ---
 
-Resolve PLUGIN_ROOT from this installation. Follow [the incoming-review recipe](../../../runtime/pr-review.md), [task state and handoffs](../../../docs/task-state.md) and effective `dk-config` settings. Use `dk-pr-reviewers-run` for discovery and a separate native verification pass before publication. Preserve original reviewer outputs, source-backed dispositions, head/target pins, native handles and publication receipts across resume. This workflow does not authorize modifying the author's code, description or commit series. Posting verified findings is the normal invoked workflow; honor analysis-only instructions and saved policy. Approval and merging require separate explicit invocation or saved policy authorization and fresh completion checks.
+Set PLUGIN_ROOT to this plugin's root directory. Follow [the incoming review recipe](../../../runtime/pr-review.md), [task state and handoffs](../../../docs/task-state.md) and effective `dk-config` settings. Use `dk-pr-reviewers-run` to find issues, then a separate native verification pass before publication.
+
+Keep original reviewer outputs, dispositions and sources, pinned head and target, native agent handles and publication receipts across interruptions. This workflow does not authorize changes to the author's code, description or commits. It normally posts verified findings; follow analysis-only instructions and saved policy. Approval and merging each require separate explicit or saved policy authorization and current completion checks.

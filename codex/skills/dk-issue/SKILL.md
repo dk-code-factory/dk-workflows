@@ -1,10 +1,10 @@
 ---
 name: dk-issue
-description: Draft, create or update repository-native GitHub issues when requested.
+description: Draft, create or update GitHub issues using repository templates and conventions.
 ---
 
-Resolve PACKAGE_ROOT from this skill’s installation and follow [the shared PR task contract](../../../docs/pr/contracts.md).
+Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
-Inspect issue templates, maintainer conventions and evidence. Draft the concrete trigger, observed/expected behavior, reproduction and relevant validation. Preserve exact user constraints. Review before authorized creation or editing; retain intent and reconcile uncertain writes. Do not infer issue-creation authorization from a PR workflow.
+Read issue templates, maintainer conventions and evidence. Describe the trigger, observed and expected behavior, reproduction steps and relevant validation. Preserve the user's exact constraints. Review the draft before authorized creation or editing. Save the intended change and reconcile uncertain writes before retrying. A PR workflow does not authorize creating issues.
 
-Use [the field conventions](../../../runtime/dk-issue-description/references/field-schema.md) when repository evidence leaves a formatting choice open.
+Use [the field conventions](../../../runtime/dk-issue-description/references/field-schema.md) when repository formatting rules leave a choice open.

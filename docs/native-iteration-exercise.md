@@ -23,7 +23,11 @@ An optional revision after `before` or `after` selects the same frozen runtime f
 
 Use separate fresh native agents, without inherited conversation or findings. Give both agents the same assignment below, substituting only their arm directory. Do not run this through another model CLI or a scripted coordinator. Resolve model and effort through the host; retain the actual host settings if observable, otherwise report them as unknown. Keep the initialized directories and original agent assignments/results privately.
 
-> Use only `python3 ARM/frozen/interface.py --root ARM COMMAND ARGS` to read or act on this offline fixture. Read the fix skill (`guidance/codex/skills/dk-pr-fix/SKILL.md` in the current arm, `guidance/codex/skills/dk-pr-iter/SKILL.md` in the historical arm) and its referenced guidance, `exercise.json`, `pins.json`, and original governing evidence as needed. Resume run `exercise` after the tree-preserving rewrite and installed reviewer resource change. Assess current required coverage, source-backed finding dispositions, distinct partition and cleanup roles, exact-head CI and publication freshness. Bring required tasks current, keep optional incompleteness visible, and retain run/cycle/retry counters. Do not modify the checkout, resources or specs, reset state, access a network or launch further agents. Choose the operations yourself and finish with an honest structured assessment.
+> Use only `python3 ARM/frozen/interface.py --root ARM COMMAND ARGS` to read or act on this offline fixture. Read the fix skill: `guidance/codex/skills/dk-pr-fix/SKILL.md` in the current arm, or `guidance/codex/skills/dk-pr-iter/SKILL.md` in the historical arm. Read its references, `exercise.json`, `pins.json` and original governing evidence as needed.
+>
+> Resume run `exercise` after the tree-preserving rewrite and reviewer resource change. Assess required coverage, finding dispositions with sources, separate partition and cleanup roles, CI for the exact head, and publication freshness. Refresh required tasks. Report incomplete optional tasks. Keep run, cycle and retry counters.
+>
+> Do not modify the checkout, resources or specs, reset state, use a network or launch agents. Choose the operations yourself. Finish with an accurate structured assessment.
 
 The interface has these operations:
 

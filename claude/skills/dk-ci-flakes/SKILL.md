@@ -1,8 +1,10 @@
 ---
 name: dk-ci-flakes
-description: Discover and verify issue-backed flaky tests and explicit CI exceptions from exact Actions attempts.
+description: Find flaky tests linked to open issues and verify CI exceptions for specific GitHub Actions attempts.
 ---
 
-Resolve PACKAGE_ROOT from this skill’s installation and follow [the shared PR task contract](../../../docs/pr/contracts.md).
+Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
-Use runtime/dk-ci/scripts/flaky_tests.py for bounded discovery, list and synchronization. Retain exact repository/head/job/attempt/test evidence and currently open issue proof. Missing logs, inaccessible/closed issues, unsupported reports and mixed unknown failures remain blocking. A known test flake cannot exempt an entire job. Report configured explicit exceptions separately with ids, reason, scope and source. Never create an issue or rerun jobs unless authorized.
+Use `runtime/dk-ci/scripts/flaky_tests.py` to search within its limits, list records and synchronize them. Save the repository, head, job, attempt, test and proof that the linked issue is open. Missing logs, inaccessible or closed issues, unsupported reports and unknown failures block acceptance. A known flaky test cannot exempt an entire job.
+
+Report configured CI exceptions separately, with each id, reason, scope and source. Create issues or rerun jobs only when authorized.

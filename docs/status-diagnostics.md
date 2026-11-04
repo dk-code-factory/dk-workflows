@@ -1,7 +1,26 @@
 # Status output details
 
-Read this reference when interpreting compact result/progress references or `status --explain` diagnostics. Routine commands and claim handling are defined in [task state](task-state.md).
+Use this reference for compact result and progress references or `status --explain`. [Task state](task-state.md) defines routine commands and claim handling.
 
-Compact output is a read projection, not a readiness assessment. Before assessing finding dispositions, exact human acceptances or interrupted-work recovery, read detailed progress with `status --run RUN_ID` (omit `--run` when evidence spans runs). The `progress_ref` JSON Pointer identifies the same array in the retained manifest; `~1` decodes to `/` and `~0` to `~` in run names. Follow each task's validated `result` path to its immutable JSON envelope: `normalized` retains findings and skill-owned fields, and `original` is the exact original output encoded as base64 (`base64.b64decode(envelope['original'], validate=True)`). Older result envelopes remain in the manifest's sibling `results/` directory; full attempt history in `entries` references their filenames. A missing or damaged current envelope yields a null result path and cannot be reused in either view. Status reads hold the same lock and perform the same integrity validation in both views; they never change the manifest, claims or counters. Compact output size does not scale with retained progress bodies, but still reflects the requested tasks, budget maps, runs and all unfinished claims. It does not reduce manifest I/O or replace fresh input, CI and publication checks.
+## Compact status
 
-Explained status uses the same capture and reuse decision as ordinary status. Its `blockers` distinguishes changed inputs, explicit invalidation, noncacheable tasks/results, unfinished claims, absent results, missing result artifacts, damaged results and failed/incomplete results. Multiple blockers can coexist. `previous_capture` references the manifest's last captured components, which can belong to an unfinished or interrupted attempt rather than the retained result. `previous_capture_fingerprint`, `current_fingerprint` and `result_fingerprint` distinguish those identities; `result_fingerprint_mismatch` also explains when the last capture is current but the result is older. The ordinary `result` field still references validated original result evidence. A task with no previous capture reports `no_previous_capture` and additions, rather than implying drift from an earlier review. Missing governing resources still fail capture with the existing blocked error before any claim or budget changes. Diagnostics do not change fingerprints or coverage, allocate cycles, recover claims or authorize reuse/publication/completion. Without `--explain`, no detailed comparisons are returned and routine compact output retains its existing bound.
+Compact status displays saved state; it does not assess readiness. Before assessing dispositions, exact user acceptances or recovery, read `status --run RUN_ID` and original results. Omit `--run` when evidence spans runs.
+
+`progress_ref` is a JSON Pointer to the same progress array in the manifest. In run names, decode `~1` as `/` and `~0` as `~`. Each validated `result` path points to an immutable JSON envelope:
+
+- `normalized` contains findings and skill-owned fields.
+- `original` contains the exact original output in base64. Decode with `base64.b64decode(envelope['original'], validate=True)`.
+
+Older envelopes remain in the manifest's sibling `results/` directory. Attempt history in `entries` references their filenames. A missing or damaged current envelope produces a null result path and cannot be reused in either view.
+
+Both status views use the same lock and integrity checks. Neither changes manifests, claims or counters. Compact size does not grow with progress bodies, but still includes requested tasks, budget maps, runs and all unfinished claims. It does not reduce manifest I/O or replace current input, CI or publication checks.
+
+## Explained status
+
+Explained and ordinary status use the same capture and reuse decision. `blockers` reports changed inputs, explicit invalidation, noncacheable tasks or results, unfinished claims, absent results, missing artifacts, damaged results, and failed or incomplete results. Several blockers may apply.
+
+`previous_capture` identifies the last captured components. These may belong to an unfinished attempt rather than the saved result. Compare `previous_capture_fingerprint`, `current_fingerprint` and `result_fingerprint` to distinguish them. `result_fingerprint_mismatch` also explains a current capture with an older result. The ordinary `result` field still points to validated original evidence.
+
+A task without prior capture reports `no_previous_capture` and additions; it does not imply a change from an earlier review. Missing governing resources still block capture before claim or budget changes.
+
+Diagnostics do not change fingerprints or coverage, allocate cycles, recover claims, or authorize reuse, publication or completion. Without `--explain`, detailed comparisons are omitted and compact output keeps its existing size limit.

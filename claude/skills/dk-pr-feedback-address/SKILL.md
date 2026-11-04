@@ -3,8 +3,10 @@ name: dk-pr-feedback-address
 description: Verify and fix actionable PR feedback from inline threads, reviews and general comments.
 ---
 
-Resolve PACKAGE_ROOT from this skill’s installation and follow [the shared PR task contract](../../../docs/pr/contracts.md).
+Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
-For analysis inputs and live verification, follow [shared PR evidence](../../../docs/pr/supplied-evidence.md).
+Use [shared PR evidence](../../../docs/pr/supplied-evidence.md) for analysis and live verification.
 
-Read stable complete feedback from the supplied handoff, or collect it using the read-comments helpers when no handoff is supplied. Read governing instructions, Decisions and code for each source. Verify validity and scope, preserve settled/deferred work, implement focused fixes and run relevant checks. Retain dispositions with evidence and source links. Respect the caller's explicit authority for pushing, replies and resolution; standalone local fixes do not imply remote authority. Use publication/reply skills for authorized remote changes. Return tested fixes, finding dispositions and outstanding blockers.
+Read complete, stable feedback from the supplied handoff. Without a handoff, collect it with the feedback read helpers. Read the governing instructions, Decisions and code for each item. Check its validity and scope. Preserve settled decisions and deferred work. Make focused fixes and run relevant checks.
+
+Record each finding's disposition with evidence and source links. Follow the caller's permissions for pushes, replies and thread resolution. Local fixes alone do not authorize remote changes. Use the publication and reply skills for authorized remote changes. Return tested fixes, dispositions and remaining blockers.
