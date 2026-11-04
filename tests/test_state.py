@@ -327,8 +327,8 @@ def test_status_batch_process_count_comparison(case, tmp_path, monkeypatch, link
         assert read(store.manifest) == retained
         return len(calls)
     # Independent captures reproduce the pre-optimization implementation.
-    with monkeypatch.context() as legacy:
-        legacy.setattr(state._CaptureContext, 'git', lambda self, source: state._capture_git(source))
+    with monkeypatch.context() as independent:
+        independent.setattr(state._CaptureContext, 'git', lambda self, source: state._capture_git(source))
         before = probe()
     after = probe()
     assert before == 42 and after == 28
@@ -361,8 +361,8 @@ def test_status_batch_mixed_modes_process_count_comparison(case, monkeypatch):
         assert all(task['reusable'] for task in store.status(specs, compact=True)['tasks'])
         assert read(store.manifest) == retained
         return len(calls)
-    with monkeypatch.context() as legacy:
-        legacy.setattr(state._CaptureContext, 'git', lambda self, source: state._capture_git(source))
+    with monkeypatch.context() as independent:
+        independent.setattr(state._CaptureContext, 'git', lambda self, source: state._capture_git(source))
         before = probe()
     after = probe()
     assert before == 66 and after == 54
@@ -753,10 +753,10 @@ def test_status_refreshes_indirect_diff_configuration(case, tmp_path, monkeypatc
 def test_status_refreshes_replacement_refs_with_continued_reftable_config(case, monkeypatch):
     a, store = case
     checkout = Path(a['git']['checkout'])
-    migration_help = subprocess.run(['git', '-C', str(checkout), 'refs', 'migrate', '-h'],
+    format_help = subprocess.run(['git', '-C', str(checkout), 'refs', 'migrate', '-h'],
                                     capture_output=True, text=True)
-    if '--ref-format' not in migration_help.stdout+migration_help.stderr:
-        pytest.skip('Git does not support reftable migration')
+    if '--ref-format' not in format_help.stdout+format_help.stderr:
+        pytest.skip('Git does not support reftable conversion')
     git(checkout, 'refs', 'migrate', '--ref-format=reftable')
     config = checkout/'.git/config'
     original_config = config.read_bytes()

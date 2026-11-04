@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private PR settings; compatible private stores for bundled PR skills."""
+"""Manage private settings for bundled PR skills."""
 import argparse
 import hashlib
 import json
@@ -10,7 +10,6 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'runtime'))
 from shared import ci_exceptions, pr_size, pr_partition_policy
 from shared.repository_scope import identities, repository
 from shared.private_state import read, write, atomic_text
-from config import normalize_skill
 
 
 def main(arguments=None):
@@ -69,8 +68,7 @@ def main(arguments=None):
                 target=location(key)
                 if target.exists():
                     for role,value in read(target,{}).items():
-                        merged[role]=({**value, 'skill':normalize_skill(value['skill'])}
-                                      if isinstance(value,dict) and 'skill' in value else normalize_skill(value))
+                        merged[role]=value
                         sources[role]={'source':key,'file':str(target)}
             return {'value':merged,'sources':sources}
         for key in levels:

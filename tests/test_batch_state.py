@@ -288,8 +288,8 @@ def test_start_batch_process_count_comparison(case, tmp_path, monkeypatch, linke
         assert all(t['reusable'] for t in store.status(specs)['tasks'])
         assert store.manifest.read_bytes() == before
         return len(calls)
-    with monkeypatch.context() as legacy:
-        legacy.setattr(state._CaptureContext, 'git', lambda self, source: state._capture_git(source))
+    with monkeypatch.context() as independent:
+        independent.setattr(state._CaptureContext, 'git', lambda self, source: state._capture_git(source))
         independent = probe(False)
     status_only = probe(False)
     batched = probe(True)

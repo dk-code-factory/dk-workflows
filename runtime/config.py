@@ -22,13 +22,6 @@ DEFAULTS = {
 }
 
 
-def normalize_skill(skill):
-    if isinstance(skill, str) and skill.startswith('dk-pr-skills:'):
-        mapping = read(Path(__file__).resolve().parents[1]/'docs/v1-skill-mapping.json')
-        return mapping.get(skill, skill)
-    return skill
-
-
 def validate(settings):
     if not isinstance(settings, dict) or set(settings) - DEFAULTS.keys():
         raise ValueError('Only reviewers, skills, iteration and domain_settings belong to workflows')
@@ -52,20 +45,10 @@ def validate(settings):
         if role not in DEFAULTS['skills'] or not isinstance(skill, str) or not skill:
             raise ValueError('Unknown role or empty selected skill')
     if 'iteration' in settings and settings['iteration'] != DEFAULTS['iteration']:
-        raise ValueError('v2 retains the fixed iteration limits')
+        raise ValueError('Iteration limits are fixed')
     for owner, reference in settings.get('domain_settings', {}).items():
         if not isinstance(owner, str) or not isinstance(reference, str) or not reference:
             raise ValueError('Domain settings must be owner-to-reference strings')
-    for reviewer in settings.get('reviewers', []):
-        reviewer['skill'] = normalize_skill(reviewer['skill'])
-    if 'skills' in settings:
-        settings['skills'] = {role: normalize_skill(skill) for role, skill in settings['skills'].items()}
-    references = settings.get('domain_settings', {})
-    if 'dk-pr-skills' in references:
-        previous = references.pop('dk-pr-skills')
-        if 'dk-workflows' in references and references['dk-workflows'] != previous:
-            raise ValueError('Conflicting saved PR settings references require reconciliation')
-        references['dk-workflows'] = previous
     return settings
 
 
@@ -102,25 +85,3 @@ def preflight(settings, available):
     selected = set(settings['skills'].values()) | {r['skill'] for r in settings['reviewers']}
     missing = sorted(selected - set(available))
     return {'ready': not missing, 'missing_selected_skills': missing}
-
-
-def migrate(reviewers=None, drafting=None):
-    """Explicit plan only. v1 caches/runs are never read or copied."""
-    mapping = read(Path(__file__).resolve().parents[1]/'docs/v1-skill-mapping.json')
-    result, unresolved = [], []
-    raw = reviewers if isinstance(reviewers, list) else (reviewers or {}).get('reviewers', [])
-    for binding in raw:
-        if isinstance(binding, str):
-            binding = {'skill': binding}
-        if (not isinstance(binding, dict) or not binding.get('skill')
-                or set(binding) - {'skill','host','required'}):
-            unresolved.append(binding)
-            continue
-        result.append({'skill': mapping.get(binding['skill'], binding['skill']), 'required': binding.get('required', True)})
-    return {'mapping': mapping, 'proposed': {'reviewers': result}, 'unresolved_bindings': unresolved,
-            'drafting_for_domain_owner': drafting or {},
-            'domain_owners': {'rules': 'dk-workflows', 'drafting': 'dk-workflows',
-                              'pr_size': 'dk-workflows', 'pr_partition': 'dk-workflows',
-                              'completion': 'dk-workflows', 'ci_exceptions': 'dk-workflows',
-                              'architecture': 'dk-architecture'},
-            'v1_state': 'Use retained v1 runtime for active runs; never migrate review caches'}

@@ -276,11 +276,11 @@ def test_helpers_default_output_and_artifact_cli(tmp_path):
                 assert result == (inline if kind == 'threads' else top)
 
 
-def test_legacy_conversation_input_remains_compatible(tmp_path):
+def test_conversation_accepts_full_thread_snapshot_json(tmp_path):
     inline, _ = snapshots()
-    legacy = {key: inline[key] for key in ['complete', 'items', 'itemCount', 'itemsSha256', 'pullRequest']}
-    path = tmp_path/'legacy.json'
-    path.write_text(json.dumps(legacy))
+    snapshot = {key: inline[key] for key in ['complete', 'items', 'itemCount', 'itemsSha256', 'pullRequest']}
+    path = tmp_path/'threads.json'
+    path.write_text(json.dumps(snapshot))
     with patch.object(conversation.sys, 'argv', ['helper', '--snapshot-file', str(path)]), \
          patch.object(conversation.sys, 'stdout', io.StringIO()), \
          patch.object(conversation, 'gh_json', side_effect=[[[]], [[]], {'headRefOid': 'abc'}]*2):

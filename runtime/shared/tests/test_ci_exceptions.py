@@ -205,7 +205,7 @@ def test_cli_base_repository_identity_crud_and_private_permissions(setup, tmp_pa
     subprocess.run(['git', 'init', '-q', str(repo)], check=True)
     subprocess.run(['git', '-C', str(repo), 'remote', 'add', 'origin', 'git@github.com:fork/project.git'], check=True)
     def cli(*args):
-        result = subprocess.run([sys.executable, str(ROOT / 'dk-config/scripts/repo_rules.py'),
+        result = subprocess.run([sys.executable, str(ROOT.parent / 'scripts/pr_config.py'),
             '--cwd', str(repo), '--pr', 'https://github.com/acme/project/pull/1', 'ci-exceptions', *args],
             capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
@@ -225,7 +225,7 @@ def test_cli_base_repository_identity_crud_and_private_permissions(setup, tmp_pa
 
 
 def test_cli_rejects_incomplete_matchers_without_writing_config(setup, tmp_path):
-    base = [sys.executable, str(ROOT / 'dk-config/scripts/repo_rules.py'), '--cwd', str(tmp_path),
+    base = [sys.executable, str(ROOT.parent / 'scripts/pr_config.py'), '--cwd', str(tmp_path),
             'ci-exceptions', 'add', '--kind', 'test', '--workflow', WORKFLOW, '--reason', 'Reason']
     result = subprocess.run(base, capture_output=True, text=True)
     assert result.returncode != 0 and 'exact job and test' in result.stderr

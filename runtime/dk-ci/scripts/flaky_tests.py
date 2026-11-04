@@ -21,7 +21,7 @@ def main():
     parser.add_argument('--cwd', default='.', help='repository path; private data must be outside it')
     sub = parser.add_subparsers(dest='command', required=True)
     listing = sub.add_parser('list', help='refresh linked issues and list active/candidate/inactive entries')
-    listing.add_argument('--history', action='store_true', help='include legacy and named-test observations')
+    listing.add_argument('--history', action='store_true', help='include named-test observations')
     sub.add_parser('sync', help='refresh every linked issue directly and reverify entries')
     scan = sub.add_parser('discover', help='scan bounded Actions history and recently updated open issues')
     scan.add_argument('--days', type=int, default=30)
@@ -37,7 +37,7 @@ def main():
             output = registry.synchronize([], api.issue)
             if args.command == 'list' and args.history:
                 saved = registry.load()
-                output.update(legacy_tests=saved.get('tests', {}), observations=saved.get('observations', []))
+                output['observations'] = saved.get('observations', [])
         saved = registry.load()
         # Unsupported or unlinked failures stay visible as candidates.
         output['unlinked_candidates'] = [o for o in saved.get('observations', [])
