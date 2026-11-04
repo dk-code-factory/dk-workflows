@@ -25,8 +25,10 @@ Each stage returns original output, completion, evidence and blockers. Check cur
    - Repeat when diff, target, scope or partition policy changes. After publishing a split, update the original PR's scope, Decisions and description. Refresh affected later tasks without resetting budgets.
 4. **Review and fix.**
    - Inputs: current description and Decisions; pinned target, base and head trees and diff; governing context; reviewer resources and options.
+   - Follow [cycle hooks](../docs/cycle-hooks.md). For a new pass requiring review invocation, check the remaining budget, save its cycle id and complete ordered `before_cycle` hooks before capturing final reviewer inputs. Hooks use managed occurrence tasks under the same run, without reviewer budget flags. Completed unchanged hooks reuse on resume. Refresh inspection and scope after hook effects.
    - Follow [the review recipe](pr-reviewers.md) with the saved run and one shared cycle id per pass. Reuse uses no cycle; resume keeps the cycle. Assess findings through feedback skills. Save dispositions and exact acceptances.
    - Return original reviewer outputs, explicit completion, findings, evidence and blockers. Fix actionable findings, then refresh scope and affected inputs. Completed tasks with unchanged inputs remain reusable.
+   - After successful review, assessment, fixes, publication and scope refresh, complete ordered `after_cycle` hooks before another cycle or cleanup. Resume an unfinished after phase even when its reviews are reusable. Hook failures block progress. Changes affecting review coverage require another pass within the retained budget. Reuse-only checks and same-cycle reviewer retries do not repeat completed hooks.
    - Allow five review and fix cycles. If a reviewer hits a usage or session limit, record its incomplete output before its one explicit same-cycle `--retry`. Resolve other failure blockers before retrying. If changed inputs require a sixth cycle, stop and preserve state.
 5. **Clean the series.**
    - Inputs: all commits, final reviewed diff, tree and head, target tip, instructions, Decisions, ownership and authorized exact lease.
