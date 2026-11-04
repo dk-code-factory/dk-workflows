@@ -4,6 +4,13 @@ Preserve: unchanged reruns invoke zero reviewers; failed or interrupted tasks re
 
 Deliberate changes: agents resolve and invoke skills; no host adapters or reviewer-internal proof gates; no engineering preparation graph or semantic reconciliation; no automatic architecture work or architecture completion gate. Domain skills own GitHub and publication. The cache applies only to invocations explicitly managed by workflows.
 
+[Native reviewer handoffs](native-review.md) retain host handles and terminal
+outcomes separately from governing inputs. Successful host execution and a
+nonempty complete skill report are both required; missing, malformed, failed,
+cancelled or unknown outcomes cannot establish coverage. Empty completed results
+are rejected on recording and reuse. The coordinator trusts native execution and
+the selected skill instead of reconstructing nested execution from wire events.
+
 Iteration waits for CI at a final completion gate after review/fix cycles, commit cleanup and governing-content synchronization. Pending or unsuccessful intermediate checks do not block independent review or cleanup. Final CI failures remain blockers; code repairs refresh scope, affected review coverage and cleanup before observation of the new final head. Retain observation deadlines, five CI repairs per cycle, three transient reruns per head and the five-review-cycle limit. Standalone CI observation is unchanged.
 
 Coordinated Feedback, Decisions and read-comments consumers at a shared analysis freshness boundary use one complete initial PR evidence handoff by default. Each consumer still verifies live sources immediately before acceptance or recording. Invalid artifacts and changes to feedback, resolved discussion, Decisions or direct/file instructions require recollection and reassessment even at an unchanged head. Standalone collection, full original schemas, publication validation and final live completion checks remain available. The [bounded native evidence exercise](native-evidence-exercise.md) records equivalent coordinator tasks with initial collections, per-consumer acceptance verifications, mocked transport reads, returned bytes and original outcomes.

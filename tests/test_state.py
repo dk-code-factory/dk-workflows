@@ -265,6 +265,44 @@ def test_public_completion_cannot_claim_failed_or_incomplete_success(case):
             store.record(spec,claim['id'],b'x',normalized,status)
 
 
+@pytest.mark.parametrize('original', [b'', b' \t\r\n'])
+def test_empty_review_output_cannot_establish_coverage(case, original):
+    spec, store = case
+    claim = store.start(spec, run='run', cycle='c1')['claim']
+    with pytest.raises(ValueError, match='nonempty original output'):
+        store.record(spec, claim['id'], original, {'complete': True}, 'complete')
+    assert store.status([spec])['unfinished'][0]['id'] == claim['id']
+    store.record(spec, claim['id'], original, {'complete': False}, 'incomplete')
+    assert not store.status([spec])['tasks'][0]['reusable']
+    retry = store.start(spec, run='run', cycle='c1', retry=True)['claim']
+    store.record(spec, retry['id'], b'No findings', {'complete': True}, 'complete')
+    assert store.start(spec)['action'] == 'reuse'
+    assert store.status([])['runs']['run']['cycles'] == ['c1']
+
+
+@pytest.mark.parametrize('original', [b'', b' \t\r\n'])
+def test_legacy_empty_complete_result_is_not_reused(case, original):
+    import base64
+    import hashlib
+
+    spec, store = case
+    done(store, spec)
+    manifest = read(store.manifest)
+    entry = manifest['entries'][capture(spec)['key']]
+    old_path = store.root/'results'/entry['result']['file']
+    envelope = read(old_path)
+    envelope['original'] = base64.b64encode(original).decode()
+    envelope['original_sha256'] = hashlib.sha256(original).hexdigest()
+    fingerprint = state.digest(envelope)
+    # Model a valid envelope written before empty completed output was rejected.
+    state.write(store.root/'results'/(fingerprint+'.json'), envelope)
+    entry['result'].update(file=fingerprint+'.json', hash=fingerprint)
+    state.write(store.manifest, manifest)
+    assert not store.status([spec])['tasks'][0]['reusable']
+    assert store.start(spec)['action'] == 'invoke'
+    assert old_path.exists()
+
+
 def test_changed_inputs_cannot_be_relaunched_under_an_existing_cycle(case):
     spec,store=case;done(store,spec,run='run',cycle='c1')
     Path(spec['inputs']['context']).write_text('Changed scope')

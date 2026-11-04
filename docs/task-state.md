@@ -66,6 +66,13 @@ partition and cleanup use separate responsibilities.
 - `record --spec A.json --claim CLAIM_ID --original OUTPUT --normalized RESULT.json --status complete|failed|incomplete` stores immutable original bytes and normalized result. Normalized result requires `complete:true|false`; `findings` is a list. Incomplete and failed use false. Extra skill-owned fields are retained. Save every successful task immediately, including successful siblings when another fails. Keep generated stage/progress records out of original instruction files and consumed source snapshots; record the original output as well as its normalized result. `--progress PROGRESS.json` appends run progress, finding dispositions and exact human acceptances without replacing earlier records.
 - `invalidate --key TASK_KEY --reason TEXT` requires fresh execution. Repeated `--key` selects multiple tasks. For a stopped active claim, pass `--recover CLAIM_ID` to close it without launching work, after reconciling its domain writes. This preserves all counters and records the interrupted attempt; it also works when missing resources prevent recapture.
 
+Native reviewers follow [native reviewer handoffs](native-review.md). Retain the
+host handle and terminal outcome in operational progress. The coordinator checks
+host execution and skill completion before recording success; the store rejects
+empty or whitespace-only original output for complete work, including reuse of
+older empty results. It does not verify host events or infer skill completion
+from report text. Failed/incomplete attempts may retain empty output.
+
 For iteration, use `start --run RUN_ID --cycle CYCLE_ID` for reviewers. Reuse never allocates a cycle. All reviewers in one pass share a cycle; resuming keeps it. New work after fixes uses a new cycle. The five-cycle limit is retained atomically before invocation. `--retry` records one eligible same-cycle retry per task. Use `--ci-repair` for five-per-cycle repair counters (omit cycle for cycle zero) and `--ci-rerun --head SHA` for three-per-head transient reruns. These counters are reserved before invoking the domain skill. Original attempts and append-only progress retain interruptions and human acceptances.
 
 Prefer `start-batch --run RUN_ID --cycle CYCLE_ID` for a reviewer pass. All specs
