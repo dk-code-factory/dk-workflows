@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'runtime'))
 from state import Store, make_spec, read
+from config import CYCLE_PHASES, make_hook_spec
 
 
 def main():
@@ -18,6 +19,14 @@ def main():
     p = sub.add_parser('spec')
     p.add_argument('--definition', type=Path, required=True,
                    help='Explicit make_spec fields, excluding repository and pr')
+    p = sub.add_parser('hook-spec', help='Define one configured cycle hook; agents execute it')
+    p.add_argument('--definition', type=Path, required=True,
+                   help='Resolved skill identity, resources, governing inputs and execution options')
+    p.add_argument('--phase', choices=CYCLE_PHASES, required=True)
+    p.add_argument('--hook-id', required=True)
+    p.add_argument('--run', required=True)
+    p.add_argument('--cycle', required=True)
+    p.add_argument('--upstream')
     p = sub.add_parser('status')
     p.add_argument('--spec', type=Path, action='append', default=[])
     p.add_argument('--compact', action='store_true', help='Replace run progress with counts and references')
@@ -52,6 +61,12 @@ def main():
     args = parser.parse_args()
     if args.command == 'spec':
         result = make_spec(repository=args.repository, pr=args.pr, **read(args.definition))
+        print(json.dumps(result, sort_keys=True))
+        return
+    if args.command == 'hook-spec':
+        result = make_hook_spec(repository=args.repository, pr=args.pr, run=args.run,
+                                cycle=args.cycle, phase=args.phase, hook_id=args.hook_id,
+                                definition=read(args.definition), upstream=args.upstream)
         print(json.dumps(result, sort_keys=True))
         return
     store = Store(args.repository, args.pr, checkout=args.checkout)

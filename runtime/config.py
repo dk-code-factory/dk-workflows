@@ -2,7 +2,9 @@
 from pathlib import Path
 import os
 import re
-from state import digest, read
+from state import digest, make_spec, read
+
+CYCLE_PHASES = ('before_cycle', 'after_cycle')
 
 DEFAULTS = {
     'reviewers': [],
@@ -23,6 +25,7 @@ DEFAULTS = {
     'iteration': {'max_cycles': 5, 'same_cycle_retries': 1, 'ci_repairs_per_cycle': 5,
                   'ci_reruns_per_head': 3},
     'domain_settings': {},
+    'cycle_hooks': {phase: [] for phase in CYCLE_PHASES},
     'identities': [],
     'incoming_review': {'post': True, 'approve': False, 'merge': False,
                         'merge_method': 'squash'},
@@ -56,6 +59,27 @@ def validate(settings):
     for owner, reference in settings.get('domain_settings', {}).items():
         if not isinstance(owner, str) or not isinstance(reference, str) or not reference:
             raise ValueError('Domain settings must be owner-to-reference strings')
+    hooks = settings.get('cycle_hooks', {})
+    if not isinstance(hooks, dict) or set(hooks) - set(CYCLE_PHASES):
+        raise ValueError('Cycle hooks require before_cycle or after_cycle lists')
+    for phase, entries in hooks.items():
+        if not isinstance(entries, list):
+            raise ValueError(phase + ' must be an ordered list')
+        ids = set()
+        for hook in entries:
+            if (not isinstance(hook, dict)
+                    or set(hook) - {'id', 'instructions', 'skill', 'options'}
+                    or not isinstance(hook.get('id'), str)
+                    or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', hook['id'])
+                    or hook['id'] in ids
+                    or not isinstance(hook.get('instructions'), str)
+                    or not hook['instructions'].strip() or '\x00' in hook['instructions']
+                    or ('skill' in hook and (not isinstance(hook['skill'], str)
+                                            or not hook['skill'].strip()))
+                    or not isinstance(hook.get('options', {}), dict)):
+                raise ValueError('Cycle hooks require unique ids, original instructions, '
+                                 'an optional skill and object options')
+            ids.add(hook['id'])
     identities = settings.get('identities', [])
     if (not isinstance(identities, list) or any(
             not isinstance(identity, dict) or set(identity) != {'host', 'id'}
@@ -94,7 +118,7 @@ def effective(repository, upstream=None):
             continue
         settings = validate(read(source))
         for key, value in settings.items():
-            if key in {'skills', 'domain_settings', 'incoming_review'}:
+            if key in {'skills', 'domain_settings', 'incoming_review', 'cycle_hooks'}:
                 result[key].update(value)
             else:
                 result[key] = value
@@ -107,5 +131,49 @@ def preflight(settings, available):
     if not isinstance(available, list) or any(not isinstance(x, str) for x in available):
         raise ValueError('Available skill identities must be a list of strings')
     selected = set(settings['skills'].values()) | {r['skill'] for r in settings['reviewers']}
+    selected.update(hook['skill'] for entries in settings.get('cycle_hooks', {}).values()
+                    for hook in entries if 'skill' in hook)
     missing = sorted(selected - set(available))
     return {'ready': not missing, 'missing_selected_skills': missing}
+
+
+def make_hook_spec(*, repository, pr, run, cycle, phase, hook_id, definition, upstream=None):
+    """Define one native hook occurrence; the caller claims and invokes it normally."""
+    if (phase not in CYCLE_PHASES or not isinstance(run, str) or not run.strip()
+            or not isinstance(cycle, str) or not cycle.strip()):
+        raise ValueError('Hook specs require a phase and retained run and cycle ids')
+    loaded = effective(repository, upstream)
+    hook = next((entry for entry in loaded['settings']['cycle_hooks'][phase]
+                 if entry['id'] == hook_id), None)
+    if hook is None:
+        raise ValueError('No configured hook for this phase and id')
+    if not isinstance(definition, dict) or set(definition) - {
+            'skill_identity', 'resources', 'instructions', 'inputs', 'options', 'git',
+            'governing_inputs_complete', 'cacheable'}:
+        raise ValueError('Hook definitions supply execution resources and inputs; '
+                         'identity and instructions come from the configured occurrence')
+    runner = definition.get('skill_identity')
+    if hook.get('skill'):
+        if runner != hook['skill']:
+            raise ValueError('Resolve and supply the configured hook skill identity')
+    elif runner not in {'dk-workflows:dk-pr-fix', 'dk-workflows:dk-pr-review'}:
+        raise ValueError('Instruction hooks run in the owning PR workflow agent')
+    if not isinstance(definition.get('options', {}), dict):
+        raise ValueError('Hook execution options must be an object')
+    instructions = definition.get('instructions', {})
+    if not isinstance(instructions, dict):
+        raise ValueError('Hook instructions must be a label-to-resource-path map')
+    instructions = dict(instructions)
+    for index, source in enumerate(loaded['sources']):
+        label = 'cycle_hook_configuration_' + str(index)
+        if label in instructions:
+            raise ValueError('Reserved hook configuration input label')
+        instructions[label] = source
+    occurrence = {'run': run, 'cycle': cycle, 'phase': phase, 'id': hook_id}
+    execution = dict(definition)
+    execution.update(
+        responsibility='cycle-hook:' + digest(occurrence),
+        assigned_instructions=hook['instructions'], instructions=instructions,
+        options={'cycle_hook': occurrence, 'configured': hook.get('options', {}),
+                 'execution': definition.get('options', {})})
+    return make_spec(repository=repository, pr=pr, **execution)
