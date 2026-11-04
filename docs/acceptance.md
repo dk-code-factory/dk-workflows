@@ -1,8 +1,8 @@
-# v2 behavior contract
+# Behavior contract
 
-Preserve: unchanged reruns invoke zero reviewers; failed or interrupted tasks retain completed siblings; five review/fix cycles with retained same-cycle retries; tree-preserving commit cleanup; fresh publication reconciliation after interruption; exact-head CI; existing partition settings and explicit human acceptances.
+Required behavior: unchanged reruns invoke zero reviewers; failed or interrupted tasks retain completed siblings; five review/fix cycles with retained same-cycle retries; tree-preserving commit cleanup; fresh publication reconciliation after interruption; exact-head CI; existing partition settings and explicit human acceptances.
 
-Deliberate changes: agents resolve and invoke skills; no host adapters or reviewer-internal proof gates; no engineering preparation graph or semantic reconciliation; no automatic architecture work or architecture completion gate. Domain skills own GitHub and publication. The cache applies only to invocations explicitly managed by workflows.
+Agents resolve and invoke native skills; selected skills own internal passes and completion reports. Domain skills own GitHub and publication. Architecture work is independently selected. The cache applies only to invocations explicitly managed by workflows.
 
 [Native reviewer handoffs](native-review.md) retain host handles and terminal
 outcomes separately from governing inputs. Successful host execution and a

@@ -12,10 +12,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from shared import ci_policy as policy
-from shared.flaky_tests import Registry, digest, identity, record_flaky
+from shared.flaky_tests import Registry, digest, identity
 from shared.flaky_actions import collect_attempt, discover, GitHub, pr_repository
 from shared.test_evidence import parse_report
-from shared.private_state import mutate, read, root
+from shared.private_state import mutate
 
 SHA = 'a' * 40
 OTHER = 'b' * 40
@@ -247,16 +247,6 @@ def test_discovery_dedup_same_head_failure_across_attempts(registry):
     assert len(registry.load()['scans']) == 2
 
 
-def test_legacy_history_preserved_but_not_active(registry):
-    def legacy(data):
-        record_flaky(data, TEST, SIGNATURE, SHA, 'fail', 'run1', 'https://example.test/1')
-        return record_flaky(data, TEST, SIGNATURE, SHA, 'pass', 'run2', 'https://example.test/2')
-    assert registry.update(legacy)['flaky']
-    api = FakeAPI(body=declaration(False))
-    assert decide(api, registry)['result'] == 'failure'
-    assert registry.load()['tests']
-
-
 def test_repository_normalization_isolation_and_outside_checkout(registry, tmp_path):
     assert Registry('GitHub.com/ACME/Project').path == registry.path
     for repo in ('github.com/fork/project', 'ghe.example/acme/project'):
@@ -342,18 +332,6 @@ def test_linked_issue_is_refreshed_when_open_scan_and_runs_unavailable(registry)
     report = discover(api, registry)
     assert len(report['missing']) == 2
     assert report['verification']['entries'][0]['status'] == 'closed'
-
-
-def test_case_normalized_legacy_import_and_cli_roundtrip(registry, tmp_path):
-    import os
-    import subprocess
-    old = root('GitHub.com/Acme/Project') / 'flaky-tests.json'
-    mutate(old, {}, lambda data: record_flaky(data, TEST, SIGNATURE, SHA, 'fail', 'legacy', 'https://example.test/legacy'))
-    restored = Registry(REPO)
-    assert restored.load()['tests']
-    mutate(old, {}, lambda data: record_flaky(data, TEST, SIGNATURE, SHA, 'pass', 'new', 'https://example.test/new'))
-    assert len(next(iter(json.loads(old.read_text())['tests'].values()))) == 2
-    assert old.is_file()  # history is retained
 
 
 def test_prose_proof_requires_exact_context_and_unambiguous_claim(registry):

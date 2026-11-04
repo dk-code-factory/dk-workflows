@@ -52,7 +52,9 @@ def initialize(root, guidance, runtime=BASE):
         path = root/'frozen'/name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(run(['git', '-C', ROOT, 'show', runtime+':'+name]))
-    markdown = run(['git', '-C', ROOT, 'ls-tree', '-r', '--name-only', BASE]).decode().splitlines()
+    markdown = ([str(p.relative_to(ROOT)) for folder in ('runtime', 'docs', 'codex')
+                 for p in sorted((ROOT/folder).rglob('*.md'))] if guidance == 'after' else
+                run(['git', '-C', ROOT, 'ls-tree', '-r', '--name-only', BASE]).decode().splitlines())
     for name in markdown:
         if not name.endswith('.md') or not name.startswith(('docs/', 'runtime/', 'codex/')):
             continue

@@ -151,7 +151,7 @@ def test_moved_publisher_recovers_original_intent_with_current_diagnostic_comman
     operation=publisher.prepare(request)['operation']
     path=Path(operation)
     saved=publication.load(path)
-    saved['reconcile_argv']=['python3','/retired/plugin/scripts/publish.py','reconcile','--operation',operation]
+    saved['reconcile_argv']=['python3','/other/plugin/scripts/publish.py','reconcile','--operation',operation]
     from shared.private_state import write
     write(path,saved)
     sends=[]
@@ -161,7 +161,7 @@ def test_moved_publisher_recovers_original_intent_with_current_diagnostic_comman
     with pytest.raises(Diagnostic) as failure:publisher.publish(operation)
     argv=failure.value.action['argv']
     assert str(ROOT/'scripts/publish.py') in argv
-    assert '/retired/plugin/scripts/publish.py' not in argv
+    assert '/other/plugin/scripts/publish.py' not in argv
     assert publisher.prepare(request)['operation']==operation
     assert publisher.publish(operation,reconcile=True)['status']=='verified'
     assert len(sends)==1

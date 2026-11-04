@@ -71,6 +71,9 @@ def initialize(root, arm, revision=BASE):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(git('show', runtime+':'+name))
             hashes[name] = sha(path.read_bytes())
+    guidance = ([str(p.relative_to(ROOT)) for folder in ('runtime', 'docs', 'codex')
+                 for p in sorted((ROOT/folder).rglob('*.md'))] if arm == 'after' else paths)
+    for name in guidance:
         if name.startswith(('runtime/', 'docs/', 'codex/')) and name.endswith('.md'):
             path = root/'guidance'/name
             path.parent.mkdir(parents=True, exist_ok=True)

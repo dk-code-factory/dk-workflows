@@ -1,4 +1,4 @@
-"""Issue-backed flake registry. Legacy observations never authorize red CI."""
+"""Issue-backed flake registry with exact attempt observations."""
 import hashlib
 import json
 import re
@@ -96,43 +96,17 @@ def historical_proof(observations, item):
 
 
 class Registry:
-    def __init__(self, repo, cwd=None, *, import_legacy=True):
+    def __init__(self, repo, cwd=None):
         self.repo = normalize_repo(repo)
         self.path = root(self.repo) / 'flaky-tests.json'
         if cwd and inside_checkout(self.path, cwd):
             raise ValueError('flake tracking must be outside the repository')
-        self._legacy_imported = False
-        if import_legacy:
-            self.import_legacy()
-
-    def import_legacy(self):
-        """Allow live classification to import history inside its shared budget."""
-        if self._legacy_imported:
-            return
-        # Preserve pre-normalization legacy history without enabling it.
-        folders = [root(self.repo).parents[2]]
-        for part in self.repo.split('/'):
-            folders = [child for folder in folders if folder.exists() for child in folder.iterdir()
-                       if child.is_dir() and child.name.lower() == part]
-        for folder in folders:
-            legacy = folder / 'flaky-tests.json'
-            if legacy == self.path or not legacy.exists():
-                continue
-            old = read(legacy, {})
-            def merge(data):
-                for key, events in old.get('tests', {}).items():
-                    target = data.setdefault('tests', {}).setdefault(key, [])
-                    for event in events:
-                        if event not in target:
-                            target.append(event)
-            self.update(merge)
-        self._legacy_imported = True
 
     def load(self):
-        return read(self.path, {'tests': {}, 'entries': {}, 'observations': [], 'scans': {}})
+        return read(self.path, {'entries': {}, 'observations': [], 'scans': {}})
 
     def update(self, operation):
-        return mutate(self.path, {'tests': {}, 'entries': {}, 'observations': [], 'scans': {}}, operation)
+        return mutate(self.path, {'entries': {}, 'observations': [], 'scans': {}}, operation)
 
     def save_observations(self, items):
         def save(data):
@@ -221,18 +195,3 @@ class Registry:
         except ClassificationTimeout as exc:
             exc.issue_errors = errors
             raise
-
-
-def record_flaky(data, test, signature, head, outcome, attempt_id, url):
-    require_head(head)
-    if not all((test, signature, attempt_id, url)) or outcome not in {"fail", "pass"} or not url.startswith("https://"):
-        raise ValueError("flaky evidence needs name, signature, outcome, attempt, and HTTPS link")
-    key = json.dumps([test, signature, head])
-    events = data.setdefault("tests", {}).setdefault(key, [])
-    if any(x["attempt"] == attempt_id for x in events):
-        raise ValueError("duplicate test attempt")
-    events.append({"outcome": outcome, "attempt": attempt_id, "url": url})
-    fails = [x for x in events if x["outcome"] == "fail"]
-    passes_after = [x for x in events if x["outcome"] == "pass" and any(events.index(f) < events.index(x) for f in fails)]
-    return {"flaky": bool(passes_after), "test": test, "signature": signature, "head": head,
-            "failures": fails, "passes": passes_after}

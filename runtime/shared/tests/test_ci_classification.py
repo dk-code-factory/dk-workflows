@@ -521,38 +521,6 @@ def test_interrupted_snapshot_retains_completed_check_sources(registry):
     assert 'deadline' in retained['checks'][1]['error']
 
 
-def test_deferred_legacy_import_lock_wait_is_inside_classification_budget(registry):
-    driver = f'''
-import fcntl, json, sys
-from pathlib import Path
-sys.path.insert(0, {str(Path(__file__).parent)!r})
-from test_flaky_tests import FakeAPI, REPO, snapshot
-from shared import ci_policy as policy
-from shared.flaky_tests import Registry
-from shared.private_state import root
-legacy = root('GitHub.com/Acme/Project') / 'flaky-tests.json'
-legacy.parent.mkdir(parents=True, exist_ok=True)
-legacy.write_text(json.dumps({{'tests': {{'legacy': [{{'outcome': 'fail'}}]}}}}))
-registry = Registry(REPO, import_legacy=False)
-lock = registry.path.parent / (registry.path.name + '.lock')
-lock.parent.mkdir(parents=True, exist_ok=True)
-api = FakeAPI()
-with lock.open('w') as held:
-    fcntl.flock(held, fcntl.LOCK_EX)
-    result = policy.decide(api, registry, snapshot(), snapshot, classification_timeout=0.03)
-assert api.calls == []
-assert Registry(REPO).load()['tests']['legacy'] == [{{'outcome': 'fail'}}]
-assert json.loads(legacy.read_text())['tests']['legacy'] == [{{'outcome': 'fail'}}]
-print(json.dumps(result))
-'''
-    child = subprocess.run([sys.executable, '-c', driver], capture_output=True, text=True, timeout=3)
-    assert child.returncode == 0, child.stderr
-    result = json.loads(child.stdout)
-    assert result['result'] == 'failure' and result['classification']['timed_out']
-    assert result['classification']['phase'] == 'initialize_registry'
-    assert Path(result['decision_file']).is_file()
-
-
 def test_per_call_deadline_checks_do_not_flood_phase_progress():
     tick = [0]
     updates = []
