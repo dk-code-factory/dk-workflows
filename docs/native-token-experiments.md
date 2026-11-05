@@ -10,9 +10,9 @@ recipe regressions separately cover recovery and publication behavior.
 
 PR #151 already imported the usage reader and its tests from the original
 PR #145 head, `c9c2a181e72f7a3673013e9a6c901d5347918240`. Against main
-`eb86b61a2a9dbf60a09d2d5c2aca89fe33e10f6b`, this PR adds the historical
+`3c155ad31bf13b77757574db2079fa9796cdbb09`, this PR adds the historical
 experiment records and independent runtime/guidance fixture coverage. Production
-files and release metadata retain main's version 3.7.0. No production token
+files and release metadata retain main's version 3.7.1. No production token
 optimization is adopted.
 
 Original experiment commits and their source pins are preserved on
