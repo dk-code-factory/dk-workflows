@@ -50,6 +50,8 @@ Reuse unchanged guidance already read in the current context. Check resource ide
 
 Without specs, status inspects runs and unfinished work. Run selection filters runs only; coverage and unfinished claims remain PR-wide. An unknown run is an error. Compact output omits progress bodies. Follow its references and validated original result paths. See [status details](status-diagnostics.md) for decoding.
 
+Task status reports `coverage_complete` only when a retained complete result matches current inputs, has no unfinished claim or invalidation, and satisfies required native execution validation. `reusable` additionally requires task and result cacheability. CI approval may accept a noncacheable result from the current retained run/cycle, but it still requires `coverage_complete`.
+
 For a new run, omit `--run` from status until a start actually invokes a task with that run id. Reuse alone does not create a run. Continue passing the chosen run id to starts so later invocations retain its budgets.
 
 Both start commands return an `action` for each task:

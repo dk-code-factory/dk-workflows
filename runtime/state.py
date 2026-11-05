@@ -583,10 +583,11 @@ class Store:
                     base64.b64decode(saved['original'], validate=True), evidence)
             except (ValueError, KeyError, TypeError, AttributeError):
                 native_problem = {'code': 'malformed_provenance', 'reason': 'Retained native observations are damaged'}
-        reusable = bool(not native_problem and captured['cacheable'] and not entry.get('invalidated') and not entry.get('claim')
-                        and saved and saved['status'] == 'complete' and saved.get('cacheable') is True and saved['fingerprint'] == captured['fingerprint'])
+        coverage_complete = bool(not native_problem and not entry.get('invalidated') and not entry.get('claim')
+                                 and saved and saved['status'] == 'complete' and saved['fingerprint'] == captured['fingerprint'])
+        reusable = bool(coverage_complete and captured['cacheable'] and saved.get('cacheable') is True)
         described = {'key': captured['key'], 'task': captured['components']['task']['id'],
-                'reusable': reusable, 'changed': changed,
+                'reusable': reusable, 'coverage_complete': coverage_complete, 'changed': changed,
                 'unfinished': entry.get('claim'), 'attempts': len(entry.get('attempts', [])),
                 'result': saved['path'] if saved else None, 'completion': saved['status'] if saved else None,
                 'findings': saved['normalized'].get('findings', []) if reusable else None,

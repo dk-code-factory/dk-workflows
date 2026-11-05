@@ -117,5 +117,5 @@ def assess(components, claim, original, evidence):
                     return {'code': 'incomplete_driver', 'reason': 'A required driver lacks a distinct successful native tool observation in its role session'}
                 calls.add(call)
         return None
-    except (ValueError, TypeError, KeyError, AttributeError):
+    except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
         return {'code': 'malformed_provenance', 'reason': 'Native execution observations or captured requirements are malformed; execution is unestablished'}

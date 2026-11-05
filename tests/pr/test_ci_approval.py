@@ -1,6 +1,8 @@
 """Evidence-backed incoming review finalization against offline GitHub and real Git."""
 from copy import deepcopy
+import base64
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -8,7 +10,7 @@ import sys
 import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]/'runtime'))
 import config
-from state import Store, capture, make_spec, read, write
+from state import Store, capture, digest, make_spec, read, write
 from shared import publication
 from shared.diagnostics import Diagnostic
 
@@ -114,21 +116,25 @@ def reviewed(tmp_path, monkeypatch):
                 'analysis_only': False, 'instructions': {'user': str(instructions)},
                 'discovery': [], 'verification': None, 'hooks': [], 'publications': []}
 
-    def task(identity, responsibility='content-review', normalized=None, options=None, inputs=None, cacheable=True):
+    def task(identity, responsibility='content-review', normalized=None, options=None, inputs=None, cacheable=True,
+             native_review=None, capture_native_review=True):
         from native_review_observations import CONTRACT, observations
         spec = make_spec(repository=repository, pr=fixture.PR, skill_identity=identity,
                          resources={'skill': str(skill)}, responsibility=responsibility,
                          assigned_instructions='Review pinned source and original evidence.',
                          instructions=document['instructions'], inputs=inputs or {}, options=options or {},
                          git={'checkout': str(checkout), 'head': head, 'target': base, 'base': base},
-                         governing_inputs_complete=True, cacheable=cacheable, native_review=CONTRACT)
+                         governing_inputs_complete=True, cacheable=cacheable,
+                         **({'native_review': native_review if native_review is not None else CONTRACT}
+                            if capture_native_review else {}))
         path = tmp_path/(identity.replace(':', '-') + '-' + responsibility + '.json')
         write(path, spec)
         started = store.start(spec, run='review', cycle='c1')
         if started['action'] == 'invoke':
             store.record(spec, started['claim']['id'], b'Original completed fixture report',
                          normalized or {'complete': True, 'findings': []}, 'complete',
-                         native_evidence=observations(spec, started['claim'], b'Original completed fixture report'))
+                         native_evidence=observations(spec, started['claim'], b'Original completed fixture report')
+                         if capture_native_review else None)
         return str(path)
 
     document['discovery'] = [task('fixture:a'), task('fixture:b')]
@@ -363,12 +369,74 @@ def test_ready_boolean_without_original_task_coverage_is_insufficient(reviewed):
 
 def test_complete_noncacheable_review_evidence_is_valid_only_in_current_cycle(reviewed):
     r = reviewed
-    path = r.task('fixture:a', 'current-noncacheable', cacheable=False)
+    path = r.task('fixture:a', 'current-noncacheable', cacheable=False, native_review={
+        'schema': 1, 'skill_version': 'fixture-1',
+        'passes': [{'role': 'toolkit', 'drivers': [['python3', '/installed/aspect-driver.py', '--pass', 'toolkit']]}]})
+    status = r.store.status([read(Path(path))])['tasks'][0]
+    assert status['coverage_complete'] and not status['reusable']
     r.edit(lambda value: value['discovery'].__setitem__(0, path))
     assert r.cli.approve(r.evidence)['status'] == 'verified'
     r.edit(lambda value: value.update(cycle='c2'))
     with pytest.raises(ValueError): r.cli.approve(r.evidence)
     assert r.remote.calls == [101, 202]
+
+
+@pytest.mark.parametrize('target', ['discovery', 'verification'])
+@pytest.mark.parametrize('defect,diagnostic', [
+    ('missing-contract', 'missing_contract'), ('missing-evidence', 'unavailable_provenance'),
+    ('missing-driver', 'missing_driver'), ('incomplete-child', 'incomplete_pass'),
+    ('deep-evidence', 'malformed_provenance')])
+def test_legacy_native_evidence_cannot_supply_current_cycle_approval(reviewed, target, defect, diagnostic):
+    r = reviewed
+    contract = {'schema': 1, 'skill_version': 'fixture-1',
+                'passes': [{'role': 'toolkit', 'drivers': [['python3', '/installed/aspect-driver.py']]}]}
+    if target == 'verification':
+        candidate = r.task('fixture:a', 'candidate-review', {'complete': True, 'findings': [{'body': 'Candidate'}]})
+        r.edit(lambda value: value['discovery'].__setitem__(0, candidate))
+        current = r.store.status([read(Path(candidate))])['tasks'][0]
+        path = r.task('dk-workflows:dk-pr-review', 'finding-verification', {
+            'complete': True, 'findings': [], 'dispositions': [
+                {'task': current['key'], 'index': 0, 'status': 'rejected', 'evidence': 'Source evidence'}]},
+            inputs={'candidates': current['result']}, native_review=contract,
+            capture_native_review=defect != 'missing-contract')
+        r.edit(lambda value: value.update(verification=path))
+    else:
+        path = r.task('fixture:a', 'legacy-review', native_review=contract,
+                      capture_native_review=defect != 'missing-contract')
+        r.edit(lambda value: value['discovery'].__setitem__(0, path))
+    spec = read(Path(path))
+    saved = read(r.store.status([spec])['tasks'][0]['result'])
+    # Retain an integrity-valid artifact from a runner that accepted aggregate completion.
+    saved['status'] = 'complete'
+    saved['normalized']['complete'] = True
+    if defect == 'missing-contract':
+        saved.pop('native_execution')
+    elif defect == 'missing-evidence':
+        saved['native_execution']['evidence'] = None
+    elif defect == 'deep-evidence':
+        saved['native_execution']['evidence'] = base64.b64encode(b'[' * 10000 + b'0' + b']' * 10000).decode()
+    else:
+        observed = json.loads(base64.b64decode(saved['native_execution']['evidence']))
+        if defect == 'missing-driver':
+            observed['passes'][0]['drivers'].clear()
+        else:
+            observed['passes'][0]['state'] = 'running'
+        saved['native_execution']['evidence'] = base64.b64encode(json.dumps(observed).encode()).decode()
+    filename = digest(saved) + '.json'
+    artifact = r.store.root/'results'/filename
+    write(artifact, saved)
+    with r.store.locked() as manifest:
+        manifest['entries'][capture(spec)['key']]['result'] = {
+            'file': filename, 'hash': digest(saved), 'fingerprint': saved['fingerprint']}
+        write(r.store.manifest, manifest)
+    original = artifact.read_bytes()
+    status = r.store.status([spec])['tasks'][0]
+    assert not status['coverage_complete'] and not status['reusable']
+    assert status['reason'] == diagnostic
+    with pytest.raises(ValueError, match=diagnostic):
+        r.cli.approve(r.evidence)
+    assert r.remote.calls == []
+    assert artifact.read_bytes() == original
 
 
 def test_head_change_after_dispatch_retains_confirmed_execution_receipt(reviewed):

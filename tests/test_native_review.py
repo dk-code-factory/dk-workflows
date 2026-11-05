@@ -83,7 +83,8 @@ def test_empty_findings_never_replace_required_host_execution_evidence(review, c
     assert not store.status([spec])['tasks'][0]['reusable']
 
 
-@pytest.mark.parametrize('payload', [None, b'not JSON', b'[]', b'{"availability":"unsupported"}'])
+@pytest.mark.parametrize('payload', [None, b'not JSON', b'[]', b'{"availability":"unsupported"}',
+    pytest.param(b'[' * 10000 + b'0' + b']' * 10000, id='deeply-nested-json')])
 def test_missing_or_unavailable_evidence_preserves_raw_output_findings_and_budget(review, payload):
     spec, store = review
     claim = store.start(spec, run='run', cycle='c1')['claim']
@@ -94,11 +95,13 @@ def test_missing_or_unavailable_evidence_preserves_raw_output_findings_and_budge
     saved = read(result['result'])
     assert result['status'] == 'incomplete' and not result['reusable']
     assert base64.b64decode(saved['original']) == original
+    assert saved['native_execution']['evidence'] == (base64.b64encode(payload).decode() if payload is not None else None)
     assert saved['native_execution']['requested_normalized'] == normalized
     assert saved['normalized']['findings'] == normalized['findings']
     assert saved['normalized']['skill_owned'] == normalized['skill_owned']
     assert normalized['complete'] is True
     assert saved['normalized']['complete'] is False
+    assert store.status([spec])['tasks'][0]['unfinished'] is None
     before = Path(result['result']).read_bytes()
     retry = store.start(spec, run='run', cycle='c1', retry=True)['claim']
     finish(spec, store, claim=retry)
