@@ -13,7 +13,7 @@ def module(name,path):
     return value
 publisher=module('publisher',ROOT/'scripts/publish.py')
 fixture=module('github_fixture',ROOT/'tests/pr/fixtures/github_remote.py')
-KINDS=sorted(publisher.KINDS)
+KINDS=sorted(publisher.KINDS - {'ci-approve'})  # Evidence-backed approvals have a dedicated suite.
 
 @pytest.fixture
 def remote(monkeypatch):

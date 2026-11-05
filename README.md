@@ -1,10 +1,10 @@
 # dk-workflows
 
-Version 3.1.2. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
+Version 3.2.0. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
 
 Use `dk-pr-iter` as the universal entry point: it recognizes your accounts and routes your PRs to `dk-pr-fix` and other authors' PRs to `dk-pr-review`. Invoke either workflow directly when the intended responsibility is explicit. Fixing preserves the review/fix, commit cleanup and final CI stages. Incoming review verifies candidate findings independently before posting; automatic approval and merging each require separate authorization or enabled policy.
 
-Configure reviewers, skills, personal accounts and PR policies through `dk-config`. Ordered [cycle hooks](docs/cycle-hooks.md) run agent instructions or selected skills before and after each new review cycle, with retained completion on resume. There is no default reviewer. Automatic posting of verified findings is enabled for incoming review; approval and merging are disabled by default. Narrower instructions, including analysis-only review, override saved policies.
+Configure reviewers, skills, personal accounts and PR policies through `dk-config`. Ordered [cycle hooks](docs/cycle-hooks.md) run agent instructions or selected skills before and after each new review cycle, with retained completion on resume. There is no default reviewer. Automatic posting of verified findings is enabled for incoming review; PR approval and merging are disabled by default. Fork workflow approval is enabled by default after complete incoming review, before waiting for CI, independently of PR approval and merge permissions. Narrower instructions, including analysis-only review, override saved policies.
 
 Supporting skills use a subject name for broad ownership and a final action when multiple operations share a subject:
 
@@ -20,6 +20,7 @@ Supporting skills use a subject name for broad ownership and a final action when
 | `dk-commit-split` | Assess and organize the full commit series. |
 | `dk-pr-split` | Split oversized or unrelated scope into separate PRs. |
 | `dk-pr-publish` | Publish prepared pushes, edits, replies, reviews and authorized merges with live checks and recovery. |
+| `dk-ci-approve` | Approve blocked fork CI after current incoming review is ready. |
 | `dk-ci` | Observe exact-head CI and handle authorized reruns. |
 | `dk-ci-flakes` | Discover and verify known-flake evidence. |
 | `dk-commit-message` | Draft and refine commit messages. |

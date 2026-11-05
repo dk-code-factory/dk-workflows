@@ -152,6 +152,12 @@ def prepare(request):
         for path in sorted(scope.glob('*/*.json')):
             retained = publication.load(path)
             approved = retained['request']['approved']
+            if (request.get('kind') == approved.get('kind') == 'ci-approve'
+                    and request.get('run_id') == approved.get('run_id')
+                    and request.get('attempt') == approved.get('attempt')):
+                if any(request.get(key) != approved.get(key) for key in ('head', 'base')):
+                    raise ValueError('Retained CI approval is bound to a different reviewed head or target')
+                return {'operation': str(path), **retained, 'reused_intent': True}
             if approved.get('_payload_hash') == payload_hash:
                 return {'operation':str(path),**retained,'reused_intent':True}
             target = request.get('pr') or (request.get('remote','')+'#'+request.get('branch',''))

@@ -26,6 +26,7 @@ Other actions use the same commands and journal. Requests include canonical `pr`
 
 | kind | Additional request fields | Fresh validation and receipt |
 | --- | --- | --- |
+| ci-approve | base, run_id, attempt, evidence | Require [current incoming-review evidence](ci-approval.md) and the exact fork gate. Recheck before dispatch; observe execution permission for the same attempt. Never resend uncertain writes. |
 | ci-rerun | run_id, attempt, reason | Require the current completed failed attempt at this head. Rerun only failed jobs. Observe exactly attempt + 1. |
 | resolve-thread | thread_id, reply_id | Read every thread page. Require this PR and head and your verified posted answer. Observe resolved state and unchanged answer. |
 | request-review | reviewers, team_reviewers | Use login and team-slug arrays with at least one entry. Observe the requested set. Already satisfied requests send nothing. |
