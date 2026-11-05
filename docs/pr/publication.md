@@ -11,10 +11,20 @@ Requests:
 ```
 
 ```json
-{"kind":"reply-inline","pr":"https://github.com/owner/repo/pull/7","head":"FULL_HEAD_SHA","parent":123,"body":"Verified answer"}
+{"kind":"reply-inline","pr":"https://github.com/owner/repo/pull/7","head":"FULL_HEAD_SHA","parent":123,"source":{"kind":"inline_comment","id":456,"url":"https://github.com/owner/repo/pull/7#discussion_r456","thread_id":"PRRT_original"},"body":"Verified answer"}
 ```
 
-For top-level responses, use kind `reply-comment` and include the source URL in the exact body. The helper saves the actor and existing reply ids to distinguish this attempt from older identical replies.
+Select reply destinations from the structured original PR evidence. An actual inline review comment uses `reply-inline` in its originating thread; `parent` is the root comment's database id, including when answering a later reply. Preserve that later comment's own id and exact URL as `source.id` and `source.url`. Retain the thread node id as `source.thread_id`. Do not substitute a review id for an inline comment database id.
+
+A review body or top-level comment without an inline parent uses `reply-comment`. Begin its exact body with `In Reply To: [descriptive source label](https://github.com/owner/repo/pull/7#pullrequestreview-789)`, followed by a blank line and the substantive response. Preserve the original URL and fragment. Embedded file/line references, code links and quoted inline findings do not create an inline parent; unrelated inline comments belonging to that review do not route a response to its review body.
+
+```json
+{"kind":"reply-comment","pr":"https://github.com/owner/repo/pull/7","head":"FULL_HEAD_SHA","source":{"kind":"review","id":789,"url":"https://github.com/owner/repo/pull/7#pullrequestreview-789"},"body":"In Reply To: [Original review](https://github.com/owner/repo/pull/7#pullrequestreview-789)\n\nVerified answer"}
+```
+
+Reply callers supply a `source` object with `kind` (`inline_comment`, `review` or `issue_comment`), the original database `id`, and exact `url`; inline sources also carry `thread_id`. The caller verifies identity, membership and destination from complete evidence before preparation, refreshing missing or ambiguous evidence. The publisher routes by `kind` and `parent`; it journals the supplied source record without independently classifying or validating it. The helper saves the actor and existing reply ids to distinguish this attempt from older identical replies.
+
+Retain source identity, routing parent, head, exact body and operation path through handoffs and resume. Reuse the operation for reconciliation; do not infer a different destination from prose, replace the source URL or regenerate an uncertain reply's attribution. Exact-body observation must preserve the heading as well as the response.
 
 ```json
 {"kind":"push","checkout":"/owned/checkout","remote":"https://github.com/owner/repo.git","branch":"pr-branch","head":"FULL_VERIFIED_HEAD_SHA","expected_head":"FULL_REMOTE_LEASE_SHA"}
