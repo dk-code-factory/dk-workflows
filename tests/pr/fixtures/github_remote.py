@@ -103,10 +103,19 @@ class Remote:
                    'state':{'COMMENT':'COMMENTED','APPROVE':'APPROVED','REQUEST_CHANGES':'CHANGES_REQUESTED'}[payload['event']],
                    'user':{'login':self.state['actor']},'html_url':PR+'#review-'+str(review_id)}
             self.state['reviews'].append(value)
-            self.state['review_comments'][str(review_id)] = [{'id':200+i,**v} for i,v in enumerate(payload['comments'])]
+            self.state['review_comments'][str(review_id)] = [
+                {'id':200+i, 'pull_request_review_id':review_id,
+                 'pull_request_url':'https://api.github.com/repos/owner/repo/pulls/7',
+                 'user':{'login':self.state['actor']}, 'commit_id':payload['commit_id'],
+                 'original_commit_id':payload['commit_id'], 'original_line':v['line'], **v}
+                for i,v in enumerate(payload['comments'])]
             return self.changed('post-review',deepcopy(value))
         if suffix.startswith('/pulls/7/reviews/') and suffix.endswith('/comments'):
             return deepcopy(self.state['review_comments'][suffix.split('/')[-2]])
+        if suffix.startswith('/pulls/comments/'):
+            comment_id = int(suffix.rsplit('/', 1)[-1])
+            return deepcopy(next(comment for comments in self.state['review_comments'].values()
+                                 for comment in comments if comment['id'] == comment_id))
         if suffix == '/issues/7/comments':
             if payload is None:
                 return deepcopy(self.state['issue_comments'])

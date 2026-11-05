@@ -161,3 +161,143 @@ def test_self_approval_is_blocked_and_actor_drift_blocks_dispatch(remote):
     remote.state['actor_id'] = 3
     with pytest.raises(Diagnostic): publisher.publish(operation)
     assert not remote.state['writes']
+
+
+@pytest.fixture
+def review_transport(remote, monkeypatch):
+    """Vary list and individual evidence independently, as GitHub does."""
+    controls = {'list': lambda values: values, 'detail': lambda value: value, 'reads': []}
+    original = remote.api
+
+    def api(pr, path, **kwargs):
+        value = original(pr, path, **kwargs)
+        if '/reviews/' in path and path.split('?')[0].endswith('/comments'):
+            return controls['list'](value)
+        if '/pulls/comments/' in path:
+            controls['reads'].append(path)
+            return controls['detail'](value)
+        return value
+
+    monkeypatch.setattr(remote, 'api', api)
+    monkeypatch.setattr(publisher, 'api', api)
+    return controls
+
+
+@pytest.mark.parametrize('field', ['line', 'side', 'both'])
+@pytest.mark.parametrize('missing', ['omitted', 'null'])
+def test_review_list_missing_locations_uses_individual_comment(remote, review_transport, field, missing):
+    keys = ('line', 'side') if field == 'both' else (field,)
+
+    def incomplete(values):
+        for value in values:
+            for key in keys:
+                if missing == 'null': value[key] = None
+                else: value.pop(key)
+        return values
+
+    review_transport['list'] = incomplete
+    operation = publisher.prepare(fixture.request('post-review'))['operation']
+    result = publisher.publish(operation)
+    assert result['status'] == 'verified'
+    assert result['receipt']['comments'] == [
+        {'id': 200, 'path': 'code.py', 'line': 1, 'side': 'RIGHT', 'body': 'Consider the value.'}]
+    assert review_transport['reads'] == ['repos/owner/repo/pulls/comments/200']
+    assert remote.state['writes'] == {'post-review': 1}
+
+
+@pytest.mark.parametrize('change', [
+    {'id': 201}, {'pull_request_review_id': 101},
+    {'pull_request_url': 'https://api.github.com/repos/owner/repo/pulls/8'},
+    {'user': {'login': 'someone-else'}}, {'original_commit_id': 'd'*40},
+    {'path': 'other.py'}, {'body': 'Edited'}, {'line': 2}, {'side': 'LEFT'},
+    {'original_line': 2}, {'original_line': True}, {'original_line': 0},
+    {'line': None, 'original_line': None}, {'side': None},
+    {'in_reply_to_id': 199}, {'start_line': 1}, {'original_start_line': 1},
+])
+def test_review_conflicting_or_incomplete_individual_evidence_stays_pending(
+        remote, review_transport, change):
+    review_transport['detail'] = lambda value: {**value, **change}
+    operation = publisher.prepare(fixture.request('post-review'))['operation']
+    with pytest.raises(Diagnostic): publisher.publish(operation)
+    for _ in range(2):
+        with pytest.raises(Diagnostic): publisher.publish(operation, reconcile=True)
+    assert publication.load(operation)['status'] == 'pending'
+    assert remote.state['writes'] == {'post-review': 1}
+
+
+@pytest.mark.parametrize('failure', ['unavailable', 'extra', 'missing', 'duplicate', 'ambiguous-review'])
+def test_review_unavailable_or_ambiguous_evidence_never_resends(remote, review_transport, failure):
+    operation = publisher.prepare(fixture.request('post-review'))['operation']
+    remote.state['lose_response'] = ['post-review']
+    with pytest.raises(Diagnostic): publisher.publish(operation)
+    if failure == 'unavailable':
+        def unavailable(value): raise OSError('Individual comment unavailable')
+        review_transport['detail'] = unavailable
+    elif failure == 'ambiguous-review':
+        remote.state['reviews'].append({**remote.state['reviews'][0], 'id': 101})
+    else:
+        comments = remote.state['review_comments']['100']
+        if failure == 'missing': comments.clear()
+        elif failure == 'extra': comments.append({**comments[0], 'id': 201})
+        else: comments.append(dict(comments[0]))
+    with pytest.raises(Diagnostic): publisher.publish(operation, reconcile=True)
+    assert publication.load(operation)['status'] == 'pending'
+    assert remote.state['writes'] == {'post-review': 1}
+
+
+@pytest.mark.parametrize('current_line', [None, 12])
+def test_pending_review_recovers_original_location_after_head_changes(remote, current_line):
+    operation = publisher.prepare(fixture.request('post-review'))['operation']
+    remote.state['lose_response'] = ['post-review']
+    with pytest.raises(Diagnostic): publisher.publish(operation)
+    pending = publication.load(operation)
+    remote.state['metadata']['headRefOid'] = 'd'*40
+    remote.state['review_comments']['100'][0].update(line=current_line, commit_id='d'*40)
+    for _ in range(2):
+        with pytest.raises(Diagnostic) as exc:
+            publisher.publish(operation, reconcile=True)
+        assert exc.value.code == 'publication_not_ready'
+        verified = publication.load(operation)
+        assert verified['status'] == 'verified'
+        assert verified['receipt']['comments'][0]['line'] == 1
+        for key in ('request', 'request_hash', 'operation_id', 'intent', 'failure'):
+            assert verified.get(key) == pending.get(key)
+    # The historical receipt releases the pending-target block, while a new
+    # publication must independently pass live head validation.
+    request = fixture.request('post-review')
+    request.update(head='d'*40, body='A new authorized review')
+    new_operation = publisher.prepare(request)['operation']
+    assert new_operation != operation
+    assert publication.load(new_operation)['status'] == 'prepared'
+    assert remote.state['writes'] == {'post-review': 1}
+
+
+def test_pending_list_only_verification_failure_recovers_without_changing_intent(remote, monkeypatch):
+    operation = publisher.prepare(fixture.request('post-review'))['operation']
+    observe = publisher.Handler.observe
+
+    def old_observe(self, expected):
+        raise ValueError('Published review comments differ from the prepared payload')
+
+    monkeypatch.setattr(publisher.Handler, 'observe', old_observe)
+    with pytest.raises(Diagnostic): publisher.publish(operation)
+    pending = publication.load(operation)
+    assert pending['status'] == 'pending'
+    monkeypatch.setattr(publisher.Handler, 'observe', observe)
+    assert publisher.publish(operation, reconcile=True)['status'] == 'verified'
+    verified = publication.load(operation)
+    for key in ('request', 'request_hash', 'operation_id', 'intent', 'response'):
+        assert verified[key] == pending[key]
+    assert remote.state['writes'] == {'post-review': 1}
+
+
+def test_review_current_location_requires_original_commit_and_all_comments_are_verified(remote, review_transport):
+    request = fixture.request('post-review')
+    request['comments'].append({**request['comments'][0], 'body': 'Second finding'})
+    review_transport['detail'] = lambda value: {k: v for k, v in value.items() if k != 'original_line'}
+    review_transport['list'] = lambda values: [
+        {k: v for k, v in value.items() if k != 'original_line'} for value in reversed(values)]
+    operation = publisher.prepare(request)['operation']
+    assert publisher.publish(operation)['status'] == 'verified'
+    assert len(review_transport['reads']) == 2
+    assert remote.state['writes'] == {'post-review': 1}

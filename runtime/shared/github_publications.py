@@ -318,9 +318,48 @@ class Handler:
         if len(matches) != 1:
             raise ValueError('Submitted review is absent or ambiguous; do not resend')
         review = matches[0]
+        positive(review['id'], 'review id')
         comments = self.pages('/pulls/' + self.number + '/reviews/' + str(review['id']) + '/comments')
+        if len(comments) != len(request.get('comments', [])):
+            raise ValueError('Published review comment count differs from the prepared payload')
+        verified_comments = []
+        for listed in comments:
+            comment_id = positive(listed['id'], 'comment id')
+            comment = self.get('/pulls/comments/' + str(comment_id))
+            pr_url = 'https://' + self.host + '/api/v3/' + self.root + '/pulls/' + self.number
+            if self.host == 'github.com':
+                pr_url = 'https://api.github.com/' + self.root + '/pulls/' + self.number
+            if (type(comment.get('id')) is not int or comment['id'] != comment_id
+                    or type(comment.get('pull_request_review_id')) is not int
+                    or comment['pull_request_review_id'] != review['id']
+                    or comment.get('pull_request_url') != pr_url
+                    or (comment.get('user') or {}).get('login') != request['actor']
+                    or comment.get('original_commit_id') != request['head']
+                    or comment.get('in_reply_to_id') is not None
+                    or comment.get('start_line') is not None
+                    or comment.get('original_start_line') is not None):
+                raise ValueError('Published review comment identity differs from the prepared review')
+            # List responses may omit locations. Any supplied evidence must still
+            # agree with the authoritative object fetched by its database id.
+            for key in ('path', 'body', 'line', 'side', 'original_line', 'commit_id',
+                        'original_commit_id', 'pull_request_review_id', 'pull_request_url'):
+                if listed.get(key) is not None and listed[key] != comment.get(key):
+                    raise ValueError('Published review comment evidence is inconsistent')
+            if ((listed.get('user') or {}).get('login') is not None
+                    and listed['user']['login'] != request['actor']):
+                raise ValueError('Published review comment actor is inconsistent')
+            # GitHub can move a comment or clear its current line after a push.
+            # Only its original location at the submitted commit proves intent.
+            line = comment.get('original_line')
+            if line is None and comment.get('commit_id') == request['head']:
+                line = comment.get('line')
+            if type(line) is not int or line <= 0 or comment.get('side') not in {'LEFT', 'RIGHT'}:
+                raise ValueError('Published review comment original location is unavailable')
+            verified_comments.append({'id': comment_id, 'path': comment.get('path'),
+                                      'line': line, 'side': comment['side'], 'body': comment.get('body')})
         projection = lambda v: {k: v.get(k) for k in ('path', 'line', 'side', 'body')}
         expected_comments = [projection(v) for v in request.get('comments', [])]
-        if sorted(map(repr, [projection(v) for v in comments])) != sorted(map(repr, expected_comments)):
+        if sorted(map(repr, [projection(v) for v in verified_comments])) != sorted(map(repr, expected_comments)):
             raise ValueError('Published review comments differ from the prepared payload')
-        return {'id': review['id'], 'url': review['html_url'], 'head': request['head']}
+        return {'id': review['id'], 'url': review['html_url'], 'head': request['head'],
+                'comments': verified_comments}
