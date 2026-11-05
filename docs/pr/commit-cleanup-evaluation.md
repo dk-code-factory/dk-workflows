@@ -49,8 +49,8 @@ Candidate decisions are recorded below as the bounded experiments complete.
 | Candidate | Decision | Evidence and limitations |
 | --- | --- | --- |
 | 1 | Keep | Native instruction reads: 15,161 → 13,750 bytes. Both arms assess all nine source commits, preserve the reviewed trees, keep the coherent series, and block dirty/mixed-author rewrites. Recovery refs and unchanged remote leases independently verified. One pair; application and test-count differences are not attributed to document separation. |
-| 2 | Pending | Await bounded pair and correctness checks. |
-| 3 | Pending | Await bounded pair and correctness checks. |
+| 2 | Drop | Both fresh arms use one application, produce the same valid three-commit result, and retain the coherent series unchanged. No demonstrated application reduction or boundary error corrected; equal outcomes are inconclusive. Proposal removed before candidate 3. |
+| 3 | Keep | Ten real-Git checks validate pins, merge topology, complete messages, binary/rename/unusual paths, replacement isolation, failures and zero repository mutation. Native agents still read source and resulting patches, retain coherent history and reproduce the reviewed tree. Recorded inspection counts and helper-internal Git calls are retained in the results summary; these measure operations, not speed or tokens. |
 | 4 | Pending | Await bounded pair and correctness checks. |
 | 5 | Pending | Await bounded pair and correctness checks. |
 | 6 | Pending | Await bounded pair and correctness checks. |

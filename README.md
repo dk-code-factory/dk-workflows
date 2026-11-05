@@ -42,6 +42,8 @@ The default fix plan runs commit cleanup and governing-content synchronization b
 
 Private workflow state lives outside repositories under XDG_STATE_HOME in `dk-workflows/v2`. Atomic claims prevent duplicate launches. Publication journals retain exact intent and require fresh checks; uncertain writes reconcile before another attempt. Direct skill calls use caching only when their caller explicitly manages task state.
 
+Read [commit cleanup](docs/pr/commit-cleanup.md) for the read-only commit-series inspection command and cleanup safeguards. That helper requires Git 2.45 or newer.
+
 Read [task state](docs/task-state.md), [workflow configuration](docs/configuration.md), [PR contracts](docs/pr/contracts.md), [publication recovery](docs/pr/publication.md) and [acceptance](docs/acceptance.md). Git capture implementation and measurements are in the [developer reference](docs/capture-performance.md).
 
 Edit skill prompts under `codex/skills/`, then run `python3 scripts/sync_skills.py` to update the Claude distribution. `python3 scripts/check.py` validates both copies, links, Python syntax and versions. `python3 scripts/test.py` runs all bundled suites offline using real Git and fixture GitHub/native-skill transports. Run controlled native-agent exercises for material recipe changes; offline fixtures do not establish native adherence. `python3 scripts/version.py X.Y.Z` synchronizes release metadata.
