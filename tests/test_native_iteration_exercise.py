@@ -113,3 +113,45 @@ def test_frozen_interface_summarizes_dispatched_argument_and_data_failures(tmp_p
     assert [row['ok'] for row in trace] == [False, True, True]
     assert trace[0]['args'] == list(arguments[1:])
     assert trace[0]['output_bytes'] == len(failed.stdout.rstrip('\n').encode())
+
+
+def test_current_runtime_and_explicit_baseline_are_frozen_independently(tmp_path):
+    revision = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
+    manifests = []
+    for guidance in ('before', 'after'):
+        arm = tmp_path/guidance
+        initialized = subprocess.run([sys.executable, str(INTERFACE), '--root', str(arm),
+                                      'init', guidance, revision, revision],
+                                     capture_output=True, text=True)
+        assert initialized.returncode == 0, initialized.stdout+initialized.stderr
+        manifest = json.loads((arm/'exercise.json').read_text())
+        manifests.append(manifest)
+        assert manifest['runtime'] == revision
+        assert manifest['guidance_revision'] == (revision if guidance == 'before' else None)
+        assert manifest['source_sha256'] == hashlib.sha256((arm/'sources.json').read_bytes()).hexdigest()
+        for name, digest in manifest['runtime_hashes'].items():
+            frozen = arm/'frozen'/name
+            assert hashlib.sha256(frozen.read_bytes()).hexdigest() == digest
+            assert frozen.read_bytes() == subprocess.check_output(['git', '-C', str(ROOT),
+                                                                  'show', revision+':'+name])
+        # Newer state/config helpers import shared dependencies; exercising the
+        # frozen CLI proves the selected runtime can run outside its checkout.
+        observed = subprocess.run([sys.executable, str(arm/'frozen/interface.py'), '--root', str(arm),
+                                   'state', 'status', '--compact', '--run', 'exercise',
+                                   '--spec', 'reviewer-a', '--spec', 'reviewer-b'],
+                                  capture_output=True, text=True, cwd=tmp_path)
+        assert observed.returncode == 0, observed.stdout+observed.stderr
+        if guidance == 'before':
+            assert (arm/'guidance/runtime/pr-iter.md').read_bytes() == subprocess.check_output(
+                ['git', '-C', str(ROOT), 'show', revision+':runtime/pr-iter.md'])
+        else:
+            assert (arm/'guidance/runtime/pr-iter.md').read_bytes() == (ROOT/'runtime/pr-iter.md').read_bytes()
+        for task in ('reviewer-a', 'scope-partition'):
+            spec = json.loads((arm/'specs'/(task+'.json')).read_text())
+            handoff = json.loads(Path(spec['inputs']['preferences']).read_text())
+            assert handoff['selection']['records'] == []
+            assert handoff['selection']['paths'] == ['code.py']
+            assert handoff['selection']['mode'] == ('review' if task == 'reviewer-a' else 'implementation')
+            assert handoff['decisions'] == []
+    assert manifests[0]['runtime_hashes'] == manifests[1]['runtime_hashes']
+    assert manifests[0]['source_sha256'] == manifests[1]['source_sha256']
