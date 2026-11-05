@@ -115,16 +115,52 @@ def test_merge_binds_reviewed_head_and_reconciles_exact_commit(remote, method):
     assert remote.state['writes'] == {'merge-pr': 1}
 
 
-@pytest.mark.parametrize('failure', ['pending-ci', 'missing-ci', 'unapproved', 'target',
-                                     'draft', 'unknown-mergeability', 'own-pr'])
+@pytest.mark.parametrize('decision', ['APPROVED', '', None])
+@pytest.mark.parametrize('own_pr', [False, True])
+def test_authorized_merge_accepts_own_pr_and_no_required_approval(remote, decision, own_pr):
+    remote.state['merge_gate']['reviewDecision'] = decision
+    if own_pr:
+        remote.state['pr_author']['id'] = remote.state['actor_id']
+    operation = publisher.prepare(fixture.request('merge-pr'))['operation']
+    assert publisher.publish(operation)['status'] == 'verified'
+    assert remote.state['writes'] == {'merge-pr': 1}
+
+
+@pytest.mark.parametrize('decision', ['REVIEW_REQUIRED', 'CHANGES_REQUESTED', 'UNKNOWN', 'missing'])
+def test_merge_rejects_unsatisfied_or_unknown_review_requirements(remote, decision):
+    if decision == 'missing':
+        del remote.state['merge_gate']['reviewDecision']
+    else:
+        remote.state['merge_gate']['reviewDecision'] = decision
+    with pytest.raises(ValueError, match='review and merge requirements'):
+        publisher.prepare(fixture.request('merge-pr'))
+    assert not remote.state['writes']
+
+
+def test_review_requirement_added_after_preparation_blocks_dispatch(remote):
+    remote.state['merge_gate']['reviewDecision'] = ''
+    operation = publisher.prepare(fixture.request('merge-pr'))['operation']
+    remote.state['merge_gate']['reviewDecision'] = 'REVIEW_REQUIRED'
+    with pytest.raises(Diagnostic): publisher.publish(operation)
+    assert not remote.state['writes']
+    assert publication.load(operation)['status'] == 'prepared'
+
+
+@pytest.mark.parametrize('failure', ['pending-ci', 'failed-ci', 'missing-ci', 'unapproved', 'target',
+                                     'draft', 'unknown-mergeability', 'rest-blocked', 'graphql-blocked'])
 def test_merge_readiness_failures_block_all_writes(remote, failure):
     if failure == 'pending-ci': remote.state['checks'][0]['bucket'] = 'pending'
+    if failure == 'failed-ci': remote.state['checks'][0]['bucket'] = 'fail'
     if failure == 'missing-ci': remote.state['checks'] = []
     if failure == 'unapproved': remote.state['merge_gate']['reviewDecision'] = 'REVIEW_REQUIRED'
     if failure == 'target': remote.state['branches']['main'] = 'd'*40
     if failure == 'draft': remote.state['pull']['draft'] = True
     if failure == 'unknown-mergeability': remote.state['pull']['mergeable'] = None
-    if failure == 'own-pr': remote.state['pr_author']['id'] = remote.state['actor_id']
+    if failure == 'rest-blocked':
+        remote.state['merge_gate']['reviewDecision'] = ''
+        remote.state['pull']['mergeable_state'] = 'blocked'
+    if failure == 'graphql-blocked':
+        remote.state['merge_gate'].update(reviewDecision=None, mergeStateStatus='BLOCKED')
     with pytest.raises(ValueError): publisher.prepare(fixture.request('merge-pr'))
     assert not remote.state['writes']
 

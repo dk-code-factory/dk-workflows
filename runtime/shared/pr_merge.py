@@ -27,8 +27,6 @@ class Merge:
         if (type(actor.get('id')) is not int or actor['id'] <= 0
                 or not actor.get('login') or type(author.get('id')) is not int or author['id'] <= 0):
             raise ValueError('Merge actor and PR author identities are required')
-        if actor['id'] == author['id']:
-            raise ValueError('Incoming-review merging requires another author\'s PR')
         if (pull.get('state') != 'open' or pull.get('merged') is not False
                 or pull.get('draft') is not False or pull.get('mergeable') is not True
                 or pull.get('mergeable_state') != 'clean'
@@ -43,7 +41,11 @@ class Merge:
         if (review.get('url') != request['pr'] or review.get('headRefOid') != request['head']
                 or review.get('baseRefOid') != request['base'] or review.get('state') != 'OPEN'
                 or review.get('isDraft') is not False or review.get('mergeable') != 'MERGEABLE'
-                or review.get('mergeStateStatus') != 'CLEAN' or review.get('reviewDecision') != 'APPROVED'):
+                or review.get('mergeStateStatus') != 'CLEAN'
+                or 'reviewDecision' not in review
+                # GitHub's nullable review decision is empty in gh when no
+                # approval is required. CLEAN still gates repository readiness.
+                or review['reviewDecision'] not in ('APPROVED', '', None)):
             raise ValueError('Current repository review and merge requirements are not satisfied')
         checks = self.run(['gh', 'pr', 'checks', request['pr'], '--json', 'name,bucket,state,link,workflow'])
         if (not isinstance(checks, list) or not checks

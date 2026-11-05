@@ -11,4 +11,6 @@ Follow [publication and recovery](../../../docs/pr/publication.md). Use `scripts
 
 Merging requires separate explicit or saved policy authorization, completed clean review and verification, and current CI. Iteration alone does not authorize merging. Save the exact target, payload and returned operation path. After an uncertain outcome, use that operation for read-only reconciliation. Cached analysis never authorizes an action.
 
+An explicit request to merge the exact PR supplies authorization with the default configuration, including for your own PR. `incoming_review.merge:false` disables automatic incoming-review merges; it does not veto the request. Require satisfied repository review requirements; do not invent an approval requirement where GitHub has none. When blocked, report the exact guard diagnostic and required next step privately, distinguishing rejection before dispatch from an uncertain write.
+
 Fork CI approval uses [current incoming-review evidence](../../../docs/pr/ci-approval.md), independently of PR approval or merging. Use `dk-ci-approve` to discover eligible runs and retain one operation per run and attempt.
