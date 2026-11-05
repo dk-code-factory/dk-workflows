@@ -77,3 +77,59 @@ not retry the unavailable optional provider, while one baseline did. A candidate
 progress append failed without losing original progress or immutable results.
 Strict all-trial adherence therefore failed as well as the numeric gate. Hook
 execution remains separately covered by regressions.
+
+## Experiment 3 protocol: existing context and bounded verification
+
+Compare inline continuation with a fresh native verifier, in three alternating
+pairs separately for short and long existing contexts. The task assesses current
+retained coverage, selective invalidation, original findings and sourced
+dispositions, incomplete optional work, counters and missing completion evidence.
+It does not execute pending reviews or complete the workflow.
+
+The setup turn reads an immutable orientation corpus before the task assignment.
+Short context contains the task-state, native-handoff, preference and reviewer
+contracts. Long context adds complete frozen production Python and governing
+Markdown sources. Original source chunks preserve exact bytes and full output;
+unread or truncated evidence must be retrieved or reported incomplete. Source
+bytes and the first parent task-response input establish the observed context
+classes; no filler or compaction-setting changes are used.
+
+Both task arms receive identical verification instructions and source access.
+Candidate parents prepare one fresh verifier, wait on its native handle, validate
+its terminal report and consume the result. The task-specific preference handoff
+includes a scoped conditional instruction to preserve original finding URLs;
+original reviewer selections remain separately preserved to avoid invalidating
+the task whose reuse is being checked. Missing evidence requires retrieval or an
+incomplete report. Neither arm may claim pending tasks, allocate cycles, invoke
+domain work, publish, or infer final-head CI success.
+
+Report task, setup and combined usage separately. The primary comparison concerns
+a task from an existing context; task-phase savings do not imply whole-session
+savings. All task-phase parent preparation, waiting, result consumption and
+descendant responses count. Native launch and terminal records reconcile the
+recursive descendant inventory; inherited history is deduplicated by response ID.
+Report native tool calls for parent and descendants separately, alongside their
+total. Preserve full original final outputs privately and commit only normalized
+metrics, hashes, quality checks and independent decisions.
+
+Independent orientation setup may overlap once its inputs are frozen. Keep the
+measured task phases within each context class in their declared alternating
+order. In this sample, long B1's task also overlapped short C3's task; later long
+orientation overlapped an earlier long task. All usage remains counted. Shared
+cache and service effects are limitations; these experiments make no global
+serialization, strict cache-isolation or elapsed-time claims.
+
+The [twelve-trial report](evidence/145-experiment-3.json) rejects delegation in both
+context classes. Short median task tokens increased from 444,814 to 1,033,698;
+long median task tokens increased from 1,230,168 to 2,540,372. No pair improved.
+Median task API-equivalent cost increased from $0.1711008 to $0.3711368 for short
+context and from $0.2296960 to $0.5722448 for long context. Setup and combined
+comparisons also failed the gate. The candidate guidance was removed.
+
+Independent review confirmed all usage, source pins and required assessment
+content. Strict short-context correctness failed because one parent's structured
+report repeated coverage keys, overwriting Boolean values with hashes when
+parsed. Its child report and parent prose retained the correct conclusion; the
+original output remains unchanged and the defect is recorded. Long-context
+assessment correctness passed. These bounded verification trials do not support
+a broader conclusion about investigation or general code review.
