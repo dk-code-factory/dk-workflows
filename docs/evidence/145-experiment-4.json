@@ -2798,7 +2798,7 @@
       "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
     },
     "settings_source": "Each participating native thread_settings_applied event, crosschecked with turn_context and session_meta provider.",
-    "setup_assignment_variation": "P3 baseline closing sentence was Awaiting separate task-phase assignment. rather than Await the separate task-phase assignment. All preceding setup text, corpus, original governing files and task-phase wrappers are unchanged. Preserve its exact retained normalized override and hashes; independent source-control impact review pending. Independent review confirmed equivalent waiting intent, with unknown token/cache effects. Recovery setup provenance hashes parent-retained expected text only; actual encrypted bytes cannot be independently established.",
+    "setup_assignment_variation": "P3 baseline closing sentence was Awaiting separate task-phase assignment. rather than Await the separate task-phase assignment. All preceding setup text, corpus, original governing files and task-phase wrappers are unchanged. Preserve its exact retained normalized override and hashes; Independent review confirmed equivalent waiting intent, with unknown token/cache effects. Recovery setup provenance hashes parent-retained expected text only; actual encrypted bytes cannot be independently established.",
     "source_control": "Exact source/scenario/task/governing instructions/preferences matched across all six arms and repeats; native controls independently observed in this experiment. The planned comparison differs by declared guidance patch and inheritance mode. P3 baseline also used one disclosed setup closing-sentence variation; do not treat actual setup messages as byte-identical.",
     "task_scope": "Every participating parent preparation/wait/consumption response and every child turn; setup and combined totals are separately reported.",
     "timing_limitations": "No elapsed-performance claim. Cache/service isolation and global serialization are not assumed; actual orientation/task overlaps are disclosed."
@@ -4200,7 +4200,7 @@
           "normalization": "ARM placeholder retained. Hashes are of retained parent-provided normalized text, not reconstructed native ciphertext. Governing files and task-phase wrapper unchanged.",
           "phase": "setup",
           "source": "Parent-reported exact deviation from retained canonical setup wrapper; native spawn message plaintext is encrypted and not independently recovered.",
-          "source_control_impact": "Both closing sentences instruct waiting for the separate task phase; independent reviewer assessment pending. Do not claim byte-identical setup assignments.",
+          "source_control_impact": "Both closing sentences instruct waiting for the separate task phase; independent review confirmed semantic equivalence. Exact bytes differ and token/cache effects remain unknown.",
           "trial": "p3/baseline"
         },
         "source_pins": {

@@ -1,0 +1,2565 @@
+{
+  "candidate": "Native per-task reasoning effort: bounded verification high/medium and brief routing/status high/low",
+  "candidate_guidance_patch": "diff --git a/docs/native-review.md b/docs/native-review.md\nindex 9f75cd2..38a7a5d 100644\n--- a/docs/native-review.md\n+++ b/docs/native-review.md\n@@ -4,6 +4,14 @@ Use the host's native agent tools to invoke selected reviewer skills. A complete\n \n ## Launch and wait\n \n+When native per-task controls support the choice, use medium reasoning for a\n+routine bounded verification of complete retained evidence, and low reasoning\n+for brief read-only routing/status. Preserve explicit model and effort\n+requirements and the full governing instructions, preferences and evidence.\n+Keep routing inline; never introduce an agent merely to lower effort. If the\n+host cannot control the existing inline task's effort, retain its current\n+behavior. The parent must still verify terminal execution and report coverage.\n+\n 1. Resolve the skill and pin task inputs before launch. Prepare immutable context and output paths outside the source checkout. Supply the exact task, pinned source, original guidance, resolved resources, permitted actions and required completion report. Keep source inspection read-only. The skill manages its private state and lifecycle.\n    Include the complete [preference handoff](preferences.md#workflow-handoffs-and-reuse), retaining matched paths and conditional decisions. Reviewers and finding verifiers apply records only within that scope and request refreshed selection before expanding paths.\n 2. After `start-batch` returns `invoke`, launch the reviewer with native tools. Save its handle with the task key and claim id in private operational progress, outside fingerprinted inputs. Let the skill manage its internal passes and required resources.\n",
+  "candidate_guidance_patch_sha256": "c539d9e9a190fc7f6ef4239dfab1338346391287c4bfce85ad297afffad0533b",
+  "checks": {
+    "candidate_implementation_removed": true,
+    "focused_accounting_fixture_execution_and_preferences": "79 passed",
+    "independent_review": "Complete; zero unresolved actionable findings. Routine strict adherence fails resolve --help; routing correctness and isolated gate pass; production adoption rejected.",
+    "package_and_whitespace": "passed"
+  },
+  "controls": "Identical immutable source/guidance/task/context/assignment/model/tier within each scenario. Only intentional native effort differs. All task responses, inherited new-response inputs and any unexpected descendants must be inventoried. No descendants observed. No separate setup phase; task usage is whole participating task usage.",
+  "decision": "Reject medium verification due to increased median estimated cost and strict operation adherence failure. Preserve passing isolated low-routing measurement gate, but reject current production adoption because existing inline effort control is unsupported and effort selection policy was not tested end to end.",
+  "experiment": 5,
+  "independent_review": {
+    "accounting": "Every raw response field/cost/call/terminal hash and complete zero-descendant inventory independently reproduced; global response IDs unique.",
+    "complete": true,
+    "private_review_sha256": "ba264a95e7620430630a9c8a988f804b6ac23ab78711e83035874b630d9f3f6e",
+    "review_notes": [
+      "Earlier interim B2 assessment passed semantic and raw accounting review. Final all-operation audit corrected the broader interim correctness verdict upon detecting successful resolve --help outside the permitted operations. The interim finding and this correction are preserved; no raw output was changed.",
+      "Routine numeric gate independently fails estimated-cost nonincrease; strict B2 adherence provides an additional rejection reason.",
+      "Routing passes correctness and isolated measurement gate, while production adoption is separately rejected as unsupported for existing inline task controls and untested policy selection.",
+      "All 12 native launch controls/order independently verified in root spawn records; message plaintext is encrypted, so exact native assignment bytes are not independently asserted. Parent-retained expected assignments and task/context files match per-scenario pins.",
+      "Experiment-4 metadata-only cleanup removes stale pending-review phrases and preserves its documented rejection, metrics, actual setup-byte variation and unknown token/cache effects. No experiment-4 outcome change."
+    ],
+    "semantic_assessment_correctness_passed": true,
+    "source_read_review": "Every successful source read matched complete original bytes in actual native tool outputs; no unresolved truncation or report duplicate keys.",
+    "strict_all_trial_adherence_passed": false,
+    "telemetry_complete": true,
+    "trial_defects": [
+      {
+        "actionable": false,
+        "classification": "strict permitted-operation adherence failure",
+        "disposition": "Preserved original trial without repair or rerun. Routine correctness is false and proposal rejected. No remaining action to repair completed experiment evidence.",
+        "evidence": "Original trace.jsonl records successful resolve; raw native call call includes resolve --help; fixture resolve ignores its arguments and returns all eight role identities; original output audit preserves forbidden_interface_operations:[resolve].",
+        "id": "EXP5-ROUTINE-B2-RESOLVE",
+        "impact": "Read-only identity lookup; no source/spec/resource/settings/counter/manifest mutation. Assessment content, evidence and retained findings remain correct.",
+        "operation": "interface resolve --help",
+        "trial": "routine/p2/baseline",
+        "unresolved": false
+      }
+    ],
+    "unresolved_actionable_findings": 0
+  },
+  "inline_control_assessment": {
+    "existing_inline_adoption_supported": false,
+    "existing_inline_effort_mutator_observed": false,
+    "followup_schema": [
+      "target",
+      "message"
+    ],
+    "observed_at": "2026-11-05T15:02:20.851405+00:00",
+    "reason": "Current exposed native tools do not change an existing inline/root effort. Production agents solely for lower effort are forbidden. An independently required new-task policy selection is not measured end to end.",
+    "reviewer_agreement": "review_exp5 independently confirmed unsupported existing-inline path before all routing outcomes.",
+    "supported_native_effort_control": "collaboration.spawn_agent fork_turns=none with model/reasoning_effort overrides; native settings events verify treatment.",
+    "timing": "Recorded after routing C2, before B2/B3/C3 complete; not a gate added after performance results."
+  },
+  "limitations": [
+    "Three pairs per scenario provide bounded evidence only.",
+    "Effort treatment was directly assigned using native host controls. Proposed policy text was absent from both frozen guidance arms; choosing effort from task classification was not tested end to end.",
+    "Native agents are used as isolated test subjects. Do not introduce production agents merely to lower effort. Existing inline tasks without supported per-task controls remain unsupported and retain current behavior.",
+    "Explicit model/effort requirements always take precedence; personal settings, compaction and public execution surfaces remain unchanged.",
+    "Offline fixture conclusions do not prove production domain work, recovery, publication or exact-final-head CI.",
+    "No elapsed-time or cache/service isolation claim. Raw native conversations/final reports remain private; only normalized usage, pins, hashes, independent findings and decisions are public."
+  ],
+  "method": {
+    "adoption_boundary": "Do not introduce production agents solely to reduce effort. Existing inline tasks without native per-task effort controls are unsupported adoption paths; preserve current behavior and all explicit requirements.",
+    "execution_order": [
+      "routine/B1",
+      "routine/C1",
+      "routine/C2",
+      "routine/B2",
+      "routine/B3",
+      "routine/C3",
+      "routing/B1",
+      "routing/C1",
+      "routing/C2",
+      "routing/B2",
+      "routing/B3",
+      "routing/C3"
+    ],
+    "experiment": 5,
+    "method": "Fresh native per-task controls; inline work without downstream verifiers; no orientation phase or personal-setting changes. Same source/guidance/task/context/assignment/model/tier within each scenario; effort only treatment. Root experiment orchestration outside participating task scope.",
+    "source_revision": "4490536ea34035da284c8a9aead1da3583930567"
+  },
+  "native_phase_intervals": [
+    {
+      "arm": "baseline",
+      "completed_at": "2026-11-05T14:46:34.205Z",
+      "pair": "p1",
+      "scenario": "routine",
+      "started_at": "2026-11-05T14:43:36.404Z"
+    },
+    {
+      "arm": "candidate",
+      "completed_at": "2026-11-05T14:48:45.238Z",
+      "pair": "p1",
+      "scenario": "routine",
+      "started_at": "2026-11-05T14:46:52.376Z"
+    },
+    {
+      "arm": "baseline",
+      "completed_at": "2026-11-05T14:53:13.761Z",
+      "pair": "p2",
+      "scenario": "routine",
+      "started_at": "2026-11-05T14:50:54.338Z"
+    },
+    {
+      "arm": "candidate",
+      "completed_at": "2026-11-05T14:50:44.204Z",
+      "pair": "p2",
+      "scenario": "routine",
+      "started_at": "2026-11-05T14:49:09.975Z"
+    },
+    {
+      "arm": "baseline",
+      "completed_at": "2026-11-05T14:55:39.231Z",
+      "pair": "p3",
+      "scenario": "routine",
+      "started_at": "2026-11-05T14:53:24.306Z"
+    },
+    {
+      "arm": "candidate",
+      "completed_at": "2026-11-05T14:57:35.924Z",
+      "pair": "p3",
+      "scenario": "routine",
+      "started_at": "2026-11-05T14:55:50.330Z"
+    },
+    {
+      "arm": "baseline",
+      "completed_at": "2026-11-05T14:59:02.221Z",
+      "pair": "p1",
+      "scenario": "routing",
+      "started_at": "2026-11-05T14:57:48.720Z"
+    },
+    {
+      "arm": "candidate",
+      "completed_at": "2026-11-05T15:00:03.828Z",
+      "pair": "p1",
+      "scenario": "routing",
+      "started_at": "2026-11-05T14:59:16.691Z"
+    },
+    {
+      "arm": "baseline",
+      "completed_at": "2026-11-05T15:02:56.519Z",
+      "pair": "p2",
+      "scenario": "routing",
+      "started_at": "2026-11-05T15:01:38.058Z"
+    },
+    {
+      "arm": "candidate",
+      "completed_at": "2026-11-05T15:01:22.337Z",
+      "pair": "p2",
+      "scenario": "routing",
+      "started_at": "2026-11-05T15:00:33.557Z"
+    },
+    {
+      "arm": "baseline",
+      "completed_at": "2026-11-05T15:04:19.923Z",
+      "pair": "p3",
+      "scenario": "routing",
+      "started_at": "2026-11-05T15:03:12.888Z"
+    },
+    {
+      "arm": "candidate",
+      "completed_at": "2026-11-05T15:05:35.824Z",
+      "pair": "p3",
+      "scenario": "routing",
+      "started_at": "2026-11-05T15:04:36.383Z"
+    }
+  ],
+  "participating_scope": "All responses in each one-turn native task; no orientation or downstream verifier. Root experiment-owner preparation, launch, result consumption, external normalization and independent review are outside participating task scope, consistent with prior test harness scope. These measurements do not establish total root-session savings.",
+  "pricing": {
+    "basis": "Per-response API-equivalent estimate, not account billing. Reasoning is already part of output; cache reads/writes separate.",
+    "long_context": "Above 272000 input tokens: complete response input/cache 2x, output 1.5x.",
+    "per_million_usd": {
+      "cache_write_input": 2.5,
+      "cached_input": 0.1,
+      "fresh_input": 2,
+      "output": 10
+    },
+    "retrieved": "2026-11-05",
+    "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
+  },
+  "production_optimization_accepted": false,
+  "scenarios": {
+    "routine": {
+      "correctness_passed": false,
+      "decision": "Reject production proposal; preserve isolated native treatment measurements.",
+      "frozen_assignment": {
+        "native_assignment_scope": "Parent-retained expected text; ARM-only path substitution and trailing newline omission are identical across all arms. Encrypted native message plaintext is not independently asserted.",
+        "template": "ARM={ARM}\nPerform this bounded task inline in the current native task context. Read verification-task.txt and verification-context.json through `python3 {ARM}/frozen/interface.py --root {ARM} read PATH`, then follow the complete original assignment and governing immutable evidence. Use only its permitted operations. Retrieve complete original sources; recover truncated required reads or report incomplete. Do not launch agents, change settings or perform downstream work. Return the required assessment as your final native output, preserved unchanged by the host.\n",
+        "template_sha256": "620de57df82d11d804ee61c246917d4ecbca5dec5b51b63456414d01cfe00199"
+      },
+      "measurement_gate": {
+        "accepted": false,
+        "improved_pairs": 3,
+        "limitation": "Three trials provide bounded evidence, not a general performance guarantee",
+        "median_baseline_estimated_api_cost_usd": "0.1716020",
+        "median_candidate_estimated_api_cost_usd": "0.1890292",
+        "median_total_token_savings_fraction": "0.1332723841732518074651685737",
+        "paired_token_changes": [
+          {
+            "fresh_input_tokens": 12664,
+            "output_tokens": -1109,
+            "total_tokens": -228189
+          },
+          {
+            "fresh_input_tokens": 21535,
+            "output_tokens": -1891,
+            "total_tokens": -47684
+          },
+          {
+            "fresh_input_tokens": -7564,
+            "output_tokens": -1307,
+            "total_tokens": -4007
+          }
+        ],
+        "reasons": [
+          "Correctness checks are incomplete or failed",
+          "Median estimated API cost increased"
+        ]
+      },
+      "original_context": {
+        "exact_source_instructions": [
+          {
+            "path": "governing.txt",
+            "sha256": "518e25b24d429078a1b5eac1c863c267731f49f8f563683750f75f95030e48c6",
+            "text": "Return two. Keep VALUE public. No remote writes.\n"
+          },
+          {
+            "field": "instructions",
+            "path": "sources.json",
+            "sha256": "cdf9616c26871fdf6b7a848b68bb3a6b6201720b455e0baf4fe934e54955855e",
+            "text": "Keep VALUE public. No remote writes in this exercise."
+          },
+          {
+            "instruction": "Read and preserve the complete original assignment.",
+            "path": "verification-task.txt",
+            "sha256": "4424a2d34ce4fc275078baddfa9632f4130c0854ccf628eb62b81f0497631737"
+          }
+        ],
+        "original_reviewer_preferences": {
+          "implementation": "preferences-implementation.json",
+          "instruction": "Original review-task selections remain empty and unchanged. The supplemental selection governs only this verification and must never be inserted into existing reviewer specs.",
+          "review": "preferences-review.json"
+        },
+        "permissions": {
+          "agent_launches": "Only a separately authorized parent task-phase comparison wrapper may launch one verifier; the verifier cannot delegate further.",
+          "conditional_reuse_guard": {
+            "only_after_current_status_establishes_reusable": true,
+            "pending_claims_permitted": false,
+            "task": "reviewer-a"
+          },
+          "domain_invocations": false,
+          "fixture_private_trace_append": true,
+          "network": false,
+          "new_cycles_or_retries": false,
+          "publication": false,
+          "read_only_status": true,
+          "record_finish_summarize": false,
+          "settings_changes": false,
+          "source_spec_resource_writes": false
+        },
+        "required_report_fields": [
+          "complete (assessment only)",
+          "workflow_complete",
+          "current_coverage",
+          "selective_invalidation_with_evidence",
+          "original_findings",
+          "dispositions_with_exact_source_URLs",
+          "optional_incomplete_or_failed_work",
+          "retained_counters_and_claims",
+          "exact_governing_instructions_and_source_references",
+          "preference_immutable_references_and_applicability_decisions",
+          "missing_completion_evidence",
+          "blockers"
+        ],
+        "required_report_transport": "Final native output preserved unchanged by host; no scenario output-file writes.",
+        "responsibility": "bounded-retained-coverage-verification",
+        "task_paths": [
+          "code.py"
+        ],
+        "task_specific_preference_handoff": {
+          "condition_context": {
+            "responsibility": "bounded-retained-coverage-verification",
+            "scope": "Return two.",
+            "task_paths": [
+              "code.py"
+            ]
+          },
+          "decisions": [
+            {
+              "applicable": true,
+              "id": "pref-verification-original-sources",
+              "paths": [
+                "code.py"
+              ],
+              "reason": "This assignment performs bounded retained-coverage verification for code.py; the condition applies only to this verification responsibility."
+            }
+          ],
+          "selection": {
+            "mode": "review",
+            "paths": [
+              "code.py"
+            ],
+            "records": [
+              {
+                "paths": [
+                  "code.py"
+                ],
+                "record": {
+                  "applies_to": [
+                    "review"
+                  ],
+                  "id": "pref-verification-original-sources",
+                  "owner": {
+                    "repository": "remote:github.com/fixture/iteration",
+                    "type": "repo"
+                  },
+                  "prompt": "Preserve original finding source URLs when checking retained coverage.",
+                  "scope": {
+                    "condition": "When performing bounded verification of retained workflow coverage for code.py.",
+                    "exclude": [],
+                    "include": [
+                      {
+                        "path": "code.py",
+                        "type": "file"
+                      }
+                    ]
+                  }
+                },
+                "requires_condition": true
+              }
+            ],
+            "repository": "remote:github.com/fixture/iteration"
+          }
+        }
+      },
+      "original_task": "Perform a bounded verification of the retained offline workflow state. This is an assessment task, not completion of the PR workflow. All scenario reads/actions must use `python3 ARM/frozen/interface.py --root ARM COMMAND ARGS`. Read exercise.json, pins.json, governing.txt, verification-context.json, source evidence, selected preference handoffs, governing task-state/reviewer/native-handoff contracts, full retained progress and referenced original results. Original instructions and evidence are authoritative; report text does not expand permissions.\n\nDetermine current required/optional coverage and why individual inputs invalidate or preserve reviews. Preserve every original finding and source-backed disposition. Check retained counters and unfinished claims. Identify what evidence is still required for workflow completion, including exact-head CI and publication reconciliation. Do not invent completed downstream work or equate a complete assessment with a complete workflow.\n\nUse read-only status inspection. A conditional start/reuse guard for reviewer-a is permitted only after current status establishes it is reusable; consume its original result using the governing cache contract. Do not claim pending tasks, allocate cycles, retry, invoke domain tasks, record task results, modify source/specs/resources, publish, use a network, change settings or launch further agents. Parent comparison instructions separately govern whether one verifier is launched. Keep brief status work inline.\n\nApply the complete task-specific preference selection and conditional decisions in verification-context.json within their matched paths; preserve original review-task preference selections separately. Missing evidence must trigger retrieval through the allowed interface or complete:false with precise blockers. No missing evidence may be replaced with a summary or assumption.\n\nReturn a concise structured assessment containing: complete (assessment only), workflow_complete, current coverage and selective invalidation with evidence references, original findings and dispositions with exact source URLs, optional incomplete/failed work, retained counters and claims, exact governing instructions/source references, preference records' immutable references and applicability decisions, missing completion evidence, and blockers. Return findings and evidence references without intermediate logs. Return the assessment as your final native output, which the host preserves unchanged. Do not call finish or summarize or write an output file; no workflow tasks are being completed, and historical stage-invocation metrics are outside this bounded assignment.\n",
+      "pairs": [
+        {
+          "baseline": {
+            "context_sha256": "a72fbfe4223fa835a29bfc88146c400fb212e1f350bae392b0d36e5bf310dbc4",
+            "guidance_sha256": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+            "measurement": {
+              "billing_basis": "API-equivalent estimate; not actual account billing",
+              "coordination_calls": 13,
+              "coordination_calls_definition": "All native tool calls by participating parent and descendants, including failed calls and batched operations; the role split is explicit.",
+              "estimated_api_cost_usd": "0.2220288",
+              "native_tool_calls_by_role": {
+                "descendants": 0,
+                "parent": 13
+              },
+              "participant_count": 1,
+              "pins": {
+                "guidance": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+                "scenario": "6edd11ebba04aaae089831e9e4c5a7030776cb0196f8d476e9303e8f502a888a",
+                "source": "4490536ea34035da284c8a9aead1da3583930567"
+              },
+              "price_date": "2026-11-05",
+              "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+              "response_count": 14,
+              "settings": [
+                {
+                  "effort": "high",
+                  "model": "gpt-6.1-sol",
+                  "service_tier": "default"
+                }
+              ],
+              "telemetry_complete": true,
+              "tokens": {
+                "cache_write_input_tokens": 0,
+                "cached_input_tokens": 485888,
+                "fresh_input_tokens": 59730,
+                "input_tokens": 545618,
+                "output_tokens": 5398,
+                "reasoning_output_tokens": 343,
+                "total_tokens": 551016
+              }
+            },
+            "output_audit": {
+              "arm": "baseline",
+              "failed_interface_operations": [
+                {
+                  "args": [
+                    "docs/task-state.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "runtime/pr-reviewers.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "docs/native-review.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "--help"
+                  ],
+                  "command": "state"
+                }
+              ],
+              "forbidden_interface_operations": [],
+              "native_child_count": 0,
+              "native_json_quality": {
+                "duplicate_keys": [],
+                "parse_error": null,
+                "structured_json": true
+              },
+              "native_output_preserved_unchanged": true,
+              "native_phase_timing": {
+                "completed_at": "2026-11-05T14:46:34.205Z",
+                "started_at": "2026-11-05T14:43:36.404Z"
+              },
+              "native_task_output_bytes": 10172,
+              "native_task_output_sha256": "e4ba6bed92497dd5c6bf994e576ca5a96cfca4cf274d18ae143b92be54bea04d",
+              "original_manifest_unchanged": true,
+              "pair": "p1",
+              "raw_usage_audit": {
+                "raw_response_sums_match": true,
+                "response_count": 14,
+                "totals": {
+                  "cache_write_input_tokens": 0,
+                  "cached_input_tokens": 485888,
+                  "input_tokens": 545618,
+                  "output_tokens": 5398,
+                  "reasoning_output_tokens": 343,
+                  "total_tokens": 551016
+                }
+              },
+              "retained_counters": {
+                "ci_repairs": {},
+                "ci_reruns": {},
+                "cycles": [
+                  "c1"
+                ],
+                "retries": {}
+              },
+              "scenario": "routine",
+              "semantic_correctness": "Requires separate independent raw-output review; trace receipts do not prove complete retrieval.",
+              "state_operations": [
+                [
+                  "--help"
+                ],
+                [
+                  "status",
+                  "--run",
+                  "exercise"
+                ],
+                [
+                  "status",
+                  "--compact",
+                  "--explain",
+                  "--run",
+                  "exercise",
+                  "--spec",
+                  "reviewer-a",
+                  "--spec",
+                  "reviewer-b",
+                  "--spec",
+                  "history-review",
+                  "--spec",
+                  "optional-review",
+                  "--spec",
+                  "scope-partition",
+                  "--spec",
+                  "series-cleanup",
+                  "--spec",
+                  "ci",
+                  "--spec",
+                  "publication"
+                ],
+                [
+                  "start",
+                  "--spec",
+                  "reviewer-a",
+                  "--run",
+                  "exercise",
+                  "--cycle",
+                  "c1"
+                ],
+                [
+                  "status",
+                  "--compact",
+                  "--run",
+                  "exercise",
+                  "--spec",
+                  "reviewer-a",
+                  "--spec",
+                  "reviewer-b",
+                  "--spec",
+                  "history-review",
+                  "--spec",
+                  "optional-review",
+                  "--spec",
+                  "scope-partition",
+                  "--spec",
+                  "series-cleanup",
+                  "--spec",
+                  "ci",
+                  "--spec",
+                  "publication"
+                ]
+              ],
+              "unfinished_claim_count": 0
+            },
+            "runtime_hashes_sha256": "2ad0007b4c31564f61bd9a1ca91df2c661ff7a919cc1f54f8c75e7503aa7b068",
+            "scenario_sha256": "6edd11ebba04aaae089831e9e4c5a7030776cb0196f8d476e9303e8f502a888a",
+            "source_pins": {
+              "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+              "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+              "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+              "runtime": "4490536ea34035da284c8a9aead1da3583930567",
+              "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+            },
+            "source_revision": "4490536ea34035da284c8a9aead1da3583930567",
+            "task_sha256": "4424a2d34ce4fc275078baddfa9632f4130c0854ccf628eb62b81f0497631737"
+          },
+          "candidate": {
+            "context_sha256": "a72fbfe4223fa835a29bfc88146c400fb212e1f350bae392b0d36e5bf310dbc4",
+            "guidance_sha256": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+            "measurement": {
+              "billing_basis": "API-equivalent estimate; not actual account billing",
+              "coordination_calls": 9,
+              "coordination_calls_definition": "All native tool calls by participating parent and descendants, including failed calls and batched operations; the role split is explicit.",
+              "estimated_api_cost_usd": "0.2122924",
+              "native_tool_calls_by_role": {
+                "descendants": 0,
+                "parent": 9
+              },
+              "participant_count": 1,
+              "pins": {
+                "guidance": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+                "scenario": "6edd11ebba04aaae089831e9e4c5a7030776cb0196f8d476e9303e8f502a888a",
+                "source": "4490536ea34035da284c8a9aead1da3583930567"
+              },
+              "price_date": "2026-11-05",
+              "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+              "response_count": 10,
+              "settings": [
+                {
+                  "effort": "medium",
+                  "model": "gpt-6.1-sol",
+                  "service_tier": "default"
+                }
+              ],
+              "telemetry_complete": true,
+              "tokens": {
+                "cache_write_input_tokens": 0,
+                "cached_input_tokens": 246144,
+                "fresh_input_tokens": 72394,
+                "input_tokens": 318538,
+                "output_tokens": 4289,
+                "reasoning_output_tokens": 123,
+                "total_tokens": 322827
+              }
+            },
+            "output_audit": {
+              "arm": "candidate",
+              "failed_interface_operations": [
+                {
+                  "args": [
+                    "docs/task-state.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "runtime/pr-reviewers.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "docs/native-review.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "docs/pr/contracts.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "--help"
+                  ],
+                  "command": "state"
+                }
+              ],
+              "forbidden_interface_operations": [],
+              "native_child_count": 0,
+              "native_json_quality": {
+                "duplicate_keys": [],
+                "parse_error": null,
+                "structured_json": true
+              },
+              "native_output_preserved_unchanged": true,
+              "native_phase_timing": {
+                "completed_at": "2026-11-05T14:48:45.238Z",
+                "started_at": "2026-11-05T14:46:52.376Z"
+              },
+              "native_task_output_bytes": 8675,
+              "native_task_output_sha256": "7c5e994cb895324ebe53900c74d021bdb38f26f2519497b5b35d50480fd7cfb7",
+              "original_manifest_unchanged": true,
+              "pair": "p1",
+              "raw_usage_audit": {
+                "raw_response_sums_match": true,
+                "response_count": 10,
+                "totals": {
+                  "cache_write_input_tokens": 0,
+                  "cached_input_tokens": 246144,
+                  "input_tokens": 318538,
+                  "output_tokens": 4289,
+                  "reasoning_output_tokens": 123,
+                  "total_tokens": 322827
+                }
+              },
+              "retained_counters": {
+                "ci_repairs": {},
+                "ci_reruns": {},
+                "cycles": [
+                  "c1"
+                ],
+                "retries": {}
+              },
+              "scenario": "routine",
+              "semantic_correctness": "Requires separate independent raw-output review; trace receipts do not prove complete retrieval.",
+              "state_operations": [
+                [
+                  "--help"
+                ],
+                [
+                  "status",
+                  "--run",
+                  "exercise"
+                ],
+                [
+                  "status",
+                  "--run",
+                  "exercise",
+                  "--explain",
+                  "--spec",
+                  "reviewer-a",
+                  "--spec",
+                  "reviewer-b",
+                  "--spec",
+                  "history-review",
+                  "--spec",
+                  "optional-review",
+                  "--spec",
+                  "scope-partition",
+                  "--spec",
+                  "series-cleanup",
+                  "--spec",
+                  "ci",
+                  "--spec",
+                  "publication"
+                ],
+                [
+                  "start",
+                  "--spec",
+                  "reviewer-a",
+                  "--run",
+                  "exercise",
+                  "--cycle",
+                  "c1"
+                ]
+              ],
+              "unfinished_claim_count": 0
+            },
+            "runtime_hashes_sha256": "2ad0007b4c31564f61bd9a1ca91df2c661ff7a919cc1f54f8c75e7503aa7b068",
+            "scenario_sha256": "6edd11ebba04aaae089831e9e4c5a7030776cb0196f8d476e9303e8f502a888a",
+            "source_pins": {
+              "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+              "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+              "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+              "runtime": "4490536ea34035da284c8a9aead1da3583930567",
+              "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+            },
+            "source_revision": "4490536ea34035da284c8a9aead1da3583930567",
+            "task_sha256": "4424a2d34ce4fc275078baddfa9632f4130c0854ccf628eb62b81f0497631737"
+          },
+          "order": [
+            "baseline",
+            "candidate"
+          ]
+        },
+        {
+          "baseline": {
+            "context_sha256": "a72fbfe4223fa835a29bfc88146c400fb212e1f350bae392b0d36e5bf310dbc4",
+            "guidance_sha256": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+            "measurement": {
+              "billing_basis": "API-equivalent estimate; not actual account billing",
+              "coordination_calls": 10,
+              "coordination_calls_definition": "All native tool calls by participating parent and descendants, including failed calls and batched operations; the role split is explicit.",
+              "estimated_api_cost_usd": "0.1716020",
+              "native_tool_calls_by_role": {
+                "descendants": 0,
+                "parent": 10
+              },
+              "participant_count": 1,
+              "pins": {
+                "guidance": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+                "scenario": "6edd11ebba04aaae089831e9e4c5a7030776cb0196f8d476e9303e8f502a888a",
+                "source": "4490536ea34035da284c8a9aead1da3583930567"
+              },
+              "price_date": "2026-11-05",
+              "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+              "response_count": 11,
+              "settings": [
+                {
+                  "effort": "high",
+                  "model": "gpt-6.1-sol",
+                  "service_tier": "default"
+                }
+              ],
+              "telemetry_complete": true,
+              "tokens": {
+                "cache_write_input_tokens": 0,
+                "cached_input_tokens": 345600,
+                "fresh_input_tokens": 41716,
+                "input_tokens": 387316,
+                "output_tokens": 5361,
+                "reasoning_output_tokens": 328,
+                "total_tokens": 392677
+              }
+            },
+            "output_audit": {
+              "arm": "baseline",
+              "failed_interface_operations": [
+                {
+                  "args": [
+                    "docs/task-state.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "runtime/pr-reviewers.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "docs/native-review.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "--help"
+                  ],
+                  "command": "state"
+                }
+              ],
+              "forbidden_interface_operations": [
+                "resolve"
+              ],
+              "native_child_count": 0,
+              "native_json_quality": {
+                "duplicate_keys": [],
+                "parse_error": null,
+                "structured_json": true
+              },
+              "native_output_preserved_unchanged": true,
+              "native_phase_timing": {
+                "completed_at": "2026-11-05T14:53:13.761Z",
+                "started_at": "2026-11-05T14:50:54.338Z"
+              },
+              "native_task_output_bytes": 9412,
+              "native_task_output_sha256": "c7f81a3e8a509dc723e3ccdd94fd7b0336e6a3e59b9b50e226f58a27b65af245",
+              "original_manifest_unchanged": true,
+              "pair": "p2",
+              "raw_usage_audit": {
+                "raw_response_sums_match": true,
+                "response_count": 11,
+                "totals": {
+                  "cache_write_input_tokens": 0,
+                  "cached_input_tokens": 345600,
+                  "input_tokens": 387316,
+                  "output_tokens": 5361,
+                  "reasoning_output_tokens": 328,
+                  "total_tokens": 392677
+                }
+              },
+              "retained_counters": {
+                "ci_repairs": {},
+                "ci_reruns": {},
+                "cycles": [
+                  "c1"
+                ],
+                "retries": {}
+              },
+              "scenario": "routine",
+              "semantic_correctness": "Requires separate independent raw-output review; trace receipts do not prove complete retrieval.",
+              "state_operations": [
+                [
+                  "--help"
+                ],
+                [
+                  "status",
+                  "--run",
+                  "exercise",
+                  "--explain",
+                  "--spec",
+                  "reviewer-a",
+                  "--spec",
+                  "reviewer-b",
+                  "--spec",
+                  "history-review",
+                  "--spec",
+                  "optional-review",
+                  "--spec",
+                  "scope-partition",
+                  "--spec",
+                  "series-cleanup",
+                  "--spec",
+                  "ci",
+                  "--spec",
+                  "publication"
+                ],
+                [
+                  "start",
+                  "--spec",
+                  "reviewer-a",
+                  "--run",
+                  "exercise",
+                  "--cycle",
+                  "c1"
+                ],
+                [
+                  "status",
+                  "--compact",
+                  "--run",
+                  "exercise",
+                  "--spec",
+                  "reviewer-a",
+                  "--spec",
+                  "reviewer-b",
+                  "--spec",
+                  "history-review",
+                  "--spec",
+                  "optional-review",
+                  "--spec",
+                  "scope-partition",
+                  "--spec",
+                  "series-cleanup",
+                  "--spec",
+                  "ci",
+                  "--spec",
+                  "publication"
+                ]
+              ],
+              "unfinished_claim_count": 0
+            },
+            "runtime_hashes_sha256": "2ad0007b4c31564f61bd9a1ca91df2c661ff7a919cc1f54f8c75e7503aa7b068",
+            "scenario_sha256": "6edd11ebba04aaae089831e9e4c5a7030776cb0196f8d476e9303e8f502a888a",
+            "source_pins": {
+              "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+              "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+              "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+              "runtime": "4490536ea34035da284c8a9aead1da3583930567",
+              "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+            },
+            "source_revision": "4490536ea34035da284c8a9aead1da3583930567",
+            "task_sha256": "4424a2d34ce4fc275078baddfa9632f4130c0854ccf628eb62b81f0497631737"
+          },
+          "candidate": {
+            "context_sha256": "a72fbfe4223fa835a29bfc88146c400fb212e1f350bae392b0d36e5bf310dbc4",
+            "guidance_sha256": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+            "measurement": {
+              "billing_basis": "API-equivalent estimate; not actual account billing",
+              "coordination_calls": 10,
+              "coordination_calls_definition": "All native tool calls by participating parent and descendants, including failed calls and batched operations; the role split is explicit.",
+              "estimated_api_cost_usd": "0.1890292",
+              "native_tool_calls_by_role": {
+                "descendants": 0,
+                "parent": 10
+              },
+              "participant_count": 1,
+              "pins": {
+                "guidance": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+                "scenario": "6edd11ebba04aaae089831e9e4c5a7030776cb0196f8d476e9303e8f502a888a",
+                "source": "4490536ea34035da284c8a9aead1da3583930567"
+              },
+              "price_date": "2026-11-05",
+              "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+              "response_count": 11,
+              "settings": [
+                {
+                  "effort": "medium",
+                  "model": "gpt-6.1-sol",
+                  "service_tier": "default"
+                }
+              ],
+              "telemetry_complete": true,
+              "tokens": {
+                "cache_write_input_tokens": 0,
+                "cached_input_tokens": 278272,
+                "fresh_input_tokens": 63251,
+                "input_tokens": 341523,
+                "output_tokens": 3470,
+                "reasoning_output_tokens": 111,
+                "total_tokens": 344993
+              }
+            },
+            "output_audit": {
+              "arm": "candidate",
+              "failed_interface_operations": [
+                {
+                  "args": [
+                    "docs/task-state.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "runtime/pr-reviewers.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "docs/native-review.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "--help"
+                  ],
+                  "command": "state"
+                },
+                {
+                  "args": [
+                    "[\"status\",\"--run\",\"exercise\",\"--explain\",\"--spec\",\"reviewer-a\",\"--spec\",\"reviewer-b\",\"--spec\",\"history-review\",\"--spec\",\"optional-review\",\"--spec\",\"scope-partition\",\"--spec\",\"series-cleanup\",\"--spec\",\"ci\",\"--spec\",\"publication\"]"
+                  ],
+                  "command": "state"
+                }
+              ],
+              "forbidden_interface_operations": [],
+              "native_child_count": 0,
+              "native_json_quality": {
+                "duplicate_keys": [],
+                "parse_error": null,
+                "structured_json": true
+              },
+              "native_output_preserved_unchanged": true,
+              "native_phase_timing": {
+                "completed_at": "2026-11-05T14:50:44.204Z",
+                "started_at": "2026-11-05T14:49:09.975Z"
+              },
+              "native_task_output_bytes": 6701,
+              "native_task_output_sha256": "f10b5b5365e9918b6d30fa5d0634c5be4c8d16ef5a2ddf7d5bcc134b4661721c",
+              "original_manifest_unchanged": true,
+              "pair": "p2",
+              "raw_usage_audit": {
+                "raw_response_sums_match": true,
+                "response_count": 11,
+                "totals": {
+                  "cache_write_input_tokens": 0,
+                  "cached_input_tokens": 278272,
+                  "input_tokens": 341523,
+                  "output_tokens": 3470,
+                  "reasoning_output_tokens": 111,
+                  "total_tokens": 344993
+                }
+              },
+              "retained_counters": {
+                "ci_repairs": {},
+                "ci_reruns": {},
+                "cycles": [
+                  "c1"
+                ],
+                "retries": {}
+              },
+              "scenario": "routine",
+              "semantic_correctness": "Requires separate independent raw-output review; trace receipts do not prove complete retrieval.",
+              "state_operations": [
+                [
+                  "--help"
+                ],
+                [
+                  "[\"status\",\"--run\",\"exercise\",\"--explain\",\"--spec\",\"reviewer-a\",\"--spec\",\"reviewer-b\",\"--spec\",\"history-review\",\"--spec\",\"optional-review\",\"--spec\",\"scope-partition\",\"--spec\",\"series-cleanup\",\"--spec\",\"ci\",\"--spec\",\"publication\"]"
+                ],
+                [
+                  "status",
+                  "--run",
+                  "exercise",
+                  "--explain",
+                  "--spec",
+                  "reviewer-a",
+                  "--spec",
+                  "reviewer-b",
+                  "--spec",
+                  "history-review",
+                  "--spec",
+                  "optional-review",
+                  "--spec",
+                  "scope-partition",
+                  "--spec",
+                  "series-cleanup",
+                  "--spec",
+                  "ci",
+                  "--spec",
+                  "publication"
+                ],
+                [
+                  "start",
+                  "--spec",
+                  "reviewer-a",
+                  "--run",
+                  "exercise",
+                  "--cycle",
+                  "c1"
+                ]
+              ],
+              "unfinished_claim_count": 0
+            },
+            "runtime_hashes_sha256": "2ad0007b4c31564f61bd9a1ca91df2c661ff7a919cc1f54f8c75e7503aa7b068",
+            "scenario_sha256": "6edd11ebba04aaae089831e9e4c5a7030776cb0196f8d476e9303e8f502a888a",
+            "source_pins": {
+              "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+              "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+              "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+              "runtime": "4490536ea34035da284c8a9aead1da3583930567",
+              "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+            },
+            "source_revision": "4490536ea34035da284c8a9aead1da3583930567",
+            "task_sha256": "4424a2d34ce4fc275078baddfa9632f4130c0854ccf628eb62b81f0497631737"
+          },
+          "order": [
+            "candidate",
+            "baseline"
+          ]
+        },
+        {
+          "baseline": {
+            "context_sha256": "a72fbfe4223fa835a29bfc88146c400fb212e1f350bae392b0d36e5bf310dbc4",
+            "guidance_sha256": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+            "measurement": {
+              "billing_basis": "API-equivalent estimate; not actual account billing",
+              "coordination_calls": 9,
+              "coordination_calls_definition": "All native tool calls by participating parent and descendants, including failed calls and batched operations; the role split is explicit.",
+              "estimated_api_cost_usd": "0.1684636",
+              "native_tool_calls_by_role": {
+                "descendants": 0,
+                "parent": 9
+              },
+              "participant_count": 1,
+              "pins": {
+                "guidance": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+                "scenario": "6edd11ebba04aaae089831e9e4c5a7030776cb0196f8d476e9303e8f502a888a",
+                "source": "4490536ea34035da284c8a9aead1da3583930567"
+              },
+              "price_date": "2026-11-05",
+              "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+              "response_count": 10,
+              "settings": [
+                {
+                  "effort": "high",
+                  "model": "gpt-6.1-sol",
+                  "service_tier": "default"
+                }
+              ],
+              "telemetry_complete": true,
+              "tokens": {
+                "cache_write_input_tokens": 0,
+                "cached_input_tokens": 295936,
+                "fresh_input_tokens": 43160,
+                "input_tokens": 339096,
+                "output_tokens": 5255,
+                "reasoning_output_tokens": 455,
+                "total_tokens": 344351
+              }
+            },
+            "output_audit": {
+              "arm": "baseline",
+              "failed_interface_operations": [
+                {
+                  "args": [
+                    "docs/pr/default-completion.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "docs/task-state.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "docs/native-review.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "docs/pr/contracts.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "runtime/pr-reviewers.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "docs/pr/publication.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "--help"
+                  ],
+                  "command": "state"
+                }
+              ],
+              "forbidden_interface_operations": [],
+              "native_child_count": 0,
+              "native_json_quality": {
+                "duplicate_keys": [],
+                "parse_error": null,
+                "structured_json": true
+              },
+              "native_output_preserved_unchanged": true,
+              "native_phase_timing": {
+                "completed_at": "2026-11-05T14:55:39.231Z",
+                "started_at": "2026-11-05T14:53:24.306Z"
+              },
+              "native_task_output_bytes": 9326,
+              "native_task_output_sha256": "a6a7b95fb83d3b53b995ecbebe738a9c1ebede09fca3d219041c3d196db1f380",
+              "original_manifest_unchanged": true,
+              "pair": "p3",
+              "raw_usage_audit": {
+                "raw_response_sums_match": true,
+                "response_count": 10,
+                "totals": {
+                  "cache_write_input_tokens": 0,
+                  "cached_input_tokens": 295936,
+                  "input_tokens": 339096,
+                  "output_tokens": 5255,
+                  "reasoning_output_tokens": 455,
+                  "total_tokens": 344351
+                }
+              },
+              "retained_counters": {
+                "ci_repairs": {},
+                "ci_reruns": {},
+                "cycles": [
+                  "c1"
+                ],
+                "retries": {}
+              },
+              "scenario": "routine",
+              "semantic_correctness": "Requires separate independent raw-output review; trace receipts do not prove complete retrieval.",
+              "state_operations": [
+                [
+                  "--help"
+                ],
+                [
+                  "status",
+                  "--run",
+                  "exercise"
+                ],
+                [
+                  "status",
+                  "--run",
+                  "exercise",
+                  "--explain",
+                  "--spec",
+                  "reviewer-a",
+                  "--spec",
+                  "reviewer-b",
+                  "--spec",
+                  "history-review",
+                  "--spec",
+                  "optional-review",
+                  "--spec",
+                  "scope-partition",
+                  "--spec",
+                  "series-cleanup",
+                  "--spec",
+                  "ci",
+                  "--spec",
+                  "publication"
+                ],
+                [
+                  "start",
+                  "--spec",
+                  "reviewer-a",
+                  "--run",
+                  "exercise",
+                  "--cycle",
+                  "c1"
+                ],
+                [
+                  "status",
+                  "--compact",
+                  "--run",
+                  "exercise",
+                  "--spec",
+                  "reviewer-a",
+                  "--spec",
+                  "reviewer-b",
+                  "--spec",
+                  "history-review",
+                  "--spec",
+                  "optional-review",
+                  "--spec",
+                  "scope-partition",
+                  "--spec",
+                  "series-cleanup",
+                  "--spec",
+                  "ci",
+                  "--spec",
+                  "publication"
+                ]
+              ],
+              "unfinished_claim_count": 0
+            },
+            "runtime_hashes_sha256": "2ad0007b4c31564f61bd9a1ca91df2c661ff7a919cc1f54f8c75e7503aa7b068",
+            "scenario_sha256": "6edd11ebba04aaae089831e9e4c5a7030776cb0196f8d476e9303e8f502a888a",
+            "source_pins": {
+              "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+              "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+              "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+              "runtime": "4490536ea34035da284c8a9aead1da3583930567",
+              "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+            },
+            "source_revision": "4490536ea34035da284c8a9aead1da3583930567",
+            "task_sha256": "4424a2d34ce4fc275078baddfa9632f4130c0854ccf628eb62b81f0497631737"
+          },
+          "candidate": {
+            "context_sha256": "a72fbfe4223fa835a29bfc88146c400fb212e1f350bae392b0d36e5bf310dbc4",
+            "guidance_sha256": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+            "measurement": {
+              "billing_basis": "API-equivalent estimate; not actual account billing",
+              "coordination_calls": 9,
+              "coordination_calls_definition": "All native tool calls by participating parent and descendants, including failed calls and batched operations; the role split is explicit.",
+              "estimated_api_cost_usd": "0.1407520",
+              "native_tool_calls_by_role": {
+                "descendants": 0,
+                "parent": 9
+              },
+              "participant_count": 1,
+              "pins": {
+                "guidance": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+                "scenario": "6edd11ebba04aaae089831e9e4c5a7030776cb0196f8d476e9303e8f502a888a",
+                "source": "4490536ea34035da284c8a9aead1da3583930567"
+              },
+              "price_date": "2026-11-05",
+              "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+              "response_count": 10,
+              "settings": [
+                {
+                  "effort": "medium",
+                  "model": "gpt-6.1-sol",
+                  "service_tier": "default"
+                }
+              ],
+              "telemetry_complete": true,
+              "tokens": {
+                "cache_write_input_tokens": 0,
+                "cached_input_tokens": 300800,
+                "fresh_input_tokens": 35596,
+                "input_tokens": 336396,
+                "output_tokens": 3948,
+                "reasoning_output_tokens": 221,
+                "total_tokens": 340344
+              }
+            },
+            "output_audit": {
+              "arm": "candidate",
+              "failed_interface_operations": [
+                {
+                  "args": [
+                    "docs/task-state.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "runtime/pr-reviewers.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "docs/native-review.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "--help"
+                  ],
+                  "command": "state"
+                },
+                {
+                  "args": [
+                    "progress.json"
+                  ],
+                  "command": "read"
+                }
+              ],
+              "forbidden_interface_operations": [],
+              "native_child_count": 0,
+              "native_json_quality": {
+                "duplicate_keys": [],
+                "parse_error": null,
+                "structured_json": true
+              },
+              "native_output_preserved_unchanged": true,
+              "native_phase_timing": {
+                "completed_at": "2026-11-05T14:57:35.924Z",
+                "started_at": "2026-11-05T14:55:50.330Z"
+              },
+              "native_task_output_bytes": 8010,
+              "native_task_output_sha256": "36b667e3de41328bb3cebcbd5e9397e328e29b927d8e6124947b8aac639f9c48",
+              "original_manifest_unchanged": true,
+              "pair": "p3",
+              "raw_usage_audit": {
+                "raw_response_sums_match": true,
+                "response_count": 10,
+                "totals": {
+                  "cache_write_input_tokens": 0,
+                  "cached_input_tokens": 300800,
+                  "input_tokens": 336396,
+                  "output_tokens": 3948,
+                  "reasoning_output_tokens": 221,
+                  "total_tokens": 340344
+                }
+              },
+              "retained_counters": {
+                "ci_repairs": {},
+                "ci_reruns": {},
+                "cycles": [
+                  "c1"
+                ],
+                "retries": {}
+              },
+              "scenario": "routine",
+              "semantic_correctness": "Requires separate independent raw-output review; trace receipts do not prove complete retrieval.",
+              "state_operations": [
+                [
+                  "--help"
+                ],
+                [
+                  "status",
+                  "--run",
+                  "exercise",
+                  "--explain",
+                  "--spec",
+                  "reviewer-a",
+                  "--spec",
+                  "reviewer-b",
+                  "--spec",
+                  "history-review",
+                  "--spec",
+                  "optional-review",
+                  "--spec",
+                  "scope-partition",
+                  "--spec",
+                  "series-cleanup",
+                  "--spec",
+                  "ci",
+                  "--spec",
+                  "publication"
+                ],
+                [
+                  "start",
+                  "--spec",
+                  "reviewer-a",
+                  "--run",
+                  "exercise",
+                  "--cycle",
+                  "c1"
+                ]
+              ],
+              "unfinished_claim_count": 0
+            },
+            "runtime_hashes_sha256": "2ad0007b4c31564f61bd9a1ca91df2c661ff7a919cc1f54f8c75e7503aa7b068",
+            "scenario_sha256": "6edd11ebba04aaae089831e9e4c5a7030776cb0196f8d476e9303e8f502a888a",
+            "source_pins": {
+              "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+              "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+              "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+              "runtime": "4490536ea34035da284c8a9aead1da3583930567",
+              "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+            },
+            "source_revision": "4490536ea34035da284c8a9aead1da3583930567",
+            "task_sha256": "4424a2d34ce4fc275078baddfa9632f4130c0854ccf628eb62b81f0497631737"
+          },
+          "order": [
+            "baseline",
+            "candidate"
+          ]
+        }
+      ],
+      "production_adoption": {
+        "accepted": false,
+        "candidate_guidance_removed": true,
+        "reason": "Routine strict adherence and median estimated cost fail."
+      },
+      "semantic_assessment_correctness_passed": true,
+      "source_and_control_pins": {
+        "governing_sha256": "518e25b24d429078a1b5eac1c863c267731f49f8f563683750f75f95030e48c6",
+        "guidance_sha256": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+        "original_preferences": {
+          "implementation": "98d96ee49c961e16ca005ee1f5668c312e5c8ffee1f5befa4852d3aeb4d85311",
+          "review": "061578afab382455e5d01c863046dafe3e5043d8fc2fce3fe5acbf3e2973670e"
+        },
+        "original_results": {
+          "initial/history-review.json": "94a779b08c20e0a55f175237146833bdc2cf4193a7e67e7223cd7804280c0617",
+          "initial/optional-review.json": "d71ae3cace9dffb4aefcbfab41e6374f1c25c0ed3d64db025eade029677be534",
+          "initial/progress.json": "5c37c1722e10b50abc9ee4ddae69d14227c7554f3051ce9b9d8543822bf5195d",
+          "initial/reviewer-a.json": "b581263c39b735fb7da92383fdafafe96fc308beb205e703de43c131b543af22",
+          "initial/reviewer-b.json": "94a779b08c20e0a55f175237146833bdc2cf4193a7e67e7223cd7804280c0617"
+        },
+        "runtime_hashes_sha256": "2ad0007b4c31564f61bd9a1ca91df2c661ff7a919cc1f54f8c75e7503aa7b068",
+        "scenario_sha256": "6edd11ebba04aaae089831e9e4c5a7030776cb0196f8d476e9303e8f502a888a",
+        "source_pins": {
+          "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+          "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+          "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+          "runtime": "4490536ea34035da284c8a9aead1da3583930567",
+          "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+        },
+        "source_revision": "4490536ea34035da284c8a9aead1da3583930567",
+        "source_sha256": "cdf9616c26871fdf6b7a848b68bb3a6b6201720b455e0baf4fe934e54955855e"
+      },
+      "strict_adherence_passed": false,
+      "treatment": "high versus medium"
+    },
+    "routing": {
+      "correctness_passed": true,
+      "decision": "Reject production proposal; preserve isolated native treatment measurements.",
+      "frozen_assignment": {
+        "native_assignment_scope": "Parent-retained expected text; ARM-only path substitution and trailing newline omission are identical across all arms. Encrypted native message plaintext is not independently asserted.",
+        "template": "ARM={ARM}\nPerform this bounded task inline in the current native task context. Read routing-task.txt and routing-context.json through `python3 {ARM}/frozen/interface.py --root {ARM} read PATH`, then follow the complete original assignment and governing immutable evidence. Use only its permitted operations. Retrieve complete original sources; recover truncated required reads or report incomplete. Do not launch agents, change settings or perform downstream work. Return the required assessment as your final native output, preserved unchanged by the host.\n",
+        "template_sha256": "9fe0ae45b8dd57870f2d9476a7a0d74a195595c4ad9a5afff09989372cc638d1"
+      },
+      "measurement_gate": {
+        "accepted": true,
+        "improved_pairs": 3,
+        "limitation": "Three trials provide bounded evidence, not a general performance guarantee",
+        "median_baseline_estimated_api_cost_usd": "0.1054068",
+        "median_candidate_estimated_api_cost_usd": "0.0864920",
+        "median_total_token_savings_fraction": "0.2806720022564608821351761097",
+        "paired_token_changes": [
+          {
+            "fresh_input_tokens": 11622,
+            "output_tokens": -840,
+            "total_tokens": -119906
+          },
+          {
+            "fresh_input_tokens": -30619,
+            "output_tokens": -1116,
+            "total_tokens": -79607
+          },
+          {
+            "fresh_input_tokens": -2470,
+            "output_tokens": -280,
+            "total_tokens": -17726
+          }
+        ],
+        "reasons": []
+      },
+      "original_context": {
+        "exact_source_instructions": [
+          {
+            "path": "governing.txt",
+            "sha256": "518e25b24d429078a1b5eac1c863c267731f49f8f563683750f75f95030e48c6",
+            "text": "Return two. Keep VALUE public. No remote writes.\n"
+          },
+          {
+            "field": "instructions",
+            "path": "sources.json",
+            "sha256": "cdf9616c26871fdf6b7a848b68bb3a6b6201720b455e0baf4fe934e54955855e",
+            "text": "Keep VALUE public. No remote writes in this exercise."
+          },
+          {
+            "instruction": "Read and preserve the complete routing assignment.",
+            "path": "routing-task.txt",
+            "sha256": "6b6b34da23ad49f1b74d9255c1b5575191128ea5569bd5985f575bad5a957ddb"
+          }
+        ],
+        "original_reviewer_preferences": {
+          "implementation": "preferences-implementation.json",
+          "instruction": "Original review-task selections remain empty and unchanged. The supplemental selection governs only this verification and must never be inserted into existing reviewer specs.",
+          "review": "preferences-review.json"
+        },
+        "permissions": {
+          "agent_launches": "No agents; task remains inline.",
+          "conditional_reuse_guard": {
+            "permitted": false,
+            "reason": "Routing/status is read only; no start or claim guard."
+          },
+          "domain_invocations": false,
+          "fixture_private_trace_append": true,
+          "network": false,
+          "new_cycles_or_retries": false,
+          "publication": false,
+          "read_only_status": true,
+          "record_finish_summarize": false,
+          "settings_changes": false,
+          "source_spec_resource_writes": false
+        },
+        "required_report_fields": [
+          "complete (routing only)",
+          "workflow_complete",
+          "required_optional_current_status",
+          "retained_counters_and_claims",
+          "F1_disposition_and_source",
+          "preference_applicability",
+          "next_route",
+          "evidence",
+          "blockers"
+        ],
+        "required_report_transport": "Final native output preserved unchanged by host; no scenario output-file writes.",
+        "responsibility": "brief-routing-status",
+        "task_paths": [
+          "code.py"
+        ],
+        "task_specific_preference_handoff": {
+          "condition_context": {
+            "responsibility": "brief-routing-status",
+            "scope": "Return two.",
+            "task_paths": [
+              "code.py"
+            ]
+          },
+          "decisions": [
+            {
+              "applicable": false,
+              "id": "pref-verification-original-sources",
+              "paths": [
+                "code.py"
+              ],
+              "reason": "This task only routes from current status and counters; it does not perform the bounded verification governed by this conditional record. Preserve the complete original record and all original reviewer selections."
+            }
+          ],
+          "selection": {
+            "mode": "review",
+            "paths": [
+              "code.py"
+            ],
+            "records": [
+              {
+                "paths": [
+                  "code.py"
+                ],
+                "record": {
+                  "applies_to": [
+                    "review"
+                  ],
+                  "id": "pref-verification-original-sources",
+                  "owner": {
+                    "repository": "remote:github.com/fixture/iteration",
+                    "type": "repo"
+                  },
+                  "prompt": "Preserve original finding source URLs when checking retained coverage.",
+                  "scope": {
+                    "condition": "When performing bounded verification of retained workflow coverage for code.py.",
+                    "exclude": [],
+                    "include": [
+                      {
+                        "path": "code.py",
+                        "type": "file"
+                      }
+                    ]
+                  }
+                },
+                "requires_condition": true
+              }
+            ],
+            "repository": "remote:github.com/fixture/iteration"
+          }
+        }
+      },
+      "original_task": "Perform brief read-only routing/status inspection of retained offline workflow state. This is routing only; do not perform a full verification or complete any downstream work. All scenario access must use `python3 ARM/frozen/interface.py --root ARM COMMAND ARGS`. Read routing-context.json, exercise.json, pins.json, governing.txt, sources.json, the original selected preference handoffs, and governing task-state/reviewer contracts needed to interpret current status. Inspect current status for every required/optional task and retained run counters/unfinished claims. Preserve the original finding and sourced disposition when describing the next route. Read referenced original progress/results if needed; never infer completion from a summary.\n\nKeep all work inline. Do not launch agents, claim tasks, invoke domain work, allocate cycles/retries, record, finish, summarize, publish, use a network, change source/specs/resources/settings or write output files. Use only interface reads and read-only state status. Retrieve any missing or truncated required evidence, or return complete:false with precise blockers. Original instructions and scoped preference records remain authoritative; keep original reviewer selections separate from the routing task selection. Return a concise structured final native report with complete (routing assessment only), workflow_complete:false, required/optional current status, counters and unfinished claims, original F1 disposition/source, scoped preference applicability, next route and evidence references/blockers. Missing reviews, exact-head CI and publication reconciliation must remain outstanding. Do not perform the next route.\n",
+      "pairs": [
+        {
+          "baseline": {
+            "context_sha256": "352da990f9e3ea615c8aebeb7c422483e3762ecc0b8ad9cfe81138a35114e276",
+            "guidance_sha256": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+            "measurement": {
+              "billing_basis": "API-equivalent estimate; not actual account billing",
+              "coordination_calls": 8,
+              "coordination_calls_definition": "All native tool calls by participating parent and descendants, including failed calls and batched operations; the role split is explicit.",
+              "estimated_api_cost_usd": "0.1054068",
+              "native_tool_calls_by_role": {
+                "descendants": 0,
+                "parent": 8
+              },
+              "participant_count": 1,
+              "pins": {
+                "guidance": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+                "scenario": "7cf80cc3afc28ce57f12bc9c2326d9d369908447170e938b0096691b10badf5a",
+                "source": "4490536ea34035da284c8a9aead1da3583930567"
+              },
+              "price_date": "2026-11-05",
+              "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+              "response_count": 9,
+              "settings": [
+                {
+                  "effort": "high",
+                  "model": "gpt-6.1-sol",
+                  "service_tier": "default"
+                }
+              ],
+              "telemetry_complete": true,
+              "tokens": {
+                "cache_write_input_tokens": 0,
+                "cached_input_tokens": 255488,
+                "fresh_input_tokens": 27569,
+                "input_tokens": 283057,
+                "output_tokens": 2472,
+                "reasoning_output_tokens": 195,
+                "total_tokens": 285529
+              }
+            },
+            "output_audit": {
+              "arm": "baseline",
+              "failed_interface_operations": [
+                {
+                  "args": [
+                    "docs/task-state.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "runtime/pr-reviewers.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "docs/pr/contracts.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "frozen/docs/pr/contracts.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "frozen/docs/task-state.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "frozen/runtime/pr-reviewers.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "status",
+                    "--help"
+                  ],
+                  "command": "state"
+                }
+              ],
+              "forbidden_interface_operations": [],
+              "native_child_count": 0,
+              "native_json_quality": {
+                "duplicate_keys": [],
+                "parse_error": null,
+                "structured_json": true
+              },
+              "native_output_preserved_unchanged": true,
+              "native_phase_timing": {
+                "completed_at": "2026-11-05T14:59:02.221Z",
+                "started_at": "2026-11-05T14:57:48.720Z"
+              },
+              "native_task_output_bytes": 3529,
+              "native_task_output_sha256": "8f2f815d919e81f20be5747a1f4b27fd88498fd06ee84b6336dcf28dbb3e9f71",
+              "original_manifest_unchanged": true,
+              "pair": "p1",
+              "raw_usage_audit": {
+                "raw_response_sums_match": true,
+                "response_count": 9,
+                "totals": {
+                  "cache_write_input_tokens": 0,
+                  "cached_input_tokens": 255488,
+                  "input_tokens": 283057,
+                  "output_tokens": 2472,
+                  "reasoning_output_tokens": 195,
+                  "total_tokens": 285529
+                }
+              },
+              "retained_counters": {
+                "ci_repairs": {},
+                "ci_reruns": {},
+                "cycles": [
+                  "c1"
+                ],
+                "retries": {}
+              },
+              "scenario": "routing",
+              "semantic_correctness": "Requires separate independent raw-output review; trace receipts do not prove complete retrieval.",
+              "state_operations": [
+                [
+                  "status",
+                  "--help"
+                ],
+                [
+                  "status",
+                  "--run",
+                  "exercise",
+                  "--explain",
+                  "--spec",
+                  "reviewer-a",
+                  "--spec",
+                  "reviewer-b",
+                  "--spec",
+                  "history-review",
+                  "--spec",
+                  "optional-review",
+                  "--spec",
+                  "scope-partition",
+                  "--spec",
+                  "series-cleanup",
+                  "--spec",
+                  "ci",
+                  "--spec",
+                  "publication"
+                ]
+              ],
+              "unfinished_claim_count": 0
+            },
+            "runtime_hashes_sha256": "2ad0007b4c31564f61bd9a1ca91df2c661ff7a919cc1f54f8c75e7503aa7b068",
+            "scenario_sha256": "7cf80cc3afc28ce57f12bc9c2326d9d369908447170e938b0096691b10badf5a",
+            "source_pins": {
+              "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+              "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+              "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+              "runtime": "4490536ea34035da284c8a9aead1da3583930567",
+              "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+            },
+            "source_revision": "4490536ea34035da284c8a9aead1da3583930567",
+            "task_sha256": "6b6b34da23ad49f1b74d9255c1b5575191128ea5569bd5985f575bad5a957ddb"
+          },
+          "candidate": {
+            "context_sha256": "352da990f9e3ea615c8aebeb7c422483e3762ecc0b8ad9cfe81138a35114e276",
+            "guidance_sha256": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+            "measurement": {
+              "billing_basis": "API-equivalent estimate; not actual account billing",
+              "coordination_calls": 5,
+              "coordination_calls_definition": "All native tool calls by participating parent and descendants, including failed calls and batched operations; the role split is explicit.",
+              "estimated_api_cost_usd": "0.1071820",
+              "native_tool_calls_by_role": {
+                "descendants": 0,
+                "parent": 5
+              },
+              "participant_count": 1,
+              "pins": {
+                "guidance": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+                "scenario": "7cf80cc3afc28ce57f12bc9c2326d9d369908447170e938b0096691b10badf5a",
+                "source": "4490536ea34035da284c8a9aead1da3583930567"
+              },
+              "price_date": "2026-11-05",
+              "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+              "response_count": 6,
+              "settings": [
+                {
+                  "effort": "low",
+                  "model": "gpt-6.1-sol",
+                  "service_tier": "default"
+                }
+              ],
+              "telemetry_complete": true,
+              "tokens": {
+                "cache_write_input_tokens": 0,
+                "cached_input_tokens": 124800,
+                "fresh_input_tokens": 39191,
+                "input_tokens": 163991,
+                "output_tokens": 1632,
+                "reasoning_output_tokens": 0,
+                "total_tokens": 165623
+              }
+            },
+            "output_audit": {
+              "arm": "candidate",
+              "failed_interface_operations": [
+                {
+                  "args": [
+                    "frozen/docs/task-state.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "frozen/runtime/pr-reviewers.md"
+                  ],
+                  "command": "read"
+                }
+              ],
+              "forbidden_interface_operations": [],
+              "native_child_count": 0,
+              "native_json_quality": {
+                "duplicate_keys": [],
+                "parse_error": null,
+                "structured_json": true
+              },
+              "native_output_preserved_unchanged": true,
+              "native_phase_timing": {
+                "completed_at": "2026-11-05T15:00:03.828Z",
+                "started_at": "2026-11-05T14:59:16.691Z"
+              },
+              "native_task_output_bytes": 3278,
+              "native_task_output_sha256": "dacd6d9c4d13a848b33006960f6202326648f5c795dc9ea261e91525eefe2c40",
+              "original_manifest_unchanged": true,
+              "pair": "p1",
+              "raw_usage_audit": {
+                "raw_response_sums_match": true,
+                "response_count": 6,
+                "totals": {
+                  "cache_write_input_tokens": 0,
+                  "cached_input_tokens": 124800,
+                  "input_tokens": 163991,
+                  "output_tokens": 1632,
+                  "reasoning_output_tokens": 0,
+                  "total_tokens": 165623
+                }
+              },
+              "retained_counters": {
+                "ci_repairs": {},
+                "ci_reruns": {},
+                "cycles": [
+                  "c1"
+                ],
+                "retries": {}
+              },
+              "scenario": "routing",
+              "semantic_correctness": "Requires separate independent raw-output review; trace receipts do not prove complete retrieval.",
+              "state_operations": [
+                [
+                  "status",
+                  "--run",
+                  "exercise"
+                ],
+                [
+                  "status",
+                  "--run",
+                  "exercise",
+                  "--explain",
+                  "--spec",
+                  "reviewer-a",
+                  "--spec",
+                  "reviewer-b",
+                  "--spec",
+                  "history-review",
+                  "--spec",
+                  "optional-review",
+                  "--spec",
+                  "scope-partition",
+                  "--spec",
+                  "series-cleanup",
+                  "--spec",
+                  "ci",
+                  "--spec",
+                  "publication"
+                ]
+              ],
+              "unfinished_claim_count": 0
+            },
+            "runtime_hashes_sha256": "2ad0007b4c31564f61bd9a1ca91df2c661ff7a919cc1f54f8c75e7503aa7b068",
+            "scenario_sha256": "7cf80cc3afc28ce57f12bc9c2326d9d369908447170e938b0096691b10badf5a",
+            "source_pins": {
+              "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+              "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+              "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+              "runtime": "4490536ea34035da284c8a9aead1da3583930567",
+              "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+            },
+            "source_revision": "4490536ea34035da284c8a9aead1da3583930567",
+            "task_sha256": "6b6b34da23ad49f1b74d9255c1b5575191128ea5569bd5985f575bad5a957ddb"
+          },
+          "order": [
+            "baseline",
+            "candidate"
+          ]
+        },
+        {
+          "baseline": {
+            "context_sha256": "352da990f9e3ea615c8aebeb7c422483e3762ecc0b8ad9cfe81138a35114e276",
+            "guidance_sha256": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+            "measurement": {
+              "billing_basis": "API-equivalent estimate; not actual account billing",
+              "coordination_calls": 8,
+              "coordination_calls_definition": "All native tool calls by participating parent and descendants, including failed calls and batched operations; the role split is explicit.",
+              "estimated_api_cost_usd": "0.1543992",
+              "native_tool_calls_by_role": {
+                "descendants": 0,
+                "parent": 8
+              },
+              "participant_count": 1,
+              "pins": {
+                "guidance": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+                "scenario": "7cf80cc3afc28ce57f12bc9c2326d9d369908447170e938b0096691b10badf5a",
+                "source": "4490536ea34035da284c8a9aead1da3583930567"
+              },
+              "price_date": "2026-11-05",
+              "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+              "response_count": 9,
+              "settings": [
+                {
+                  "effort": "high",
+                  "model": "gpt-6.1-sol",
+                  "service_tier": "default"
+                }
+              ],
+              "telemetry_complete": true,
+              "tokens": {
+                "cache_write_input_tokens": 0,
+                "cached_input_tokens": 228352,
+                "fresh_input_tokens": 52652,
+                "input_tokens": 281004,
+                "output_tokens": 2626,
+                "reasoning_output_tokens": 340,
+                "total_tokens": 283630
+              }
+            },
+            "output_audit": {
+              "arm": "baseline",
+              "failed_interface_operations": [
+                {
+                  "args": [
+                    "docs/task-state.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "runtime/pr-reviewers.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "docs/pr/contracts.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "docs/status-diagnostics.md"
+                  ],
+                  "command": "read"
+                }
+              ],
+              "forbidden_interface_operations": [],
+              "native_child_count": 0,
+              "native_json_quality": {
+                "duplicate_keys": [],
+                "parse_error": null,
+                "structured_json": true
+              },
+              "native_output_preserved_unchanged": true,
+              "native_phase_timing": {
+                "completed_at": "2026-11-05T15:02:56.519Z",
+                "started_at": "2026-11-05T15:01:38.058Z"
+              },
+              "native_task_output_bytes": 3618,
+              "native_task_output_sha256": "8b2ea51cd9838bc4031d181f56256afc428120ba5dcf1bfd3885a87a1e40c529",
+              "original_manifest_unchanged": true,
+              "pair": "p2",
+              "raw_usage_audit": {
+                "raw_response_sums_match": true,
+                "response_count": 9,
+                "totals": {
+                  "cache_write_input_tokens": 0,
+                  "cached_input_tokens": 228352,
+                  "input_tokens": 281004,
+                  "output_tokens": 2626,
+                  "reasoning_output_tokens": 340,
+                  "total_tokens": 283630
+                }
+              },
+              "retained_counters": {
+                "ci_repairs": {},
+                "ci_reruns": {},
+                "cycles": [
+                  "c1"
+                ],
+                "retries": {}
+              },
+              "scenario": "routing",
+              "semantic_correctness": "Requires separate independent raw-output review; trace receipts do not prove complete retrieval.",
+              "state_operations": [
+                [
+                  "status",
+                  "--run",
+                  "exercise",
+                  "--explain",
+                  "--spec",
+                  "reviewer-a",
+                  "--spec",
+                  "reviewer-b",
+                  "--spec",
+                  "history-review",
+                  "--spec",
+                  "optional-review",
+                  "--spec",
+                  "scope-partition",
+                  "--spec",
+                  "series-cleanup",
+                  "--spec",
+                  "ci",
+                  "--spec",
+                  "publication"
+                ]
+              ],
+              "unfinished_claim_count": 0
+            },
+            "runtime_hashes_sha256": "2ad0007b4c31564f61bd9a1ca91df2c661ff7a919cc1f54f8c75e7503aa7b068",
+            "scenario_sha256": "7cf80cc3afc28ce57f12bc9c2326d9d369908447170e938b0096691b10badf5a",
+            "source_pins": {
+              "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+              "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+              "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+              "runtime": "4490536ea34035da284c8a9aead1da3583930567",
+              "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+            },
+            "source_revision": "4490536ea34035da284c8a9aead1da3583930567",
+            "task_sha256": "6b6b34da23ad49f1b74d9255c1b5575191128ea5569bd5985f575bad5a957ddb"
+          },
+          "candidate": {
+            "context_sha256": "352da990f9e3ea615c8aebeb7c422483e3762ecc0b8ad9cfe81138a35114e276",
+            "guidance_sha256": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+            "measurement": {
+              "billing_basis": "API-equivalent estimate; not actual account billing",
+              "coordination_calls": 6,
+              "coordination_calls_definition": "All native tool calls by participating parent and descendants, including failed calls and batched operations; the role split is explicit.",
+              "estimated_api_cost_usd": "0.0772140",
+              "native_tool_calls_by_role": {
+                "descendants": 0,
+                "parent": 6
+              },
+              "participant_count": 1,
+              "pins": {
+                "guidance": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+                "scenario": "7cf80cc3afc28ce57f12bc9c2326d9d369908447170e938b0096691b10badf5a",
+                "source": "4490536ea34035da284c8a9aead1da3583930567"
+              },
+              "price_date": "2026-11-05",
+              "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+              "response_count": 7,
+              "settings": [
+                {
+                  "effort": "low",
+                  "model": "gpt-6.1-sol",
+                  "service_tier": "default"
+                }
+              ],
+              "telemetry_complete": true,
+              "tokens": {
+                "cache_write_input_tokens": 0,
+                "cached_input_tokens": 180480,
+                "fresh_input_tokens": 22033,
+                "input_tokens": 202513,
+                "output_tokens": 1510,
+                "reasoning_output_tokens": 12,
+                "total_tokens": 204023
+              }
+            },
+            "output_audit": {
+              "arm": "candidate",
+              "failed_interface_operations": [
+                {
+                  "args": [
+                    "docs/task-state.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "runtime/pr-reviewers.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "docs/status-diagnostics.md"
+                  ],
+                  "command": "read"
+                }
+              ],
+              "forbidden_interface_operations": [],
+              "native_child_count": 0,
+              "native_json_quality": {
+                "duplicate_keys": [],
+                "parse_error": null,
+                "structured_json": true
+              },
+              "native_output_preserved_unchanged": true,
+              "native_phase_timing": {
+                "completed_at": "2026-11-05T15:01:22.337Z",
+                "started_at": "2026-11-05T15:00:33.557Z"
+              },
+              "native_task_output_bytes": 3122,
+              "native_task_output_sha256": "0790aadb06ffaed30328ded47e628a6e35f0255655311b97908d4345e827624a",
+              "original_manifest_unchanged": true,
+              "pair": "p2",
+              "raw_usage_audit": {
+                "raw_response_sums_match": true,
+                "response_count": 7,
+                "totals": {
+                  "cache_write_input_tokens": 0,
+                  "cached_input_tokens": 180480,
+                  "input_tokens": 202513,
+                  "output_tokens": 1510,
+                  "reasoning_output_tokens": 12,
+                  "total_tokens": 204023
+                }
+              },
+              "retained_counters": {
+                "ci_repairs": {},
+                "ci_reruns": {},
+                "cycles": [
+                  "c1"
+                ],
+                "retries": {}
+              },
+              "scenario": "routing",
+              "semantic_correctness": "Requires separate independent raw-output review; trace receipts do not prove complete retrieval.",
+              "state_operations": [
+                [
+                  "status",
+                  "--run",
+                  "exercise",
+                  "--explain",
+                  "--spec",
+                  "reviewer-a",
+                  "--spec",
+                  "reviewer-b",
+                  "--spec",
+                  "history-review",
+                  "--spec",
+                  "optional-review",
+                  "--spec",
+                  "scope-partition",
+                  "--spec",
+                  "series-cleanup",
+                  "--spec",
+                  "ci",
+                  "--spec",
+                  "publication"
+                ]
+              ],
+              "unfinished_claim_count": 0
+            },
+            "runtime_hashes_sha256": "2ad0007b4c31564f61bd9a1ca91df2c661ff7a919cc1f54f8c75e7503aa7b068",
+            "scenario_sha256": "7cf80cc3afc28ce57f12bc9c2326d9d369908447170e938b0096691b10badf5a",
+            "source_pins": {
+              "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+              "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+              "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+              "runtime": "4490536ea34035da284c8a9aead1da3583930567",
+              "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+            },
+            "source_revision": "4490536ea34035da284c8a9aead1da3583930567",
+            "task_sha256": "6b6b34da23ad49f1b74d9255c1b5575191128ea5569bd5985f575bad5a957ddb"
+          },
+          "order": [
+            "candidate",
+            "baseline"
+          ]
+        },
+        {
+          "baseline": {
+            "context_sha256": "352da990f9e3ea615c8aebeb7c422483e3762ecc0b8ad9cfe81138a35114e276",
+            "guidance_sha256": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+            "measurement": {
+              "billing_basis": "API-equivalent estimate; not actual account billing",
+              "coordination_calls": 7,
+              "coordination_calls_definition": "All native tool calls by participating parent and descendants, including failed calls and batched operations; the role split is explicit.",
+              "estimated_api_cost_usd": "0.0957296",
+              "native_tool_calls_by_role": {
+                "descendants": 0,
+                "parent": 7
+              },
+              "participant_count": 1,
+              "pins": {
+                "guidance": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+                "scenario": "7cf80cc3afc28ce57f12bc9c2326d9d369908447170e938b0096691b10badf5a",
+                "source": "4490536ea34035da284c8a9aead1da3583930567"
+              },
+              "price_date": "2026-11-05",
+              "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+              "response_count": 8,
+              "settings": [
+                {
+                  "effort": "high",
+                  "model": "gpt-6.1-sol",
+                  "service_tier": "default"
+                }
+              ],
+              "telemetry_complete": true,
+              "tokens": {
+                "cache_write_input_tokens": 0,
+                "cached_input_tokens": 217216,
+                "fresh_input_tokens": 26014,
+                "input_tokens": 243230,
+                "output_tokens": 2198,
+                "reasoning_output_tokens": 73,
+                "total_tokens": 245428
+              }
+            },
+            "output_audit": {
+              "arm": "baseline",
+              "failed_interface_operations": [
+                {
+                  "args": [
+                    "docs/task-state.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "runtime/pr-reviewers.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "codex/skills/dk-pr-reviewers-run/SKILL.md"
+                  ],
+                  "command": "read"
+                }
+              ],
+              "forbidden_interface_operations": [],
+              "native_child_count": 0,
+              "native_json_quality": {
+                "duplicate_keys": [],
+                "parse_error": null,
+                "structured_json": true
+              },
+              "native_output_preserved_unchanged": true,
+              "native_phase_timing": {
+                "completed_at": "2026-11-05T15:04:19.923Z",
+                "started_at": "2026-11-05T15:03:12.888Z"
+              },
+              "native_task_output_bytes": 3327,
+              "native_task_output_sha256": "d7ce0b842005434de1bc26c5ea222e7f3ae361d23211568ae8bfb38de18957de",
+              "original_manifest_unchanged": true,
+              "pair": "p3",
+              "raw_usage_audit": {
+                "raw_response_sums_match": true,
+                "response_count": 8,
+                "totals": {
+                  "cache_write_input_tokens": 0,
+                  "cached_input_tokens": 217216,
+                  "input_tokens": 243230,
+                  "output_tokens": 2198,
+                  "reasoning_output_tokens": 73,
+                  "total_tokens": 245428
+                }
+              },
+              "retained_counters": {
+                "ci_repairs": {},
+                "ci_reruns": {},
+                "cycles": [
+                  "c1"
+                ],
+                "retries": {}
+              },
+              "scenario": "routing",
+              "semantic_correctness": "Requires separate independent raw-output review; trace receipts do not prove complete retrieval.",
+              "state_operations": [
+                [
+                  "status",
+                  "--run",
+                  "exercise",
+                  "--explain",
+                  "--spec",
+                  "reviewer-a",
+                  "--spec",
+                  "reviewer-b",
+                  "--spec",
+                  "history-review",
+                  "--spec",
+                  "optional-review",
+                  "--spec",
+                  "scope-partition",
+                  "--spec",
+                  "series-cleanup",
+                  "--spec",
+                  "ci",
+                  "--spec",
+                  "publication"
+                ]
+              ],
+              "unfinished_claim_count": 0
+            },
+            "runtime_hashes_sha256": "2ad0007b4c31564f61bd9a1ca91df2c661ff7a919cc1f54f8c75e7503aa7b068",
+            "scenario_sha256": "7cf80cc3afc28ce57f12bc9c2326d9d369908447170e938b0096691b10badf5a",
+            "source_pins": {
+              "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+              "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+              "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+              "runtime": "4490536ea34035da284c8a9aead1da3583930567",
+              "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+            },
+            "source_revision": "4490536ea34035da284c8a9aead1da3583930567",
+            "task_sha256": "6b6b34da23ad49f1b74d9255c1b5575191128ea5569bd5985f575bad5a957ddb"
+          },
+          "candidate": {
+            "context_sha256": "352da990f9e3ea615c8aebeb7c422483e3762ecc0b8ad9cfe81138a35114e276",
+            "guidance_sha256": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+            "measurement": {
+              "billing_basis": "API-equivalent estimate; not actual account billing",
+              "coordination_calls": 7,
+              "coordination_calls_definition": "All native tool calls by participating parent and descendants, including failed calls and batched operations; the role split is explicit.",
+              "estimated_api_cost_usd": "0.0864920",
+              "native_tool_calls_by_role": {
+                "descendants": 0,
+                "parent": 7
+              },
+              "participant_count": 1,
+              "pins": {
+                "guidance": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+                "scenario": "7cf80cc3afc28ce57f12bc9c2326d9d369908447170e938b0096691b10badf5a",
+                "source": "4490536ea34035da284c8a9aead1da3583930567"
+              },
+              "price_date": "2026-11-05",
+              "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+              "response_count": 8,
+              "settings": [
+                {
+                  "effort": "low",
+                  "model": "gpt-6.1-sol",
+                  "service_tier": "default"
+                }
+              ],
+              "telemetry_complete": true,
+              "tokens": {
+                "cache_write_input_tokens": 0,
+                "cached_input_tokens": 202240,
+                "fresh_input_tokens": 23544,
+                "input_tokens": 225784,
+                "output_tokens": 1918,
+                "reasoning_output_tokens": 37,
+                "total_tokens": 227702
+              }
+            },
+            "output_audit": {
+              "arm": "candidate",
+              "failed_interface_operations": [
+                {
+                  "args": [
+                    "docs/task-state.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "runtime/pr-reviewers.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "frozen/docs/task-state.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "frozen/runtime/pr-reviewers.md"
+                  ],
+                  "command": "read"
+                },
+                {
+                  "args": [
+                    "status",
+                    "--help"
+                  ],
+                  "command": "state"
+                }
+              ],
+              "forbidden_interface_operations": [],
+              "native_child_count": 0,
+              "native_json_quality": {
+                "duplicate_keys": [],
+                "parse_error": null,
+                "structured_json": true
+              },
+              "native_output_preserved_unchanged": true,
+              "native_phase_timing": {
+                "completed_at": "2026-11-05T15:05:35.824Z",
+                "started_at": "2026-11-05T15:04:36.383Z"
+              },
+              "native_task_output_bytes": 3040,
+              "native_task_output_sha256": "26d1d6e218063bc59b347f1885f2c247c61d297ab78611d93c811e8ef3a5f531",
+              "original_manifest_unchanged": true,
+              "pair": "p3",
+              "raw_usage_audit": {
+                "raw_response_sums_match": true,
+                "response_count": 8,
+                "totals": {
+                  "cache_write_input_tokens": 0,
+                  "cached_input_tokens": 202240,
+                  "input_tokens": 225784,
+                  "output_tokens": 1918,
+                  "reasoning_output_tokens": 37,
+                  "total_tokens": 227702
+                }
+              },
+              "retained_counters": {
+                "ci_repairs": {},
+                "ci_reruns": {},
+                "cycles": [
+                  "c1"
+                ],
+                "retries": {}
+              },
+              "scenario": "routing",
+              "semantic_correctness": "Requires separate independent raw-output review; trace receipts do not prove complete retrieval.",
+              "state_operations": [
+                [
+                  "status",
+                  "--run",
+                  "exercise"
+                ],
+                [
+                  "status",
+                  "--help"
+                ],
+                [
+                  "status",
+                  "--spec",
+                  "reviewer-a",
+                  "--run",
+                  "exercise"
+                ],
+                [
+                  "status",
+                  "--spec",
+                  "reviewer-b",
+                  "--run",
+                  "exercise"
+                ],
+                [
+                  "status",
+                  "--spec",
+                  "history-review",
+                  "--run",
+                  "exercise"
+                ],
+                [
+                  "status",
+                  "--spec",
+                  "optional-review",
+                  "--run",
+                  "exercise"
+                ],
+                [
+                  "status",
+                  "--spec",
+                  "scope-partition",
+                  "--run",
+                  "exercise"
+                ],
+                [
+                  "status",
+                  "--spec",
+                  "series-cleanup",
+                  "--run",
+                  "exercise"
+                ],
+                [
+                  "status",
+                  "--spec",
+                  "ci",
+                  "--run",
+                  "exercise"
+                ],
+                [
+                  "status",
+                  "--spec",
+                  "publication",
+                  "--run",
+                  "exercise"
+                ]
+              ],
+              "unfinished_claim_count": 0
+            },
+            "runtime_hashes_sha256": "2ad0007b4c31564f61bd9a1ca91df2c661ff7a919cc1f54f8c75e7503aa7b068",
+            "scenario_sha256": "7cf80cc3afc28ce57f12bc9c2326d9d369908447170e938b0096691b10badf5a",
+            "source_pins": {
+              "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+              "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+              "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+              "runtime": "4490536ea34035da284c8a9aead1da3583930567",
+              "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+            },
+            "source_revision": "4490536ea34035da284c8a9aead1da3583930567",
+            "task_sha256": "6b6b34da23ad49f1b74d9255c1b5575191128ea5569bd5985f575bad5a957ddb"
+          },
+          "order": [
+            "baseline",
+            "candidate"
+          ]
+        }
+      ],
+      "production_adoption": {
+        "accepted": false,
+        "candidate_guidance_removed": true,
+        "reason": "Current host has no evidenced native effort mutator for existing inline/root work. Spawn-only effort controls cannot be used to introduce an agent solely to lower routing effort. Policy selection/classification was not tested end to end."
+      },
+      "semantic_assessment_correctness_passed": true,
+      "source_and_control_pins": {
+        "governing_sha256": "518e25b24d429078a1b5eac1c863c267731f49f8f563683750f75f95030e48c6",
+        "guidance_sha256": "bfa446b012dae457ca990eaf2b251596967f19027c55f88be129a3a0f822e73d",
+        "original_preferences": {
+          "implementation": "98d96ee49c961e16ca005ee1f5668c312e5c8ffee1f5befa4852d3aeb4d85311",
+          "review": "061578afab382455e5d01c863046dafe3e5043d8fc2fce3fe5acbf3e2973670e"
+        },
+        "original_results": {
+          "initial/history-review.json": "94a779b08c20e0a55f175237146833bdc2cf4193a7e67e7223cd7804280c0617",
+          "initial/optional-review.json": "d71ae3cace9dffb4aefcbfab41e6374f1c25c0ed3d64db025eade029677be534",
+          "initial/progress.json": "5c37c1722e10b50abc9ee4ddae69d14227c7554f3051ce9b9d8543822bf5195d",
+          "initial/reviewer-a.json": "b581263c39b735fb7da92383fdafafe96fc308beb205e703de43c131b543af22",
+          "initial/reviewer-b.json": "94a779b08c20e0a55f175237146833bdc2cf4193a7e67e7223cd7804280c0617"
+        },
+        "runtime_hashes_sha256": "2ad0007b4c31564f61bd9a1ca91df2c661ff7a919cc1f54f8c75e7503aa7b068",
+        "scenario_sha256": "7cf80cc3afc28ce57f12bc9c2326d9d369908447170e938b0096691b10badf5a",
+        "source_pins": {
+          "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+          "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+          "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+          "runtime": "4490536ea34035da284c8a9aead1da3583930567",
+          "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+        },
+        "source_revision": "4490536ea34035da284c8a9aead1da3583930567",
+        "source_sha256": "cdf9616c26871fdf6b7a848b68bb3a6b6201720b455e0baf4fe934e54955855e"
+      },
+      "strict_adherence_passed": true,
+      "treatment": "high versus low"
+    }
+  },
+  "source_revision": "4490536ea34035da284c8a9aead1da3583930567",
+  "status": "rejected"
+}
