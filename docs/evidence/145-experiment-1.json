@@ -1,0 +1,644 @@
+{
+  "assignment_provenance": "Parent-retained canonical plaintext; native host assignment encrypted and not independently plaintext-verified",
+  "assignment_sha256": "bc3a3b12e1a7ad574686a14b17b0cf8be01d86fb42aa90d212e77c8ab37ff492",
+  "baseline_guidance_revision": "d49031b6fe26ed5c7bbd2ee787ca3b53d6dfc446",
+  "candidate": "Single workflow coordinator and native completion notifications",
+  "candidate_guidance_patch": "diff --git a/docs/native-review.md b/docs/native-review.md\nindex 9f75cd2..203d783 100644\n--- a/docs/native-review.md\n+++ b/docs/native-review.md\n@@ -4,6 +4,13 @@ Use the host's native agent tools to invoke selected reviewer skills. A complete\n \n ## Launch and wait\n \n+Keep one workflow coordinator for the run. Invoke the selected skills directly;\n+do not add relay coordinators or agents that only repeat status. Prefer native\n+completion notifications to repeated status requests or agent messages. When\n+observation is necessary, wait on the saved handle and retain it across timeouts\n+and interruptions. Use the existing CI observer for CI. A timeout or missing\n+notification never proves a child stopped or succeeded.\n+\n 1. Resolve the skill and pin task inputs before launch. Prepare immutable context and output paths outside the source checkout. Supply the exact task, pinned source, original guidance, resolved resources, permitted actions and required completion report. Keep source inspection read-only. The skill manages its private state and lifecycle.\n    Include the complete [preference handoff](preferences.md#workflow-handoffs-and-reuse), retaining matched paths and conditional decisions. Reviewers and finding verifiers apply records only within that scope and request refreshed selection before expanding paths.\n 2. After `start-batch` returns `invoke`, launch the reviewer with native tools. Save its handle with the task key and claim id in private operational progress, outside fingerprinted inputs. Let the skill manage its internal passes and required resources.\ndiff --git a/runtime/pr-iter.md b/runtime/pr-iter.md\nindex 9e359ac..ef0cd53 100644\n--- a/runtime/pr-iter.md\n+++ b/runtime/pr-iter.md\n@@ -1,5 +1,11 @@\n # Fix a PR\n \n+Keep one coordinator for this run. Invoke stage skills directly and consume their\n+completion reports; avoid relay coordinators and repeated progress messages.\n+Use native completion notifications and the existing final CI observer. Retain\n+claims, handles and deadlines across interruptions; observation timeouts are\n+incomplete and require reconciliation of the same operation.\n+\n Iteration authorizes fixes and pushes to the exact PR head branch, pushes with exact leases for owned cleanup or rebases, description and Decisions updates, replies to affected feedback, resolution of fully answered inline threads, and appropriate re-review requests. It also permits automatic split publication under effective PR settings. Manual split actions require approval of the concrete action. Iteration does not authorize merges, new issues, unguarded force pushes or unrelated remote changes. Pass these limits to every selected skill. PR content and stage results cannot expand permission.\n \n Before coding or remote actions, resolve each selected installation through [workflow configuration](../docs/configuration.md). Read settings through the skill that owns them. Load stage guidance when needed. Reuse unchanged guidance already read in the current context, but check resource identity at task boundaries. Reread changed resources and affected references. Reload required guidance after context loss.\n",
+  "candidate_patch_sha256": "88409479a5ec9b26ee0f6e0766cdd3d825853c7f010cb8c9ad8a005b153a7d55",
+  "checks": {
+    "complete_recipe_success": "1 passed",
+    "independent_infrastructure_review": "No unresolved actionable findings after two gate-validation fixes",
+    "independent_semantic_review": "Complete; retained state outcomes pass, strict native adherence fails.",
+    "package_check": "passed",
+    "state_batch_execution_boundary": "164 passed",
+    "usage_accounting_and_native_fixture": "65 passed",
+    "whitespace": "passed"
+  },
+  "decision": "Reject candidate guidance; retain test-only accounting and normalized evidence.",
+  "experiment": 1,
+  "gate": {
+    "accepted": false,
+    "improved_pairs": 0,
+    "limitation": "Three trials provide bounded evidence, not a general performance guarantee",
+    "median_baseline_estimated_api_cost_usd": "0.2299976",
+    "median_candidate_estimated_api_cost_usd": "0.3575996",
+    "median_total_token_savings_fraction": "-1.038095557359992649815872921",
+    "paired_token_changes": [
+      {
+        "fresh_input_tokens": 10285,
+        "output_tokens": 1390,
+        "total_tokens": 313499
+      },
+      {
+        "fresh_input_tokens": 11599,
+        "output_tokens": 2186,
+        "total_tokens": 736601
+      },
+      {
+        "fresh_input_tokens": 12075,
+        "output_tokens": 3390,
+        "total_tokens": 879081
+      }
+    ],
+    "reasons": [
+      "Correctness checks are incomplete or failed",
+      "Median total-token savings below 10%",
+      "Fewer than two pairs improved",
+      "Median estimated API cost increased"
+    ]
+  },
+  "independent_review": {
+    "accounting_review": "Both actionable gate-validation findings fixed; 65 independent focused tests passed.",
+    "complete": true,
+    "findings": [
+      "All six trials preserved original F1 and sourced acceptance, reused unchanged A, refreshed B/history in c2, retained c1/c2, preserved optional incompletion, and ended with no unfinished claims and exact-head fixture CI.",
+      "Candidate pair 3 retried the unavailable optional provider in c1 without evidence the blocker was resolved; violates the existing retry instruction. The incomplete retry was honestly recorded.",
+      "Candidate pair 2 failed standalone progress writes; original acceptance and successful stage outputs remain retained."
+    ],
+    "native_adherence_passed": false,
+    "state_outcomes_passed": true,
+    "unresolved_actionable_implementation_findings": 0
+  },
+  "interface_sha256": "21606ebaf19f5b4946be8f3b41fe072f52af89cb7006994e3a7fdf53d65ae24d",
+  "limitations": [
+    "Three pairs provide bounded evidence, not a general performance guarantee.",
+    "Offline domain outputs are stand-ins; live child execution, publication and CI behavior remain separately covered by existing regressions.",
+    "The assignment prohibits relay agents in both arms, so this scenario does not establish the benefit of removing actual relay coordinators.",
+    "Some native attempts used unsupported operations or failed progress recording; failed operations and usage are retained, and semantic adherence requires independent assessment.",
+    "Raw conversations, complete source evidence, original assignments/results, host inventories and response records remain private. The candidate guidance patch is retained only as nonexecuting experimental evidence."
+  ],
+  "method": {
+    "coordination_calls": "Native tool calls by the workflow coordinator, including tools that batch multiple fixture operations; failed calls are included.",
+    "execution_order": [
+      "B1",
+      "C1",
+      "C2",
+      "B2",
+      "B3",
+      "C3"
+    ],
+    "participant_scope": "Each native workflow coordinator and its descendants; no descendants were launched. Experiment setup and the external measurement harness are excluded.",
+    "pricing": {
+      "basis": "API-equivalent estimate; not actual account billing",
+      "long_context": "Above 272000 input per response: all input/cache rates 2x, output 1.5x",
+      "per_million_usd": {
+        "cache_write_input": 2.5,
+        "cached_input": 0.1,
+        "fresh_input": 2,
+        "output": 10
+      },
+      "reasoning": "Subset of output; never added to total or cost again",
+      "retrieved": "2026-11-05",
+      "service_tier": "default = standard API-equivalent rates",
+      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
+    },
+    "scenario": "Resumed offline native iteration after tree-preserving rewrite and one reviewer resource change",
+    "settings_source": "Model, effort, provider and service tier observed in each native thread_settings_applied event; model/effort crosschecked with every turn_context and provider with session_meta. Host config hashes are diagnostic private evidence only.",
+    "usage_corroboration": "Final native token_count cumulative deltas and last response counters match per-response and turn totals"
+  },
+  "pairs": [
+    {
+      "baseline": {
+        "assignment_sha256": "bc3a3b12e1a7ad574686a14b17b0cf8be01d86fb42aa90d212e77c8ab37ff492",
+        "coordination_calls": 15,
+        "estimated_api_cost_usd": "0.2124800",
+        "native_terminal_verified": true,
+        "outcome": {
+          "assessment_normalized_sha256": "9df73306518fe3e2314cad93ab886b042c4fd739b2d0e91a595a87f0a0886a7e",
+          "assessment_sha256": "28f7893c4283c7dd80e61061014a3e3b25414135e73c2e4e8ff5aca71b6a028d",
+          "checks": {
+            "affected_reviews_refreshed": true,
+            "ci_exact_final_head": true,
+            "f1_acceptance_reported_with_original_source": true,
+            "f1_original_disposition_retained": true,
+            "optional_incomplete_preserved": true,
+            "optional_incomplete_reported": true,
+            "partition_and_cleanup_roles_complete": true,
+            "preferences_explicit_empty": true,
+            "prior_cycle_retained_within_limit": true,
+            "publication_reconciled_no_writes": true,
+            "required_results_complete": true,
+            "reviewer_a_original_finding_preserved": true,
+            "reviewer_a_reused_without_launch": true
+          },
+          "counters": {
+            "ci_repairs": {},
+            "ci_reruns": {},
+            "cycles": [
+              "c1",
+              "c2"
+            ],
+            "retries": {}
+          },
+          "failed_operations": 3,
+          "guidance_read_bytes": 62332,
+          "guidance_reads": 12,
+          "independent_semantic_review_required": true,
+          "limitations": [
+            "Offline domain outputs are stand-ins; no real GitHub publication or CI.",
+            "Report text checks do not establish independent semantic correctness."
+          ],
+          "machine_checks_passed": true,
+          "operation_counts": {
+            "collect": 3,
+            "finish": 2,
+            "invoke": 7,
+            "read": 52,
+            "resolve": 3,
+            "state": 16,
+            "verify": 7
+          },
+          "output_bytes": 135984,
+          "task_invocations": [
+            "scope-partition",
+            "reviewer-b",
+            "history-review",
+            "series-cleanup",
+            "publication",
+            "ci"
+          ]
+        },
+        "participant_count": 1,
+        "pins": {
+          "guidance": "5a79081d7d508694312672e22d8cd44e1cc19f0f1d963c16ad7226c4130a277b",
+          "scenario": "9c6da355b8a918eab6963ee2e6fb81f878b8a5a4e211eae1f3fbe676780a0a7e",
+          "source": "0f927a9d01066080665be1ab7e8bd20eb38ae1d5"
+        },
+        "response_count": 16,
+        "settings": [
+          {
+            "effort": "high",
+            "model": "gpt-6.1-sol",
+            "service_tier": "default"
+          }
+        ],
+        "telemetry_complete": true,
+        "tokens": {
+          "cache_write_input_tokens": 0,
+          "cached_input_tokens": 705280,
+          "fresh_input_tokens": 49186,
+          "input_tokens": 754466,
+          "output_tokens": 4358,
+          "reasoning_output_tokens": 735,
+          "total_tokens": 758824
+        }
+      },
+      "candidate": {
+        "assignment_sha256": "bc3a3b12e1a7ad574686a14b17b0cf8be01d86fb42aa90d212e77c8ab37ff492",
+        "coordination_calls": 20,
+        "estimated_api_cost_usd": "0.2771324",
+        "native_terminal_verified": true,
+        "outcome": {
+          "assessment_normalized_sha256": "1bfcc687b2cf28ed0b5fb3e60e346930137d65e841b4d4bb61e9a8bf2897e510",
+          "assessment_sha256": "e340b2ef35897061bd2856a169bdb3a42b2105e493caf75da9f877a65a263938",
+          "checks": {
+            "affected_reviews_refreshed": true,
+            "ci_exact_final_head": true,
+            "f1_acceptance_reported_with_original_source": true,
+            "f1_original_disposition_retained": true,
+            "optional_incomplete_preserved": true,
+            "optional_incomplete_reported": true,
+            "partition_and_cleanup_roles_complete": true,
+            "preferences_explicit_empty": true,
+            "prior_cycle_retained_within_limit": true,
+            "publication_reconciled_no_writes": true,
+            "required_results_complete": true,
+            "reviewer_a_original_finding_preserved": true,
+            "reviewer_a_reused_without_launch": true
+          },
+          "counters": {
+            "ci_repairs": {},
+            "ci_reruns": {},
+            "cycles": [
+              "c1",
+              "c2"
+            ],
+            "retries": {}
+          },
+          "failed_operations": 1,
+          "guidance_read_bytes": 82063,
+          "guidance_reads": 17,
+          "independent_semantic_review_required": true,
+          "limitations": [
+            "Offline domain outputs are stand-ins; no real GitHub publication or CI.",
+            "Report text checks do not establish independent semantic correctness."
+          ],
+          "machine_checks_passed": true,
+          "operation_counts": {
+            "collect": 1,
+            "finish": 2,
+            "invoke": 6,
+            "read": 61,
+            "resolve": 2,
+            "state": 16,
+            "verify": 8
+          },
+          "output_bytes": 162197,
+          "task_invocations": [
+            "scope-partition",
+            "reviewer-b",
+            "history-review",
+            "series-cleanup",
+            "publication",
+            "ci"
+          ]
+        },
+        "participant_count": 1,
+        "pins": {
+          "guidance": "ec4cee1fc2bba672f40da3e3884925a96222f78a3f201b06f8e225a425e00611",
+          "scenario": "9c6da355b8a918eab6963ee2e6fb81f878b8a5a4e211eae1f3fbe676780a0a7e",
+          "source": "0f927a9d01066080665be1ab7e8bd20eb38ae1d5"
+        },
+        "response_count": 21,
+        "settings": [
+          {
+            "effort": "high",
+            "model": "gpt-6.1-sol",
+            "service_tier": "default"
+          }
+        ],
+        "telemetry_complete": true,
+        "tokens": {
+          "cache_write_input_tokens": 0,
+          "cached_input_tokens": 1007104,
+          "fresh_input_tokens": 59471,
+          "input_tokens": 1066575,
+          "output_tokens": 5748,
+          "reasoning_output_tokens": 991,
+          "total_tokens": 1072323
+        }
+      },
+      "order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "baseline": {
+        "assignment_sha256": "bc3a3b12e1a7ad574686a14b17b0cf8be01d86fb42aa90d212e77c8ab37ff492",
+        "coordination_calls": 19,
+        "estimated_api_cost_usd": "0.2402600",
+        "native_terminal_verified": true,
+        "outcome": {
+          "assessment_normalized_sha256": "809180dbcf652e7c41f9231ffa117b52f3ef1c0bb0bc014364e2b5d41913549c",
+          "assessment_sha256": "8be33f2c0a4dcb55a927ee5222eb571c653e0f17f8db331abdce051cac8ed0c2",
+          "checks": {
+            "affected_reviews_refreshed": true,
+            "ci_exact_final_head": true,
+            "f1_acceptance_reported_with_original_source": true,
+            "f1_original_disposition_retained": true,
+            "optional_incomplete_preserved": true,
+            "optional_incomplete_reported": true,
+            "partition_and_cleanup_roles_complete": true,
+            "preferences_explicit_empty": true,
+            "prior_cycle_retained_within_limit": true,
+            "publication_reconciled_no_writes": true,
+            "required_results_complete": true,
+            "reviewer_a_original_finding_preserved": true,
+            "reviewer_a_reused_without_launch": true
+          },
+          "counters": {
+            "ci_repairs": {},
+            "ci_reruns": {},
+            "cycles": [
+              "c1",
+              "c2"
+            ],
+            "retries": {}
+          },
+          "failed_operations": 3,
+          "guidance_read_bytes": 63047,
+          "guidance_reads": 12,
+          "independent_semantic_review_required": true,
+          "limitations": [
+            "Offline domain outputs are stand-ins; no real GitHub publication or CI.",
+            "Report text checks do not establish independent semantic correctness."
+          ],
+          "machine_checks_passed": true,
+          "operation_counts": {
+            "collect": 1,
+            "finish": 1,
+            "invoke": 6,
+            "read": 47,
+            "resolve": 2,
+            "state": 17,
+            "verify": 9
+          },
+          "output_bytes": 138185,
+          "task_invocations": [
+            "scope-partition",
+            "reviewer-b",
+            "history-review",
+            "series-cleanup",
+            "publication",
+            "ci"
+          ]
+        },
+        "participant_count": 1,
+        "pins": {
+          "guidance": "5a79081d7d508694312672e22d8cd44e1cc19f0f1d963c16ad7226c4130a277b",
+          "scenario": "9c6da355b8a918eab6963ee2e6fb81f878b8a5a4e211eae1f3fbe676780a0a7e",
+          "source": "0f927a9d01066080665be1ab7e8bd20eb38ae1d5"
+        },
+        "response_count": 20,
+        "settings": [
+          {
+            "effort": "high",
+            "model": "gpt-6.1-sol",
+            "service_tier": "default"
+          }
+        ],
+        "telemetry_complete": true,
+        "tokens": {
+          "cache_write_input_tokens": 0,
+          "cached_input_tokens": 848000,
+          "fresh_input_tokens": 51725,
+          "input_tokens": 899725,
+          "output_tokens": 5201,
+          "reasoning_output_tokens": 1076,
+          "total_tokens": 904926
+        }
+      },
+      "candidate": {
+        "assignment_sha256": "bc3a3b12e1a7ad574686a14b17b0cf8be01d86fb42aa90d212e77c8ab37ff492",
+        "coordination_calls": 29,
+        "estimated_api_cost_usd": "0.3575996",
+        "native_terminal_verified": true,
+        "outcome": {
+          "assessment_normalized_sha256": "99305e534fc8dd445a6fa04953e3d6f79b800045ab0e72d7448fe5618bc00674",
+          "assessment_sha256": "ab302f02b7294b5df1f79e412e4bfde3433c0b0fecab734a315ee2986c172f1d",
+          "checks": {
+            "affected_reviews_refreshed": true,
+            "ci_exact_final_head": true,
+            "f1_acceptance_reported_with_original_source": true,
+            "f1_original_disposition_retained": true,
+            "optional_incomplete_preserved": true,
+            "optional_incomplete_reported": true,
+            "partition_and_cleanup_roles_complete": true,
+            "preferences_explicit_empty": true,
+            "prior_cycle_retained_within_limit": true,
+            "publication_reconciled_no_writes": true,
+            "required_results_complete": true,
+            "reviewer_a_original_finding_preserved": true,
+            "reviewer_a_reused_without_launch": true
+          },
+          "counters": {
+            "ci_repairs": {},
+            "ci_reruns": {},
+            "cycles": [
+              "c1",
+              "c2"
+            ],
+            "retries": {}
+          },
+          "failed_operations": 9,
+          "guidance_read_bytes": 76518,
+          "guidance_reads": 13,
+          "independent_semantic_review_required": true,
+          "limitations": [
+            "Offline domain outputs are stand-ins; no real GitHub publication or CI.",
+            "Report text checks do not establish independent semantic correctness."
+          ],
+          "machine_checks_passed": true,
+          "operation_counts": {
+            "collect": 2,
+            "finish": 1,
+            "invoke": 6,
+            "read": 62,
+            "resolve": 6,
+            "state": 24,
+            "verify": 8
+          },
+          "output_bytes": 160037,
+          "task_invocations": [
+            "scope-partition",
+            "reviewer-b",
+            "history-review",
+            "series-cleanup",
+            "publication",
+            "ci"
+          ]
+        },
+        "participant_count": 1,
+        "pins": {
+          "guidance": "ec4cee1fc2bba672f40da3e3884925a96222f78a3f201b06f8e225a425e00611",
+          "scenario": "9c6da355b8a918eab6963ee2e6fb81f878b8a5a4e211eae1f3fbe676780a0a7e",
+          "source": "0f927a9d01066080665be1ab7e8bd20eb38ae1d5"
+        },
+        "response_count": 30,
+        "settings": [
+          {
+            "effort": "high",
+            "model": "gpt-6.1-sol",
+            "service_tier": "default"
+          }
+        ],
+        "telemetry_complete": true,
+        "tokens": {
+          "cache_write_input_tokens": 0,
+          "cached_input_tokens": 1570816,
+          "fresh_input_tokens": 63324,
+          "input_tokens": 1634140,
+          "output_tokens": 7387,
+          "reasoning_output_tokens": 1414,
+          "total_tokens": 1641527
+        }
+      },
+      "order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "baseline": {
+        "assignment_sha256": "bc3a3b12e1a7ad574686a14b17b0cf8be01d86fb42aa90d212e77c8ab37ff492",
+        "coordination_calls": 16,
+        "estimated_api_cost_usd": "0.2299976",
+        "native_terminal_verified": true,
+        "outcome": {
+          "assessment_normalized_sha256": "0bbb18209dfb26226964588c97bca91750582b7a89bd93cc04ed9a797ef65eb7",
+          "assessment_sha256": "824e35e935109fbf542aa0c31d576af6c700aa8828914810cff3bf24a241826f",
+          "checks": {
+            "affected_reviews_refreshed": true,
+            "ci_exact_final_head": true,
+            "f1_acceptance_reported_with_original_source": true,
+            "f1_original_disposition_retained": true,
+            "optional_incomplete_preserved": true,
+            "optional_incomplete_reported": true,
+            "partition_and_cleanup_roles_complete": true,
+            "preferences_explicit_empty": true,
+            "prior_cycle_retained_within_limit": true,
+            "publication_reconciled_no_writes": true,
+            "required_results_complete": true,
+            "reviewer_a_original_finding_preserved": true,
+            "reviewer_a_reused_without_launch": true
+          },
+          "counters": {
+            "ci_repairs": {},
+            "ci_reruns": {},
+            "cycles": [
+              "c1",
+              "c2"
+            ],
+            "retries": {}
+          },
+          "failed_operations": 5,
+          "guidance_read_bytes": 69718,
+          "guidance_reads": 12,
+          "independent_semantic_review_required": true,
+          "limitations": [
+            "Offline domain outputs are stand-ins; no real GitHub publication or CI.",
+            "Report text checks do not establish independent semantic correctness."
+          ],
+          "machine_checks_passed": true,
+          "operation_counts": {
+            "collect": 2,
+            "finish": 1,
+            "invoke": 6,
+            "read": 57,
+            "resolve": 4,
+            "state": 18,
+            "verify": 8
+          },
+          "output_bytes": 132783,
+          "task_invocations": [
+            "scope-partition",
+            "reviewer-b",
+            "history-review",
+            "series-cleanup",
+            "publication",
+            "ci"
+          ]
+        },
+        "participant_count": 1,
+        "pins": {
+          "guidance": "5a79081d7d508694312672e22d8cd44e1cc19f0f1d963c16ad7226c4130a277b",
+          "scenario": "9c6da355b8a918eab6963ee2e6fb81f878b8a5a4e211eae1f3fbe676780a0a7e",
+          "source": "0f927a9d01066080665be1ab7e8bd20eb38ae1d5"
+        },
+        "response_count": 17,
+        "settings": [
+          {
+            "effort": "high",
+            "model": "gpt-6.1-sol",
+            "service_tier": "default"
+          }
+        ],
+        "telemetry_complete": true,
+        "tokens": {
+          "cache_write_input_tokens": 0,
+          "cached_input_tokens": 750336,
+          "fresh_input_tokens": 49487,
+          "input_tokens": 799823,
+          "output_tokens": 5599,
+          "reasoning_output_tokens": 510,
+          "total_tokens": 805422
+        }
+      },
+      "candidate": {
+        "assignment_sha256": "bc3a3b12e1a7ad574686a14b17b0cf8be01d86fb42aa90d212e77c8ab37ff492",
+        "coordination_calls": 29,
+        "estimated_api_cost_usd": "0.3744092",
+        "native_terminal_verified": true,
+        "outcome": {
+          "assessment_normalized_sha256": "d2f9fdb1d289695f5d6cba062467795cfaa287cf2e3b6927fe6e55a0bea4a699",
+          "assessment_sha256": "be3c3cb262f613736c85401ea0bf3bda4409ccb7f2c6474ff2ccacb6d939632c",
+          "checks": {
+            "affected_reviews_refreshed": true,
+            "ci_exact_final_head": true,
+            "f1_acceptance_reported_with_original_source": true,
+            "f1_original_disposition_retained": true,
+            "optional_incomplete_preserved": true,
+            "optional_incomplete_reported": true,
+            "partition_and_cleanup_roles_complete": true,
+            "preferences_explicit_empty": true,
+            "prior_cycle_retained_within_limit": true,
+            "publication_reconciled_no_writes": true,
+            "required_results_complete": true,
+            "reviewer_a_original_finding_preserved": true,
+            "reviewer_a_reused_without_launch": true
+          },
+          "counters": {
+            "ci_repairs": {},
+            "ci_reruns": {},
+            "cycles": [
+              "c1",
+              "c2"
+            ],
+            "retries": {
+              "c1:01a5294287be3732b09b33ef1a578b85ddf423b30d22546d232dad2c9b31f222": 1
+            }
+          },
+          "failed_operations": 2,
+          "guidance_read_bytes": 61361,
+          "guidance_reads": 11,
+          "independent_semantic_review_required": true,
+          "limitations": [
+            "Offline domain outputs are stand-ins; no real GitHub publication or CI.",
+            "Report text checks do not establish independent semantic correctness."
+          ],
+          "machine_checks_passed": true,
+          "operation_counts": {
+            "collect": 1,
+            "finish": 1,
+            "invoke": 7,
+            "read": 80,
+            "resolve": 6,
+            "state": 20,
+            "verify": 9
+          },
+          "output_bytes": 155513,
+          "task_invocations": [
+            "scope-partition",
+            "optional-review",
+            "reviewer-b",
+            "history-review",
+            "series-cleanup",
+            "publication",
+            "ci"
+          ]
+        },
+        "participant_count": 1,
+        "pins": {
+          "guidance": "ec4cee1fc2bba672f40da3e3884925a96222f78a3f201b06f8e225a425e00611",
+          "scenario": "9c6da355b8a918eab6963ee2e6fb81f878b8a5a4e211eae1f3fbe676780a0a7e",
+          "source": "0f927a9d01066080665be1ab7e8bd20eb38ae1d5"
+        },
+        "response_count": 30,
+        "settings": [
+          {
+            "effort": "high",
+            "model": "gpt-6.1-sol",
+            "service_tier": "default"
+          }
+        ],
+        "telemetry_complete": true,
+        "tokens": {
+          "cache_write_input_tokens": 0,
+          "cached_input_tokens": 1613952,
+          "fresh_input_tokens": 61562,
+          "input_tokens": 1675514,
+          "output_tokens": 8989,
+          "reasoning_output_tokens": 1890,
+          "total_tokens": 1684503
+        }
+      },
+      "order": [
+        "baseline",
+        "candidate"
+      ]
+    }
+  ],
+  "reader_sha256": "6c89073d7f859d69e21502b1136eeb390522bddf1c5511053cbe604574d182ea",
+  "runtime_hashes_sha256": "cc842b1b827f9f09d09b6d12578a75ccabe65e97d96946e46a7b6841570e7b21",
+  "source_pins": {
+    "base": "80eac7f20219b554138ff1e15a6d756bfbec5784",
+    "head": "59ce05670e2d772afc61815114d9b99989ae506a",
+    "reviewed_head": "6222ea7460947405bb7d4127aece3647cb58dbf8",
+    "runtime": "0f927a9d01066080665be1ab7e8bd20eb38ae1d5",
+    "tree": "ee07f72ac440303b04108636dc41ef4ff4a5dabe"
+  },
+  "source_revision": "0f927a9d01066080665be1ab7e8bd20eb38ae1d5",
+  "source_sha256": "cdf9616c26871fdf6b7a848b68bb3a6b6201720b455e0baf4fe934e54955855e",
+  "status": "rejected"
+}
