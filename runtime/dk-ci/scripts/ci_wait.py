@@ -99,7 +99,8 @@ def wait(pr, head, repo=None, timeout=1800, interval=30, no_checks_grace=60,
         if on_progress and (result["result"] != last_reported_state or
                             elapsed - last_reported_elapsed >= 60):
             on_progress({"result": result["result"], "head": head,
-                         "elapsed_seconds": round(elapsed, 1), "check_count": len(result["checks"])})
+                         "elapsed_seconds": round(elapsed, 1), "check_count": len(result["checks"]),
+                         **({"observer_receipt": budget["observer_receipt"]} if "observer_receipt" in budget else {})})
             last_reported_elapsed = elapsed
             last_reported_state = result["result"]
         sleep(min(interval, remaining))
@@ -122,27 +123,31 @@ def main():
     parser.add_argument("--no-checks-grace", type=int, default=60)
     parser.add_argument('--rerun-operation', help='Verified ci-rerun publication operation authorizing one new attempt window')
     parser.add_argument('--retry-denied', action='store_true', help='Explicitly retry observation after repairing denied read access')
+    parser.add_argument('--receipt', action='store_true', help='Retain a private observer receipt with deadline, state and final evidence')
     args = parser.parse_args()
     if args.classification_timeout <= 0:
         parser.error("classification timeout must be positive")
     try:
         with for_pr(args.pr, args.head, args.repo, timeout=args.timeout,
-                    rerun=args.rerun_operation, retry_denied=args.retry_denied) as observation:
+                    rerun=args.rerun_operation, retry_denied=args.retry_denied, receipt=args.receipt) as observation:
             result = wait(args.pr, args.head, args.repo, args.timeout, args.interval,
                           args.no_checks_grace, observation=observation,
                           on_progress=lambda update: print(json.dumps(update, sort_keys=True),
                                                            file=sys.stderr, flush=True))
-        if result["result"] in {"success", "failure"}:
-            print(json.dumps({"phase": "terminal", "raw_result": result["result"],
-                              "head": result["head"], "elapsed_seconds": result.get("elapsed_seconds"),
-                              "check_count": len(result["checks"])},
-                             sort_keys=True), file=sys.stderr, flush=True)
-            repo = pr_repository(result.get("url") or args.pr, args.repo)
-            result = decide(GitHub(repo), Registry(repo, Path.cwd()), result,
-                            lambda: observe(args.pr, args.head, args.repo),
-                            classification_timeout=args.classification_timeout,
-                            on_progress=lambda update: print(json.dumps(update, sort_keys=True),
-                                                             file=sys.stderr, flush=True))
+            if result["result"] in {"success", "failure"}:
+                print(json.dumps({"phase": "terminal", "raw_result": result["result"],
+                                  "head": result["head"], "elapsed_seconds": result.get("elapsed_seconds"),
+                                  "check_count": len(result["checks"])},
+                                 sort_keys=True), file=sys.stderr, flush=True)
+                repo = pr_repository(result.get("url") or args.pr, args.repo)
+                result = decide(GitHub(repo), Registry(repo, Path.cwd()), result,
+                                lambda: observe(args.pr, args.head, args.repo),
+                                classification_timeout=args.classification_timeout,
+                                on_progress=lambda update: print(json.dumps(update, sort_keys=True),
+                                                                 file=sys.stderr, flush=True))
+            reference = observation.finish(result)
+            if reference:
+                result['observer_receipt'] = reference
     except (RuntimeError, ValueError, OSError, KeyError, subprocess.TimeoutExpired) as exc:
         parser.exit(2, json.dumps({"result": "error", "message": str(exc)}) + "\n")
     print(json.dumps(result, sort_keys=True))

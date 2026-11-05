@@ -20,6 +20,7 @@ def assess(root, experiment):
     manifest = verified['manifest']
     scenario = verified['scenario']
     problems = []
+    ci_evidence = None
     if not verified['frozen_intact'] or not verified['inputs_intact']:
         problems.append('Frozen runtime/guidance/inputs changed')
     if assessment.get('complete') is not True or (assessment.get('blockers') and experiment != 3):
@@ -99,16 +100,49 @@ def assess(root, experiment):
                 problems.append('CI observation identity changed')
             if observation.get('last_result',{}).get('result') != 'success':
                 problems.append('CI did not observe successful exact-head checks')
-            if observation.get('deadline') != observation['started'] + observation['window_seconds']:
-                problems.append('CI deadline was reset or unnecessarily extended')
+            if (observation.get('extensions') not in (0,1) or observation.get('deadline') !=
+                    observation['started'] + observation['window_seconds'] +
+                    observation['extensions'] * observation['extension_seconds']):
+                problems.append('CI deadline does not match its retained window and extension')
+            pending = []
+            def windows(value):
+                if isinstance(value, dict):
+                    if {'head','pr','started','deadline','window_seconds','extension_seconds','extensions'} <= value.keys():
+                        if value.get('last_result',{}).get('result') == 'pending':
+                            pending.append(value)
+                    for child in value.values():
+                        windows(child)
+                elif isinstance(value, list):
+                    for child in value:
+                        windows(child)
+            for path in (root/'artifacts').rglob('*.json'):
+                try:
+                    windows(json.loads(path.read_text()))
+                except ValueError:
+                    pass
+            identity = ('id','head','pr','started','window_seconds','extension_seconds','rerun')
+            if not pending or any(any(old.get(k) != observation.get(k) for k in identity) or
+                                  old['extensions'] > observation['extensions'] for old in pending):
+                problems.append('Pending observer identity/window was not retained through resume')
+            ci_evidence = {k:observation.get(k) for k in (*identity,'deadline','extensions')}
+            ci_evidence['pending_snapshot_count'] = len(pending)
+            ci_evidence['terminal_result'] = observation.get('last_result',{}).get('result')
+            receipt = observation.get('receipt')
+            if receipt:
+                if receipt.get('state') != 'success' or receipt.get('final_evidence',{}).get('result') != 'success':
+                    problems.append('Retained receipt lacks terminal policy evidence')
+                ci_evidence['receipt_version'] = receipt.get('receipt_version')
+                ci_evidence['final_evidence_sha256'] = sha(json.dumps(receipt.get('final_evidence'),sort_keys=True).encode())
         transport = json.loads((root/'ci-transport.json').read_text()) if (root/'ci-transport.json').exists() else {}
-        if transport.get('checks',0) < 3:
+        buckets = [e['bucket'] for e in transport.get('events',[]) if 'bucket' in e]
+        if transport.get('checks',0) < 3 or buckets[:2] != ['pending','pending'] or 'pass' not in buckets[2:]:
             problems.append('Pending and terminal CI transports were not both consumed')
     result_refs = [{'task':r['task'],'status':r['status'],'normalized':r['normalized'],
                     'original_sha256':sha(r['original'].encode())} for r in verified['results']]
     return {'passed':not problems,'problems':problems,'frozen_intact':verified['frozen_intact'],
             'inputs_intact':verified['inputs_intact'],
             'assessment_sha256':sha((root/'artifacts/assessment.json').read_bytes()) if assessment else None,
+            'ci_evidence':ci_evidence,
             'native_complete':assessment.get('complete'), 'native_blockers':assessment.get('blockers'),
             'exact_acceptance':scenario.get('acceptance'), 'acceptance_source':scenario.get('source'),
             'results':result_refs,

@@ -37,12 +37,13 @@ class PermissionDenied(RuntimeError):
 
 class Observation:
     def __init__(self, path, pr, head, *, timeout=1800, extension=1800,
-                 rerun=None, retry_denied=False, clock=time.time):
+                 rerun=None, retry_denied=False, receipt=False, clock=time.time):
         if timeout < 0 or extension < 0:
             raise ValueError('invalid CI observation duration')
         self.path, self.pr, self.head = Path(path), pr, head
         self.timeout, self.extension, self.clock = timeout, extension, clock
         self.rerun, self.retry_denied = rerun, retry_denied
+        self.receipt_enabled = receipt
 
     @staticmethod
     def validate_window(value):
@@ -111,6 +112,12 @@ class Observation:
                 raise PermissionDenied('CI access was denied; repair access and explicitly retry with --retry-denied')
             if self.retry_denied:
                 self.current.pop('permission_denied', None)
+            self.receipt_enabled = self.receipt_enabled or 'receipt' in self.current
+            if self.receipt_enabled:
+                self.current['receipt_state'] = 'observing'
+                self.current['receipt_owner'] = {'pid': os.getpid(), 'started': self.clock()}
+                self.current.pop('final_evidence', None)
+                self.current.pop('receipt_error', None)
             self.persist()
             self.token = ACTIVE.set(self)
             return self
@@ -118,19 +125,56 @@ class Observation:
             self.lock.close()
             raise
 
-    def __exit__(self, *args):
-        ACTIVE.reset(self.token)
-        self.lock.close()
+    def __exit__(self, kind, error, traceback):
+        try:
+            if error is not None and self.receipt_enabled:
+                self.current['receipt_state'] = ('permission_denied' if self.current.get('permission_denied')
+                                                  else 'interrupted' if isinstance(error, KeyboardInterrupt) else 'error')
+                self.current['receipt_error'] = {'type': type(error).__name__, 'message': str(error)}
+                self.persist()
+        finally:
+            ACTIVE.reset(self.token)
+            self.lock.close()
 
     def bind(self, url):
         if url and canonical(url)[1] != self.pr:
             raise ValueError('CI observation canonical PR identity changed')
 
+    def receipt_ref(self):
+        return {'path': str(self.path), 'pointer': '/current/receipt'} if self.receipt_enabled else None
+
     def persist(self):
+        if self.receipt_enabled:
+            self.current['receipt'] = {
+                'receipt_version': 1,
+                'identity': {'pr': self.pr, 'head': self.head,
+                             'observation_id': self.current.get('id'), 'rerun': self.current.get('rerun')},
+                'owner': self.current.get('receipt_owner'),
+                'started': self.current['started'], 'deadline': self.current['deadline'],
+                'extensions': self.current['extensions'],
+                'state': self.current.get('receipt_state', 'observing'),
+                'last_observation': self.current.get('last_result'),
+                'final_evidence': self.current.get('final_evidence'),
+                'error': self.current.get('receipt_error'),
+                'requires_live_refresh': True}
         write(self.path, self.state)
+
+    def finish(self, result):
+        if not self.receipt_enabled:
+            return None
+        if result.get('head') != self.head or result.get('result') not in {
+                'success','known_flakes','accepted_exceptions','failure','timeout','no_checks','head_changed','error'}:
+            raise ValueError('CI receipt needs a terminal result for the observed head')
+        self.current['receipt_state'] = result['result']
+        self.current['final_evidence'] = copy.deepcopy(result)
+        self.persist()
+        return self.receipt_ref()
 
     def denied(self, exc):
         self.current['permission_denied'] = {'at': self.clock(), 'reason': str(exc)}
+        if self.receipt_enabled:
+            self.current['receipt_state'] = 'permission_denied'
+            self.current['receipt_error'] = {'type': type(exc).__name__, 'message': str(exc)}
         self.persist()
 
     def update(self, result, progress=None):
@@ -145,6 +189,8 @@ class Observation:
             self.current['id'] = digest({key: self.current[key] for key in ('pr', 'head', 'rerun', 'attempts')})
         self.current['latest_attempts'] = attempts
         self.current['last_result'] = result
+        if self.receipt_enabled:
+            self.current['receipt_state'] = result['result']
         if (result['result'] == 'pending' and now >= self.current['deadline']
                 and self.current['extensions'] == 0 and self.current['extension_seconds'] > 0):
             self.current['extensions'] = 1
@@ -159,7 +205,8 @@ class Observation:
         return {'elapsed_seconds': round(now - self.current['started'], 1),
                 'remaining_seconds': max(0, self.current['deadline'] - now),
                 'extensions': self.current['extensions'], 'observation_id': self.current['id'],
-                'deadline': self.current['deadline']}
+                'deadline': self.current['deadline'],
+                **({'observer_receipt': self.receipt_ref()} if self.receipt_enabled else {})}
 
 
 def canonical(pr, repo=None):
@@ -220,6 +267,11 @@ class NumberedObservation:
         if self.bound is None:
             self.bind(result.get('url'))
         return self.bound.update(result, progress)
+
+    def finish(self, result):
+        if self.bound is None:
+            raise ValueError('CI receipt requires resolved canonical identity')
+        return self.bound.finish(result)
 
     def denied(self, exc):
         write(self.alias, {'permission_denied': {'at': time.time(), 'reason': str(exc)}})
