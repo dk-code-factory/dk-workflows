@@ -1,0 +1,982 @@
+{
+  "baseline": "0f927a9d01066080665be1ab7e8bd20eb38ae1d5",
+  "decisions": {
+    "1": "keep",
+    "2": "drop",
+    "3": "keep",
+    "4": "drop",
+    "5": "drop",
+    "6": "keep"
+  },
+  "execution": {
+    "assignment_equal_except_arm_path": true,
+    "assignment_template_sha256": "202fb1683612f8d70cd1ebaa803ecf3ae83b931196ec0867d74c5f1f5ac555c8",
+    "fork_turns": "none",
+    "fresh_native_runs": 14,
+    "host": "Codex collaboration native agents",
+    "network_and_remote_service_calls": false,
+    "requested_model_and_effort": "inherited; no overrides",
+    "resolved_effort": null,
+    "resolved_model": null
+  },
+  "measurement_notes": [
+    "One sample per arm; no tokens, latency, production speed or generalized adherence claims.",
+    "Instruction bytes are exact successful guidance reads; repeated reads count again. Metadata/source/task reads are excluded.",
+    "Inspection operations are native git/inspect operations excluding update-ref/reset/commit/add/checkout/switch/push/read-tree/update-index/rebase. Git config absence reads count, including expected failures.",
+    "Recorded Git calls include transport Git calls and helper-internal trace2 start events. They exclude Git subprocesses inside test bodies and environment version probes.",
+    "Applications count apply dispatches, including failed dispatches; test executions count native test dispatches. Setup tests and the original interrupted send are excluded.",
+    "Semantic assessments are explicit assess records or state record results, including original/resulting-series and safety assessments; these do not measure hidden reasoning.",
+    "Original structured native outputs, source/worktree/remote state, receipts and traces stay private. Earlier arms retain semantic originals and operation metadata; the combined pair additionally archives every returned body and immutable test receipts.",
+    "Source-ID presence is an integrity cross-check, not a semantic proof. Original coverage and complete source/resulting patches were reviewed separately.",
+    "The helper was refined after its isolated pair to reject shallow history and disable implicit promisor fetching. Both final arms use the final exercise interface; final after uses the refined helper.",
+    "Observed failures are retained. C1-before and C5-after each recover a malformed apply. Combined-before recovers an omitted-mode content claim before proceeding with explicit history capture.",
+    "C6 and combined after retain verified publication receipts while blocking CI readiness absent a fixture CI observer. Successful published paths are validated separately by the production publication and recipe tests."
+  ],
+  "pairs": {
+    "c1": {
+      "after": {
+        "archived_returns_verified": true,
+        "checks": {
+          "alpha": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": true,
+            "outcome": "no_op",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "beta": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": null,
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          },
+          "delta": {
+            "complete": false,
+            "dirty": false,
+            "head_unchanged": true,
+            "outcome": "no_op",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "gamma": {
+            "complete": false,
+            "dirty": true,
+            "head_unchanged": true,
+            "outcome": "no_op",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          }
+        },
+        "guidance_read_sha256": {
+          "codex/skills/dk-commit-message/SKILL.md": "9496dc0a83ae538610425e342d35852a0bc7ba116aa66b2d7039449e7df87b19",
+          "codex/skills/dk-commit-split/SKILL.md": "61db610e30443ab0d1cbb07d4eebad7fa2050283a5f66640508c86aa4690aea6",
+          "codex/skills/dk-pr-publish/SKILL.md": "add9a36691dd7bcf5423ff1c136e6f147941123498cab3208a5fe35be907d6ee",
+          "docs/pr/commit-cleanup.md": "bbcac4268db3cb4969c52150da4e1551fbb8c6e01e43a6abeeadc641867f9765",
+          "docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+          "docs/pr/publication.md": "37f30c639000a74242d27ec28be865156633fd87c4674d6cd375974e2e38fa54",
+          "runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212"
+        },
+        "hashes": {
+          "assessment": "88f3e5e9bebeccb26411dcbd4cdd4322d742f74260156529141468f76d080666",
+          "git_trace": "e3bfa4b5361a782872a8bc0ea76b16a1c02821af9b7114f7678de9eb2632b0f6",
+          "interface": "fc9d700c71d8c4ced1aae39b3ea423392c15656c0552109690d1fb9fab1dd432",
+          "trace": "56aa5d96f9b70adced5b48ba173da246b0725cd9e1760b75064d5648df1dfef3"
+        },
+        "host_handle": "/root/c1_after",
+        "metrics": {
+          "applications": 1,
+          "failed_operations": 4,
+          "helper_git_calls": 0,
+          "inspection_operations": 69,
+          "instruction_bytes": 13750,
+          "native_git_or_inspect_operations": 70,
+          "recorded_git_calls": 93,
+          "semantic_assessments": 5,
+          "test_executions": 8
+        },
+        "operation_return_archives": 0,
+        "original_local_push_sends": 0
+      },
+      "before": {
+        "archived_returns_verified": true,
+        "checks": {
+          "alpha": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": true,
+            "outcome": "no_op",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "beta": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "prepared",
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          },
+          "delta": {
+            "complete": false,
+            "dirty": false,
+            "head_unchanged": true,
+            "outcome": "blocked",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "gamma": {
+            "complete": false,
+            "dirty": true,
+            "head_unchanged": true,
+            "outcome": "blocked",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          }
+        },
+        "guidance_read_sha256": {
+          "codex/skills/dk-commit-message/SKILL.md": "9496dc0a83ae538610425e342d35852a0bc7ba116aa66b2d7039449e7df87b19",
+          "codex/skills/dk-commit-split/SKILL.md": "b615690b254d5190bee2ec9630df0ec10a77b49a0deedf369a75370d85b6a3da",
+          "codex/skills/dk-pr-publish/SKILL.md": "add9a36691dd7bcf5423ff1c136e6f147941123498cab3208a5fe35be907d6ee",
+          "docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+          "docs/pr/partition-cleanup.md": "c207527854c4023b74db0e89049538e51ce0b7c122303b9581b9274f552347ab",
+          "docs/pr/publication.md": "37f30c639000a74242d27ec28be865156633fd87c4674d6cd375974e2e38fa54",
+          "runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212"
+        },
+        "hashes": {
+          "assessment": "403559df4cd22298a7fe9c0f9863b2c136ef0c6cdb77486ce08f3b51cda84ad8",
+          "git_trace": "75411e54d4bc3260ffdc322aa764ed03fb2508759d8090e544e3d06c8ddb61e4",
+          "interface": "fc9d700c71d8c4ced1aae39b3ea423392c15656c0552109690d1fb9fab1dd432",
+          "trace": "3d124dd878ccd2784781ad25524e6ff813804f7817d9700a63949c1be090970b"
+        },
+        "host_handle": "/root/c1_before",
+        "metrics": {
+          "applications": 2,
+          "failed_operations": 5,
+          "helper_git_calls": 0,
+          "inspection_operations": 75,
+          "instruction_bytes": 15161,
+          "native_git_or_inspect_operations": 76,
+          "recorded_git_calls": 95,
+          "semantic_assessments": 9,
+          "test_executions": 2
+        },
+        "operation_return_archives": 0,
+        "original_local_push_sends": 0
+      }
+    },
+    "c2": {
+      "after": {
+        "archived_returns_verified": true,
+        "checks": {
+          "alpha": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": true,
+            "outcome": "no_op",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "beta": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "prepared",
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          }
+        },
+        "guidance_read_sha256": {
+          "codex/skills/dk-commit-message/SKILL.md": "9496dc0a83ae538610425e342d35852a0bc7ba116aa66b2d7039449e7df87b19",
+          "codex/skills/dk-commit-split/SKILL.md": "61db610e30443ab0d1cbb07d4eebad7fa2050283a5f66640508c86aa4690aea6",
+          "docs/pr/commit-cleanup.md": "6f5242e3a3c9028cb4dafa7554796848ec852058e401b6b8fc9f8da1b77de4c3",
+          "docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+          "runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212"
+        },
+        "hashes": {
+          "assessment": "03d3ad35cf0dc44ee4b5f4726e181bbbbb26dac435de170ae8f951edaad785d9",
+          "git_trace": "310ec78aee150d61c9f87c15594a0513fba18257c8f3251e6839b6a1d81bc9ff",
+          "interface": "430f957dc3ecc966dbff0eb2452abc54ec4b0b870a645b352efe87f161e5496f",
+          "trace": "b38921133e684c9bbc85f1b99c24d5da539d7e6972f0bee71e37011fa6233d4d"
+        },
+        "host_handle": "/root/c2_after",
+        "metrics": {
+          "applications": 1,
+          "failed_operations": 1,
+          "helper_git_calls": 0,
+          "inspection_operations": 25,
+          "instruction_bytes": 7114,
+          "native_git_or_inspect_operations": 27,
+          "recorded_git_calls": 46,
+          "semantic_assessments": 4,
+          "test_executions": 4
+        },
+        "operation_return_archives": 0,
+        "original_local_push_sends": 0
+      },
+      "before": {
+        "archived_returns_verified": true,
+        "checks": {
+          "alpha": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": true,
+            "outcome": "no_op",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "beta": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "prepared",
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          }
+        },
+        "guidance_read_sha256": {
+          "codex/skills/dk-commit-message/SKILL.md": "9496dc0a83ae538610425e342d35852a0bc7ba116aa66b2d7039449e7df87b19",
+          "codex/skills/dk-commit-split/SKILL.md": "61db610e30443ab0d1cbb07d4eebad7fa2050283a5f66640508c86aa4690aea6",
+          "docs/pr/commit-cleanup.md": "bbcac4268db3cb4969c52150da4e1551fbb8c6e01e43a6abeeadc641867f9765",
+          "docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+          "docs/pr/publication.md": "37f30c639000a74242d27ec28be865156633fd87c4674d6cd375974e2e38fa54",
+          "runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212"
+        },
+        "hashes": {
+          "assessment": "f34de3ae84f14f55603ff943a485d0dfa0dacde090e2ebc390b5353b85320025",
+          "git_trace": "c6cb4c5c4ed23e5f33694ca5b3437120af708bdadca3caee0b35706d8e73d7e8",
+          "interface": "430f957dc3ecc966dbff0eb2452abc54ec4b0b870a645b352efe87f161e5496f",
+          "trace": "8331b7078c5a325d05809c9429688ce64fd9db42228a9985ecf82bdc33f8b6c4"
+        },
+        "host_handle": "/root/c2_before",
+        "metrics": {
+          "applications": 1,
+          "failed_operations": 0,
+          "helper_git_calls": 0,
+          "inspection_operations": 35,
+          "instruction_bytes": 12754,
+          "native_git_or_inspect_operations": 36,
+          "recorded_git_calls": 55,
+          "semantic_assessments": 4,
+          "test_executions": 4
+        },
+        "operation_return_archives": 0,
+        "original_local_push_sends": 0
+      }
+    },
+    "c3": {
+      "after": {
+        "archived_returns_verified": true,
+        "checks": {
+          "alpha": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": true,
+            "outcome": "no_op",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "beta": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "prepared",
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          }
+        },
+        "guidance_read_sha256": {
+          "codex/skills/dk-commit-message/SKILL.md": "9496dc0a83ae538610425e342d35852a0bc7ba116aa66b2d7039449e7df87b19",
+          "codex/skills/dk-commit-split/SKILL.md": "61db610e30443ab0d1cbb07d4eebad7fa2050283a5f66640508c86aa4690aea6",
+          "docs/pr/commit-cleanup.md": "391f360168e84f325db97b3e942d654f4b0181614e50f5ff337c5e6d7ebe584c",
+          "docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+          "runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212"
+        },
+        "hashes": {
+          "assessment": "e473ed2012387fce53eb1f42599e8e625af49460b3b466b9c467e01c17bca532",
+          "git_trace": "089ed42749ffe38f95dbff68ad16496dec8847a495e9a57d0715c6c056dc2e61",
+          "interface": "2f5ab2fdc6c97a9cf38141f5e06adc0a924293b301be57e5d0f4e4e31f4f03a4",
+          "trace": "a153d444570cc08825dd42a36fc2b020ec73ff239b3f110923a8c4ab6b14bc5c"
+        },
+        "host_handle": "/root/c3_after",
+        "metrics": {
+          "applications": 1,
+          "failed_operations": 2,
+          "helper_git_calls": 17,
+          "inspection_operations": 32,
+          "instruction_bytes": 7253,
+          "native_git_or_inspect_operations": 33,
+          "recorded_git_calls": 67,
+          "semantic_assessments": 4,
+          "test_executions": 4
+        },
+        "operation_return_archives": 0,
+        "original_local_push_sends": 0
+      },
+      "before": {
+        "archived_returns_verified": true,
+        "checks": {
+          "alpha": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": true,
+            "outcome": "no_op",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "beta": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "prepared_local",
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          }
+        },
+        "guidance_read_sha256": {
+          "codex/skills/dk-commit-message/SKILL.md": "9496dc0a83ae538610425e342d35852a0bc7ba116aa66b2d7039449e7df87b19",
+          "codex/skills/dk-commit-split/SKILL.md": "61db610e30443ab0d1cbb07d4eebad7fa2050283a5f66640508c86aa4690aea6",
+          "docs/pr/commit-cleanup.md": "bbcac4268db3cb4969c52150da4e1551fbb8c6e01e43a6abeeadc641867f9765",
+          "docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+          "docs/pr/publication.md": "37f30c639000a74242d27ec28be865156633fd87c4674d6cd375974e2e38fa54",
+          "runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212"
+        },
+        "hashes": {
+          "assessment": "ad3c25f2aeb3e8c2e9da8f88be78e6a57f10e30b2674011dbe9c24a0b6367811",
+          "git_trace": "53d79270ad0021cb038ab6c56c2899cbace70137e02bd81a46e02afcf8f9e852",
+          "interface": "2f5ab2fdc6c97a9cf38141f5e06adc0a924293b301be57e5d0f4e4e31f4f03a4",
+          "trace": "6321625eb31e1c5f19551d50bd4ae48f4577293199d4629b787a555278162c2b"
+        },
+        "host_handle": "/root/c3_before",
+        "metrics": {
+          "applications": 1,
+          "failed_operations": 3,
+          "helper_git_calls": 0,
+          "inspection_operations": 48,
+          "instruction_bytes": 12754,
+          "native_git_or_inspect_operations": 50,
+          "recorded_git_calls": 69,
+          "semantic_assessments": 3,
+          "test_executions": 4
+        },
+        "operation_return_archives": 0,
+        "original_local_push_sends": 0
+      }
+    },
+    "c4": {
+      "after": {
+        "archived_returns_verified": true,
+        "checks": {
+          "epsilon": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "no_op",
+            "remote_equals_original_lease": false,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          }
+        },
+        "guidance_read_sha256": {
+          "codex/skills/dk-commit-message/SKILL.md": "9496dc0a83ae538610425e342d35852a0bc7ba116aa66b2d7039449e7df87b19",
+          "codex/skills/dk-commit-split/SKILL.md": "61db610e30443ab0d1cbb07d4eebad7fa2050283a5f66640508c86aa4690aea6",
+          "docs/pr/commit-cleanup.md": "e55dddc4f3d43c66899be3b3fd17e3a08ba95a9549fb6c2d177e3db831d0a009",
+          "docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+          "docs/pr/publication.md": "37f30c639000a74242d27ec28be865156633fd87c4674d6cd375974e2e38fa54",
+          "docs/task-state.md": "b0ba0bb87b79bccf72b26ba8b467d55114eba1093993be1b33637c2dce5560e3",
+          "runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212"
+        },
+        "hashes": {
+          "assessment": "1087df63ee5a20eb880921c95a50670c810071a614742d2c2e819225b380e34f",
+          "git_trace": "4e841ad04bc0fc3ff75827486263d01184ca5508ed9a5a38ed81820ed24fa2ae",
+          "interface": "2f5ab2fdc6c97a9cf38141f5e06adc0a924293b301be57e5d0f4e4e31f4f03a4",
+          "trace": "fbc73cd164398dc6c8c6e3cf44d85c0fc11e4a8ccc1710067888d6ffe176e176"
+        },
+        "host_handle": "/root/c4_after",
+        "metrics": {
+          "applications": 0,
+          "failed_operations": 1,
+          "helper_git_calls": 43,
+          "inspection_operations": 32,
+          "instruction_bytes": 23414,
+          "native_git_or_inspect_operations": 35,
+          "recorded_git_calls": 93,
+          "semantic_assessments": 6,
+          "test_executions": 2
+        },
+        "operation_return_archives": 0,
+        "original_local_push_sends": 0
+      },
+      "before": {
+        "archived_returns_verified": true,
+        "checks": {
+          "epsilon": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "no_op",
+            "remote_equals_original_lease": false,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          }
+        },
+        "guidance_read_sha256": {
+          "codex/skills/dk-commit-message/SKILL.md": "9496dc0a83ae538610425e342d35852a0bc7ba116aa66b2d7039449e7df87b19",
+          "codex/skills/dk-commit-split/SKILL.md": "61db610e30443ab0d1cbb07d4eebad7fa2050283a5f66640508c86aa4690aea6",
+          "docs/pr/commit-cleanup.md": "391f360168e84f325db97b3e942d654f4b0181614e50f5ff337c5e6d7ebe584c",
+          "docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+          "docs/task-state.md": "b0ba0bb87b79bccf72b26ba8b467d55114eba1093993be1b33637c2dce5560e3"
+        },
+        "hashes": {
+          "assessment": "78b4cf36c469025e6ea03384bc6af29f55e385690a0c51751f94e74509326583",
+          "git_trace": "04c29c0e3ce6df0013ff1306c5009525011e8798a37b017edd9c75fc6f9f13e8",
+          "interface": "2f5ab2fdc6c97a9cf38141f5e06adc0a924293b301be57e5d0f4e4e31f4f03a4",
+          "trace": "f87355e4b616b835e2ac00b5912ab3af9446b074c19cde386b5df6f0d78989fd"
+        },
+        "host_handle": "/root/c4_before",
+        "metrics": {
+          "applications": 0,
+          "failed_operations": 0,
+          "helper_git_calls": 34,
+          "inspection_operations": 18,
+          "instruction_bytes": 14995,
+          "native_git_or_inspect_operations": 21,
+          "recorded_git_calls": 74,
+          "semantic_assessments": 7,
+          "test_executions": 3
+        },
+        "operation_return_archives": 0,
+        "original_local_push_sends": 0
+      }
+    },
+    "c5": {
+      "after": {
+        "archived_returns_verified": true,
+        "checks": {
+          "beta": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": null,
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          }
+        },
+        "guidance_read_sha256": {
+          "codex/skills/dk-commit-message/SKILL.md": "9496dc0a83ae538610425e342d35852a0bc7ba116aa66b2d7039449e7df87b19",
+          "codex/skills/dk-commit-split/SKILL.md": "61db610e30443ab0d1cbb07d4eebad7fa2050283a5f66640508c86aa4690aea6",
+          "codex/skills/dk-pr-publish/SKILL.md": "add9a36691dd7bcf5423ff1c136e6f147941123498cab3208a5fe35be907d6ee",
+          "docs/pr/commit-cleanup.md": "0926e5ea00b30e564fd014c98be51f19348a3e2a93d44384eeba2873394f3146",
+          "docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+          "runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212",
+          "runtime/shared/test_evidence.py": "b1fb0030187954e2d343040f8e6bf58bb843dfc1f7ec04eadab67cf57451b786"
+        },
+        "hashes": {
+          "assessment": "632d1513e42313ffb9d105f4c0b8786c1a0b478cf4f4e5b04dabbb1c59ad89e7",
+          "git_trace": "dca8840a0cad73b5f02c777b7841c8d18b72b3c38f7b99e8f8bf0a2e891fc6a9",
+          "interface": "e2df6bfa42f2d23adfb0e4b2871a6041a33d0945f8d98dc3cbbb3aaebf125f7c",
+          "trace": "5fe88a39f9d897aa6b7d7cea88b81087fb440bf3bdca1031772f69e6bc0eacfb"
+        },
+        "host_handle": "/root/c5_after",
+        "metrics": {
+          "applications": 2,
+          "failed_operations": 2,
+          "helper_git_calls": 17,
+          "inspection_operations": 28,
+          "instruction_bytes": 21500,
+          "native_git_or_inspect_operations": 31,
+          "recorded_git_calls": 62,
+          "semantic_assessments": 3,
+          "test_executions": 2
+        },
+        "operation_return_archives": 0,
+        "original_local_push_sends": 0
+      },
+      "before": {
+        "archived_returns_verified": true,
+        "checks": {
+          "beta": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "prepared",
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          }
+        },
+        "guidance_read_sha256": {
+          "codex/skills/dk-commit-message/SKILL.md": "9496dc0a83ae538610425e342d35852a0bc7ba116aa66b2d7039449e7df87b19",
+          "codex/skills/dk-commit-split/SKILL.md": "61db610e30443ab0d1cbb07d4eebad7fa2050283a5f66640508c86aa4690aea6",
+          "docs/pr/commit-cleanup.md": "391f360168e84f325db97b3e942d654f4b0181614e50f5ff337c5e6d7ebe584c",
+          "docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+          "runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212"
+        },
+        "hashes": {
+          "assessment": "01a83b71bbe99c025ad6f6a42ff473ac1bc584c26198ef412939307b81273f68",
+          "git_trace": "ba4e7c5212880011945316ceafe524073f2d002189468e15b861a413bbccc435",
+          "interface": "e2df6bfa42f2d23adfb0e4b2871a6041a33d0945f8d98dc3cbbb3aaebf125f7c",
+          "trace": "a1348208aa1b4810cf77a5d255e61c5dfd01c9483700d15ce8e91961e0977e4d"
+        },
+        "host_handle": "/root/c5_before",
+        "metrics": {
+          "applications": 1,
+          "failed_operations": 1,
+          "helper_git_calls": 9,
+          "inspection_operations": 18,
+          "instruction_bytes": 7253,
+          "native_git_or_inspect_operations": 19,
+          "recorded_git_calls": 41,
+          "semantic_assessments": 2,
+          "test_executions": 2
+        },
+        "operation_return_archives": 0,
+        "original_local_push_sends": 0
+      }
+    },
+    "c6": {
+      "after": {
+        "archived_returns_verified": true,
+        "checks": {
+          "alpha": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": true,
+            "outcome": "no_op",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "beta": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "prepared",
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          },
+          "gamma": {
+            "complete": false,
+            "dirty": true,
+            "head_unchanged": true,
+            "outcome": "blocked",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "theta": {
+            "complete": false,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "prepared",
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          },
+          "zeta": {
+            "complete": false,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "blocked",
+            "remote_equals_original_lease": false,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          }
+        },
+        "guidance_read_sha256": {
+          "codex/skills/dk-commit-message/SKILL.md": "9496dc0a83ae538610425e342d35852a0bc7ba116aa66b2d7039449e7df87b19",
+          "codex/skills/dk-commit-split/SKILL.md": "61db610e30443ab0d1cbb07d4eebad7fa2050283a5f66640508c86aa4690aea6",
+          "codex/skills/dk-pr-publish/SKILL.md": "add9a36691dd7bcf5423ff1c136e6f147941123498cab3208a5fe35be907d6ee",
+          "docs/pr/commit-cleanup.md": "5f706aef73c9aa95de9707cc7f1e2583eb3ca1c2e1a75ae7c32e60397869aa79",
+          "docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+          "docs/pr/publication.md": "37f30c639000a74242d27ec28be865156633fd87c4674d6cd375974e2e38fa54",
+          "docs/task-state.md": "b0ba0bb87b79bccf72b26ba8b467d55114eba1093993be1b33637c2dce5560e3",
+          "runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212"
+        },
+        "hashes": {
+          "assessment": "b42d7312affaecd753876de7ea08af49cf90c3d3da4cfa2bfad03b131cc0e5ab",
+          "git_trace": "871ce51aa39f51396fd4c166b5d1003921bf1d46c5f46c5e4905ece37c700a3d",
+          "interface": "1dc2c8da495c472a29816a28610392cb2cce7b7c1af88f1ef5ba462d98b28d22",
+          "trace": "42eab4af4a5d2fb97a7782007f4056f192147b735832bb032f23f9699fbc85ff"
+        },
+        "host_handle": "/root/c6_after",
+        "metrics": {
+          "applications": 2,
+          "failed_operations": 0,
+          "helper_git_calls": 67,
+          "inspection_operations": 79,
+          "instruction_bytes": 28115,
+          "native_git_or_inspect_operations": 82,
+          "recorded_git_calls": 182,
+          "semantic_assessments": 8,
+          "test_executions": 8
+        },
+        "operation_return_archives": 0,
+        "original_local_push_sends": 1,
+        "reconciled_operation_status": "verified"
+      },
+      "before": {
+        "archived_returns_verified": true,
+        "checks": {
+          "alpha": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": true,
+            "outcome": "no_op",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "beta": {
+            "complete": false,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": null,
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          },
+          "gamma": {
+            "complete": false,
+            "dirty": true,
+            "head_unchanged": true,
+            "outcome": "no_op",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "theta": {
+            "complete": false,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": null,
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          },
+          "zeta": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "published",
+            "remote_equals_original_lease": false,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          }
+        },
+        "guidance_read_sha256": {
+          "codex/skills/dk-commit-message/SKILL.md": "9496dc0a83ae538610425e342d35852a0bc7ba116aa66b2d7039449e7df87b19",
+          "codex/skills/dk-commit-split/SKILL.md": "61db610e30443ab0d1cbb07d4eebad7fa2050283a5f66640508c86aa4690aea6",
+          "codex/skills/dk-pr-publish/SKILL.md": "add9a36691dd7bcf5423ff1c136e6f147941123498cab3208a5fe35be907d6ee",
+          "docs/pr/commit-cleanup.md": "391f360168e84f325db97b3e942d654f4b0181614e50f5ff337c5e6d7ebe584c",
+          "docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+          "docs/pr/publication.md": "37f30c639000a74242d27ec28be865156633fd87c4674d6cd375974e2e38fa54",
+          "docs/task-state.md": "b0ba0bb87b79bccf72b26ba8b467d55114eba1093993be1b33637c2dce5560e3",
+          "runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212"
+        },
+        "hashes": {
+          "assessment": "a2e42ffda3d39756b98410eeaf7198aef3f39579cc4ec3bd0ba11fd987779a42",
+          "git_trace": "514124a9719aff6f7f742ffe019ebb31b925d287d73fedbb30c92d9b43b33a25",
+          "interface": "1dc2c8da495c472a29816a28610392cb2cce7b7c1af88f1ef5ba462d98b28d22",
+          "trace": "34b8f187683711509c5550ea325a0e794ff04b4add891c38802083e5faea192d"
+        },
+        "host_handle": "/root/c6_before",
+        "metrics": {
+          "applications": 2,
+          "failed_operations": 0,
+          "helper_git_calls": 47,
+          "inspection_operations": 63,
+          "instruction_bytes": 23462,
+          "native_git_or_inspect_operations": 65,
+          "recorded_git_calls": 147,
+          "semantic_assessments": 7,
+          "test_executions": 8
+        },
+        "operation_return_archives": 0,
+        "original_local_push_sends": 1,
+        "reconciled_operation_status": "verified"
+      }
+    },
+    "combined": {
+      "after": {
+        "archived_returns_verified": true,
+        "checks": {
+          "alpha": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": true,
+            "outcome": "no_op",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "beta": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "prepared",
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          },
+          "delta": {
+            "complete": false,
+            "dirty": false,
+            "head_unchanged": true,
+            "outcome": "blocked",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "epsilon": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "no_op",
+            "remote_equals_original_lease": false,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "gamma": {
+            "complete": false,
+            "dirty": true,
+            "head_unchanged": true,
+            "outcome": "blocked",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "theta": {
+            "complete": false,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "prepared",
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          },
+          "zeta": {
+            "complete": false,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "blocked",
+            "remote_equals_original_lease": false,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          }
+        },
+        "guidance_read_sha256": {
+          "codex/skills/dk-commit-message/SKILL.md": "9496dc0a83ae538610425e342d35852a0bc7ba116aa66b2d7039449e7df87b19",
+          "codex/skills/dk-commit-split/SKILL.md": "61db610e30443ab0d1cbb07d4eebad7fa2050283a5f66640508c86aa4690aea6",
+          "codex/skills/dk-pr-publish/SKILL.md": "add9a36691dd7bcf5423ff1c136e6f147941123498cab3208a5fe35be907d6ee",
+          "docs/pr/commit-cleanup.md": "5f706aef73c9aa95de9707cc7f1e2583eb3ca1c2e1a75ae7c32e60397869aa79",
+          "docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+          "docs/pr/publication.md": "37f30c639000a74242d27ec28be865156633fd87c4674d6cd375974e2e38fa54",
+          "docs/task-state.md": "b0ba0bb87b79bccf72b26ba8b467d55114eba1093993be1b33637c2dce5560e3",
+          "runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212",
+          "runtime/shared/test_evidence.py": "b1fb0030187954e2d343040f8e6bf58bb843dfc1f7ec04eadab67cf57451b786"
+        },
+        "hashes": {
+          "assessment": "dd0b0185389ecf1ed5e430333e45d483e03e039b4056c85cb35ae8c43fbe770c",
+          "git_trace": "8a441f39a1aabd62a20dda138c66a25cd95d440b228cbb44a238e315e75a9307",
+          "interface": "87aea9fab0a6b0e145f82295959ed80e017f8ed70a2eaba7ee7ab7d2612ae7f0",
+          "trace": "1a321cbba73a1c0830bfe47a636ced8ef8893fb658e04dc55622b0884c85a88e"
+        },
+        "host_handle": "/root/combined_after",
+        "metrics": {
+          "applications": 2,
+          "failed_operations": 0,
+          "helper_git_calls": 76,
+          "inspection_operations": 97,
+          "instruction_bytes": 37174,
+          "native_git_or_inspect_operations": 99,
+          "recorded_git_calls": 230,
+          "semantic_assessments": 15,
+          "test_executions": 14
+        },
+        "operation_return_archives": 176,
+        "original_local_push_sends": 1,
+        "reconciled_operation_status": "verified"
+      },
+      "before": {
+        "archived_returns_verified": true,
+        "checks": {
+          "alpha": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": true,
+            "outcome": "no_op",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "beta": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": null,
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          },
+          "delta": {
+            "complete": false,
+            "dirty": false,
+            "head_unchanged": true,
+            "outcome": "no_op",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "epsilon": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "no_op",
+            "remote_equals_original_lease": false,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "gamma": {
+            "complete": false,
+            "dirty": true,
+            "head_unchanged": true,
+            "outcome": "no_op",
+            "remote_equals_original_lease": true,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          },
+          "theta": {
+            "complete": false,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": null,
+            "remote_equals_original_lease": true,
+            "source_commits": 3,
+            "source_ids_present_in_saved_assessments": 3,
+            "tree_matches_reviewed": true
+          },
+          "zeta": {
+            "complete": true,
+            "dirty": false,
+            "head_unchanged": false,
+            "outcome": "published",
+            "remote_equals_original_lease": false,
+            "source_commits": 2,
+            "source_ids_present_in_saved_assessments": 2,
+            "tree_matches_reviewed": true
+          }
+        },
+        "guidance_read_sha256": {
+          "codex/skills/dk-commit-message/SKILL.md": "9496dc0a83ae538610425e342d35852a0bc7ba116aa66b2d7039449e7df87b19",
+          "codex/skills/dk-commit-split/SKILL.md": "b615690b254d5190bee2ec9630df0ec10a77b49a0deedf369a75370d85b6a3da",
+          "codex/skills/dk-pr-publish/SKILL.md": "add9a36691dd7bcf5423ff1c136e6f147941123498cab3208a5fe35be907d6ee",
+          "docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+          "docs/pr/partition-cleanup.md": "c207527854c4023b74db0e89049538e51ce0b7c122303b9581b9274f552347ab",
+          "docs/pr/publication.md": "37f30c639000a74242d27ec28be865156633fd87c4674d6cd375974e2e38fa54",
+          "docs/pr/supplied-evidence.md": "0e78b6740a376251780b537c84d56324f1b0dcfede4d6a3a936fc3d59220641c",
+          "docs/task-state.md": "b0ba0bb87b79bccf72b26ba8b467d55114eba1093993be1b33637c2dce5560e3",
+          "runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212"
+        },
+        "hashes": {
+          "assessment": "15f4e639c4bd65e29cdd0df2e8bb3adb6e9ad2fad7f0a756acee20b20bef5b32",
+          "git_trace": "75860cadc01570fb5d294a703aacf9a3074accaa70da7e5f7afc9cecbef3f832",
+          "interface": "87aea9fab0a6b0e145f82295959ed80e017f8ed70a2eaba7ee7ab7d2612ae7f0",
+          "trace": "b986548e3e469f436d96daaf0b2f5dee379a2bb672648c012355e9f8156f18cf"
+        },
+        "host_handle": "/root/combined_before",
+        "metrics": {
+          "applications": 2,
+          "failed_operations": 8,
+          "helper_git_calls": 0,
+          "inspection_operations": 109,
+          "instruction_bytes": 28230,
+          "native_git_or_inspect_operations": 115,
+          "recorded_git_calls": 178,
+          "semantic_assessments": 16,
+          "test_executions": 6
+        },
+        "operation_return_archives": 204,
+        "original_local_push_sends": 1,
+        "reconciled_operation_status": "verified"
+      }
+    }
+  },
+  "schema_version": 1,
+  "validation": {
+    "changed_skill_frontmatter": "passed",
+    "commit_message_lines": "passed",
+    "exercise_transport_checks": 6,
+    "focused_state_publication_tests_passed": 171,
+    "helper_checks": 12,
+    "links_and_host_parity": "passed",
+    "offline_subtests_passed": 7,
+    "offline_tests_passed": 722,
+    "package_and_base_version": "passed",
+    "python": "3.12.13",
+    "retained_failed_suite_attempt": "Existing test_status_batch_process_count_comparison[True] asserted 35 != 28; unchanged complete rerun passes. No state implementation or assertion was changed.",
+    "whitespace": "passed"
+  }
+}
