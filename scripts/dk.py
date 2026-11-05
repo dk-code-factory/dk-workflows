@@ -39,6 +39,12 @@ def main():
     p.add_argument('--compact', action='store_true', help='Replace run progress with counts and references')
     p.add_argument('--explain', action='store_true', help='Add precise captured-field changes and reuse blockers')
     p.add_argument('--run', help='Select a retained run; unfinished claims remain PR-wide')
+    p = sub.add_parser('continue-run', help='Record explicit user authorization for an exhausted run')
+    p.add_argument('--run', required=True, help='Existing run id; preserve its history and all counters')
+    p.add_argument('--request-id', required=True, help='Stable user-request identity; retain on replay')
+    p.add_argument('--authorization', required=True, help='Exact renewed user instruction, not an inferred resume')
+    p.add_argument('--source', required=True, help='Source identifying the explicit user request')
+    p.add_argument('--cycles', type=int, default=5, help='Additional review cycles, from one to five (default five)')
     for name in ('start', 'start-batch'):
         p = sub.add_parser(name)
         if name == 'start':
@@ -95,6 +101,9 @@ def main():
     store = Store(args.repository, args.pr, checkout=args.checkout)
     if args.command == 'status':
         result = store.status([read(p) for p in args.spec], compact=args.compact, run=args.run, explain=args.explain)
+    elif args.command == 'continue-run':
+        result = store.continue_run(run=args.run, request_id=args.request_id,
+                                    authorization=args.authorization, source=args.source, cycles=args.cycles)
     elif args.command == 'start':
         result = store.start(read(args.spec), recover=args.recover, run=args.run, cycle=args.cycle,
                              retry=args.retry, ci_repair=args.ci_repair, ci_rerun=args.ci_rerun, head=args.head)

@@ -17,6 +17,7 @@ import time
 import uuid
 
 CONTRACT = 2
+REVIEW_CYCLES = 5
 
 
 def digest(value):
@@ -638,7 +639,9 @@ class Store:
         with self.locked() as manifest:
             if run is not None and run not in manifest['runs']:
                 raise ValueError('Unknown run id: ' + run)
-            runs = manifest['runs'] if run is None else {run: manifest['runs'][run]}
+            selected = manifest['runs'] if run is None else {run: manifest['runs'][run]}
+            runs = {name: {**state, 'review_budget': self.review_budget(state)}
+                    for name, state in selected.items()}
             if compact:
                 runs = {
                     name: {
@@ -658,6 +661,63 @@ class Store:
                     'unfinished': [e['claim'] for e in manifest['entries'].values() if e.get('claim')]}
 
     @staticmethod
+    def review_budget(state):
+        """Legacy runs have five cycles; only retained authorizations add more."""
+        limit, requests = REVIEW_CYCLES, set()
+        allowances = state.get('review_allowances', [])
+        if not isinstance(allowances, list):
+            raise ValueError('Damaged review allowance history; do not reset retained budgets')
+        for allowance in allowances:
+            if (not isinstance(allowance, dict)
+                    or any(not isinstance(allowance.get(key), str) or not allowance[key].strip()
+                           for key in ('request_id', 'authorization', 'source'))
+                    or allowance['request_id'] in requests
+                    or type(allowance.get('cycles')) is not int
+                    or not 1 <= allowance['cycles'] <= REVIEW_CYCLES
+                    or allowance.get('previous_limit') != limit
+                    or allowance.get('cycle_limit') != limit + allowance['cycles']):
+                raise ValueError('Damaged review allowance history; do not reset retained budgets')
+            requests.add(allowance['request_id'])
+            limit = allowance['cycle_limit']
+        used = len(state['cycles'])
+        return {'used': used, 'limit': limit, 'remaining': max(0, limit - used)}
+
+    def continue_run(self, *, run, request_id, authorization, source, cycles=REVIEW_CYCLES):
+        """Record a renewed user allowance without changing any existing work.
+
+        The coordinating agent must supply an explicit user request, not infer
+        authorization from a resume or repository content. This is bookkeeping,
+        not authentication of the supplied evidence. Replays retain the original
+        grant, including after later cycles have consumed it.
+        """
+        if any(not isinstance(value, str) or not value.strip()
+               for value in (run, request_id, authorization, source)):
+            raise ValueError('Run, stable request id, exact user authorization and source are required')
+        if type(cycles) is not int or not 1 <= cycles <= REVIEW_CYCLES:
+            raise ValueError('Continuation requires between one and five additional review cycles')
+        with self.locked() as manifest:
+            if run not in manifest['runs']:
+                raise ValueError('Unknown run id: ' + run)
+            state = manifest['runs'][run]
+            budget = self.review_budget(state)
+            intent = {'request_id': request_id, 'authorization': authorization,
+                      'source': source, 'cycles': cycles}
+            for allowance in state.get('review_allowances', []):
+                if allowance['request_id'] == request_id:
+                    if any(allowance[key] != value for key, value in intent.items()):
+                        raise ValueError('Continuation request id already has a different authorization')
+                    return {'action': 'reuse', 'allowance': deepcopy(allowance),
+                            'review_budget': budget, 'manifest': str(self.manifest)}
+            if budget['remaining'] or budget['used'] != budget['limit']:
+                raise ValueError('Continuation requires an exhausted review allowance')
+            allowance = {**intent, 'previous_limit': budget['limit'],
+                         'cycle_limit': budget['limit'] + cycles, 'authorized_at': time.time()}
+            state.setdefault('review_allowances', []).append(allowance)
+            write(self.manifest, manifest)
+            return {'action': 'continued', 'allowance': deepcopy(allowance),
+                    'review_budget': self.review_budget(state), 'manifest': str(self.manifest)}
+
+    @staticmethod
     def budget(manifest, *, run, cycle, retry, ci_repair, ci_rerun, head, task):
         if not run:
             if any((cycle, retry, ci_repair, ci_rerun)):
@@ -670,8 +730,11 @@ class Store:
                 raise ValueError('CI work must retain an existing cycle or use cycle zero')
             if retry:
                 raise ValueError('Retry requires an existing cycle')
-            if len(state['cycles']) >= 5:
-                raise ValueError('Five review-and-fix cycle limit reached')
+            budget = Store.review_budget(state)
+            if not budget['remaining']:
+                label = 'Five' if budget['limit'] == REVIEW_CYCLES else str(budget['limit'])
+                raise ValueError(label + ' review-and-fix cycle limit reached; '
+                                 'explicit user continuation is required')
             state['cycles'].append(cycle)
         if retry:
             if not cycle:
