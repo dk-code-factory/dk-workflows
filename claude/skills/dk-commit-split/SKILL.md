@@ -5,6 +5,8 @@ description: Review and organize all PR commits while preserving the reviewed fi
 
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
-Follow commit cleanup in [partition and cleanup](../../../docs/pr/partition-cleanup.md). Inspect every commit. Explain why no change is needed, or reorganize commits when authorized and safe. Save ownership evidence, recovery refs, exact remote leases, test results, boundary reasons, and the reviewed and final heads and trees.
+Resolve [the commit policy](../../../docs/commit-policy.md) before cleanup. Reuse a verified current supplied handoff; direct calls resolve their own effective policy. A saved prompt supplies grouping and message instructions directly. Resolve a selected policy skill natively with pinned PR context, history, repository requirements and current user constraints; require successful execution and a complete report with nonempty `policy_prompt`. Policy providers only return instructions. Missing or incomplete providers block cleanup.
 
-Use `dk-commit-message` for messages and `dk-pr-publish` for authorized pushes with exact leases. An unchanged head does not prove that every commit was assessed. Use `dk-pr-split` to move work into separate PRs.
+Follow commit cleanup in [partition and cleanup](../../../docs/pr/partition-cleanup.md). Inspect every commit and apply the effective policy to boundaries and messages. Explicit policies replace built-in stylistic defaults; required repository conventions, exact user constraints and rewrite safeguards still apply. Explain why no change is needed, or reorganize commits when authorized and safe. Save policy sources, ownership evidence, recovery refs, exact remote leases, test results, boundary reasons, and the reviewed and final heads and trees.
+
+Pass the policy's message instructions and original constraints to `dk-commit-message`. Use `dk-pr-publish` for authorized pushes with exact leases. A policy grants no rewrite or publication permission. An unchanged head does not prove that every commit was assessed. Use `dk-pr-split` to move work into separate PRs.

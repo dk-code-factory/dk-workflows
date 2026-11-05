@@ -6,6 +6,8 @@ Required behavior: unchanged reruns invoke zero reviewers; failed or interrupted
 
 Agents resolve and invoke native skills; selected skills own internal passes and completion reports. Domain skills own GitHub and publication. Architecture work is independently selected. The cache applies only to invocations explicitly managed by workflows.
 
+[Commit policies](commit-policy.md) accept exactly one saved prompt or native skill, with whole-policy repository/upstream/global inheritance and reset. Policy providers return complete instruction reports without side effects; missing providers and incomplete reports block cleanup. Captured configuration, resources, history, context and returned instructions govern reuse. Tests cover private round trips, unrelated-setting preservation, prompt/default direct calls, provider failure, relevant changes and unchanged reuse. A real Git fixture verifies one subject-only commit, identical final tree, preserved content review and exact resulting-head CI. The [bounded native sample](native-commit-policy-exercise.md) additionally exercises in-session policy interpretation and a lease-protected push to a local bare remote; it does not establish independent host lifecycle adherence.
+
 [Native reviewer handoffs](native-review.md) retain host handles and terminal
 outcomes separately from governing inputs. Successful host execution and a
 nonempty complete skill report are both required; missing, malformed, failed,

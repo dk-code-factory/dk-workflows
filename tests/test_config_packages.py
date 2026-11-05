@@ -40,7 +40,7 @@ def test_bundled_helpers_work_from_a_copied_plugin_without_an_external_repositor
     import shutil
     installed=tmp_path/'plugin'
     shutil.copytree(ROOT,installed,ignore=shutil.ignore_patterns('.git','__pycache__','.pytest_cache','.dependencies'))
-    for script in ('dk.py','config.py','pr_config.py','publish.py','preferences.py'):
+    for script in ('dk.py','config.py','pr_config.py','publish.py','preferences.py','commit_policy.py'):
         result=subprocess.run([sys.executable,str(installed/'scripts'/script),'--help'],cwd=tmp_path,text=True,capture_output=True)
         assert result.returncode==0,result.stderr
     assert not (installed/'test-dependencies.json').exists()

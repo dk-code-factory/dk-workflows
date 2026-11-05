@@ -10,6 +10,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'runtime'))
 from shared import ci_exceptions, pr_size, pr_partition_policy
 from shared.repository_scope import identities, repository
 from shared.private_state import read, write, atomic_text
+import commit_policy
 
 
 def main(arguments=None):
@@ -34,7 +35,7 @@ def main(arguments=None):
             a.add_argument('--workflow',required=True);a.add_argument('--reason',required=True)
             for key in ('job','test','signature'):a.add_argument('--'+key)
         if action=='remove':a.add_argument('id')
-    for name in ('rules','drafting','completion'):
+    for name in ('rules','drafting','completion','commit-policy'):
         c=sub.add_parser(name);s=c.add_subparsers(dest='action',required=True)
         for action in ('show','set','reset'):
             a=s.add_parser(action);a.add_argument('--scope',choices=['repo','user','effective'],default='effective' if action=='show' else 'repo')
@@ -49,12 +50,14 @@ def main(arguments=None):
         value={k:getattr(a,k) for k in ('kind','workflow','job','test','signature','reason')} if a.action=='add' else None
         return ci_exceptions.configure(key,a.action,scope=a.scope,value=value,entry_id=getattr(a,'id',None))
     chain=identities(a.cwd,a.pr)
+    if a.command=='commit-policy' and a.action=='show':return commit_policy.load(chain,a.scope)
     if a.command=='pr-size':
         if a.action=='list':return pr_size.load(chain,a.scope)
         settings={k:getattr(a,k) for k in pr_size.DEFAULTS if getattr(a,k,None) is not None}
         return pr_size.configure(chain,a.action,scope=a.scope,settings=settings,keys=getattr(a,'keys',None))
     data=ci_exceptions.data_root()
     def location(key):
+        if a.command=='commit-policy':return commit_policy.path(key)
         if a.command=='completion':
             base=data.parent/'dk-pr-iter/completion-prompts'
             return base/'user.txt' if key=='user' else base/'repositories'/(hashlib.sha256(key.encode()).hexdigest()[:24]+'.txt')
@@ -96,6 +99,7 @@ def main(arguments=None):
                 atomic_text(target,text)
             else:
                 value=json.loads(a.file.read_text())
+                if a.command=='commit-policy':value=commit_policy.validate(value)
                 if not isinstance(value,dict) or not value:raise ValueError('Nonempty domain settings object required')
                 write(target,value)
     return {'action':a.action,'file':str(target)}
