@@ -54,12 +54,16 @@ def main():
         p.add_argument('--ci-repair', action='store_true')
         p.add_argument('--ci-rerun', action='store_true')
         p.add_argument('--head')
+    p = sub.add_parser('native-binding', help='Expected binding for native observations; never creates evidence')
+    p.add_argument('--spec', type=Path, required=True)
+    p.add_argument('--claim', required=True)
     p = sub.add_parser('record')
     p.add_argument('--spec', type=Path, required=True)
     p.add_argument('--claim', required=True)
     p.add_argument('--original', type=Path, required=True)
     p.add_argument('--normalized', type=Path, required=True)
     p.add_argument('--status', choices=['complete', 'failed', 'incomplete'], required=True)
+    p.add_argument('--native-evidence', type=Path, help='Original coordinator-captured native host observations')
     p.add_argument('--progress', type=Path, help='Step status, finding dispositions, exact human acceptances and evidence')
     p = sub.add_parser('invalidate')
     p.add_argument('--key', action='append', required=True)
@@ -104,9 +108,12 @@ def main():
         result = store.start_batch([read(path) for path in args.spec], recover=recover,
                                    run=args.run, cycle=args.cycle, retry=args.retry,
                                    ci_repair=args.ci_repair, ci_rerun=args.ci_rerun, head=args.head)
+    elif args.command == 'native-binding':
+        result = store.native_binding(read(args.spec), args.claim)
     elif args.command == 'record':
         result = store.record(read(args.spec), args.claim, args.original.read_bytes(), read(args.normalized),
-                              args.status, progress=read(args.progress) if args.progress else None)
+                              args.status, progress=read(args.progress) if args.progress else None,
+                              native_evidence=args.native_evidence.read_bytes() if args.native_evidence else None)
     else:
         result = store.invalidate(args.key, args.reason, recover=args.recover)
     print(json.dumps(result, sort_keys=True))

@@ -73,7 +73,7 @@ def identity(repository, pr):
 
 def make_spec(*, repository, pr, skill_identity, resources, responsibility,
               assigned_instructions, instructions, inputs, options, git=None,
-              governing_inputs_complete=False, cacheable=None):
+              governing_inputs_complete=False, cacheable=None, native_review=None):
     """Build an ordinary task spec from explicit inputs, without capturing them.
 
     Callers supply the complete governing resource/input maps. Generation does
@@ -124,6 +124,9 @@ def make_spec(*, repository, pr, skill_identity, resources, responsibility,
             if type(source.get(option, False)) is not bool:
                 raise ValueError(option + ' must be boolean')
         spec['git'] = source
+    if native_review is not None:
+        from native_review import contract
+        spec['native_review'] = deepcopy(contract(native_review))
     digest(spec)  # Reject values that cannot survive the JSON task-spec contract.
     return spec
 
@@ -465,6 +468,9 @@ def capture(spec, *, _context=None):
     fingerprint_inputs = {'contract': CONTRACT, **subject, 'task': task, 'skill': {
         'identity': skill['identity'], 'resources': resources}, 'instructions': governing,
         'inputs': inputs, 'options': spec.get('options', {})}
+    if 'native_review' in spec:
+        from native_review import contract
+        fingerprint_inputs['native_review'] = deepcopy(contract(spec['native_review']))
     key = digest({**subject, 'task': task['id'], 'skill': skill['identity']})
     return {'key': key, 'fingerprint': digest(fingerprint_inputs), 'components': fingerprint_inputs,
             'provenance': provenance, 'cacheable': cacheable, 'subject': subject}
@@ -566,7 +572,18 @@ class Store:
         for key, value in captured['components'].items():
             if value != old.get(key):
                 changed.append(key)
-        reusable = bool(captured['cacheable'] and not entry.get('invalidated') and not entry.get('claim')
+        from native_review import assess, required
+        native_problem = None
+        if saved and saved['status'] == 'complete' and required(captured['components']):
+            native = saved.get('native_execution', {})
+            try:
+                evidence = base64.b64decode(native['evidence'], validate=True) if native.get('evidence') is not None else None
+                native_problem = assess(captured['components'], {'id': saved['claim'],
+                    'fingerprint': saved['fingerprint'], 'provenance': saved['provenance']},
+                    base64.b64decode(saved['original'], validate=True), evidence)
+            except (ValueError, KeyError, TypeError, AttributeError):
+                native_problem = {'code': 'malformed_provenance', 'reason': 'Retained native observations are damaged'}
+        reusable = bool(not native_problem and captured['cacheable'] and not entry.get('invalidated') and not entry.get('claim')
                         and saved and saved['status'] == 'complete' and saved.get('cacheable') is True and saved['fingerprint'] == captured['fingerprint'])
         described = {'key': captured['key'], 'task': captured['components']['task']['id'],
                 'reusable': reusable, 'changed': changed,
@@ -574,7 +591,7 @@ class Store:
                 'result': saved['path'] if saved else None, 'completion': saved['status'] if saved else None,
                 'findings': saved['normalized'].get('findings', []) if reusable else None,
                 'invalidated': entry.get('invalidated'),
-                'reason': ('reusable' if reusable else 'unfinished' if entry.get('claim') else
+                'reason': ('reusable' if reusable else native_problem['code'] if native_problem else 'unfinished' if entry.get('claim') else
                            'invalidated' if entry.get('invalidated') else
                            'changed_inputs' if changed else saved['status'] if saved and saved['status'] != 'complete' else 'missing_or_incomplete_result')}
         if explain:
@@ -589,6 +606,8 @@ class Store:
                 blockers.append('no_previous_capture')
             elif digest(old) != captured['fingerprint']:
                 blockers.append('changed_inputs')
+            if native_problem:
+                blockers.append(native_problem['code'])
             if result_problem:
                 blockers.append(result_problem)
             elif saved:
@@ -725,6 +744,21 @@ class Store:
                 write(self.manifest, manifest)
             return result
 
+    def native_binding(self, spec, claim_id):
+        """Expose expected binding only for an unchanged active invocation."""
+        from native_review import binding
+        captured = capture(spec)
+        if captured['subject'] != self.subject:
+            raise ValueError('Spec refers to another PR')
+        with self.locked() as manifest:
+            claim = manifest['entries'].get(captured['key'], {}).get('claim')
+            if not claim or claim['id'] != claim_id:
+                raise ValueError('Claim is absent or owned by another attempt')
+            if claim['fingerprint'] != captured['fingerprint']:
+                raise ValueError('Inputs changed during execution; retain claim and explicitly recover')
+            return {'binding': binding(captured['components'], claim),
+                    'requirements': captured['components']['native_review']}
+
     def start_batch(self, specs, *, recover=None, run=None, cycle=None, retry=False,
                     ci_repair=False, ci_rerun=False, head=None):
         """Claim a set of tasks atomically, sharing only command-local Git work.
@@ -773,7 +807,7 @@ class Store:
                     'unfinished': [entry['claim'] for entry in manifest['entries'].values()
                                    if entry.get('claim')]}
 
-    def record(self, spec, claim_id, original, normalized, status, *, progress=None):
+    def record(self, spec, claim_id, original, normalized, status, *, progress=None, native_evidence=None):
         captured = capture(spec)
         if captured['subject'] != self.subject:
             raise ValueError('Spec refers to another PR')
@@ -791,10 +825,22 @@ class Store:
                 raise ValueError('Claim is absent or owned by another attempt')
             if claim['fingerprint'] != captured['fingerprint']:
                 raise ValueError('Inputs changed during execution; retain claim and explicitly recover')
+            from native_review import assess, required
+            native = None
+            if required(captured['components']):
+                diagnostic = assess(captured['components'], claim, original, native_evidence)
+                native = {'evidence': base64.b64encode(native_evidence).decode() if native_evidence is not None else None,
+                          'diagnostic': diagnostic, 'requested_status': status,
+                          'requested_normalized': deepcopy(normalized)}
+                if status == 'complete' and diagnostic:
+                    status = 'incomplete'
+                    normalized = {**normalized, 'complete': False, 'execution_diagnostic': diagnostic}
             envelope = {'contract': CONTRACT, 'key': captured['key'], 'fingerprint': captured['fingerprint'],
                         'cacheable': claim['cacheable'], 'provenance': claim['provenance'], 'claim': claim_id, 'status': status,
                         'original': base64.b64encode(original).decode(),
                         'original_sha256': hashlib.sha256(original).hexdigest(), 'normalized': normalized}
+            if native is not None:
+                envelope['native_execution'] = native
             fingerprint = digest(envelope)
             filename = fingerprint + '.json'
             path = self.root/'results'/filename
@@ -812,7 +858,8 @@ class Store:
                     raise ValueError('Progress requires a retained run id')
                 manifest['runs'][claim['run']]['progress'].append({'claim': claim_id, 'value': progress})
             write(self.manifest, manifest)
-            return {'status': status, 'result': str(path), 'reusable': status == 'complete' and captured['cacheable']}
+            return {'status': status, 'result': str(path), 'reusable': status == 'complete' and captured['cacheable'],
+                    **({'execution_diagnostic': native['diagnostic']} if native and native['diagnostic'] else {})}
 
     def invalidate(self, keys, reason, *, recover=None):
         if not reason:

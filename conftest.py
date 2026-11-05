@@ -1,7 +1,10 @@
 """Every standalone package test uses private temporary state."""
 import subprocess
+import sys
 from pathlib import Path
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent/'tests/fixtures'))
 
 @pytest.fixture(autouse=True)
 def private_state(tmp_path, monkeypatch):

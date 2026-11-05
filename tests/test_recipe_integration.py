@@ -163,6 +163,7 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
         return save('preferences-'+mode+'.json',{'selection':selection,'condition_context':{'scope':'Return two.'},
                                                'decisions':decisions})
     def spec(skill,task='content-review',current=None,cacheable=True):
+        from native_review_observations import CONTRACT
         definition={'skill_identity':'fixture:'+skill,'resources':{'skill':str(installed/(skill+'.md'))},
                     'responsibility':task,
                     'assigned_instructions':'Perform '+task+' against the complete pinned scope and instructions.',
@@ -172,13 +173,20 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
                     'git':{'checkout':str(checkout),'target':base,'base':base,'head':current or git('rev-parse','HEAD')}}
         if skill in ('a','b'):
             definition['resources']['implementation']=str(FIXTURE/'reviewer.py')
+            definition['native_review'] = CONTRACT
         value=cache('spec','--definition',save('definition.json',definition))
         return save(skill+'-'+task+'.json',value)
     def record(task,claim,value,progress=None):
+        from native_review_observations import observations
         output=save('output-'+claim['id']+'.json',value)
         args=['--spec',task,'--claim',claim['id'],'--original',output,'--normalized',output,
               '--status','complete' if value['complete'] else 'incomplete']
         if progress:args+=['--progress',save('progress.json',progress)]
+        source = json.loads(task.read_text())
+        if 'native_review' in source:
+            evidence = tmp_path/('native-'+claim['id']+'.json')
+            evidence.write_bytes(observations(source, claim, output.read_bytes()))
+            args += ['--native-evidence', evidence]
         return cache('record',*args)
     finalizer_groups=cache('finalizer-plan')['groups']
     assert finalizer_groups==[[reference] for reference in [

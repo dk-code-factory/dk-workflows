@@ -115,18 +115,20 @@ def reviewed(tmp_path, monkeypatch):
                 'discovery': [], 'verification': None, 'hooks': [], 'publications': []}
 
     def task(identity, responsibility='content-review', normalized=None, options=None, inputs=None, cacheable=True):
+        from native_review_observations import CONTRACT, observations
         spec = make_spec(repository=repository, pr=fixture.PR, skill_identity=identity,
                          resources={'skill': str(skill)}, responsibility=responsibility,
                          assigned_instructions='Review pinned source and original evidence.',
                          instructions=document['instructions'], inputs=inputs or {}, options=options or {},
                          git={'checkout': str(checkout), 'head': head, 'target': base, 'base': base},
-                         governing_inputs_complete=True, cacheable=cacheable)
+                         governing_inputs_complete=True, cacheable=cacheable, native_review=CONTRACT)
         path = tmp_path/(identity.replace(':', '-') + '-' + responsibility + '.json')
         write(path, spec)
         started = store.start(spec, run='review', cycle='c1')
         if started['action'] == 'invoke':
             store.record(spec, started['claim']['id'], b'Original completed fixture report',
-                         normalized or {'complete': True, 'findings': []}, 'complete')
+                         normalized or {'complete': True, 'findings': []}, 'complete',
+                         native_evidence=observations(spec, started['claim'], b'Original completed fixture report'))
         return str(path)
 
     document['discovery'] = [task('fixture:a'), task('fixture:b')]
