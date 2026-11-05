@@ -1,10 +1,12 @@
 # dk-workflows
 
-Version 3.2.2. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
+Version 3.3.1. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
 
-Use `dk-pr-iter` as the universal entry point: it recognizes your accounts and routes your PRs to `dk-pr-fix` and other authors' PRs to `dk-pr-review`. Invoke either workflow directly when the intended responsibility is explicit. Fixing preserves the review/fix, commit cleanup and final CI stages. Incoming review verifies candidate findings independently before posting; automatic approval and merging each require separate authorization or enabled policy.
+Use `dk-pr-iter` as the universal entry point: it recognizes your accounts and routes your PRs to `dk-pr-fix` and other authors' PRs to `dk-pr-review`. Invoke either workflow directly when the intended responsibility is explicit. Fixing runs review/fix cycles followed by [configured finalizers](docs/finalizers.md); the default ending preserves commit cleanup and final CI. Incoming review verifies candidate findings independently before posting; automatic approval and merging each require separate authorization or enabled policy.
 
 Configure reviewers, skills, personal accounts and PR policies through `dk-config`. Ordered [cycle hooks](docs/cycle-hooks.md) run agent instructions or selected skills before and after each new review cycle, with retained completion on resume. There is no default reviewer. Automatic posting of verified findings is enabled for incoming review; approval and merging are disabled by default. Narrower instructions, including analysis-only review, override saved policies.
+
+Configure `finalizers` as an ordered list of `/skill/PLUGIN:SKILL` strings. Nested lists run independent skills in parallel and wait for every sibling before proceeding. External installed skills are supported. Each scoped list replaces inherited finalizers; `[]` disables them. Final live checks report selected-plan completion separately from skipped cleanup, CI or other readiness evidence.
 
 Use `dk-preferences` for concrete personal or repository instructions scoped to implementation and review. [Preferences](docs/preferences.md) live in a separate private XDG_CONFIG_HOME catalog. Admission settles contradictions before saving; runtime retrieval matches paths and coordinators evaluate conditions. Workflows pass complete scoped records downstream and refresh affected task inputs when applicable preferences change. Existing saved rules stay separate.
 
@@ -34,7 +36,7 @@ Install through this plugin’s marketplace or the organization catalog. Externa
 
 Standalone review and iteration share task identities and cached results. Fingerprints cover canonical PR identity, complete consumed Git content/context, installed resources, assigned instructions, options and the contract version. Generate specs with `spec --definition` and claim reviewer passes with `start-batch`. Each task retains its own result, claim and recovery path. Completed findings remain reusable analysis; failed, incomplete or damaged artifacts do not satisfy coverage. Squash-only cleanup can retain content reviews while refreshing head-specific checks. Use `status --explain` for reuse diagnostics.
 
-Iteration runs review/fix cycles and commit cleanup before blocking on final-head CI. CI repairs refresh scope, affected reviews and cleanup before observation of the resulting final head. Observation deadlines, retry counters and the five-cycle review budget survive interruption.
+The default fix plan runs commit cleanup and governing-content synchronization before blocking on final-head CI. CI repairs refresh scope, affected reviews and selected cleanup before observation of the resulting final head. Custom finalizer plans control which ending actions run. Observation deadlines, retry counters and the five-cycle review budget survive interruption.
 
 Private workflow state lives outside repositories under XDG_STATE_HOME in `dk-workflows/v2`. Atomic claims prevent duplicate launches. Publication journals retain exact intent and require fresh checks; uncertain writes reconcile before another attempt. Direct skill calls use caching only when their caller explicitly manages task state.
 

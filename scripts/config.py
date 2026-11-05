@@ -19,9 +19,10 @@ def main():
         c=sub.add_parser(action);c.add_argument('--scope',choices=['repo','user'],default='repo')
         if action=='set':c.add_argument('--file',type=Path,required=True)
     c=sub.add_parser('preflight');c.add_argument('--available',type=Path,required=True)
+    c.add_argument('--workflow',choices=['fix','review'],default='fix')
     a=p.parse_args()
     if a.action=='show':result=config.effective(a.repository,a.upstream)
-    elif a.action=='preflight':result=config.preflight(config.effective(a.repository,a.upstream)['settings'],read(a.available))
+    elif a.action=='preflight':result=config.preflight(config.effective(a.repository,a.upstream)['settings'],read(a.available),workflow=a.workflow)
     else:
         target=config.path(a.repository if a.scope=='repo' else None)
         if a.action=='set':write(target,config.validate(read(a.file)))

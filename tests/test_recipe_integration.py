@@ -180,8 +180,27 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
               '--status','complete' if value['complete'] else 'incomplete']
         if progress:args+=['--progress',save('progress.json',progress)]
         return cache('record',*args)
-    def domain(task,perform,*,complete=True,**budget):
-        task_spec=spec('domain',task,cacheable=False)
+    finalizer_groups=cache('finalizer-plan')['groups']
+    assert finalizer_groups==[[reference] for reference in [
+        '/skill/dk-workflows:dk-commit-split','/skill/dk-workflows:dk-pr-decisions',
+        '/skill/dk-workflows:dk-pr-description','/skill/dk-workflows:dk-pr-feedback-reply',
+        '/skill/dk-workflows:dk-ci','/skill/dk-workflows:dk-pr-publish']]
+    finalizer_references=dict(zip(('cleanup','decisions','description','reply','ci','publish'),
+                                   (group[0] for group in finalizer_groups)))
+    finalizer_calls=[]
+    def finalizer_spec(role,task):
+        # Domain stand-ins retain pinned real Git inputs and use the public
+        # configured-finalizer handoff instead of a generic stage task.
+        source=json.loads(spec('domain',task,cacheable=False).read_text())
+        definition={key:source[key] for key in ('instructions','inputs','git','cacheable','governing_inputs_complete')}
+        definition.update(skill_identity=finalizer_references[role].removeprefix('/skill/'),
+                          resources=source['skill']['resources'],assigned_instructions=source['task']['instructions'],options={})
+        generated=cache('finalizer-spec','--run','iteration','--finalizer',finalizer_references[role],
+                        '--definition',save('finalizer-definition.json',definition))
+        return save('finalizer-'+role+'.json',generated)
+    def domain(task,perform,*,complete=True,finalizer_role=None,**budget):
+        task_spec=finalizer_spec(finalizer_role,task) if finalizer_role else spec('domain',task,cacheable=False)
+        if finalizer_role:finalizer_calls.append(finalizer_role)
         args=['--spec',task_spec,'--run','iteration']
         for key,value in budget.items():
             args+=['--'+key.replace('_','-')]
@@ -255,11 +274,17 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
         push(old,candidate)
         return {'outcome':'published','reviewed_head':old,'head':candidate,'tree':reviewed_tree,
                 'reasons':['One coherent behavior change with documentation'],'target':base}
-    head=domain('cleanup',cleanup)['head']
+    head=domain('cleanup',cleanup,finalizer_role='cleanup')['head']
     # Squash changes only provenance: final content review coverage is retained.
     for skill in ('a','b'):assert review(skill,'c3')['action']=='reuse'
-    reply=domain('reply',lambda:publish({'kind':'reply-inline','pr':PR,'head':head,'parent':41,'body':'Verified answer'}))
-    domain('resolve',lambda:publish({'kind':'resolve-thread','pr':PR,'head':head,'thread_id':'PRRT_fixture','reply_id':reply['receipt']['id']}))
+    domain('final-decisions',lambda:{'decisions':['Return two.'],'source':PR},finalizer_role='decisions')
+    domain('final-description',lambda:publish({'kind':'edit-pr','pr':PR,'head':head,'fields':{'body':body}}),
+           finalizer_role='description')
+    def finish_replies():
+        reply=publish({'kind':'reply-inline','pr':PR,'head':head,'parent':41,'body':'Verified answer'})
+        resolved=publish({'kind':'resolve-thread','pr':PR,'head':head,'thread_id':'PRRT_fixture','reply_id':reply['receipt']['id']})
+        return {'reply':reply,'resolution':resolved}
+    domain('reply',finish_replies,finalizer_role='reply')
     assert not ci_heads and not remote_value().get('check_reads')
     assert remote_value()['checks'][0]['bucket']=='pending'
     final_head=head
@@ -268,7 +293,7 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
         # The first observation is at the final gate. A verified rerun opens
         # the next attempt window without allocating another review cycle.
         update_remote(lambda v:v.update(checks=[]))
-        unresolved=domain('ci',lambda:ci(head,ok=False),complete=False)
+        unresolved=domain('ci',lambda:ci(head,ok=False),complete=False,finalizer_role='ci')
         assert unresolved['result']=='no_checks'
         rerun=domain('rerun',lambda:publish({'kind':'ci-rerun','pr':PR,'head':head,'run_id':77,'attempt':1,
                                           'reason':'Verified transient fixture outage'}),ci_rerun=True,head=head)
@@ -277,9 +302,9 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
         # review inputs, so refresh coverage and cleanup before observing again.
         update_remote(lambda v:v.update(checks=[{**fixture.initial()['checks'][0],
                                                'bucket':'fail','state':'FAILURE'}]))
-        failed=domain('ci',lambda:ci(head,ok=False),complete=False)
+        failed=domain('ci',lambda:ci(head,ok=False),complete=False,finalizer_role='ci')
         assert failed['result']=='failure' and failed['blockers']
-        assert cache('status','--run','iteration','--spec',spec('domain','ci',cacheable=False))['tasks'][0]['completion']=='incomplete'
+        assert cache('status','--run','iteration','--spec',finalizer_spec('ci','ci'))['tasks'][0]['completion']=='incomplete'
         def repair():
             old=git('rev-parse','HEAD')
             (checkout/'code.py').write_text('VALUE = 2\nCI_VALIDATED = True\n')
@@ -294,16 +319,20 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
         assert not review('a','c3',claimed=repaired['a'])['findings']
         assert not review('b','c3',claimed=repaired['b'])['findings']
         reviewed_tree=git('rev-parse','HEAD^{tree}')
-        head=domain('cleanup',cleanup)['head']
+        head=domain('cleanup',cleanup,finalizer_role='cleanup')['head']
         for skill in ('a','b'):assert review(skill,'c3')['action']=='reuse'
         assert ci_heads==[final_head] and head!=final_head
         assert set(remote_value()['check_reads'])=={final_head}
     update_remote(lambda v:v.update(checks=fixture.initial()['checks']))
-    final_ci=domain('ci',lambda:ci(head,rerun['operation'] if rerun else None))
+    final_ci=domain('ci',lambda:ci(head,rerun['operation'] if rerun else None),finalizer_role='ci')
     assert final_ci['result']=='success' and final_ci['head']==head
     assert ci_heads==([head] if final_ci_outcome=='success' else [final_head,head])
     assert set(remote_value()['check_reads'])==set(ci_heads)
-    domain('re-review',lambda:publish({'kind':'request-review','pr':PR,'head':head,'reviewers':['reviewer']}))
+    domain('re-review',lambda:publish({'kind':'request-review','pr':PR,'head':head,'reviewers':['reviewer']}),
+           finalizer_role='publish')
+    assert finalizer_calls[:4]==['cleanup','decisions','description','reply']
+    assert finalizer_calls[4:]==({'success':['ci','publish'],'rerun':['ci','ci','publish'],
+                                  'repair':['ci','cleanup','ci','publish']}[final_ci_outcome])
     domain('complete',lambda:{'head':head,'coverage':['a','b'],'findings':[],'ci':'success','cleanup':'published'})
     status=cache('status','--compact','--run','iteration','--spec',spec('a'),'--spec',spec('b'))
     assert all(t['reusable'] and not t['findings'] for t in status['tasks'])
