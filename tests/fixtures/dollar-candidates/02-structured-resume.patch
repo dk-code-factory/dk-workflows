@@ -1,0 +1,237 @@
+diff --git a/.claude-plugin/marketplace.json b/.claude-plugin/marketplace.json
+index 8bb4814..d389c55 100644
+--- a/.claude-plugin/marketplace.json
++++ b/.claude-plugin/marketplace.json
+@@ -8,7 +8,7 @@
+       "name": "dk-workflows",
+       "source": "./",
+       "description": "dk-workflows",
+-      "version": "3.5.0"
++      "version": "3.5.1"
+     }
+   ]
+ }
+diff --git a/.claude-plugin/plugin.json b/.claude-plugin/plugin.json
+index 79db613..bae302b 100644
+--- a/.claude-plugin/plugin.json
++++ b/.claude-plugin/plugin.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "dk-workflows",
+-  "version": "3.5.0",
++  "version": "3.5.1",
+   "description": "Agent-led PR workflows with bundled drafting, feedback, publication, cleanup and CI skills.",
+   "author": {
+     "name": "Dmitry Kropachev"
+diff --git a/.codex-plugin/plugin.json b/.codex-plugin/plugin.json
+index f6b55ac..dcad121 100644
+--- a/.codex-plugin/plugin.json
++++ b/.codex-plugin/plugin.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "dk-workflows",
+-  "version": "3.5.0",
++  "version": "3.5.1",
+   "description": "Agent-led PR workflows with bundled drafting, feedback, publication, cleanup and CI skills.",
+   "author": {
+     "name": "Dmitry Kropachev"
+diff --git a/README.md b/README.md
+index f072a6f..6b56750 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # dk-workflows
+ 
+-Version 3.5.0. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
++Version 3.5.1. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
+ 
+ Use `dk-pr-iter` as the universal entry point: it recognizes your accounts and routes your PRs to `dk-pr-fix` and other authors' PRs to `dk-pr-review`. Invoke either workflow directly when the intended responsibility is explicit. Fixing runs review/fix cycles followed by [configured finalizers](docs/finalizers.md); the default ending preserves commit cleanup and final CI. Incoming review verifies candidate findings independently before posting; automatic approval and merging each require separate authorization or enabled policy.
+ 
+diff --git a/docs/task-state.md b/docs/task-state.md
+index d4f4c49..57773ef 100644
+--- a/docs/task-state.md
++++ b/docs/task-state.md
+@@ -86,3 +86,7 @@ Reserve counters before dispatch:
+ Batch options apply to each invocation. Group only tasks eligible for the same options. Otherwise use separate batches or single starts. Never edit manifests, erase claims or replace a run to bypass limits. Concurrent callers serialize per PR. Unfinished claims prevent duplicate launches. Immutable outputs identified by content retain original attempts and progress.
+ 
+ Caching never replaces live CI, publication checks, reconciliation or final completion checks. See [the developer reference](capture-performance.md) for capture implementation and benchmark reproduction.
++
++## Structured resume packet
++
++`resume --run RUN --spec CURRENT_SPEC.json` reads one locked snapshot containing retained budgets, progress references, task captures, validated evidence references, native handles when retained, and PR-wide unfinished claims. Repeat `--spec` for known current tasks. Current specs use ordinary freshness checks; an omitted governing spec remains explicitly missing and never implies reusable coverage. Missing or damaged original evidence remains explicit. Read the referenced original results and progress before assessing findings or exact acceptances. The packet makes no mutations, infers no governing inputs and never authorizes recovery or publication. Reconcile unfinished native/domain work and obtain the existing recovery authority before using ordinary recovery commands.
+diff --git a/runtime/state.py b/runtime/state.py
+index 2678e43..8445f60 100644
+--- a/runtime/state.py
++++ b/runtime/state.py
+@@ -610,32 +610,73 @@ class Store:
+             }
+         return described
+ 
++    def _status_locked(self, manifest, captures, *, compact=False, run=None, explain=False):
++        if run is not None and run not in manifest['runs']:
++            raise ValueError('Unknown run id: ' + run)
++        runs = manifest['runs'] if run is None else {run: manifest['runs'][run]}
++        if compact:
++            runs = {
++                name: {
++                    **{key: value for key, value in state.items() if key != 'progress'},
++                    'cycle': state['cycles'][-1] if state['cycles'] else None,
++                    'progress_count': len(state['progress']),
++                    'progress_ref': {
++                        'manifest': str(self.manifest),
++                        'pointer': '/runs/' + name.replace('~', '~0').replace('/', '~1') + '/progress',
++                    },
++                }
++                for name, state in runs.items()
++            }
++        return {'contract': CONTRACT, 'subject': self.subject, 'manifest': str(self.manifest),
++                'tasks': [self.describe(c, manifest['entries'].get(c['key'], {}), explain=explain) for c in captures],
++                'runs': runs,
++                'unfinished': [e['claim'] for e in manifest['entries'].values() if e.get('claim')]}
++
++
+     def status(self, specs, *, compact=False, run=None, explain=False):
+         context = _CaptureContext()
+         captures = [capture(spec, _context=context) for spec in specs]
+         if any(c['subject'] != self.subject for c in captures):
+             raise ValueError('Specs refer to another PR')
+         with self.locked() as manifest:
+-            if run is not None and run not in manifest['runs']:
+-                raise ValueError('Unknown run id: ' + run)
+-            runs = manifest['runs'] if run is None else {run: manifest['runs'][run]}
+-            if compact:
+-                runs = {
+-                    name: {
+-                        **{key: value for key, value in state.items() if key != 'progress'},
+-                        'cycle': state['cycles'][-1] if state['cycles'] else None,
+-                        'progress_count': len(state['progress']),
+-                        'progress_ref': {
+-                            'manifest': str(self.manifest),
+-                            'pointer': '/runs/' + name.replace('~', '~0').replace('/', '~1') + '/progress',
+-                        },
+-                    }
+-                    for name, state in runs.items()
+-                }
+-            return {'contract': CONTRACT, 'subject': self.subject, 'manifest': str(self.manifest),
+-                    'tasks': [self.describe(c, manifest['entries'].get(c['key'], {}), explain=explain) for c in captures],
+-                    'runs': runs,
+-                    'unfinished': [e['claim'] for e in manifest['entries'].values() if e.get('claim')]}
++            return self._status_locked(manifest, captures, compact=compact, run=run, explain=explain)
++
++    def resume(self, specs, *, run):
++        """Read one locked snapshot; references never supply omitted governing inputs."""
++        context = _CaptureContext()
++        captures = [capture(spec, _context=context) for spec in specs]
++        if any(c['subject'] != self.subject for c in captures):
++            raise ValueError('Specs refer to another PR')
++        with self.locked() as manifest:
++            status = self._status_locked(manifest, captures, compact=True, run=run, explain=True)
++            current = {task['key']: task for task in status['tasks']}
++            tasks = []
++            for key, entry in manifest['entries'].items():
++                if key not in current and not any(a.get('run') == run for a in entry.get('attempts', [])):
++                    continue
++                saved, problem = self._load_saved(entry)
++                tasks.append({'key': key, 'task': entry.get('components', {}).get('task', {}).get('id'),
++                    'current': current.get(key), 'governing_spec_supplied': key in current,
++                    'missing_references': [] if key in current else ['governing_spec'],
++                    'claim': entry.get('claim'),
++                    'attempts': [{name:a.get(name) for name in ('id','status','run','cycle','handle')}
++                                 for a in entry.get('attempts', [])],
++                    'evidence': {'result': saved['path'] if saved else None,
++                                 'status': saved['status'] if saved else None,
++                                 'problem': problem},
++                    'captured_inputs_ref': {'manifest': str(self.manifest),
++                                           'pointer': _pointer(('entries',key,'components'))}})
++            retained_keys = {t['key'] for t in tasks}
++            for task in status['tasks']:
++                if task['key'] not in retained_keys:
++                    tasks.append({'key':task['key'],'task':task['task'],'current':task,
++                                  'governing_spec_supplied':True,'missing_references':['retained_task']})
++            return {'packet_version': 1, 'contract': CONTRACT, 'subject': self.subject,
++                    'manifest': str(self.manifest), 'run_id': run, 'run': status['runs'][run],
++                    'tasks': tasks, 'unfinished': status['unfinished'],
++                    'limits': {'read_only':True, 'recovery_authorized':False,
++                               'missing_inputs_inferred':False,
++                               'freshness_requires_supplied_current_specs':True}}
+ 
+     @staticmethod
+     def budget(manifest, *, run, cycle, retry, ci_repair, ci_rerun, head, task):
+diff --git a/scripts/dk.py b/scripts/dk.py
+index c472ccf..b8ce32a 100644
+--- a/scripts/dk.py
++++ b/scripts/dk.py
+@@ -34,6 +34,9 @@ def main():
+     p.add_argument('--finalizer', required=True, help='/skill/PLUGIN:SKILL reference')
+     p.add_argument('--run', required=True)
+     p.add_argument('--upstream')
++    p = sub.add_parser('resume', help='Read retained run, task and evidence references without authorizing recovery')
++    p.add_argument('--spec', type=Path, action='append', default=[])
++    p.add_argument('--run', required=True)
+     p = sub.add_parser('status')
+     p.add_argument('--spec', type=Path, action='append', default=[])
+     p.add_argument('--compact', action='store_true', help='Replace run progress with counts and references')
+@@ -89,7 +92,9 @@ def main():
+         print(json.dumps(result, sort_keys=True))
+         return
+     store = Store(args.repository, args.pr, checkout=args.checkout)
+-    if args.command == 'status':
++    if args.command == 'resume':
++        result = store.resume([read(p) for p in args.spec], run=args.run)
++    elif args.command == 'status':
+         result = store.status([read(p) for p in args.spec], compact=args.compact, run=args.run, explain=args.explain)
+     elif args.command == 'start':
+         result = store.start(read(args.spec), recover=args.recover, run=args.run, cycle=args.cycle,
+diff --git a/tests/test_resume_packet.py b/tests/test_resume_packet.py
+new file mode 100644
+index 0000000..4ec63c1
+--- /dev/null
++++ b/tests/test_resume_packet.py
+@@ -0,0 +1,47 @@
++"""Resume packets retain provenance and missing inputs without granting recovery."""
++from pathlib import Path
++from copy import deepcopy
++import pytest
++from test_state import case, done
++
++
++def test_resume_is_read_only_with_freshness_and_explicit_missing_specs(case):
++    spec, store = case
++    done(store, spec, run='run', cycle='c1')
++    other = deepcopy(spec); other['task']['id'] = 'unfinished'
++    claim = store.start(other, run='run', cycle='c1')['claim']
++    before = store.manifest.read_bytes()
++    packet = store.resume([spec], run='run')
++    assert store.manifest.read_bytes() == before
++    assert packet['run']['cycles'] == ['c1']
++    tasks = {t['task']:t for t in packet['tasks']}
++    assert tasks['content-review']['current']['reusable']
++    assert tasks['unfinished']['missing_references'] == ['governing_spec']
++    assert tasks['unfinished']['current'] is None
++    assert packet['unfinished'][0]['id'] == claim['id']
++    assert packet['limits']['recovery_authorized'] is False
++    assert tasks['content-review']['evidence']['result']
++    assert tasks['content-review']['attempts'][0]['handle'] is None
++
++
++def test_resume_changed_inputs_do_not_infer_reuse_or_reset_budgets(case):
++    spec, store = case
++    done(store, spec, run='run', cycle='c1')
++    Path(spec['instructions']['user']).write_text('Changed exact governing input')
++    before = store.manifest.read_bytes()
++    task = store.resume([spec], run='run')['tasks'][0]
++    assert task['current']['reusable'] is False
++    assert 'changed_inputs' in task['current']['explanation']['blockers']
++    assert store.manifest.read_bytes() == before
++    with pytest.raises(ValueError, match='Unknown run'):
++        store.resume([spec], run='absent')
++
++
++def test_resume_damaged_evidence_is_explicit_and_preserves_original_claim(case):
++    spec, store = case
++    done(store, spec, run='run', cycle='c1')
++    path = Path(store.status([spec])['tasks'][0]['result'])
++    path.unlink()
++    task = store.resume([spec], run='run')['tasks'][0]
++    assert task['evidence']['problem'] == 'missing_result_artifact'
++    assert task['evidence']['result'] is None

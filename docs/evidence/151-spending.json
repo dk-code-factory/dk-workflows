@@ -1,0 +1,285 @@
+{
+  "billing_basis": "API-equivalent cost; not actual account billing",
+  "complete_account_billing": false,
+  "globally_unique_priced_response_count": 594,
+  "implementation_review_measurement_overhead": {
+    "attribution": "Whole responses assigned by primary tool action. Mixed actions are not split or disguised as precise time accounting.",
+    "last_priced_response_timestamp": "2026-11-05T19:33:21.135Z",
+    "observed_costs_by_primary_action_usd": {
+      "coordination_unallocated": "1.1035402",
+      "implementation": "0.0283964",
+      "measurement": "3.8943546",
+      "mixed_implementation_measurement_review": "0.7166368",
+      "mixed_implementation_review": "0.0419376",
+      "review_validation": "0.4966796"
+    },
+    "observed_tokens": {
+      "cache_write_input_tokens": 0,
+      "cached_input_tokens": 32093056,
+      "input_tokens": 32372021,
+      "output_tokens": 209146,
+      "reasoning_output_tokens": 120277,
+      "total_tokens": 32581167
+    },
+    "observed_total_usd": "6.2815452",
+    "pricing_assumption": "Configured gpt-6.1-sol/high/default; coordinator responses lack independent SSE tier inventory.",
+    "raw_rollout_sha256_at_cutoff": "1623852d447be1f7cc02091fbb8113cdc6f9f11c12e178971fde1253fd3c6d45",
+    "response_counts_by_primary_action": {
+      "coordination_unallocated": 32,
+      "implementation": 1,
+      "measurement": 148,
+      "mixed_implementation_measurement_review": 19,
+      "mixed_implementation_review": 2,
+      "review_validation": 25
+    },
+    "telemetry_complete": false
+  },
+  "limitations": [
+    "API-equivalent estimates, not actual subscription/account charges. No fixed spending ceiling.",
+    "Experiment 1 lacks an independent response inventory and remains observed/inconclusive.",
+    "The active coordinator, later CI consumption and final response remain outside this recorded cutoff.",
+    "Overhead attribution uses tool-action heuristics with explicit mixed/unallocated buckets; it is not recurring workflow cost.",
+    "Native scopes include preparation, waits, result consumption and terminal assessment; no descendants were launched."
+  ],
+  "native_recurring_trial_spending": [
+    {
+      "arms": [
+        {
+          "arm": "1-baseline",
+          "observed_api_equivalent_cost_usd": "0.1541972",
+          "response_count": 11,
+          "telemetry_complete": false
+        },
+        {
+          "arm": "1-candidate",
+          "observed_api_equivalent_cost_usd": "0.1642272",
+          "response_count": 10,
+          "telemetry_complete": false
+        },
+        {
+          "arm": "2-baseline",
+          "observed_api_equivalent_cost_usd": "0.2297000",
+          "response_count": 12,
+          "telemetry_complete": false
+        },
+        {
+          "arm": "2-candidate",
+          "observed_api_equivalent_cost_usd": "0.1539644",
+          "response_count": 10,
+          "telemetry_complete": false
+        },
+        {
+          "arm": "3-baseline",
+          "observed_api_equivalent_cost_usd": "0.1619104",
+          "response_count": 9,
+          "telemetry_complete": false
+        },
+        {
+          "arm": "3-candidate",
+          "observed_api_equivalent_cost_usd": "0.1270564",
+          "response_count": 8,
+          "telemetry_complete": false
+        }
+      ],
+      "experiment": "experiment-1",
+      "observed_total_usd": "0.9910556"
+    },
+    {
+      "arms": [
+        {
+          "arm": "1-baseline",
+          "observed_api_equivalent_cost_usd": "0.2143820",
+          "response_count": 13,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "1-candidate",
+          "observed_api_equivalent_cost_usd": "0.1901388",
+          "response_count": 10,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "2-baseline",
+          "observed_api_equivalent_cost_usd": "0.2183528",
+          "response_count": 12,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "2-candidate",
+          "observed_api_equivalent_cost_usd": "0.2310276",
+          "response_count": 16,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "3-baseline",
+          "observed_api_equivalent_cost_usd": "0.2303840",
+          "response_count": 20,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "3-candidate",
+          "observed_api_equivalent_cost_usd": "0.1873048",
+          "response_count": 14,
+          "telemetry_complete": true
+        }
+      ],
+      "experiment": "experiment-2",
+      "observed_total_usd": "1.2715900"
+    },
+    {
+      "arms": [
+        {
+          "arm": "1-baseline",
+          "observed_api_equivalent_cost_usd": "0.1271160",
+          "response_count": 11,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "1-candidate",
+          "observed_api_equivalent_cost_usd": "0.1624512",
+          "response_count": 14,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "2-baseline",
+          "observed_api_equivalent_cost_usd": "0.1662800",
+          "response_count": 11,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "2-candidate",
+          "observed_api_equivalent_cost_usd": "0.1570100",
+          "response_count": 10,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "3-baseline",
+          "observed_api_equivalent_cost_usd": "0.1637432",
+          "response_count": 10,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "3-candidate",
+          "observed_api_equivalent_cost_usd": "0.2054872",
+          "response_count": 13,
+          "telemetry_complete": true
+        }
+      ],
+      "experiment": "experiment-3",
+      "observed_total_usd": "0.9820876"
+    },
+    {
+      "arms": [
+        {
+          "arm": "1-baseline",
+          "observed_api_equivalent_cost_usd": "0.2566360",
+          "response_count": 12,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "1-candidate",
+          "observed_api_equivalent_cost_usd": "0.1490952",
+          "response_count": 10,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "2-baseline",
+          "observed_api_equivalent_cost_usd": "0.1955628",
+          "response_count": 15,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "2-candidate",
+          "observed_api_equivalent_cost_usd": "0.1933976",
+          "response_count": 11,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "3-baseline",
+          "observed_api_equivalent_cost_usd": "0.2124984",
+          "response_count": 12,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "3-candidate",
+          "observed_api_equivalent_cost_usd": "0.2095708",
+          "response_count": 15,
+          "telemetry_complete": true
+        }
+      ],
+      "experiment": "experiment-4",
+      "observed_total_usd": "1.2167608"
+    },
+    {
+      "arms": [
+        {
+          "arm": "1-baseline",
+          "observed_api_equivalent_cost_usd": "0.2367000",
+          "response_count": 14,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "1-candidate",
+          "observed_api_equivalent_cost_usd": "0.2843668",
+          "response_count": 11,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "2-baseline",
+          "observed_api_equivalent_cost_usd": "0.1798040",
+          "response_count": 14,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "2-candidate",
+          "observed_api_equivalent_cost_usd": "0.2376092",
+          "response_count": 13,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "3-baseline",
+          "observed_api_equivalent_cost_usd": "0.2604020",
+          "response_count": 12,
+          "telemetry_complete": true
+        },
+        {
+          "arm": "3-candidate",
+          "observed_api_equivalent_cost_usd": "0.2439592",
+          "response_count": 14,
+          "telemetry_complete": true
+        }
+      ],
+      "experiment": "experiment-5",
+      "observed_total_usd": "1.4428412"
+    }
+  ],
+  "observed_cumulative_total_usd": "12.1858804",
+  "observed_native_trial_total_usd": "5.9043352",
+  "rate_card": {
+    "billing_basis": "API-equivalent cost; not actual account billing",
+    "date": "2026-11-05",
+    "long_context_input_multiplier": "2",
+    "long_context_output_multiplier": "1.5",
+    "long_context_threshold": 272000,
+    "model": "gpt-6.1-sol",
+    "per_million_usd": {
+      "cache_read": ".1",
+      "cache_write_12h": "5",
+      "cache_write_30m": "2.5",
+      "input": "2",
+      "output": "10"
+    },
+    "pricing_source": "https://developers.openai.com/api/docs/pricing",
+    "regional_multiplier": "1.1",
+    "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+    "tiers": {
+      "batch": "0.5",
+      "default": "1",
+      "fast": "2",
+      "flex": "0.5",
+      "priority": "2",
+      "standard": "1",
+      "ultrafast": "6"
+    }
+  }
+}

@@ -1,0 +1,265 @@
+diff --git a/docs/task-state.md b/docs/task-state.md
+index d4f4c49..b2f8903 100644
+--- a/docs/task-state.md
++++ b/docs/task-state.md
+@@ -86,3 +86,9 @@ Reserve counters before dispatch:
+ Batch options apply to each invocation. Group only tasks eligible for the same options. Otherwise use separate batches or single starts. Never edit manifests, erase claims or replace a run to bypass limits. Concurrent callers serialize per PR. Unfinished claims prevent duplicate launches. Immutable outputs identified by content retain original attempts and progress.
+ 
+ Caching never replaces live CI, publication checks, reconciliation or final completion checks. See [the developer reference](capture-performance.md) for capture implementation and benchmark reproduction.
++
++## JSON bookkeeping requests
++
++`request --file REQUEST.json` accepts `{ "version": 1, "operation": "start", "arguments": { "spec": "/private/task.json", "run": "retained" } }`. Operation names and argument keys match the existing CLI (hyphens become underscores). Repeated arguments are arrays; switches are booleans; other values are nonempty strings. Unknown fields, wrong types and missing required arguments block before mutation. Responses use `{version:1, ok:bool, operation, result, error}`; blocked requests exit 2. Existing CLI output is unchanged.
++
++After claiming, `handle --spec SPEC --claim CLAIM --value HANDLE.json` retains `{host:"codex",id:"native-handle"}` on that claim and attempt. A different handle requires explicit recovery. `progress --spec SPEC --claim CLAIM --value PROGRESS.json` appends a nonempty progress object to the claim's retained run. Both verify claim ownership and current inputs. These helpers store evidence only; they never invoke or resume agents, judge findings or authorize publication.
+diff --git a/runtime/state.py b/runtime/state.py
+index 2678e43..f1c711e 100644
+--- a/runtime/state.py
++++ b/runtime/state.py
+@@ -814,6 +814,41 @@ class Store:
+             write(self.manifest, manifest)
+             return {'status': status, 'result': str(path), 'reusable': status == 'complete' and captured['cacheable']}
+ 
++    def _claim_bookkeeping(self, spec, claim_id, value, *, handle):
++        captured = capture(spec)
++        if captured['subject'] != self.subject:
++            raise ValueError('Spec refers to another PR')
++        if not isinstance(value, dict) or not value:
++            raise ValueError('Bookkeeping value must be a nonempty object')
++        if handle and (set(value) != {'host', 'id'} or
++                       any(not isinstance(v, str) or not v.strip() for v in value.values())):
++            raise ValueError('Native handle requires nonempty host and id')
++        with self.locked() as manifest:
++            entry = manifest['entries'].get(captured['key'], {})
++            claim = entry.get('claim')
++            if not claim or claim['id'] != claim_id:
++                raise ValueError('Claim is absent or owned by another attempt')
++            if claim['fingerprint'] != captured['fingerprint']:
++                raise ValueError('Inputs changed during execution; explicitly recover')
++            if handle:
++                if claim.get('handle') and claim['handle'] != value:
++                    raise ValueError('Native handle already retained for this claim')
++                claim['handle'] = value
++                entry['attempts'][-1]['handle'] = value
++            else:
++                if not claim['run']:
++                    raise ValueError('Progress requires a retained run id')
++                manifest['runs'][claim['run']]['progress'].append({'claim': claim_id, 'value': value})
++            write(self.manifest, manifest)
++            return {'manifest': str(self.manifest), 'key': captured['key'],
++                    'claim': claim_id, 'handle' if handle else 'progress': value}
++
++    def save_handle(self, spec, claim_id, value):
++        return self._claim_bookkeeping(spec, claim_id, value, handle=True)
++
++    def append_progress(self, spec, claim_id, value):
++        return self._claim_bookkeeping(spec, claim_id, value, handle=False)
++
+     def invalidate(self, keys, reason, *, recover=None):
+         if not reason:
+             raise ValueError('An invalidation reason is required')
+diff --git a/scripts/dk.py b/scripts/dk.py
+index c472ccf..03402ee 100644
+--- a/scripts/dk.py
++++ b/scripts/dk.py
+@@ -10,7 +10,7 @@ from state import Store, make_spec, read
+ from config import CYCLE_PHASES, effective, finalizer_groups, make_finalizer_spec, make_hook_spec
+ 
+ 
+-def main():
++def make_parser():
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--repository', required=True, help='HOST/OWNER/REPO')
+     parser.add_argument('--pr', required=True, help='Canonical https PR URL')
+@@ -65,17 +65,25 @@ def main():
+     p.add_argument('--key', action='append', required=True)
+     p.add_argument('--reason', required=True)
+     p.add_argument('--recover', help='Close this stopped claim without invoking; reconcile domain writes first')
+-    args = parser.parse_args()
++    for name in ('handle', 'progress'):
++        p = sub.add_parser(name, help='Retain claim-owned native bookkeeping')
++        p.add_argument('--spec', type=Path, required=True)
++        p.add_argument('--claim', required=True)
++        p.add_argument('--value', type=Path, required=True)
++    p = sub.add_parser('request', help='Validated v1 JSON request for an existing operation')
++    p.add_argument('--file', type=Path, required=True)
++    return parser
++
++
++def execute(args):
+     if args.command == 'spec':
+         result = make_spec(repository=args.repository, pr=args.pr, **read(args.definition))
+-        print(json.dumps(result, sort_keys=True))
+-        return
++        return result
+     if args.command == 'hook-spec':
+         result = make_hook_spec(repository=args.repository, pr=args.pr, run=args.run,
+                                 cycle=args.cycle, phase=args.phase, hook_id=args.hook_id,
+                                 definition=read(args.definition), upstream=args.upstream)
+-        print(json.dumps(result, sort_keys=True))
+-        return
++        return result
+     if args.command == 'finalizer-plan':
+         loaded = effective(args.repository, args.upstream)
+         print(json.dumps({'groups': finalizer_groups(loaded['settings']['finalizers'],
+@@ -86,8 +94,7 @@ def main():
+         result = make_finalizer_spec(repository=args.repository, pr=args.pr, run=args.run,
+                                      finalizer=args.finalizer, definition=read(args.definition),
+                                      upstream=args.upstream)
+-        print(json.dumps(result, sort_keys=True))
+-        return
++        return result
+     store = Store(args.repository, args.pr, checkout=args.checkout)
+     if args.command == 'status':
+         result = store.status([read(p) for p in args.spec], compact=args.compact, run=args.run, explain=args.explain)
+@@ -104,12 +111,74 @@ def main():
+         result = store.start_batch([read(path) for path in args.spec], recover=recover,
+                                    run=args.run, cycle=args.cycle, retry=args.retry,
+                                    ci_repair=args.ci_repair, ci_rerun=args.ci_rerun, head=args.head)
++    elif args.command == 'handle':
++        result = store.save_handle(read(args.spec), args.claim, read(args.value))
++    elif args.command == 'progress':
++        result = store.append_progress(read(args.spec), args.claim, read(args.value))
+     elif args.command == 'record':
+         result = store.record(read(args.spec), args.claim, args.original.read_bytes(), read(args.normalized),
+                               args.status, progress=read(args.progress) if args.progress else None)
+     else:
+         result = store.invalidate(args.key, args.reason, recover=args.recover)
+-    print(json.dumps(result, sort_keys=True))
++    return result
++
++
++def request(parser, outer, value):
++    if (not isinstance(value, dict) or set(value) != {'version', 'operation', 'arguments'}
++            or type(value['version']) is not int or value['version'] != 1):
++        raise ValueError('Request requires version 1, operation and arguments')
++    operation = value['operation']
++    commands = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices
++    if not isinstance(operation, str) or operation not in commands or operation == 'request':
++        raise ValueError('Unknown request operation')
++    arguments = value['arguments']
++    actions = {a.dest: a for a in commands[operation]._actions if a.dest != 'help'}
++    if not isinstance(arguments, dict) or arguments.keys() - actions.keys():
++        raise ValueError('Unknown request arguments')
++    argv = ['--repository', outer.repository, '--pr', outer.pr]
++    if outer.checkout:
++        argv += ['--checkout', str(outer.checkout)]
++    argv.append(operation)
++    for key, action in actions.items():
++        if action.required and key not in arguments:
++            raise ValueError('Missing required argument: '+key)
++        if key not in arguments:
++            continue
++        item = arguments[key]
++        if isinstance(action, argparse._StoreTrueAction):
++            if type(item) is not bool:
++                raise ValueError(key+' must be boolean')
++            if item:
++                argv.append(action.option_strings[0])
++            continue
++        values = item if isinstance(action, argparse._AppendAction) else [item]
++        if not isinstance(values, list) or not values or any(not isinstance(v, str) or not v for v in values):
++            raise ValueError(key+' must contain nonempty strings')
++        for argument in values:
++            if action.choices and argument not in action.choices:
++                raise ValueError('Invalid '+key)
++            argv.append(action.option_strings[0]+'='+argument)
++    return execute(parser.parse_args(argv))
++
++
++def main():
++    parser = make_parser()
++    args = parser.parse_args()
++    if args.command != 'request':
++        print(json.dumps(execute(args), sort_keys=True))
++        return
++    operation = None
++    try:
++        value = read(args.file)
++        operation = value.get('operation') if isinstance(value, dict) else None
++        result = request(parser, args, value)
++        envelope = {'version': 1, 'ok': True, 'operation': operation, 'result': result, 'error': None}
++    except (ValueError, KeyError, TypeError, OSError, RuntimeError) as exc:
++        envelope = {'version': 1, 'ok': False, 'operation': operation, 'result': None,
++                    'error': {'code': 'blocked', 'message': str(exc)}}
++    print(json.dumps(envelope, sort_keys=True))
++    if not envelope['ok']:
++        raise SystemExit(2)
+ 
+ if __name__ == '__main__':
+     os.umask(0o077)
+diff --git a/tests/test_bookkeeping.py b/tests/test_bookkeeping.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_bookkeeping.py
+@@ -0,0 +1,70 @@
++"""Claim-owned bookkeeping and JSON delegation retain existing task guarantees."""
++import importlib.util
++import json
++from pathlib import Path
++from types import SimpleNamespace
++import pytest
++from test_state import case, done
++
++ROOT = Path(__file__).resolve().parents[1]
++module = importlib.util.spec_from_file_location('dk_bookkeeping', ROOT/'scripts/dk.py')
++dk = importlib.util.module_from_spec(module)
++module.loader.exec_module(dk)
++
++
++def test_handles_progress_and_reuse_preserve_originals(case):
++    spec, store = case
++    start = store.start(spec, run='retained', cycle='c1')
++    claim = start['claim']['id']
++    handle = {'host': 'codex', 'id': 'native-1'}
++    store.save_handle(spec, claim, handle)
++    store.save_handle(spec, claim, handle)
++    with pytest.raises(ValueError, match='already retained'):
++        store.save_handle(spec, claim, {'host': 'codex', 'id': 'another'})
++    progress = {'finding': 'F1', 'acceptance': 'Keep the exact original text.\r\n',
++                'source': spec['pr']+'#issuecomment-9'}
++    store.append_progress(spec, claim, progress)
++    assert store.status([])['unfinished'][0]['handle'] == handle
++    store.record(spec, claim, b'Original findings', {'complete': True, 'findings': ['F1']}, 'complete')
++    assert store.start(spec)['action'] == 'reuse'
++    assert store.status([])['runs']['retained']['progress'][0]['value'] == progress
++    with pytest.raises(ValueError, match='owned'):
++        store.append_progress(spec, claim, progress)
++
++
++def test_bookkeeping_rejects_stale_and_foreign_claims(case):
++    spec, store = case
++    claim = store.start(spec, run='retained')['claim']['id']
++    with pytest.raises(ValueError, match='owned'):
++        store.save_handle(spec, 'wrong', {'host': 'codex', 'id': 'one'})
++    Path(spec['instructions']['user']).write_text('Changed governing instructions')
++    with pytest.raises(ValueError, match='changed'):
++        store.append_progress(spec, claim, {'state': 'complete'})
++    assert len(store.status([])['unfinished']) == 1
++
++
++def test_json_delegates_without_affecting_cli(case, tmp_path):
++    spec, store = case
++    path = tmp_path/'spec.json'; path.write_text(json.dumps(spec))
++    outer = SimpleNamespace(repository=spec['repository'], pr=spec['pr'], checkout=None)
++    request = {'version': 1, 'operation': 'start', 'arguments': {'spec': str(path), 'run': 'run'}}
++    started = dk.request(dk.make_parser(), outer, request)
++    assert started['action'] == 'invoke'
++    request.update(operation='status', arguments={'spec': [str(path)], 'compact': True})
++    assert dk.request(dk.make_parser(), outer, request)['unfinished'][0]['id'] == started['claim']['id']
++
++
++@pytest.mark.parametrize('value', [
++    {}, {'version': True, 'operation': 'status', 'arguments': {}},
++    {'version': 1, 'operation': 'request', 'arguments': {}},
++    {'version': 1, 'operation': 'status', 'arguments': {'typo': True}},
++    {'version': 1, 'operation': 'start', 'arguments': {}},
++    {'version': 1, 'operation': 'status', 'arguments': {'compact': 'yes'}},
++    {'version': 1, 'operation': 'status', 'arguments': {'spec': 'path'}},
++])
++def test_invalid_requests_do_not_mutate(case, value):
++    spec, store = case
++    outer = SimpleNamespace(repository=spec['repository'], pr=spec['pr'], checkout=None)
++    with pytest.raises(ValueError):
++        dk.request(dk.make_parser(), outer, value)
++    assert not store.manifest.exists()

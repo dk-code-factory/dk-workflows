@@ -1,0 +1,327 @@
+diff --git a/docs/task-state.md b/docs/task-state.md
+index 57773ef..4f437dd 100644
+--- a/docs/task-state.md
++++ b/docs/task-state.md
+@@ -90,3 +90,9 @@ Caching never replaces live CI, publication checks, reconciliation or final comp
+ ## Structured resume packet
+ 
+ `resume --run RUN --spec CURRENT_SPEC.json` reads one locked snapshot containing retained budgets, progress references, task captures, validated evidence references, native handles when retained, and PR-wide unfinished claims. Repeat `--spec` for known current tasks. Current specs use ordinary freshness checks; an omitted governing spec remains explicitly missing and never implies reusable coverage. Missing or damaged original evidence remains explicit. Read the referenced original results and progress before assessing findings or exact acceptances. The packet makes no mutations, infers no governing inputs and never authorizes recovery or publication. Reconcile unfinished native/domain work and obtain the existing recovery authority before using ordinary recovery commands.
++
++## Private CI observer receipt
++
++The existing waiter supports `python3 PLUGIN_ROOT/runtime/dk-ci/scripts/ci_wait.py --pr PR_URL --head FULL_SHA --receipt`. Pending progress and the terminal JSON include `observer_receipt`, a private state path plus `/current/receipt` pointer. The receipt retains canonical PR/head identity, observation id, original deadline, current owner/state, last observation and complete final policy evidence. It shares the existing atomic observer state and lock; classification and final evidence remain under that lock.
++
++Interrupting and resuming the ordinary waiter retains its original window. A retained receipt keeps updating on resume even if the flag is omitted. Beginning a new observation clears the prior terminal credential and requires live checks; a saved success never authorizes readiness, recovery, reruns or publication. Check the receipt identity against the requested head. Denied access remains latched until repaired and explicitly retried. Head changes, failures, timeout, absent checks and helper errors remain unsuccessful outcomes. This adds bookkeeping only; the waiter never launches or reruns CI jobs.
+diff --git a/runtime/dk-ci/scripts/ci_wait.py b/runtime/dk-ci/scripts/ci_wait.py
+index 7bbbe30..452997a 100644
+--- a/runtime/dk-ci/scripts/ci_wait.py
++++ b/runtime/dk-ci/scripts/ci_wait.py
+@@ -99,7 +99,8 @@ def wait(pr, head, repo=None, timeout=1800, interval=30, no_checks_grace=60,
+         if on_progress and (result["result"] != last_reported_state or
+                             elapsed - last_reported_elapsed >= 60):
+             on_progress({"result": result["result"], "head": head,
+-                         "elapsed_seconds": round(elapsed, 1), "check_count": len(result["checks"])})
++                         "elapsed_seconds": round(elapsed, 1), "check_count": len(result["checks"]),
++                         **({"observer_receipt": budget["observer_receipt"]} if "observer_receipt" in budget else {})})
+             last_reported_elapsed = elapsed
+             last_reported_state = result["result"]
+         sleep(min(interval, remaining))
+@@ -122,27 +123,31 @@ def main():
+     parser.add_argument("--no-checks-grace", type=int, default=60)
+     parser.add_argument('--rerun-operation', help='Verified ci-rerun publication operation authorizing one new attempt window')
+     parser.add_argument('--retry-denied', action='store_true', help='Explicitly retry observation after repairing denied read access')
++    parser.add_argument('--receipt', action='store_true', help='Retain a private observer receipt with deadline, state and final evidence')
+     args = parser.parse_args()
+     if args.classification_timeout <= 0:
+         parser.error("classification timeout must be positive")
+     try:
+         with for_pr(args.pr, args.head, args.repo, timeout=args.timeout,
+-                    rerun=args.rerun_operation, retry_denied=args.retry_denied) as observation:
++                    rerun=args.rerun_operation, retry_denied=args.retry_denied, receipt=args.receipt) as observation:
+             result = wait(args.pr, args.head, args.repo, args.timeout, args.interval,
+                           args.no_checks_grace, observation=observation,
+                           on_progress=lambda update: print(json.dumps(update, sort_keys=True),
+                                                            file=sys.stderr, flush=True))
+-        if result["result"] in {"success", "failure"}:
+-            print(json.dumps({"phase": "terminal", "raw_result": result["result"],
+-                              "head": result["head"], "elapsed_seconds": result.get("elapsed_seconds"),
+-                              "check_count": len(result["checks"])},
+-                             sort_keys=True), file=sys.stderr, flush=True)
+-            repo = pr_repository(result.get("url") or args.pr, args.repo)
+-            result = decide(GitHub(repo), Registry(repo, Path.cwd()), result,
+-                            lambda: observe(args.pr, args.head, args.repo),
+-                            classification_timeout=args.classification_timeout,
+-                            on_progress=lambda update: print(json.dumps(update, sort_keys=True),
+-                                                             file=sys.stderr, flush=True))
++            if result["result"] in {"success", "failure"}:
++                print(json.dumps({"phase": "terminal", "raw_result": result["result"],
++                                  "head": result["head"], "elapsed_seconds": result.get("elapsed_seconds"),
++                                  "check_count": len(result["checks"])},
++                                 sort_keys=True), file=sys.stderr, flush=True)
++                repo = pr_repository(result.get("url") or args.pr, args.repo)
++                result = decide(GitHub(repo), Registry(repo, Path.cwd()), result,
++                                lambda: observe(args.pr, args.head, args.repo),
++                                classification_timeout=args.classification_timeout,
++                                on_progress=lambda update: print(json.dumps(update, sort_keys=True),
++                                                                 file=sys.stderr, flush=True))
++            reference = observation.finish(result)
++            if reference:
++                result['observer_receipt'] = reference
+     except (RuntimeError, ValueError, OSError, KeyError, subprocess.TimeoutExpired) as exc:
+         parser.exit(2, json.dumps({"result": "error", "message": str(exc)}) + "\n")
+     print(json.dumps(result, sort_keys=True))
+diff --git a/runtime/shared/ci_observation.py b/runtime/shared/ci_observation.py
+index 75eb150..82fcf0c 100644
+--- a/runtime/shared/ci_observation.py
++++ b/runtime/shared/ci_observation.py
+@@ -37,12 +37,13 @@ class PermissionDenied(RuntimeError):
+ 
+ class Observation:
+     def __init__(self, path, pr, head, *, timeout=1800, extension=1800,
+-                 rerun=None, retry_denied=False, clock=time.time):
++                 rerun=None, retry_denied=False, receipt=False, clock=time.time):
+         if timeout < 0 or extension < 0:
+             raise ValueError('invalid CI observation duration')
+         self.path, self.pr, self.head = Path(path), pr, head
+         self.timeout, self.extension, self.clock = timeout, extension, clock
+         self.rerun, self.retry_denied = rerun, retry_denied
++        self.receipt_enabled = receipt
+ 
+     @staticmethod
+     def validate_window(value):
+@@ -111,6 +112,12 @@ class Observation:
+                 raise PermissionDenied('CI access was denied; repair access and explicitly retry with --retry-denied')
+             if self.retry_denied:
+                 self.current.pop('permission_denied', None)
++            self.receipt_enabled = self.receipt_enabled or 'receipt' in self.current
++            if self.receipt_enabled:
++                self.current['receipt_state'] = 'observing'
++                self.current['receipt_owner'] = {'pid': os.getpid(), 'started': self.clock()}
++                self.current.pop('final_evidence', None)
++                self.current.pop('receipt_error', None)
+             self.persist()
+             self.token = ACTIVE.set(self)
+             return self
+@@ -118,19 +125,56 @@ class Observation:
+             self.lock.close()
+             raise
+ 
+-    def __exit__(self, *args):
+-        ACTIVE.reset(self.token)
+-        self.lock.close()
++    def __exit__(self, kind, error, traceback):
++        try:
++            if error is not None and self.receipt_enabled:
++                self.current['receipt_state'] = ('permission_denied' if self.current.get('permission_denied')
++                                                  else 'interrupted' if isinstance(error, KeyboardInterrupt) else 'error')
++                self.current['receipt_error'] = {'type': type(error).__name__, 'message': str(error)}
++                self.persist()
++        finally:
++            ACTIVE.reset(self.token)
++            self.lock.close()
+ 
+     def bind(self, url):
+         if url and canonical(url)[1] != self.pr:
+             raise ValueError('CI observation canonical PR identity changed')
+ 
++    def receipt_ref(self):
++        return {'path': str(self.path), 'pointer': '/current/receipt'} if self.receipt_enabled else None
++
+     def persist(self):
++        if self.receipt_enabled:
++            self.current['receipt'] = {
++                'receipt_version': 1,
++                'identity': {'pr': self.pr, 'head': self.head,
++                             'observation_id': self.current.get('id'), 'rerun': self.current.get('rerun')},
++                'owner': self.current.get('receipt_owner'),
++                'started': self.current['started'], 'deadline': self.current['deadline'],
++                'extensions': self.current['extensions'],
++                'state': self.current.get('receipt_state', 'observing'),
++                'last_observation': self.current.get('last_result'),
++                'final_evidence': self.current.get('final_evidence'),
++                'error': self.current.get('receipt_error'),
++                'requires_live_refresh': True}
+         write(self.path, self.state)
+ 
++    def finish(self, result):
++        if not self.receipt_enabled:
++            return None
++        if result.get('head') != self.head or result.get('result') not in {
++                'success','known_flakes','accepted_exceptions','failure','timeout','no_checks','head_changed','error'}:
++            raise ValueError('CI receipt needs a terminal result for the observed head')
++        self.current['receipt_state'] = result['result']
++        self.current['final_evidence'] = copy.deepcopy(result)
++        self.persist()
++        return self.receipt_ref()
++
+     def denied(self, exc):
+         self.current['permission_denied'] = {'at': self.clock(), 'reason': str(exc)}
++        if self.receipt_enabled:
++            self.current['receipt_state'] = 'permission_denied'
++            self.current['receipt_error'] = {'type': type(exc).__name__, 'message': str(exc)}
+         self.persist()
+ 
+     def update(self, result, progress=None):
+@@ -145,6 +189,8 @@ class Observation:
+             self.current['id'] = digest({key: self.current[key] for key in ('pr', 'head', 'rerun', 'attempts')})
+         self.current['latest_attempts'] = attempts
+         self.current['last_result'] = result
++        if self.receipt_enabled:
++            self.current['receipt_state'] = result['result']
+         if (result['result'] == 'pending' and now >= self.current['deadline']
+                 and self.current['extensions'] == 0 and self.current['extension_seconds'] > 0):
+             self.current['extensions'] = 1
+@@ -159,7 +205,8 @@ class Observation:
+         return {'elapsed_seconds': round(now - self.current['started'], 1),
+                 'remaining_seconds': max(0, self.current['deadline'] - now),
+                 'extensions': self.current['extensions'], 'observation_id': self.current['id'],
+-                'deadline': self.current['deadline']}
++                'deadline': self.current['deadline'],
++                **({'observer_receipt': self.receipt_ref()} if self.receipt_enabled else {})}
+ 
+ 
+ def canonical(pr, repo=None):
+@@ -221,6 +268,11 @@ class NumberedObservation:
+             self.bind(result.get('url'))
+         return self.bound.update(result, progress)
+ 
++    def finish(self, result):
++        if self.bound is None:
++            raise ValueError('CI receipt requires resolved canonical identity')
++        return self.bound.finish(result)
++
+     def denied(self, exc):
+         write(self.alias, {'permission_denied': {'at': time.time(), 'reason': str(exc)}})
+         if self.bound is not None:
+diff --git a/runtime/shared/tests/test_ci_receipt.py b/runtime/shared/tests/test_ci_receipt.py
+new file mode 100644
+index 0000000..8bc17c2
+--- /dev/null
++++ b/runtime/shared/tests/test_ci_receipt.py
+@@ -0,0 +1,85 @@
++"""Durable receipts share the original observer lock and retained deadline."""
++import os
++from pathlib import Path
++import pytest
++from shared.ci_observation import Observation, PermissionDenied
++from shared.private_state import read
++
++PR='https://github.com/owner/repo/pull/7'
++HEAD='a'*40
++
++
++def result(status='pending'):
++    return {'head':HEAD,'result':status,'checks':[{'name':'test','bucket':'pending' if status=='pending' else 'pass',
++            'link':'attempt-1','workflow':'Validate','startedAt':'2026-11-05T12:00:00Z'}]}
++
++
++def test_receipt_pending_resume_and_final_evidence_keep_original_deadline(tmp_path):
++    path=tmp_path/'observation.json'
++    with Observation(path,PR,HEAD,timeout=30,extension=0,clock=lambda:10,receipt=True) as observer:
++        budget=observer.update(result())
++        packet=read(path,{})['current']['receipt']
++        assert packet['deadline']==40 and packet['state']=='pending'
++        assert packet['identity']['observation_id']==budget['observation_id']
++        assert packet['identity']['head']==HEAD
++        assert budget['observer_receipt']['pointer']=='/current/receipt'
++    with Observation(path,PR,HEAD,timeout=900,clock=lambda:20) as observer:
++        assert observer.current['receipt']['state']=='observing'
++        assert observer.current['receipt']['final_evidence'] is None
++        assert observer.current['receipt']['deadline']==40
++        observer.update(result('success'))
++        final={**result('success'),'raw_result':'success','blockers':[],'verified_at':'now'}
++        reference=observer.finish(final)
++        packet=read(path,{})['current']['receipt']
++        assert packet['final_evidence']==final
++        assert packet['deadline']==40
++        assert packet['requires_live_refresh'] is True
++        with pytest.raises(BlockingIOError):
++            with Observation(path,PR,HEAD):pass
++    assert reference['path']==str(path)
++    assert path.stat().st_mode & 0o777==0o600
++
++
++@pytest.mark.parametrize('status',['head_changed','failure','timeout','no_checks','error'])
++def test_negative_terminal_receipts_never_become_success(tmp_path,status):
++    path=tmp_path/'observation.json'
++    with Observation(path,PR,HEAD,receipt=True) as observer:
++        observed=result(status)
++        observer.update(observed)
++        observer.finish(observed)
++    packet=read(path,{})['current']['receipt']
++    assert packet['state']==status
++    assert packet['final_evidence']['result']==status
++    assert packet['final_evidence']['result']!='success'
++
++
++def test_denied_access_stays_latched_and_old_success_is_not_reused(tmp_path):
++    path=tmp_path/'observation.json'
++    with Observation(path,PR,HEAD,receipt=True,clock=lambda:10) as observer:
++        observer.update(result('success'));observer.finish(result('success'))
++    deadline=read(path,{})['current']['deadline']
++    with Observation(path,PR,HEAD,clock=lambda:20) as observer:
++        assert observer.current['receipt']['state']=='observing'
++        assert observer.current['receipt']['final_evidence'] is None
++        observer.denied(PermissionError('denied'))
++    assert read(path,{})['current']['receipt']['state']=='permission_denied'
++    with pytest.raises(PermissionDenied):
++        with Observation(path,PR,HEAD):pass
++    with Observation(path,PR,HEAD,retry_denied=True) as observer:
++        assert observer.current['deadline']==deadline
++        assert observer.current['receipt']['state']=='observing'
++
++
++def test_interrupt_and_changed_head_preserve_receipt_identity(tmp_path):
++    path=tmp_path/'observation.json'
++    with pytest.raises(KeyboardInterrupt):
++        with Observation(path,PR,HEAD,receipt=True) as observer:
++            observer.update(result())
++            raise KeyboardInterrupt()
++    old=read(path,{})['current']['receipt']
++    assert old['state']=='interrupted'
++    with Observation(path,PR,'b'*40,receipt=True) as observer:
++        assert observer.current['receipt']['identity']['head']=='b'*40
++        with pytest.raises(ValueError,match='terminal result'):
++            observer.finish(result('success'))
++    assert read(path,{})['history'][0]['receipt']==old
+diff --git a/tests/test_ci_receipt_cli.py b/tests/test_ci_receipt_cli.py
+new file mode 100644
+index 0000000..cf8a540
+--- /dev/null
++++ b/tests/test_ci_receipt_cli.py
+@@ -0,0 +1,35 @@
++"""Receipt CLI runs the real waiter and final policy through a local gh transport."""
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++sys.path.insert(0,str(Path(__file__).parent/'fixtures'))
++import dollar_exercise
++
++
++def test_receipt_cli_saves_terminal_policy_evidence_privately(tmp_path):
++    root=tmp_path/'arm'
++    initialized=subprocess.run([sys.executable,dollar_exercise.__file__,'--root',str(root),
++                               '--experiment','4','init'],check=True,capture_output=True,text=True)
++    scenario=json.loads(initialized.stdout)
++    env={**os.environ,'XDG_STATE_HOME':str(root/'state'),'XDG_CONFIG_HOME':str(root/'config'),
++         'XDG_DATA_HOME':str(root/'data'),'PATH':str(root/'bin')+os.pathsep+os.environ['PATH'],
++         'PYTHONDONTWRITEBYTECODE':'1'}
++    command=[sys.executable,str(root/'frozen/runtime/dk-ci/scripts/ci_wait.py'),'--pr',scenario['pr'],
++             '--head',scenario['head'],'--receipt','--interval','1','--timeout','30']
++    completed=subprocess.run(command,env=env,cwd=root,capture_output=True,text=True,check=True)
++    result=json.loads(completed.stdout)
++    assert result['result']=='success' and result['head']==scenario['head']
++    reference=result['observer_receipt']
++    state=json.loads(Path(reference['path']).read_text())
++    receipt=state['current']['receipt']
++    assert receipt['identity']['pr']==scenario['pr']
++    assert receipt['identity']['head']==scenario['head']
++    assert receipt['deadline']==state['current']['started']+30
++    assert receipt['final_evidence']['result']=='success'
++    assert receipt['final_evidence']['blockers']==[]
++    assert Path(reference['path']).stat().st_mode & 0o777==0o600
++    pending=json.loads(completed.stderr.splitlines()[0])
++    assert pending['result']=='pending' and pending['observer_receipt']==reference
++    assert json.loads((root/'ci-transport.json').read_text())['checks']>=3
