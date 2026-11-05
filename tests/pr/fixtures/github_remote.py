@@ -51,7 +51,7 @@ class Remote:
         if suffix == '':
             return {'default_branch': 'main'}
         if suffix == '/pulls/7':
-            return deepcopy({**self.state['pull'], 'html_url': PR,
+            return deepcopy({**self.state['pull'], 'html_url': PR, 'number': 7,
                              'head': {'sha': self.state['metadata']['headRefOid']},
                              'user': self.state['pr_author']})
         if suffix == '/pulls/7/merge':

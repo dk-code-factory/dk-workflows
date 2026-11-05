@@ -72,8 +72,11 @@ def test_offline_git_transport_rejects_scp_and_preserves_local_paths(tmp_path, u
         assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize('final_ci_outcome',['success','rerun','repair'])
-def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_outcome):
+@pytest.mark.parametrize('final_ci_outcome,merge_after_iteration', [
+    ('success', False), ('rerun', False), ('repair', False),
+    ('success', True), ('repair', True),
+])
+def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_outcome,merge_after_iteration):
     def execute(argv, *, env=None, ok=True, cwd=None):
         result=subprocess.run([str(v) for v in argv],env=env,text=True,capture_output=True,cwd=cwd)
         if ok:assert result.returncode==0,result.stdout+result.stderr
@@ -105,6 +108,10 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
     fixture_spec=importlib.util.spec_from_file_location('recipe_fixture',PR_PACKAGE/'tests/pr/fixtures/github_remote.py')
     fixture=importlib.util.module_from_spec(fixture_spec);fixture_spec.loader.exec_module(fixture)
     state=fixture.initial();state['metadata']['headRefOid']=head;state['run']['head_sha']=head
+    if merge_after_iteration:
+        state['pr_author']['id']=state['actor_id']
+        state['merge_gate'].update(baseRefOid=base,reviewDecision='')
+        state['pull']['base']['sha']=base
     state['checks'][0].update(bucket='pending',state='PENDING')
     state['branches'].update(main=base,**{'pr-branch':head})
     state['lose_response']=['push','edit-pr','reply-inline','resolve-thread','request-review','ci-rerun']
@@ -123,6 +130,11 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
         return json.loads(result.stdout) if result.stdout.strip() else None
     def cache(action,*args,ok=True):
         return command(ROOT/'scripts/dk.py','--repository',REPO,'--pr',PR,'--checkout',checkout,action,*args,ok=ok)
+    if merge_after_iteration:
+        routed=command(ROOT/'scripts/pr_route.py','--pr',PR)
+        assert routed['ownership']=='mine' and routed['skill']=='dk-workflows:dk-pr-fix'
+        settings=command(ROOT/'scripts/config.py','--repository',REPO,'show')['settings']
+        assert settings['incoming_review']['merge'] is False
     def publish(request):
         request_file=save('request.json',request)
         prepared=command(PR_PACKAGE/'scripts/publish.py','prepare','--file',request_file)
@@ -143,7 +155,8 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
         return command(PR_PACKAGE/'runtime/dk-ci/scripts/ci_wait.py',*args,ok=ok)
     installed=tmp_path/'selected-skills';installed.mkdir()
     for name in ('domain','a','b'):(installed/(name+'.md')).write_text('Native fixture skill '+name)
-    context=save('context.json',{'scope':'Return two.','decisions':['Return two.'],'instructions':'Fix this PR.'})
+    instructions=('Check out '+PR+', run dk-pr-iter, then merge it.' if merge_after_iteration else 'Fix this PR.')
+    context=save('context.json',{'scope':'Return two.','decisions':['Return two.'],'instructions':instructions})
     applicable_rules=save('applicable-rules.json',{'rules':['The settled value must be an integer.']})
     def preference_command(action, *args):
         return command(ROOT/'scripts/preferences.py', '--checkout', checkout, action, *args)
@@ -366,3 +379,15 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
     for name,text in unrelated_docs.items():
         assert (checkout/name).read_text()==text
         assert git('show',head+':'+name)==text.strip()
+    if merge_after_iteration:
+        # Explicit caller permission survives routed fixes, interruption,
+        # cleanup and any CI repair. The final reviewed/published pins govern
+        # dispatch, never the head initially checked out.
+        request={'kind':'merge-pr','pr':PR,'head':head,'base':base,'merge_method':'squash'}
+        update_remote(lambda v:v['lose_response'].append('merge-pr'))
+        merged=publish(request)
+        assert merged['receipt']['head']==head and merged['receipt']['base']==base
+        assert publish(request)['status']=='verified'
+        assert remote_value()['writes']['merge-pr']==1
+    else:
+        assert 'merge-pr' not in remote_value()['writes']
