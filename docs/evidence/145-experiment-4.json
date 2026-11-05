@@ -4438,7 +4438,7 @@
         },
         "setup_assignment_provenance": {
           "canonical_normalized_sha256": "11dae3cf7fda1add29f09e324cfedb191ef5b8fee9f1a4351d0a1fbd1611a142",
-          "difference": "Canonical template ends with two LF bytes; actual spawn message ends after final period. All substantive setup text and corpus unchanged.",
+          "difference": "Canonical template ends with one LF byte; actual spawn message ends after final period. All substantive setup text and corpus unchanged.",
           "hash_scope": "Parent-retained expected sent text/artifact only. Encrypted native spawn message does not independently establish its exact byte hash.",
           "native_plaintext_independently_observable": false,
           "override_observed": true,

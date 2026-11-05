@@ -6,6 +6,22 @@ execution engine or model launcher. Native agents choose their actions from
 frozen workflow guidance. Offline task/domain results remain stand-ins; full
 recipe regressions separately cover recovery and publication behavior.
 
+## Integration with current main
+
+PR #151 already imported the usage reader and its tests from the original
+PR #145 head, `c9c2a181e72f7a3673013e9a6c901d5347918240`. Against main
+`eb86b61a2a9dbf60a09d2d5c2aca89fe33e10f6b`, this PR adds the historical
+experiment records and independent runtime/guidance fixture coverage. Production
+files and release metadata retain main's version 3.7.0. No production token
+optimization is adopted.
+
+Original experiment commits and their source pins are preserved on
+`archive/pr-145-token-experiments`. The rebase does not rerun the trials or change
+their decisions. Validation below describes the original integrated revisions;
+validation of the rebased PR is recorded separately in its description and CI.
+
+## Measurement protocol
+
 Use new external arm directories for every trial. The iteration exercise accepts
 `init before RUNTIME_SHA GUIDANCE_SHA` to freeze a baseline independently of the
 runtime. `init after RUNTIME_SHA GUIDANCE_SHA` freezes checkout guidance. Pin the
@@ -205,11 +221,12 @@ removed, with its patch retained as nonexecuting evidence. Raw conversations
 remain private. Upstream finalizer/preflight and commit-policy changes are outside these pinned native inputs
 and require separate final integration regressions.
 
-## Final integration validation
+## Historical integration validation
 
 The [validation record](evidence/145-final-validation.json) pins integrated
-source and preserved commits. Current main's finalizer/preflight and commit-policy
-changes are retained separately from native performance inputs. The release is
+source and preserved commits from before the rebase, using main
+`d18c6eb7be2c4f8588fc99dc2060565e4e641429`. Its finalizer/preflight and
+commit-policy changes are retained separately from native performance inputs. The release is
 synchronized to 3.4.1. Production commands, configuration schemas, private formats
 and native guidance match integrated main. Final validation records distinguish
 the prior 3.3.1 integration and its passing 792-test/seven-subtest suite from the
