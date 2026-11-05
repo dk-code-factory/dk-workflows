@@ -5,6 +5,7 @@ Fixture records are synthetic bookkeeping setup, not native review coverage.
 No remote or production workflow state is read or written.
 """
 import argparse
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -16,17 +17,47 @@ sys.path.insert(0, str(ROOT/'runtime'))
 from state import Store, make_spec
 
 
+@contextmanager
+def fixture_environment(directory):
+    # Store and its nested capture calls read the process environment, so keep
+    # the entire setup in this scope, including their internal Git subprocesses.
+    isolated = {'XDG_STATE_HOME': str(directory/'state'),
+                'XDG_CONFIG_HOME': str(directory/'config'),
+                'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_SYSTEM': os.devnull,
+                'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_ATTR_NOSYSTEM': '1'}
+    names = {name for name in os.environ if name.startswith('GIT_')} | isolated.keys()
+    original = {name: os.environ.get(name) for name in names}
+    try:
+        for name in names:
+            os.environ.pop(name, None)
+        os.environ.update(isolated)
+        yield
+    finally:
+        for name, value in original.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
 def prepare(directory):
     directory = directory.resolve()
     directory.mkdir(parents=True, exist_ok=False)
-    os.environ['XDG_STATE_HOME'] = str(directory/'state')
+    with fixture_environment(directory):
+        return prepare_isolated(directory)
+
+
+def prepare_isolated(directory):
     repo = directory/'repo'
     repo.mkdir()
 
     def git(*args):
         return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
 
-    git('init', '-q')
+    git('init', '-q', '--template=')
+    git('config', 'core.hooksPath', os.devnull)
+    git('config', 'commit.gpgsign', 'false')
+    git('config', 'tag.gpgsign', 'false')
     git('config', 'user.name', 'Exercise')
     git('config', 'user.email', 'exercise@example.test')
     (repo/'code').write_text('base\n')
