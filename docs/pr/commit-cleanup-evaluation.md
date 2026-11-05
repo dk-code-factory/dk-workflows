@@ -44,11 +44,11 @@ deterministic checks.
 
 ## Decision ledger
 
-Implementation and experiment tests have not run. All candidates are pending.
+Candidate decisions are recorded below as the bounded experiments complete.
 
 | Candidate | Decision | Evidence and limitations |
 | --- | --- | --- |
-| 1 | Pending | Await bounded pair and correctness checks. |
+| 1 | Keep | Native instruction reads: 15,161 → 13,750 bytes. Both arms assess all nine source commits, preserve the reviewed trees, keep the coherent series, and block dirty/mixed-author rewrites. Recovery refs and unchanged remote leases independently verified. One pair; application and test-count differences are not attributed to document separation. |
 | 2 | Pending | Await bounded pair and correctness checks. |
 | 3 | Pending | Await bounded pair and correctness checks. |
 | 4 | Pending | Await bounded pair and correctness checks. |
