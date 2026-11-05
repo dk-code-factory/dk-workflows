@@ -165,3 +165,42 @@ A separate 482,985-token missing-evidence probe
 returned incomplete when mandatory preference context was unavailable; it is
 excluded from the three performance pairs. These bounded task results do not
 establish whole-session savings or generalize to other review responsibilities.
+
+## Experiment 5: native reasoning effort
+
+The [twelve-arm report](evidence/145-experiment-5.json) records three alternating
+pairs for each scenario, with actual native effort controls and identical
+source, guidance, task, preferences, assignment, model and tier within each
+scenario. Source `4490536` is the latest retained state after experiment 4.
+Every measured task worked inline, with no orientation or downstream verifier;
+all task responses count. Experiment-owner orchestration is outside the measured
+tasks, so these results do not establish complete root-session savings.
+
+Routine bounded verification with medium effort reduced median tokens from
+392,677 to 340,344 (13.33%); all three pairs improved. Median estimated API cost
+increased from $0.1716020 to $0.1890292. Reject this proposal under the unchanged
+cost gate. Semantic assessments pass, but strict routine adherence also fails:
+one baseline ran the unauthorized read-only `resolve --help` operation. Its
+successful role lookup, unchanged state and all usage remain preserved; no
+completed trial was repaired or rerun.
+
+Brief routing/status with low effort reduced median tokens from 283,630 to
+204,023 (28.07%); all three pairs improved. Median estimated cost fell from
+$0.1054068 to $0.0864920. These are isolated native task measurements. The current
+host exposes effort selection when launching a new native task, but provides no
+evidenced control to change an existing inline task's effort. Creating production
+agents merely to lower effort is forbidden. A policy for selecting effort on an
+already independently required task was not tested end to end. Reject production
+routing-policy adoption as unsupported; preserve the passing measured treatment
+separately from that decision. Existing inline behavior and explicit model/effort
+requirements remain unchanged.
+
+All original findings, sourced dispositions, conditional preference decisions,
+required/optional coverage, counters and unfinished-work evidence remain in the
+assessments. Original reviewer selections remain separate; the supplemental
+condition applies to verification and is false for routing-only work. Candidate
+policy text was absent from both frozen guidance arms to isolate native effort;
+selection/adoption behavior is outside these samples. The proposed guidance was
+removed, with its patch retained as nonexecuting evidence. Raw conversations
+remain private. Upstream finalizer/preflight changes are outside these pinned native inputs
+and require separate final integration regressions.
