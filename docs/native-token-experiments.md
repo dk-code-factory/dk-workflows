@@ -133,3 +133,35 @@ parsed. Its child report and parent prose retained the correct conclusion; the
 original output remains unchanged and the defect is recorded. Long-context
 assessment correctness passed. These bounded verification trials do not support
 a broader conclusion about investigation or general code review.
+
+## Experiment 4: focused immutable-evidence handoffs
+
+The [six-arm report](evidence/145-experiment-4.json) rejects the fresh-context
+handoff proposal for bounded retained-evidence verification. Both parents
+launched one native verifier: inherited history versus a focused assignment with
+complete immutable evidence references. All three candidate task totals improved,
+but median task tokens fell only 9.62%, from 2,355,154 to 2,128,497, below the
+required 10%. Median estimated API cost increased from $0.4393272 to $0.6883816.
+The candidate guidance was removed; no production optimization was adopted.
+
+Setup, complete parent/child task and combined usage remain separate. P3's
+original candidate parent completed orientation before the interruption but was
+inaccessible in the resumed session; its task had never started. A distinct
+recovery arm repeated orientation from 146 byte-identical copied files and ran
+the unstarted task. The original setup's 1,330,137 tokens and $0.3623796 estimated
+cost remain additional interruption overhead. Copied specifications retain
+references to preserved original immutable evidence; recovery state and trace
+are separate. Neither original nor recovery counters or frozen sources changed.
+
+P3 baseline's setup used a semantically equivalent closing sentence with different
+bytes. The recovery setup omitted the canonical template's trailing newlines.
+Both variations and hashes are disclosed, with unknown token/cache effects.
+Failed exploratory calls, recovered truncation, actual overlaps and original
+output hashes remain in evidence. Independent raw-output review also found an
+unrecovered 2,370-token truncation inside the recovery child's orientation-corpus
+inventory. Mandatory assessment sources were complete, but strict all-trial read
+adherence failed; the original child report is preserved without repair or rerun.
+A separate 482,985-token missing-evidence probe
+returned incomplete when mandatory preference context was unavailable; it is
+excluded from the three performance pairs. These bounded task results do not
+establish whole-session savings or generalize to other review responsibilities.
