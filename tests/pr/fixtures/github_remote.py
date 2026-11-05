@@ -19,7 +19,7 @@ def initial():
                        'comments': [{'id': 'comment-42', 'databaseId': 42, 'url': PR+'#discussion_r42',
                                      'body': 'Verified answer', 'author': {'login': 'author'}}]},
             'requested': {'users': [], 'teams': []}, 'branches': {'main': 'b'*40, 'partition': 'c'*40},
-            'pulls': [], 'reviews': [], 'review_comments': {}, 'replies': [], 'writes': {}, 'lose_response': [],
+            'pulls': [], 'reviews': [], 'review_comments': {}, 'replies': [], 'issue_comments': [], 'writes': {}, 'lose_response': [],
             'files': [{'filename': 'code.py', 'patch': '@@ -1 +1 @@\n-VALUE = 0\n+VALUE = 2'}],
             'checks': [{'name': 'test', 'bucket': 'pass', 'state': 'SUCCESS', 'link': PR+'/checks/1', 'workflow': 'CI'}]}
 
@@ -107,6 +107,15 @@ class Remote:
             return self.changed('post-review',deepcopy(value))
         if suffix.startswith('/pulls/7/reviews/') and suffix.endswith('/comments'):
             return deepcopy(self.state['review_comments'][suffix.split('/')[-2]])
+        if suffix == '/issues/7/comments':
+            if payload is None:
+                return deepcopy(self.state['issue_comments'])
+            comment_id = 300 + len(self.state['issue_comments'])
+            value = {'id': comment_id, 'body': payload['body'],
+                     'user': {'login': self.state['actor']},
+                     'html_url': PR+'#issuecomment-'+str(comment_id)}
+            self.state['issue_comments'].append(value)
+            return self.changed('reply-comment', deepcopy(value))
         if suffix == '/pulls/7/comments':
             return deepcopy(self.state['replies'])
         if suffix == '/pulls/7/comments/41/replies':
