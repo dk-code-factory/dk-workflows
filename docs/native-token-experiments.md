@@ -202,23 +202,25 @@ condition applies to verification and is false for routing-only work. Candidate
 policy text was absent from both frozen guidance arms to isolate native effort;
 selection/adoption behavior is outside these samples. The proposed guidance was
 removed, with its patch retained as nonexecuting evidence. Raw conversations
-remain private. Upstream finalizer/preflight changes are outside these pinned native inputs
+remain private. Upstream finalizer/preflight and commit-policy changes are outside these pinned native inputs
 and require separate final integration regressions.
 
 ## Final integration validation
 
-The [validation record](evidence/145-final-validation.json) pins the integrated
-source and preserved commits. Current main's finalizer/preflight changes are
-retained; the experiment release is synchronized to 3.3.1. Production commands,
-configuration schemas, private formats and native guidance match integrated main.
-The full CI-style local suite passes 792 tests and seven subtests on Python 3.12.
-Both host distributions, package, whitespace and current-base release checks pass.
+The [validation record](evidence/145-final-validation.json) pins integrated
+source and preserved commits. Current main's finalizer/preflight and commit-policy
+changes are retained separately from native performance inputs. The release is
+synchronized to 3.4.1. Production commands, configuration schemas, private formats
+and native guidance match integrated main. Final validation records distinguish
+the prior 3.3.1 integration and its passing 792-test/seven-subtest suite from the
+new main integration. The earlier published head received no CI checks after main
+advanced and caused conflicts; that observation is not a passing CI result.
 
 Earlier local attempts remain recorded: missing parallel dependencies and a
-process-count assertion on default Python 3.14. The complete supported Python
-3.12 run passes without assertion changes or native-trial reruns. The whole
-personal configuration hash differs from the initial private observation; no
-experiment action edits personal or compaction settings, and effective native
-model/effort/tier controls were independently verified. Whole-file equality is
-not claimed. Final exact-head CI is recorded in PR #145 after final publication;
-local checks do not substitute for that gate.
+process-count assertion on default Python 3.14. The supported Python 3.12 setup
+uses isolated CI dependencies, without assertion changes or native-trial reruns.
+The whole personal configuration hash differs from the initial private
+observation; no experiment action edits personal or compaction settings, and
+effective native model/effort/tier controls were independently verified.
+Whole-file equality is not claimed. Final exact-head CI is recorded in PR #145
+after final publication; local checks do not substitute for that gate.

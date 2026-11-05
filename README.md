@@ -1,12 +1,14 @@
 # dk-workflows
 
-Version 3.3.1. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
+Version 3.4.1. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
 
 Use `dk-pr-iter` as the universal entry point: it recognizes your accounts and routes your PRs to `dk-pr-fix` and other authors' PRs to `dk-pr-review`. Invoke either workflow directly when the intended responsibility is explicit. Fixing runs review/fix cycles followed by [configured finalizers](docs/finalizers.md); the default ending preserves commit cleanup and final CI. Incoming review verifies candidate findings independently before posting; automatic approval and merging each require separate authorization or enabled policy.
 
 Configure reviewers, skills, personal accounts and PR policies through `dk-config`. Ordered [cycle hooks](docs/cycle-hooks.md) run agent instructions or selected skills before and after each new review cycle, with retained completion on resume. There is no default reviewer. Automatic posting of verified findings is enabled for incoming review; approval and merging are disabled by default. Narrower instructions, including analysis-only review, override saved policies.
 
 Configure `finalizers` as an ordered list of `/skill/PLUGIN:SKILL` strings. Nested lists run independent skills in parallel and wait for every sibling before proceeding. External installed skills are supported. Each scoped list replaces inherited finalizers; `[]` disables them. Final live checks report selected-plan completion separately from skipped cleanup, CI or other readiness evidence.
+
+Configure [commit grouping and message policies](docs/commit-policy.md) through `dk-config`: save a prompt or select a native policy skill globally or for a repository. For example, “Use dk-config to set my global commit policy to this prompt: squash each PR into one commit and use a short subject-only message.” Policies apply during selected final cleanup and direct `dk-commit-split` calls, within existing rewrite and publication permissions. The default keeps current cleanup behavior.
 
 Use `dk-preferences` for concrete personal or repository instructions scoped to implementation and review. [Preferences](docs/preferences.md) live in a separate private XDG_CONFIG_HOME catalog. Admission settles contradictions before saving; runtime retrieval matches paths and coordinators evaluate conditions. Workflows pass complete scoped records downstream and refresh affected task inputs when applicable preferences change. Existing saved rules stay separate.
 
