@@ -7,7 +7,7 @@ from pathlib import Path
 import uuid
 
 from shared import workflow_storage
-from shared.private_state import read, write
+from shared.private_state import atomic_bytes, read, write
 from shared.diagnostics import Diagnostic, command, task
 
 
@@ -54,6 +54,23 @@ def require_target(path, kind, pr):
     if pr is not None and value['request']['target'].lower() != pr.lower():
         raise ValueError('common PR context conflicts with the retained publication target')
     return value
+
+
+def refresh_prepared(path, kind, expected, approved):
+    """Refresh undispatched evidence, retaining every original preparation."""
+    path = Path(path).resolve()
+    with path.with_name(path.name + '.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        value = load(path, kind)
+        if value['status'] == 'prepared':
+            request = {**value['request'], 'expected': expected, 'approved': approved}
+            if request != value['request']:
+                snapshot = path.with_name(path.name + '.prepared-' + uuid.uuid4().hex)
+                atomic_bytes(snapshot, path.read_bytes())
+                value.setdefault('preparations', []).append(str(snapshot))
+                value.update(request=request, request_hash=digest(request))
+                write(path, value)
+        return {'operation': str(path), **value, 'reused_intent': True}
 
 
 def execute(path, kind, *, check, send, observe, reconcile=False, reconcile_argv=None):

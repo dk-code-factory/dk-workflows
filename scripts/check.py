@@ -38,7 +38,7 @@ def package(root):
         target=root/'claude/skills'/name/'SKILL.md'
         assert source.read_bytes()==target.read_bytes(),'Run scripts/sync_skills.py: '+name
     if manifests[0]['name']=='dk-workflows':
-        assert entries[0]==['dk-ci', 'dk-ci-flakes', 'dk-commit-message', 'dk-commit-split',
+        assert entries[0]==['dk-ci', 'dk-ci-approve', 'dk-ci-flakes', 'dk-commit-message', 'dk-commit-split',
                             'dk-config', 'dk-issue', 'dk-pr-decisions',
                             'dk-pr-description', 'dk-pr-feedback-address',
                             'dk-pr-feedback-read', 'dk-pr-feedback-reply', 'dk-pr-fix',

@@ -152,6 +152,15 @@ def prepare(request):
         for path in sorted(scope.glob('*/*.json')):
             retained = publication.load(path)
             approved = retained['request']['approved']
+            if (request.get('kind') == approved.get('kind') == 'ci-approve'
+                    and request.get('run_id') == approved.get('run_id')
+                    and request.get('attempt') == approved.get('attempt')):
+                if any(request.get(key) != approved.get(key) for key in ('head', 'base')):
+                    raise ValueError('Retained CI approval is bound to a different reviewed head or target')
+                if retained['status'] == 'prepared':
+                    refreshed = {**request, '_payload_hash': payload_hash}
+                    return publication.refresh_prepared(path, 'ci-approve', handler(refreshed).prepare(), refreshed)
+                return {'operation': str(path), **retained, 'reused_intent': True}
             if approved.get('_payload_hash') == payload_hash:
                 return {'operation':str(path),**retained,'reused_intent':True}
             target = request.get('pr') or (request.get('remote','')+'#'+request.get('branch',''))
@@ -166,11 +175,10 @@ def publish(path, *, reconcile=False):
     kind = retained['request']['kind']
     if kind not in KINDS | {'edit-pr','reply-inline','reply-comment','push'}:
         raise ValueError('Unsupported publication kind')
-    special = handler(retained['request']['approved']) if kind in KINDS else None
     def check(value, verified):
         request, expected = value['request']['approved'], value['request']['expected']
-        if special:
-            return special.check(expected,verified)
+        if kind in KINDS:
+            return handler(request).check(expected,verified)
         if kind=='push':
             tree = run(['git','rev-parse',request['head']+'^{tree}'],cwd=request['checkout'],json_output=False)
             if tree!=request['tree'] or remote_head(request)!=(request['head'] if verified else request['expected_head']):
@@ -188,8 +196,8 @@ def publish(path, *, reconcile=False):
                 raise ValueError('Reply conversation changed; refresh before publication')
     def send(value):
         request = value['request']['approved']
-        if special:
-            return special.send(value['request']['expected'],value['operation_id'])
+        if kind in KINDS:
+            return handler(request).send(value['request']['expected'],value['operation_id'])
         if kind=='push':
             return run(['git','push','--force-with-lease=refs/heads/'+request['branch']+':'+(request['expected_head'] or ''),
                         request['remote'],request['head']+':refs/heads/'+request['branch']],
@@ -213,8 +221,8 @@ def publish(path, *, reconcile=False):
         return api(request['pr'],route,payload={'body':request['body']})
     def observe(value):
         request, expected = value['request']['approved'], value['request']['expected']
-        if special:
-            return special.observe(expected)
+        if kind in KINDS:
+            return handler(request).observe(expected)
         if kind=='push':
             if remote_head(request)!=request['head']:raise ValueError('Push not verified')
             return {'head':request['head']}
