@@ -32,6 +32,8 @@ def package(root):
             text=path.read_text()
             assert text.startswith('---\n') and re.search(r'(?m)^name: '+re.escape(path.parent.name)+'$',text)
             assert re.search(r'(?m)^description: .+',text)
+            if manifest['name']=='dk-workflows':
+                assert '[private workflow reporting](../../../docs/private-reporting.md)' in text, 'Missing private reporting contract: '+str(path)
     assert entries[0]==entries[1]
     for name in entries[0]:
         source=root/'codex/skills'/name/'SKILL.md'

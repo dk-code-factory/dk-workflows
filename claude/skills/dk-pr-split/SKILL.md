@@ -3,6 +3,8 @@ name: dk-pr-split
 description: Move unrelated work or split large changes into separate PRs under saved size, scope and publication policies.
 ---
 
+Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
+
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
 Follow [partition guidance](../../../docs/pr/partition-cleanup.md). Read current policies through `dk-config`. Save ownership evidence, recovery refs, exact remote leases, test results and reasons for each split boundary. Explain why work should stay in this PR, or return verified publication receipts for the split. Use `dk-commit-split` to assess or reorganize commits while preserving the final tree.

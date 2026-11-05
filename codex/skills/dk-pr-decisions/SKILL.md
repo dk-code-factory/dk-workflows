@@ -3,6 +3,8 @@ name: dk-pr-decisions
 description: Collect and reconcile settled PR decisions, then publish them when authorized with source references.
 ---
 
+Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
+
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
 Use [shared PR evidence](../../../docs/pr/supplied-evidence.md) for analysis and live verification.

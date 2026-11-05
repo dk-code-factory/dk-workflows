@@ -1,5 +1,7 @@
 # Native reviewer handoffs
 
+Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
+
 Use the host's native agent tools to invoke selected reviewer skills. A complete review requires successful host execution and a complete skill report with findings and coverage. This workflow trusts the host and selected skill; it does not independently prove that every instruction was followed.
 
 ## Launch and wait

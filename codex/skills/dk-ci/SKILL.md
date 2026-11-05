@@ -3,6 +3,8 @@ name: dk-ci
 description: Check CI for the current PR commit, preserve wait deadlines and classify failures using verified flaky tests or exceptions.
 ---
 
+Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
+
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
 Run `python3 PACKAGE_ROOT/runtime/dk-ci/scripts/ci_wait.py --pr PR_URL --head SHA`, using the full lowercase head SHA. Keep one observer per PR and head across interruptions. The default wait is 30 minutes, with one 30-minute extension while checks are pending. Resume the same process when a tool yields. Read the current head and check attempts from GitHub.
