@@ -10,9 +10,9 @@ recipe regressions separately cover recovery and publication behavior.
 
 PR #151 already imported the usage reader and its tests from the original
 PR #145 head, `c9c2a181e72f7a3673013e9a6c901d5347918240`. Against main
-`3c155ad31bf13b77757574db2079fa9796cdbb09`, this PR adds the historical
+`7240325eed0bc8cdd39ac139743435f1c9aff8bb`, this PR adds the historical
 experiment records and independent runtime/guidance fixture coverage. Production
-files and release metadata retain main's version 3.7.1. No production token
+files and release metadata retain main's version 3.7.2. No production token
 optimization is adopted.
 
 Original experiment commits and their source pins are preserved on
@@ -170,7 +170,7 @@ references to preserved original immutable evidence; recovery state and trace
 are separate. Neither original nor recovery counters or frozen sources changed.
 
 P3 baseline's setup used a semantically equivalent closing sentence with different
-bytes. The recovery setup omitted the canonical template's trailing newlines.
+bytes. The recovery setup omitted the canonical template's trailing LF byte.
 Both variations and hashes are disclosed, with unknown token/cache effects.
 Failed exploratory calls, recovered truncation, actual overlaps and original
 output hashes remain in evidence. Independent raw-output review also found an
