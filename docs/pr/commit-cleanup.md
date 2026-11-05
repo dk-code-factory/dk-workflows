@@ -21,9 +21,22 @@ require fresh CI and publication checks for the new head, plus refreshed tasks
 that use history. Use `scripts/publish.py` for authorized pushes with exact leases.
 A changed remote lease or target tip blocks publication until reassessed.
 
-Return an assessment with outcome `no_op` or `published`, PR identity, reviewed
-and final heads and trees, target tip, commit count, boundary reasons, validation,
-recovery refs and publication receipts. A no-op must explain the whole series;
-an unchanged SHA is insufficient. Return this result to the caller so it can
-check coverage and CI within its saved budget. Do not claim the caller's
-iteration is complete.
+Return the shared task result plus policy evidence, PR identity, reviewed and final heads and
+trees, target tip, commit count, per-commit coverage and boundary reasons,
+source-to-destination mapping, validation, recovery refs, publication operation
+paths and receipts. For unchanged commits the mapping is identity. Include
+resulting-series coverage after a rewrite. Use these cleanup outcomes:
+
+| Outcome | Completion |
+| --- | --- |
+| `no_op` | Every commit and boundary was assessed and the series needs no change; an unchanged SHA alone is insufficient. Complete only when no required publication remains. |
+| `prepared` | A local rewritten series passed validation and preserves the reviewed tree. May use `complete:true` for a preparation-only assignment. Use `complete:false` when the assignment requires publication, even if pushing is not authorized yet. |
+| `published` | Current checks and a verified receipt establish publication of the validated final head. Include its original operation and receipt paths. |
+| `blocked` | Always `complete:false`, with concrete blockers, retained original and current pins, recovery evidence and the next safe step. |
+
+An uncertain push is blocked pending read-only reconciliation of its original
+operation. Never prepare or send a replacement to discover whether it applied.
+Retain verified receipts even when a later readiness check fails; that failure
+still blocks completion. These are cleanup-owned outcomes, not a change to the
+global task-state schema. Return this result to the caller for coverage and CI
+checks within its saved budget. Do not claim the caller's iteration is complete.
