@@ -1,7 +1,72 @@
 {
   "billing_basis": "API-equivalent cost; not actual account billing",
+  "context_uncontrolled_original_gate": {
+    "accepted": false,
+    "decision": "inconclusive",
+    "reasons": [
+      "Incomplete telemetry"
+    ]
+  },
   "correctness_passed": true,
   "decision": {
+    "accepted": false,
+    "decision": "inconclusive",
+    "reasons": [
+      "Incomplete telemetry"
+    ]
+  },
+  "host_audit_correction": "Do not adopt a candidate with mismatched or unproven starting-context controls. Completed trials are preserved and are not rerun.",
+  "host_context_audit": {
+    "arms": {
+      "1-baseline": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "0d4dca146a80e0f0790b6931fef85fc62c5e9387bf9158789952c1c9c5307410",
+        "effective_initial_messages_sha256": "b3afeab4274d76ef2fb14ef727fb195fa62be59972c15d81959b2587cfe0d2aa",
+        "host_conditions_sha256": "ae5439522252a8069ae162bc0c9f3f72d53eac59624c8c9e0ae1d9964fb79285"
+      },
+      "1-candidate": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "0d4dca146a80e0f0790b6931fef85fc62c5e9387bf9158789952c1c9c5307410",
+        "effective_initial_messages_sha256": "b3afeab4274d76ef2fb14ef727fb195fa62be59972c15d81959b2587cfe0d2aa",
+        "host_conditions_sha256": "ae5439522252a8069ae162bc0c9f3f72d53eac59624c8c9e0ae1d9964fb79285"
+      },
+      "2-baseline": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "0d4dca146a80e0f0790b6931fef85fc62c5e9387bf9158789952c1c9c5307410",
+        "effective_initial_messages_sha256": "b3afeab4274d76ef2fb14ef727fb195fa62be59972c15d81959b2587cfe0d2aa",
+        "host_conditions_sha256": "ae5439522252a8069ae162bc0c9f3f72d53eac59624c8c9e0ae1d9964fb79285"
+      },
+      "2-candidate": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "0d4dca146a80e0f0790b6931fef85fc62c5e9387bf9158789952c1c9c5307410",
+        "effective_initial_messages_sha256": "b3afeab4274d76ef2fb14ef727fb195fa62be59972c15d81959b2587cfe0d2aa",
+        "host_conditions_sha256": "ae5439522252a8069ae162bc0c9f3f72d53eac59624c8c9e0ae1d9964fb79285"
+      },
+      "3-baseline": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "0d4dca146a80e0f0790b6931fef85fc62c5e9387bf9158789952c1c9c5307410",
+        "effective_initial_messages_sha256": "b3afeab4274d76ef2fb14ef727fb195fa62be59972c15d81959b2587cfe0d2aa",
+        "host_conditions_sha256": "ae5439522252a8069ae162bc0c9f3f72d53eac59624c8c9e0ae1d9964fb79285"
+      },
+      "3-candidate": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "0d4dca146a80e0f0790b6931fef85fc62c5e9387bf9158789952c1c9c5307410",
+        "effective_initial_messages_sha256": "b3afeab4274d76ef2fb14ef727fb195fa62be59972c15d81959b2587cfe0d2aa",
+        "host_conditions_sha256": "ae5439522252a8069ae162bc0c9f3f72d53eac59624c8c9e0ae1d9964fb79285"
+      }
+    },
+    "distinct_context_counts": {
+      "base_instruction_metadata_sha256": 1,
+      "combined_sha256": 1,
+      "effective_initial_messages_sha256": 1,
+      "host_conditions_sha256": 1
+    },
+    "limitation": "Host instructions were not pinned before these trials. This retrospective audit cannot excuse a mismatch or authorize a rerun.",
+    "method": "Normalize ARM path only; compare retained host base metadata, effective initial messages and execution conditions.",
+    "passed": true,
+    "problems": []
+  },
+  "initial_decision_before_host_audit": {
     "accepted": false,
     "decision": "inconclusive",
     "reasons": [
@@ -36,6 +101,7 @@
         "correctness": {
           "acceptance_source": "https://github.com/fixture/dollars/pull/7#issuecomment-9",
           "assessment_sha256": "346e6e7eeb5d309b33cea73020b623bf46fbe468eea0eb5bfe0ed8ba61c6ee5c",
+          "ci_evidence": null,
           "exact_acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
           "frozen_intact": true,
           "inputs_intact": true,
@@ -279,6 +345,7 @@
         "correctness": {
           "acceptance_source": "https://github.com/fixture/dollars/pull/7#issuecomment-9",
           "assessment_sha256": "dc8dcc4820752345605bcd651cfaf4b48d432cbc4a826d79cb661317549ae35e",
+          "ci_evidence": null,
           "exact_acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
           "frozen_intact": true,
           "inputs_intact": true,
@@ -539,6 +606,7 @@
         "correctness": {
           "acceptance_source": "https://github.com/fixture/dollars/pull/7#issuecomment-9",
           "assessment_sha256": "c4c407d4614a93bec5ec94d87d65c0e95f6227685b17db2979355eb72fab8a34",
+          "ci_evidence": null,
           "exact_acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
           "frozen_intact": true,
           "inputs_intact": true,
@@ -787,6 +855,7 @@
         "correctness": {
           "acceptance_source": "https://github.com/fixture/dollars/pull/7#issuecomment-9",
           "assessment_sha256": "c7118abc70a057338b2e8b5c28887a09494ac60f084372c61cac70461f216776",
+          "ci_evidence": null,
           "exact_acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
           "frozen_intact": true,
           "inputs_intact": true,
@@ -1033,6 +1102,7 @@
         "correctness": {
           "acceptance_source": "https://github.com/fixture/dollars/pull/7#issuecomment-9",
           "assessment_sha256": "3090a2e417ccce53fcc0240eb71c1dab7d2fddf003967875287c71c4020abe6d",
+          "ci_evidence": null,
           "exact_acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
           "frozen_intact": true,
           "inputs_intact": true,
@@ -1282,6 +1352,7 @@
         "correctness": {
           "acceptance_source": "https://github.com/fixture/dollars/pull/7#issuecomment-9",
           "assessment_sha256": "46d44502581e290ff9b8c25d682dc555d856d9d77ab0f3229a153a5e4c36529a",
+          "ci_evidence": null,
           "exact_acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
           "frozen_intact": true,
           "inputs_intact": true,
@@ -1534,5 +1605,6 @@
       ]
     }
   ],
+  "private_archive_sha256": "58776388e2204a8e056c32d0005887d56e722e318848d3d1eccdb9db602ce62e",
   "proposal": 1
 }

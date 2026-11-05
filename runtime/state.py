@@ -610,73 +610,32 @@ class Store:
             }
         return described
 
-    def _status_locked(self, manifest, captures, *, compact=False, run=None, explain=False):
-        if run is not None and run not in manifest['runs']:
-            raise ValueError('Unknown run id: ' + run)
-        runs = manifest['runs'] if run is None else {run: manifest['runs'][run]}
-        if compact:
-            runs = {
-                name: {
-                    **{key: value for key, value in state.items() if key != 'progress'},
-                    'cycle': state['cycles'][-1] if state['cycles'] else None,
-                    'progress_count': len(state['progress']),
-                    'progress_ref': {
-                        'manifest': str(self.manifest),
-                        'pointer': '/runs/' + name.replace('~', '~0').replace('/', '~1') + '/progress',
-                    },
-                }
-                for name, state in runs.items()
-            }
-        return {'contract': CONTRACT, 'subject': self.subject, 'manifest': str(self.manifest),
-                'tasks': [self.describe(c, manifest['entries'].get(c['key'], {}), explain=explain) for c in captures],
-                'runs': runs,
-                'unfinished': [e['claim'] for e in manifest['entries'].values() if e.get('claim')]}
-
-
     def status(self, specs, *, compact=False, run=None, explain=False):
         context = _CaptureContext()
         captures = [capture(spec, _context=context) for spec in specs]
         if any(c['subject'] != self.subject for c in captures):
             raise ValueError('Specs refer to another PR')
         with self.locked() as manifest:
-            return self._status_locked(manifest, captures, compact=compact, run=run, explain=explain)
-
-    def resume(self, specs, *, run):
-        """Read one locked snapshot; references never supply omitted governing inputs."""
-        context = _CaptureContext()
-        captures = [capture(spec, _context=context) for spec in specs]
-        if any(c['subject'] != self.subject for c in captures):
-            raise ValueError('Specs refer to another PR')
-        with self.locked() as manifest:
-            status = self._status_locked(manifest, captures, compact=True, run=run, explain=True)
-            current = {task['key']: task for task in status['tasks']}
-            tasks = []
-            for key, entry in manifest['entries'].items():
-                if key not in current and not any(a.get('run') == run for a in entry.get('attempts', [])):
-                    continue
-                saved, problem = self._load_saved(entry)
-                tasks.append({'key': key, 'task': entry.get('components', {}).get('task', {}).get('id'),
-                    'current': current.get(key), 'governing_spec_supplied': key in current,
-                    'missing_references': [] if key in current else ['governing_spec'],
-                    'claim': entry.get('claim'),
-                    'attempts': [{name:a.get(name) for name in ('id','status','run','cycle','handle')}
-                                 for a in entry.get('attempts', [])],
-                    'evidence': {'result': saved['path'] if saved else None,
-                                 'status': saved['status'] if saved else None,
-                                 'problem': problem},
-                    'captured_inputs_ref': {'manifest': str(self.manifest),
-                                           'pointer': _pointer(('entries',key,'components'))}})
-            retained_keys = {t['key'] for t in tasks}
-            for task in status['tasks']:
-                if task['key'] not in retained_keys:
-                    tasks.append({'key':task['key'],'task':task['task'],'current':task,
-                                  'governing_spec_supplied':True,'missing_references':['retained_task']})
-            return {'packet_version': 1, 'contract': CONTRACT, 'subject': self.subject,
-                    'manifest': str(self.manifest), 'run_id': run, 'run': status['runs'][run],
-                    'tasks': tasks, 'unfinished': status['unfinished'],
-                    'limits': {'read_only':True, 'recovery_authorized':False,
-                               'missing_inputs_inferred':False,
-                               'freshness_requires_supplied_current_specs':True}}
+            if run is not None and run not in manifest['runs']:
+                raise ValueError('Unknown run id: ' + run)
+            runs = manifest['runs'] if run is None else {run: manifest['runs'][run]}
+            if compact:
+                runs = {
+                    name: {
+                        **{key: value for key, value in state.items() if key != 'progress'},
+                        'cycle': state['cycles'][-1] if state['cycles'] else None,
+                        'progress_count': len(state['progress']),
+                        'progress_ref': {
+                            'manifest': str(self.manifest),
+                            'pointer': '/runs/' + name.replace('~', '~0').replace('/', '~1') + '/progress',
+                        },
+                    }
+                    for name, state in runs.items()
+                }
+            return {'contract': CONTRACT, 'subject': self.subject, 'manifest': str(self.manifest),
+                    'tasks': [self.describe(c, manifest['entries'].get(c['key'], {}), explain=explain) for c in captures],
+                    'runs': runs,
+                    'unfinished': [e['claim'] for e in manifest['entries'].values() if e.get('claim')]}
 
     @staticmethod
     def budget(manifest, *, run, cycle, retry, ci_repair, ci_rerun, head, task):

@@ -34,9 +34,6 @@ def main():
     p.add_argument('--finalizer', required=True, help='/skill/PLUGIN:SKILL reference')
     p.add_argument('--run', required=True)
     p.add_argument('--upstream')
-    p = sub.add_parser('resume', help='Read retained run, task and evidence references without authorizing recovery')
-    p.add_argument('--spec', type=Path, action='append', default=[])
-    p.add_argument('--run', required=True)
     p = sub.add_parser('status')
     p.add_argument('--spec', type=Path, action='append', default=[])
     p.add_argument('--compact', action='store_true', help='Replace run progress with counts and references')
@@ -92,9 +89,7 @@ def main():
         print(json.dumps(result, sort_keys=True))
         return
     store = Store(args.repository, args.pr, checkout=args.checkout)
-    if args.command == 'resume':
-        result = store.resume([read(p) for p in args.spec], run=args.run)
-    elif args.command == 'status':
+    if args.command == 'status':
         result = store.status([read(p) for p in args.spec], compact=args.compact, run=args.run, explain=args.explain)
     elif args.command == 'start':
         result = store.start(read(args.spec), recover=args.recover, run=args.run, cycle=args.cycle,

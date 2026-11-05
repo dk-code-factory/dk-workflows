@@ -40,9 +40,12 @@ def response_cost(usage, *, service_tier, cache_write_12h_tokens=0, regional=Fal
     return cost * (Decimal('1.1') if regional else 1)
 
 
-def evaluate_pairs(pairs, *, correctness_passed):
+def evaluate_pairs(pairs, *, correctness_passed, context_control_passed=None):
     """Exactly three frozen alternating pairs; missing evidence is inconclusive."""
     reasons = []
+    if context_control_passed is not True:
+        return {'accepted': False, 'decision': 'inconclusive',
+                'reasons': ['Missing or mismatched native starting-context controls']}
     if type(correctness_passed) is not bool:
         return {'accepted': False, 'decision': 'inconclusive',
                 'reasons': ['Missing correctness assessment']}

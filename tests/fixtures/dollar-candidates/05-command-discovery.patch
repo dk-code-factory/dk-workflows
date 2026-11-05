@@ -1,0 +1,218 @@
+diff --git a/docs/task-state.md b/docs/task-state.md
+index 4f437dd..8a99253 100644
+--- a/docs/task-state.md
++++ b/docs/task-state.md
+@@ -4,6 +4,8 @@ Native agents resolve and invoke skills. Python fingerprints inputs, claims task
+ 
+ Run commands as `python3 PLUGIN_ROOT/scripts/dk.py --repository HOST/OWNER/REPO --pr https://HOST/OWNER/REPO/pull/N --checkout REPO COMMAND`. Direct skill calls use this cache only when their caller manages them with these commands.
+ 
++For a versioned command/schema reference and ordinary, hook and finalizer examples, run `python3 PLUGIN_ROOT/scripts/dk_reference.py`. Use `--command NAME` to select one command. It reads parser definitions without creating state or invoking skills.
++
+ ## Define and capture tasks
+ 
+ Generate a spec with `spec --definition /private/reviewer-definition.json`. Save stdout outside the repository. Global command arguments supply the canonical repository and PR. Example definition:
+diff --git a/scripts/dk.py b/scripts/dk.py
+index b8ce32a..a51649d 100644
+--- a/scripts/dk.py
++++ b/scripts/dk.py
+@@ -10,8 +10,9 @@ from state import Store, make_spec, read
+ from config import CYCLE_PHASES, effective, finalizer_groups, make_finalizer_spec, make_hook_spec
+ 
+ 
+-def main():
+-    parser = argparse.ArgumentParser(description=__doc__)
++def make_parser():
++    parser = argparse.ArgumentParser(description=__doc__,
++        epilog='Command schemas and examples: python3 PLUGIN_ROOT/scripts/dk_reference.py')
+     parser.add_argument('--repository', required=True, help='HOST/OWNER/REPO')
+     parser.add_argument('--pr', required=True, help='Canonical https PR URL')
+     parser.add_argument('--checkout', type=Path, help='Repository whose state must remain external')
+@@ -68,7 +69,11 @@ def main():
+     p.add_argument('--key', action='append', required=True)
+     p.add_argument('--reason', required=True)
+     p.add_argument('--recover', help='Close this stopped claim without invoking; reconcile domain writes first')
+-    args = parser.parse_args()
++    return parser
++
++
++def main():
++    args = make_parser().parse_args()
+     if args.command == 'spec':
+         result = make_spec(repository=args.repository, pr=args.pr, **read(args.definition))
+         print(json.dumps(result, sort_keys=True))
+diff --git a/scripts/dk_reference.py b/scripts/dk_reference.py
+new file mode 100644
+index 0000000..aea4072
+--- /dev/null
++++ b/scripts/dk_reference.py
+@@ -0,0 +1,105 @@
++#!/usr/bin/env python3
++"""Read-only, versioned bookkeeping reference generated from the CLI parser."""
++import argparse
++import inspect
++import json
++from pathlib import Path
++
++from dk import make_parser, make_spec
++
++
++def arguments(parser):
++    result = []
++    for action in parser._actions:
++        if isinstance(action, (argparse._HelpAction, argparse._SubParsersAction)):
++            continue
++        item = {'flags': action.option_strings, 'name': action.dest,
++                'required': action.required,
++                'type': getattr(action.type, '__name__', 'string'),
++                'repeatable': isinstance(action, argparse._AppendAction)}
++        if action.nargs == 0:
++            item['type'] = 'boolean'
++        if action.choices is not None:
++            item['choices'] = list(action.choices)
++        if action.default is not None:
++            item['default'] = action.default
++        if action.help:
++            item['help'] = action.help
++        result.append(item)
++    return result
++
++
++def examples():
++    common = {'resources': {'skill': 'skill.md'}, 'instructions': {'user': 'instructions.txt'},
++              'inputs': {'context': 'context.json'}, 'options': {},
++              'governing_inputs_complete': True}
++    ordinary = dict(common, skill_identity='example:review', responsibility='content-review',
++                    assigned_instructions='Review the supplied scope and retain original findings.')
++    hook = dict(common, skill_identity='dk-workflows:dk-pr-fix')
++    finalizer = dict(common, skill_identity='example:finalizer',
++                     assigned_instructions='Validate the supplied finalization scope.')
++    prefix = ['--repository', 'github.com/example/project', '--pr',
++              'https://github.com/example/project/pull/7']
++    return {'argv_prefix': prefix,
++            'files': {'ordinary.json': ordinary, 'hook.json': hook, 'finalizer.json': finalizer},
++            'configuration': {'cycle_hooks': {'before_cycle': [
++                {'id': 'audit', 'instructions': 'Assess the supplied cycle scope.'}]},
++                'finalizers': ['/skill/example:finalizer']},
++            'commands': {
++                'spec': ['spec', '--definition', 'ordinary.json'],
++                'hook-spec': ['hook-spec', '--definition', 'hook.json', '--phase', 'before_cycle',
++                              '--hook-id', 'audit', '--run', 'run', '--cycle', 'c1'],
++                'finalizer-plan': ['finalizer-plan'],
++                'finalizer-spec': ['finalizer-spec', '--definition', 'finalizer.json',
++                                   '--finalizer', '/skill/example:finalizer', '--run', 'run'],
++                'resume': ['resume', '--run', 'run', '--spec', 'spec.json'],
++                'status': ['status', '--compact', '--spec', 'spec.json', '--run', 'run'],
++                'start': ['start', '--spec', 'spec.json', '--run', 'run'],
++                'start-batch': ['start-batch', '--spec', 'a.json', '--spec', 'b.json', '--run', 'run'],
++                'record': ['record', '--spec', 'spec.json', '--claim', 'CLAIM_FROM_START',
++                           '--original', 'original.txt', '--normalized', 'normalized.json',
++                           '--status', 'complete'],
++                'invalidate': ['invalidate', '--key', 'KEY_FROM_STATUS', '--reason', 'Changed scope']},
++            'usage': ['Substitute canonical identity and real private resource paths; include all governing inputs.',
++                      'Save generated spec stdout as spec.json outside the checkout.',
++                      'Configure hook/finalizer entries through scripts/config.py before generating their specs.',
++                      'For hooks/finalizers claim with --run only, without reviewer cycle or budget flags.',
++                      'Agents invoke skills between start and record; use the returned claim id.',
++                      'Reuse action from start requires no invocation. Recovery requires explicit authorization.',
++                      'Original output is exact skill output. normalized.json contains completion, findings and evidence.']}
++
++
++def reference(command=None):
++    parser = make_parser()
++    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
++    if command is not None and command not in sub.choices:
++        raise ValueError('Unknown command: ' + command)
++    sample = examples()
++    # Keep examples synchronized with the supported argument grammar.
++    for argv in sample['commands'].values():
++        parser.parse_args(sample['argv_prefix'] + argv)
++    names = [command] if command else list(sub.choices)
++    required = [name for name, p in inspect.signature(make_spec).parameters.items()
++                if p.default is inspect.Parameter.empty and name not in ('repository', 'pr')]
++    return {'reference_version': 1,
++            'package_version': json.loads((Path(__file__).resolve().parents[1]/
++                                          '.codex-plugin/plugin.json').read_text())['version'],
++            'global_arguments': arguments(parser),
++            'commands': {name: arguments(sub.choices[name]) for name in names},
++            'ordinary_definition_required': required,
++            'examples': {**sample, 'commands': {name: sample['commands'][name] for name in names}},
++            'limits': 'Bookkeeping only. Examples do not authorize invocation, recovery or publication.'}
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--command', help='Select one command instead of the full reference')
++    args = parser.parse_args()
++    try:
++        print(json.dumps(reference(args.command), sort_keys=True))
++    except ValueError as exc:
++        parser.error(str(exc))
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tests/test_command_reference.py b/tests/test_command_reference.py
+new file mode 100644
+index 0000000..9e8a2b0
+--- /dev/null
++++ b/tests/test_command_reference.py
+@@ -0,0 +1,59 @@
++"""Generated discovery remains read-only and its examples work with real helpers."""
++from copy import deepcopy
++import json
++from pathlib import Path
++import subprocess
++import sys
++
++import pytest
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT/'scripts'))
++import dk_reference
++import config
++from state import Store, make_spec, write
++
++
++def test_reference_uses_live_parser_and_selects_commands_without_state(tmp_path, monkeypatch):
++    monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path/'state'))
++    value = dk_reference.reference()
++    assert value['reference_version'] == 1
++    assert value['package_version'] == json.loads((ROOT/'.codex-plugin/plugin.json').read_text())['version']
++    assert len(value['commands']) == 10
++    assert next(a for a in value['commands']['record'] if a['name'] == 'status')['choices'] == [
++        'complete', 'failed', 'incomplete']
++    assert next(a for a in value['commands']['start-batch'] if a['name'] == 'spec')['repeatable']
++    assert list(dk_reference.reference('hook-spec')['commands']) == ['hook-spec']
++    with pytest.raises(ValueError, match='Unknown command'):
++        dk_reference.reference('execute')
++    output = subprocess.check_output([sys.executable, str(ROOT/'scripts/dk_reference.py'),
++                                      '--command', 'record'], text=True, cwd=tmp_path)
++    assert json.loads(output)['commands']['record'] == value['commands']['record']
++    assert not (tmp_path/'state').exists()
++
++
++def test_examples_complete_ordinary_hook_and_finalizer_without_reviewer_budgets(tmp_path):
++    sample = deepcopy(dk_reference.examples())
++    repository = 'github.com/example/project'
++    pr = 'https://github.com/example/project/pull/7'
++    write(config.path(repository), sample['configuration'])
++    for definition in sample['files'].values():
++        for field in ('resources', 'instructions', 'inputs'):
++            for label, name in definition[field].items():
++                path = tmp_path/name
++                path.write_text('Explicit example resource and governing context.')
++                definition[field][label] = str(path)
++    ordinary = make_spec(repository=repository, pr=pr, **sample['files']['ordinary.json'])
++    hook = config.make_hook_spec(repository=repository, pr=pr, run='run', cycle='c1',
++        phase='before_cycle', hook_id='audit', definition=sample['files']['hook.json'])
++    finalizer = config.make_finalizer_spec(repository=repository, pr=pr, run='run',
++        finalizer='/skill/example:finalizer', definition=sample['files']['finalizer.json'])
++    store = Store(repository, pr)
++    for task in (ordinary, hook, finalizer):
++        claim = store.start(task, run='run')['claim']
++        store.record(task, claim['id'], b'Original native output.',
++                     {'complete': True, 'findings': []}, 'complete')
++        assert store.start(task, run='run')['action'] == 'reuse'
++    run = store.status([ordinary, hook, finalizer])['runs']['run']
++    assert run['cycles'] == []
++    assert all(not run.get(k) for k in ('retries', 'ci_repairs', 'ci_reruns'))

@@ -35,7 +35,7 @@ def pairs(baseline, candidate):
     ([100]*3, [90]*3, True),
 ])
 def test_dollar_boundaries(b, c, accepted):
-    assert dollars.evaluate_pairs(pairs(b, c), correctness_passed=True)['accepted'] is accepted
+    assert dollars.evaluate_pairs(pairs(b, c), correctness_passed=True, context_control_passed=True)['accepted'] is accepted
 
 
 @pytest.mark.parametrize('change', [
@@ -51,11 +51,11 @@ def test_dollar_boundaries(b, c, accepted):
 def test_missing_or_changed_evidence_is_inconclusive(change):
     value = pairs([100]*3, [90]*3)
     change(value)
-    assert dollars.evaluate_pairs(value, correctness_passed=True)['decision'] == 'inconclusive'
+    assert dollars.evaluate_pairs(value, correctness_passed=True, context_control_passed=True)['decision'] == 'inconclusive'
 
 
 def test_correctness_blocks_savings():
-    assert not dollars.evaluate_pairs(pairs([100]*3, [90]*3), correctness_passed=False)['accepted']
+    assert not dollars.evaluate_pairs(pairs([100]*3, [90]*3), correctness_passed=False, context_control_passed=True)['accepted']
 
 
 def test_cache_context_tier_and_reasoning_accounting():
@@ -71,4 +71,11 @@ def test_cache_context_tier_and_reasoning_accounting():
 
 
 def test_missing_correctness_is_inconclusive():
-    assert dollars.evaluate_pairs(pairs([100]*3, [90]*3), correctness_passed=None)['decision'] == 'inconclusive'
+    assert dollars.evaluate_pairs(pairs([100]*3, [90]*3), correctness_passed=None, context_control_passed=True)['decision'] == 'inconclusive'
+
+
+@pytest.mark.parametrize('control', [False, None])
+def test_uncontrolled_host_context_forbids_adoption(control):
+    value = dollars.evaluate_pairs(pairs([100]*3, [90]*3),
+        correctness_passed=True, context_control_passed=control)
+    assert value['decision'] == 'inconclusive' and not value['accepted']

@@ -8,6 +8,7 @@ import sys
 import dollar_exercise
 import dollar_trials
 import dollar_usage
+import dollar_context
 
 
 def sha(data):
@@ -172,10 +173,15 @@ def report(root, experiment):
             cost = usage.get('api_equivalent_cost_usd',usage.get('observed_api_equivalent_cost_usd'))
             observations[arm].append(Decimal(cost))
         pairs.append(pair)
+    context_audit = dollar_context.audit(root)
     gate = dollar_usage.evaluate_pairs([{k:(v['usage'] if k != 'order' else v) for k,v in p.items()}
-                                       for p in pairs], correctness_passed=(all(c['passed'] for c in checks)
+                                       for p in pairs], context_control_passed=context_audit['passed'], correctness_passed=(all(c['passed'] for c in checks)
                                            if all(c['assessment_sha256'] for c in checks) else None))
     result = {'proposal':experiment, 'decision':gate,
+              'host_context_audit':context_audit,
+              'context_uncontrolled_original_gate':dollar_usage.evaluate_pairs(
+                  [{k:(v['usage'] if k != 'order' else v) for k,v in p.items()} for p in pairs],
+                  context_control_passed=True, correctness_passed=all(c['passed'] for c in checks)),
               'correctness_passed':all(c['passed'] for c in checks),
               'native_arm_count':6, 'pairs':pairs,
               'observed_costs_usd':{arm:list(map(str,costs)) for arm,costs in observations.items()},

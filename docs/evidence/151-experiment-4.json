@@ -1,7 +1,115 @@
 {
   "billing_basis": "API-equivalent cost; not actual account billing",
+  "context_uncontrolled_original_gate": {
+    "accepted": true,
+    "baseline_usd": [
+      "0.2566360",
+      "0.1955628",
+      "0.2124984"
+    ],
+    "candidate_usd": [
+      "0.1490952",
+      "0.1933976",
+      "0.2095708"
+    ],
+    "decision": "accepted",
+    "improved_pairs": 3,
+    "limitation": "Three pairs give bounded evidence, not a general savings guarantee",
+    "median_baseline_usd": "0.2124984",
+    "median_candidate_usd": "0.1933976",
+    "rate_card": {
+      "billing_basis": "API-equivalent cost; not actual account billing",
+      "date": "2026-11-05",
+      "long_context_input_multiplier": "2",
+      "long_context_output_multiplier": "1.5",
+      "long_context_threshold": 272000,
+      "model": "gpt-6.1-sol",
+      "per_million_usd": {
+        "cache_read": ".1",
+        "cache_write_12h": "5",
+        "cache_write_30m": "2.5",
+        "input": "2",
+        "output": "10"
+      },
+      "pricing_source": "https://developers.openai.com/api/docs/pricing",
+      "regional_multiplier": "1.1",
+      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+      "tiers": {
+        "batch": "0.5",
+        "default": "1",
+        "fast": "2",
+        "flex": "0.5",
+        "priority": "2",
+        "standard": "1",
+        "ultrafast": "6"
+      }
+    },
+    "reasons": [],
+    "sum_baseline_usd": "0.6646972",
+    "sum_candidate_usd": "0.5520636"
+  },
   "correctness_passed": true,
   "decision": {
+    "accepted": false,
+    "decision": "inconclusive",
+    "reasons": [
+      "Missing or mismatched native starting-context controls"
+    ]
+  },
+  "host_audit_correction": "Do not adopt a candidate with mismatched or unproven starting-context controls. Completed trials are preserved and are not rerun.",
+  "host_context_audit": {
+    "arms": {
+      "1-baseline": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "36d07d2341b6560e327f593639ad584faf20ea820f1425c73aa6bfc6f97b4f81",
+        "effective_initial_messages_sha256": "a23cee25b29f13479e1f9223a90b3723726e2e8c85fa93fee9f006296486a097",
+        "host_conditions_sha256": "721e7f2e66ec7bff076c0adc1b532f144b514baf13e31449de6a013ee5cf726d"
+      },
+      "1-candidate": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "5ed8ee8ebf0ac02f191095ed0564aeaa2cc669c204ee29d9ec7ca44974bfa7b6",
+        "effective_initial_messages_sha256": "ed07c4291c3240e1966c849bcb8c76e3848068c7c384dd23935112c4cbc87935",
+        "host_conditions_sha256": "721e7f2e66ec7bff076c0adc1b532f144b514baf13e31449de6a013ee5cf726d"
+      },
+      "2-baseline": {
+        "base_instruction_metadata_sha256": "09a2ca85e0b24b37c9dc01a03b236e8abee81a1e73321e78d05d4011b799070f",
+        "combined_sha256": "cc8ef259e84d55ef5c0b6257b27da925ab4e4fdcb1ff6f5d3dd4404aab83ffc2",
+        "effective_initial_messages_sha256": "00fddc240ace346ed94e4017a38e9f9711b3930d7c2d99f76aab36654afafbe0",
+        "host_conditions_sha256": "721e7f2e66ec7bff076c0adc1b532f144b514baf13e31449de6a013ee5cf726d"
+      },
+      "2-candidate": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "5ed8ee8ebf0ac02f191095ed0564aeaa2cc669c204ee29d9ec7ca44974bfa7b6",
+        "effective_initial_messages_sha256": "ed07c4291c3240e1966c849bcb8c76e3848068c7c384dd23935112c4cbc87935",
+        "host_conditions_sha256": "721e7f2e66ec7bff076c0adc1b532f144b514baf13e31449de6a013ee5cf726d"
+      },
+      "3-baseline": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "5ed8ee8ebf0ac02f191095ed0564aeaa2cc669c204ee29d9ec7ca44974bfa7b6",
+        "effective_initial_messages_sha256": "ed07c4291c3240e1966c849bcb8c76e3848068c7c384dd23935112c4cbc87935",
+        "host_conditions_sha256": "721e7f2e66ec7bff076c0adc1b532f144b514baf13e31449de6a013ee5cf726d"
+      },
+      "3-candidate": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "5ed8ee8ebf0ac02f191095ed0564aeaa2cc669c204ee29d9ec7ca44974bfa7b6",
+        "effective_initial_messages_sha256": "ed07c4291c3240e1966c849bcb8c76e3848068c7c384dd23935112c4cbc87935",
+        "host_conditions_sha256": "721e7f2e66ec7bff076c0adc1b532f144b514baf13e31449de6a013ee5cf726d"
+      }
+    },
+    "distinct_context_counts": {
+      "base_instruction_metadata_sha256": 2,
+      "combined_sha256": 3,
+      "effective_initial_messages_sha256": 3,
+      "host_conditions_sha256": 1
+    },
+    "limitation": "Host instructions were not pinned before these trials. This retrospective audit cannot excuse a mismatch or authorize a rerun.",
+    "method": "Normalize ARM path only; compare retained host base metadata, effective initial messages and execution conditions.",
+    "passed": false,
+    "problems": [
+      "Native starting instructions/conditions differ across frozen arms"
+    ]
+  },
+  "initial_decision_before_host_audit": {
     "accepted": true,
     "baseline_usd": [
       "0.2566360",
