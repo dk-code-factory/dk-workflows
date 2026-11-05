@@ -2,7 +2,7 @@
 import re
 from urllib.parse import quote, urlencode
 
-KINDS = {'ci-rerun', 'resolve-thread', 'request-review', 'create-draft-pr', 'post-review', 'merge-pr'}
+KINDS = {'ci-approve', 'ci-rerun', 'resolve-thread', 'request-review', 'create-draft-pr', 'post-review', 'merge-pr'}
 
 
 def positive(value, name):
@@ -30,6 +30,10 @@ class Handler:
     def merger(self):
         from shared.pr_merge import Merge
         return Merge(self.request, api=self.api, run=self.run, endpoint=self.endpoint)
+
+    def ci_approval(self):
+        from shared.ci_approval import Approval
+        return Approval(self)
 
     def pages(self, suffix):
         separator = '&' if '?' in suffix else '?'
@@ -142,6 +146,8 @@ class Handler:
 
     def prepare(self):
         request = self.request
+        if request['kind'] == 'ci-approve':
+            return self.ci_approval().prepare()
         if request['kind'] == 'merge-pr':
             return self.merger().prepare()
         sha(request.get('head'))
@@ -218,6 +224,8 @@ class Handler:
 
     def check(self, expected, verified):
         request, kind = self.request, self.request['kind']
+        if kind == 'ci-approve':
+            return self.ci_approval().check(expected, verified)
         if kind == 'merge-pr':
             return self.merger().check(expected, verified)
         if self.metadata(request['pr']) != expected['metadata']:
@@ -248,6 +256,8 @@ class Handler:
 
     def send(self, expected, operation_id):
         request, kind = self.request, self.request['kind']
+        if kind == 'ci-approve':
+            return self.ci_approval().send()
         if kind == 'merge-pr':
             return self.merger().send()
         if kind == 'ci-rerun':
@@ -272,6 +282,8 @@ class Handler:
 
     def observe(self, expected):
         request, kind = self.request, self.request['kind']
+        if kind == 'ci-approve':
+            return self.ci_approval().observe(expected)
         if kind == 'merge-pr':
             return self.merger().observe(expected)
         if kind == 'ci-rerun':
