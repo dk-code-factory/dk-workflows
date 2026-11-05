@@ -144,9 +144,12 @@ def report():
 
 
 def finish(store, task, result=None):
+    from native_review_observations import observations
     claim = store.start(task, run='run')['claim']
     result = result or {'complete': True, 'findings': []}
-    store.record(task, claim['id'], json.dumps(result).encode(), result, 'complete')
+    original = json.dumps(result).encode()
+    store.record(task, claim['id'], original, result, 'complete',
+                 native_evidence=observations(task, claim, original) if 'native_review' in task else None)
 
 
 def cleanup_task(context, handoff, tmp_path):
@@ -333,10 +336,11 @@ def test_real_git_single_subject_commit_preserves_tree_content_reviews_and_final
     tree = git(checkout, 'rev-parse', 'HEAD^{tree}')
     review_git = {**context['git'], 'history': False, 'head_sensitive': False}
     def review():
+        from native_review_observations import CONTRACT
         return make_spec(repository=REPO, pr=PR, skill_identity='fixture:review', resources=context['resources'],
             responsibility='content-review', assigned_instructions='Review the complete content.',
             instructions=context['instructions'], inputs=context['inputs'], options={},
-            git=review_git, governing_inputs_complete=True)
+            git=review_git, governing_inputs_complete=True, native_review=CONTRACT)
     store = Store(REPO, PR)
     finish(store, review())
     cleanup = cleanup_task(context, supplied, tmp_path)

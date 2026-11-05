@@ -115,9 +115,7 @@ class Approval:
                 saved = store.saved(entry)
                 attempt = entry.get('attempts', [{}])[-1]
                 current_completion = bool(
-                    saved and saved['status'] == 'complete'
-                    and saved['fingerprint'] == current['fingerprint']
-                    and not entry.get('invalidated') and not entry.get('claim')
+                    status['coverage_complete']
                     and spec.get('governing_inputs_complete') is True and spec['skill'].get('resources')
                     and attempt.get('run') == value.get('run') and attempt.get('cycle') == cycle)
                 if not status['reusable'] and not current_completion:

@@ -20,6 +20,7 @@ Generate a spec with `spec --definition /private/reviewer-definition.json`. Save
   "inputs": {"context": "/private/review-context.json"},
   "git": {"checkout": "/review/checkout", "target": "TARGET_SHA", "base": "DIFF_BASE_SHA", "head": "HEAD_SHA", "history": false, "head_sensitive": false},
   "options": {},
+  "native_review": {"schema": 1, "skill_version": "RESOLVED_VERSION", "passes": []},
   "governing_inputs_complete": true
 }
 ```
@@ -51,6 +52,8 @@ Reuse unchanged guidance already read in the current context. Check resource ide
 
 Without specs, status inspects runs and unfinished work. Run selection filters runs only; coverage and unfinished claims remain PR-wide. An unknown run is an error. Compact output omits progress bodies. Follow its references and validated original result paths. See [status details](status-diagnostics.md) for decoding.
 
+Task status reports `coverage_complete` only when a retained complete result matches current inputs, has no unfinished claim or invalidation, and satisfies required native execution validation. `reusable` additionally requires task and result cacheability. CI approval may accept a noncacheable result from the current retained run/cycle, but it still requires `coverage_complete`.
+
 For a new run, omit `--run` from status until a start actually invokes a task with that run id. Reuse alone does not create a run. Continue passing the chosen run id to starts so later invocations retain its budgets.
 
 Both start commands return an `action` for each task:
@@ -65,7 +68,7 @@ Batch results preserve order and include the manifest and all unfinished PR clai
 
 ## Record and recover
 
-Run `record --spec A.json --claim CLAIM_ID --original OUTPUT --normalized RESULT.json --status complete|failed|incomplete`. Preserve original bytes. Normalized results require `complete:true|false` and a `findings` list. Keep skill-owned fields. Failed and incomplete results use false. Record successful tasks immediately, even if others fail. Save stale, failed and incomplete attempts accurately. Recover explicitly when required.
+Run `record --spec A.json --claim CLAIM_ID --original OUTPUT --normalized RESULT.json --status complete|failed|incomplete`. For native reviewers also supply `--native-evidence OBSERVATIONS.json`, following [native reviewer handoffs](native-review.md). Preserve original bytes. Normalized results require `complete:true|false` and a `findings` list. Keep skill-owned fields. Failed and incomplete results use false. Record successful tasks immediately, even if others fail. Save stale, failed and incomplete attempts accurately. Recover explicitly when required.
 
 Use `record --progress PROGRESS.json` for append-only outcomes, dispositions and exact user acceptances with sources. Keep progress outside governing instruction and input files. Completed analysis may contain findings; assess readiness separately. Failed, incomplete, damaged, invalidated or unfinished results never satisfy coverage.
 
@@ -73,7 +76,9 @@ Claims never expire. Confirm the prior agent stopped and reconcile its writes be
 
 To close a stopped claim without replacement work, use `invalidate --key TASK_KEY --reason TEXT --recover CLAIM_ID`. This also works when missing resources prevent recapture. Repeat `--key` to invalidate several tasks.
 
-Follow [native reviewer handoffs](native-review.md). Save the host handle and terminal outcome in operational progress. Before recording success, the coordinator checks host execution and skill completion. The store rejects empty or whitespace-only original output for complete tasks, including reuse of older empty results. It does not verify host events or infer completion from report text. Failed or incomplete attempts may keep empty output.
+Follow [native reviewer handoffs](native-review.md). Save the host handle and terminal outcome in operational progress. Before recording success, the coordinator collects host execution evidence and checks skill completion. The store rejects empty or whitespace-only original output for complete tasks, including reuse of older empty results. Native review requirements are fingerprinted with resources and instructions. Reserved review responsibilities (`review` as a hyphen, underscore or colon delimited word, and `finding-verification`), explicit `native_review` tasks, and `code-review*` skill names require this contract even when omitted by the caller. Use `content-review` for configured reviewers; arbitrary generic responsibilities are not automatically classified from prose.
+
+`native-binding --spec A.json --claim CLAIM_ID` exposes expected claim, fingerprint, skill/version/resources and original pinned Git identities for a host collector. It creates no observed events. `record` validates the supplied observations, distinct child handles, terminal outputs and required driver tool outcomes. Missing contracts or unavailable, malformed or incomplete evidence downgrade requested completion to incomplete with an execution diagnostic. Original output, evidence bytes, requested normalized fields and findings remain retained; run, retry and cycle history are unchanged. Check the returned status. Reuse applies the same gate to historical reviewer artifacts without rewriting them. The trusted coordinator must obtain actual host observations; the store does not authenticate self-authored JSON or infer semantic adherence from report text. Failed or incomplete attempts may keep empty output.
 
 ## Retained budgets
 

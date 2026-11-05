@@ -45,7 +45,7 @@ def case(tmp_path, monkeypatch):
     context=tmp_path/'context';context.write_text('scope and decisions')
     instruction=tmp_path/'instructions';instruction.write_text('original user instruction')
     spec={'repository':REPO,'pr':PR,'skill':{'identity':'reviewer:a','resources':{'entry':str(skill)}},
-          'task':{'id':'content-review','instructions':'Review complete pinned code against supplied context.'},
+          'task':{'id':'content-analysis','instructions':'Analyze complete pinned code against supplied context.'},
           'inputs':{'context':str(context)},'instructions':{'user':str(instruction)},
           'options':{},'governing_inputs_complete':True,
           'git':{'checkout':str(checkout),'base':base,'target':base,'head':head}}
@@ -155,7 +155,7 @@ def test_supplied_architecture_rules_remain_required_without_a_global_gate(case,
 
 def test_squash_keeps_content_reviews_but_refreshes_history_and_head_checks(case):
     content,store=case
-    history=deepcopy(content);history['task']['id']='history-review';history['git']['history']=True
+    history=deepcopy(content);history['task']['id']='history-analysis';history['git']['history']=True
     head_check=deepcopy(content);head_check['task']['id']='head-check';head_check['git']['head_sensitive']=True
     for spec in (content,history,head_check):done(store,spec)
     checkout=content['git']['checkout']

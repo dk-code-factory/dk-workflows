@@ -44,6 +44,7 @@ def handoff(checkout, mode, paths, *, return_value=True):
 
 
 def spec(tmp_path, responsibility, preference_input):
+    from native_review_observations import CONTRACT
     source = tmp_path / (responsibility + '-preferences.json')
     write(source, preference_input)
     return make_spec(repository=REPO, pr=PR, skill_identity='fixture:' + responsibility,
@@ -51,12 +52,16 @@ def spec(tmp_path, responsibility, preference_input):
                                 'preferences': str(ROOT / 'docs/preferences.md'),
                                 'preference_runtime': str(ROOT / 'runtime/preferences.py')},
                      responsibility=responsibility, assigned_instructions='Perform the assigned task within the supplied scope.',
-                     instructions={}, inputs={'preferences': str(source)}, options={}, governing_inputs_complete=True)
+                     instructions={}, inputs={'preferences': str(source)}, options={}, governing_inputs_complete=True,
+                     native_review=CONTRACT)
 
 
 def complete(store, task):
+    from native_review_observations import observations
     claim = store.start(task)['claim']
-    store.record(task, claim['id'], b'Complete native stand-in report.', {'complete': True, 'findings': []}, 'complete')
+    original = b'Complete native stand-in report.'
+    store.record(task, claim['id'], original, {'complete': True, 'findings': []}, 'complete',
+                 native_evidence=observations(task, claim, original) if 'native_review' in task else None)
     return claim
 
 
@@ -79,7 +84,9 @@ def test_downstream_process_receives_complete_scoped_records(workflow, tmp_path,
     assert result['preferences']['selection']['records'][0]['record']['id'] == preference_id
     assert result['preferences']['selection']['records'][0]['paths'] == ['code.py']
     assert result['preferences']['decisions'][0]['paths'] == ['code.py']
-    store.record(task, claim['id'], output.read_bytes(), result, 'complete')
+    from native_review_observations import observations
+    store.record(task, claim['id'], output.read_bytes(), result, 'complete',
+                 native_evidence=observations(task, claim, output.read_bytes()))
     # Identical fresh resolution and condition decisions preserve reuse.
     unchanged = spec(tmp_path, responsibility, handoff(checkout, mode, ['unrelated.py', 'code.py']))
     assert store.start(unchanged)['action'] == 'reuse'
