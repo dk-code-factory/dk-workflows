@@ -204,3 +204,21 @@ selection/adoption behavior is outside these samples. The proposed guidance was
 removed, with its patch retained as nonexecuting evidence. Raw conversations
 remain private. Upstream finalizer/preflight changes are outside these pinned native inputs
 and require separate final integration regressions.
+
+## Final integration validation
+
+The [validation record](evidence/145-final-validation.json) pins the integrated
+source and preserved commits. Current main's finalizer/preflight changes are
+retained; the experiment release is synchronized to 3.3.1. Production commands,
+configuration schemas, private formats and native guidance match integrated main.
+The full CI-style local suite passes 792 tests and seven subtests on Python 3.12.
+Both host distributions, package, whitespace and current-base release checks pass.
+
+Earlier local attempts remain recorded: missing parallel dependencies and a
+process-count assertion on default Python 3.14. The complete supported Python
+3.12 run passes without assertion changes or native-trial reruns. The whole
+personal configuration hash differs from the initial private observation; no
+experiment action edits personal or compaction settings, and effective native
+model/effort/tier controls were independently verified. Whole-file equality is
+not claimed. Final exact-head CI is recorded in PR #145 after final publication;
+local checks do not substitute for that gate.
