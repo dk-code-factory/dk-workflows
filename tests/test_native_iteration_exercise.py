@@ -1,6 +1,7 @@
 """Exercise-only safety and trace checks; no native agent or service is launched."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -117,17 +118,24 @@ def test_frozen_interface_summarizes_dispatched_argument_and_data_failures(tmp_p
 
 def test_current_runtime_and_explicit_baseline_are_frozen_independently(tmp_path):
     revision = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
+    baseline = '620f8df51b1066e44faeb69878235adcd3c49317'
+    baseline_guidance = subprocess.check_output(['git', '-C', str(ROOT),
+                                                'show', baseline+':runtime/pr-iter.md'])
+    assert baseline_guidance != subprocess.check_output(['git', '-C', str(ROOT),
+                                                         'show', revision+':runtime/pr-iter.md'])
+    env = os.environ.copy()
+    env.pop('PYTHONPATH', None)
     manifests = []
     for guidance in ('before', 'after'):
         arm = tmp_path/guidance
         initialized = subprocess.run([sys.executable, str(INTERFACE), '--root', str(arm),
-                                      'init', guidance, revision, revision],
+                                      'init', guidance, revision, baseline],
                                      capture_output=True, text=True)
         assert initialized.returncode == 0, initialized.stdout+initialized.stderr
         manifest = json.loads((arm/'exercise.json').read_text())
         manifests.append(manifest)
         assert manifest['runtime'] == revision
-        assert manifest['guidance_revision'] == (revision if guidance == 'before' else None)
+        assert manifest['guidance_revision'] == (baseline if guidance == 'before' else None)
         assert manifest['source_sha256'] == hashlib.sha256((arm/'sources.json').read_bytes()).hexdigest()
         for name, digest in manifest['runtime_hashes'].items():
             frozen = arm/'frozen'/name
@@ -139,11 +147,10 @@ def test_current_runtime_and_explicit_baseline_are_frozen_independently(tmp_path
         observed = subprocess.run([sys.executable, str(arm/'frozen/interface.py'), '--root', str(arm),
                                    'state', 'status', '--compact', '--run', 'exercise',
                                    '--spec', 'reviewer-a', '--spec', 'reviewer-b'],
-                                  capture_output=True, text=True, cwd=tmp_path)
+                                  capture_output=True, text=True, cwd=tmp_path, env=env)
         assert observed.returncode == 0, observed.stdout+observed.stderr
         if guidance == 'before':
-            assert (arm/'guidance/runtime/pr-iter.md').read_bytes() == subprocess.check_output(
-                ['git', '-C', str(ROOT), 'show', revision+':runtime/pr-iter.md'])
+            assert (arm/'guidance/runtime/pr-iter.md').read_bytes() == baseline_guidance
         else:
             assert (arm/'guidance/runtime/pr-iter.md').read_bytes() == (ROOT/'runtime/pr-iter.md').read_bytes()
         for task in ('reviewer-a', 'scope-partition'):
