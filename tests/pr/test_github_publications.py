@@ -225,6 +225,19 @@ def test_review_conflicting_or_incomplete_individual_evidence_stays_pending(
     assert remote.state['writes'] == {'post-review': 1}
 
 
+@pytest.mark.parametrize('field', ['in_reply_to_id', 'start_line', 'original_start_line'])
+def test_review_conflicting_list_identity_evidence_stays_pending(remote, review_transport, field):
+    review_transport['list'] = lambda values: [{**value, field: 1} for value in values]
+    operation = publisher.prepare(fixture.request('post-review'))['operation']
+    with pytest.raises(Diagnostic): publisher.publish(operation)
+    pending = publication.load(operation)
+    with pytest.raises(Diagnostic): publisher.publish(operation, reconcile=True)
+    retained = publication.load(operation)
+    assert retained['status'] == 'pending'
+    assert retained['intent'] == pending['intent']
+    assert remote.state['writes'] == {'post-review': 1}
+
+
 @pytest.mark.parametrize('failure', ['unavailable', 'extra', 'missing', 'duplicate', 'ambiguous-review'])
 def test_review_unavailable_or_ambiguous_evidence_never_resends(remote, review_transport, failure):
     operation = publisher.prepare(fixture.request('post-review'))['operation']
@@ -270,6 +283,11 @@ def test_pending_review_recovers_original_location_after_head_changes(remote, cu
     assert new_operation != operation
     assert publication.load(new_operation)['status'] == 'prepared'
     assert remote.state['writes'] == {'post-review': 1}
+    result = publisher.publish(new_operation)
+    assert result['status'] == 'verified'
+    assert result['receipt']['comments'][0]['id'] != verified['receipt']['comments'][0]['id']
+    assert publication.load(operation)['receipt'] == verified['receipt']
+    assert remote.state['writes'] == {'post-review': 2}
 
 
 def test_pending_list_only_verification_failure_recovers_without_changing_intent(remote, monkeypatch):

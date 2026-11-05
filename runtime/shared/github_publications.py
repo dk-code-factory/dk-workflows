@@ -342,7 +342,8 @@ class Handler:
             # List responses may omit locations. Any supplied evidence must still
             # agree with the authoritative object fetched by its database id.
             for key in ('path', 'body', 'line', 'side', 'original_line', 'commit_id',
-                        'original_commit_id', 'pull_request_review_id', 'pull_request_url'):
+                        'original_commit_id', 'pull_request_review_id', 'pull_request_url',
+                        'in_reply_to_id', 'start_line', 'original_start_line'):
                 if listed.get(key) is not None and listed[key] != comment.get(key):
                     raise ValueError('Published review comment evidence is inconsistent')
             if ((listed.get('user') or {}).get('login') is not None

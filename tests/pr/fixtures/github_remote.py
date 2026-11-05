@@ -103,8 +103,10 @@ class Remote:
                    'state':{'COMMENT':'COMMENTED','APPROVE':'APPROVED','REQUEST_CHANGES':'CHANGES_REQUESTED'}[payload['event']],
                    'user':{'login':self.state['actor']},'html_url':PR+'#review-'+str(review_id)}
             self.state['reviews'].append(value)
+            next_comment_id = 1 + max((comment['id']
+                for comments in self.state['review_comments'].values() for comment in comments), default=199)
             self.state['review_comments'][str(review_id)] = [
-                {'id':200+i, 'pull_request_review_id':review_id,
+                {'id':next_comment_id+i, 'pull_request_review_id':review_id,
                  'pull_request_url':'https://api.github.com/repos/owner/repo/pulls/7',
                  'user':{'login':self.state['actor']}, 'commit_id':payload['commit_id'],
                  'original_commit_id':payload['commit_id'], 'original_line':v['line'], **v}
