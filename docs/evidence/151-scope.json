@@ -1,0 +1,17 @@
+{
+  "combined_gate": "not_triggered",
+  "combined_native_arms": 0,
+  "final_decisions": {
+    "1": "inconclusive",
+    "2": "inconclusive",
+    "3": "inconclusive",
+    "4": "inconclusive",
+    "5": "declined"
+  },
+  "history": "Initial accepted commits f5ec9b4 and a279391 remain; b8b307c withdraws production adoption without rewriting them.",
+  "individual_native_arms": 30,
+  "integrated_upstream": "af9123e21de114799ab5673f20ae9464edeb059c",
+  "original_baseline": "88f81954c1415b118d95ef16c24196bd4bc49201",
+  "reason": "No proposal retains valid individual acceptance after host-context audit. No combined result or readiness is claimed.",
+  "valid_accepted_proposals": []
+}

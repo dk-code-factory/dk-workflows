@@ -1,0 +1,38 @@
+{
+  "all_five_archived_patches_apply_to_recorded_baselines": true,
+  "exact_head_ci": "Recorded in PR description after final evidence commit; no moving-head claim is embedded in the committed report.",
+  "full_offline": {
+    "command": "python scripts/test.py --workers 2",
+    "exit_code": 0,
+    "log_sha256": "e5423df174dc99a3631ae4de79eff2afa1990397d10120b74458dcc00ce27066",
+    "python": "3.12.13",
+    "subtests_passed": 7,
+    "suite_counts": [
+      537,
+      8,
+      157,
+      267
+    ],
+    "tests_passed": 969
+  },
+  "host_sync_passed": true,
+  "original_checkout_clean": true,
+  "original_checkout_head": "e2e6a8db5b7702a222330216277171945d2cbc2e",
+  "package_check": {
+    "base": "af9123e21de114799ab5673f20ae9464edeb059c",
+    "passed": true,
+    "version": "3.6.0"
+  },
+  "pr_145_head_unchanged": "c9c2a181e72f7a3673013e9a6c901d5347918240",
+  "production_tree_matches_integrated_upstream": true,
+  "usage_reader_provenance": {
+    "byte_identical": true,
+    "sha256": {
+      "tests/fixtures/native_usage.py": "6c89073d7f859d69e21502b1136eeb390522bddf1c5511053cbe604574d182ea",
+      "tests/test_native_usage.py": "a7e639cdcb20b8e20b5c4a94a0284ce86b8dece59829297e2c77fb7f15326a6f"
+    },
+    "source_commit": "c9c2a181e72f7a3673013e9a6c901d5347918240",
+    "source_pr": 145
+  },
+  "whitespace_passed": true
+}

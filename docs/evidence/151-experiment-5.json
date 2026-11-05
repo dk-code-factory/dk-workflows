@@ -1,0 +1,1940 @@
+{
+  "billing_basis": "API-equivalent cost; not actual account billing",
+  "context_uncontrolled_original_gate": {
+    "accepted": false,
+    "baseline_usd": [
+      "0.2367000",
+      "0.1798040",
+      "0.2604020"
+    ],
+    "candidate_usd": [
+      "0.2843668",
+      "0.2376092",
+      "0.2439592"
+    ],
+    "decision": "declined",
+    "improved_pairs": 1,
+    "limitation": "Three pairs give bounded evidence, not a general savings guarantee",
+    "median_baseline_usd": "0.2367000",
+    "median_candidate_usd": "0.2439592",
+    "rate_card": {
+      "billing_basis": "API-equivalent cost; not actual account billing",
+      "date": "2026-11-05",
+      "long_context_input_multiplier": "2",
+      "long_context_output_multiplier": "1.5",
+      "long_context_threshold": 272000,
+      "model": "gpt-6.1-sol",
+      "per_million_usd": {
+        "cache_read": ".1",
+        "cache_write_12h": "5",
+        "cache_write_30m": "2.5",
+        "input": "2",
+        "output": "10"
+      },
+      "pricing_source": "https://developers.openai.com/api/docs/pricing",
+      "regional_multiplier": "1.1",
+      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+      "tiers": {
+        "batch": "0.5",
+        "default": "1",
+        "fast": "2",
+        "flex": "0.5",
+        "priority": "2",
+        "standard": "1",
+        "ultrafast": "6"
+      }
+    },
+    "reasons": [
+      "Median dollar savings below 5%",
+      "Total candidate dollar cost did not decrease",
+      "Fewer than two improving dollar pairs"
+    ],
+    "sum_baseline_usd": "0.6769060",
+    "sum_candidate_usd": "0.7659352"
+  },
+  "correctness_passed": true,
+  "decision": {
+    "accepted": false,
+    "baseline_usd": [
+      "0.2367000",
+      "0.1798040",
+      "0.2604020"
+    ],
+    "candidate_usd": [
+      "0.2843668",
+      "0.2376092",
+      "0.2439592"
+    ],
+    "decision": "declined",
+    "improved_pairs": 1,
+    "limitation": "Three pairs give bounded evidence, not a general savings guarantee",
+    "median_baseline_usd": "0.2367000",
+    "median_candidate_usd": "0.2439592",
+    "rate_card": {
+      "billing_basis": "API-equivalent cost; not actual account billing",
+      "date": "2026-11-05",
+      "long_context_input_multiplier": "2",
+      "long_context_output_multiplier": "1.5",
+      "long_context_threshold": 272000,
+      "model": "gpt-6.1-sol",
+      "per_million_usd": {
+        "cache_read": ".1",
+        "cache_write_12h": "5",
+        "cache_write_30m": "2.5",
+        "input": "2",
+        "output": "10"
+      },
+      "pricing_source": "https://developers.openai.com/api/docs/pricing",
+      "regional_multiplier": "1.1",
+      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+      "tiers": {
+        "batch": "0.5",
+        "default": "1",
+        "fast": "2",
+        "flex": "0.5",
+        "priority": "2",
+        "standard": "1",
+        "ultrafast": "6"
+      }
+    },
+    "reasons": [
+      "Median dollar savings below 5%",
+      "Total candidate dollar cost did not decrease",
+      "Fewer than two improving dollar pairs"
+    ],
+    "sum_baseline_usd": "0.6769060",
+    "sum_candidate_usd": "0.7659352"
+  },
+  "host_context_audit": {
+    "arms": {
+      "1-baseline": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "5ed8ee8ebf0ac02f191095ed0564aeaa2cc669c204ee29d9ec7ca44974bfa7b6",
+        "effective_initial_messages_sha256": "ed07c4291c3240e1966c849bcb8c76e3848068c7c384dd23935112c4cbc87935",
+        "host_conditions_sha256": "721e7f2e66ec7bff076c0adc1b532f144b514baf13e31449de6a013ee5cf726d"
+      },
+      "1-candidate": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "5ed8ee8ebf0ac02f191095ed0564aeaa2cc669c204ee29d9ec7ca44974bfa7b6",
+        "effective_initial_messages_sha256": "ed07c4291c3240e1966c849bcb8c76e3848068c7c384dd23935112c4cbc87935",
+        "host_conditions_sha256": "721e7f2e66ec7bff076c0adc1b532f144b514baf13e31449de6a013ee5cf726d"
+      },
+      "2-baseline": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "5ed8ee8ebf0ac02f191095ed0564aeaa2cc669c204ee29d9ec7ca44974bfa7b6",
+        "effective_initial_messages_sha256": "ed07c4291c3240e1966c849bcb8c76e3848068c7c384dd23935112c4cbc87935",
+        "host_conditions_sha256": "721e7f2e66ec7bff076c0adc1b532f144b514baf13e31449de6a013ee5cf726d"
+      },
+      "2-candidate": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "5ed8ee8ebf0ac02f191095ed0564aeaa2cc669c204ee29d9ec7ca44974bfa7b6",
+        "effective_initial_messages_sha256": "ed07c4291c3240e1966c849bcb8c76e3848068c7c384dd23935112c4cbc87935",
+        "host_conditions_sha256": "721e7f2e66ec7bff076c0adc1b532f144b514baf13e31449de6a013ee5cf726d"
+      },
+      "3-baseline": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "5ed8ee8ebf0ac02f191095ed0564aeaa2cc669c204ee29d9ec7ca44974bfa7b6",
+        "effective_initial_messages_sha256": "ed07c4291c3240e1966c849bcb8c76e3848068c7c384dd23935112c4cbc87935",
+        "host_conditions_sha256": "721e7f2e66ec7bff076c0adc1b532f144b514baf13e31449de6a013ee5cf726d"
+      },
+      "3-candidate": {
+        "base_instruction_metadata_sha256": "3c58c75398ea3ea0981f8a7699134b37df6f4e78abe015ab97461ceb54bf67bc",
+        "combined_sha256": "5ed8ee8ebf0ac02f191095ed0564aeaa2cc669c204ee29d9ec7ca44974bfa7b6",
+        "effective_initial_messages_sha256": "ed07c4291c3240e1966c849bcb8c76e3848068c7c384dd23935112c4cbc87935",
+        "host_conditions_sha256": "721e7f2e66ec7bff076c0adc1b532f144b514baf13e31449de6a013ee5cf726d"
+      }
+    },
+    "distinct_context_counts": {
+      "base_instruction_metadata_sha256": 1,
+      "combined_sha256": 1,
+      "effective_initial_messages_sha256": 1,
+      "host_conditions_sha256": 1
+    },
+    "limitation": "Host instructions were not pinned before these trials. This retrospective audit cannot excuse a mismatch or authorize a rerun.",
+    "method": "Normalize ARM path only; compare retained host base metadata, effective initial messages and execution conditions.",
+    "passed": true,
+    "problems": []
+  },
+  "limitations": [
+    "Only complete telemetry may accept a production change.",
+    "Three pairs provide bounded evidence. Raw traces remain private."
+  ],
+  "native_arm_count": 6,
+  "observed_costs_usd": {
+    "baseline": [
+      "0.2367000",
+      "0.1798040",
+      "0.2604020"
+    ],
+    "candidate": [
+      "0.2843668",
+      "0.2376092",
+      "0.2439592"
+    ]
+  },
+  "observed_medians_usd": {
+    "baseline": "0.2367000",
+    "candidate": "0.2439592"
+  },
+  "observed_total_usd": "1.4428412",
+  "pairs": [
+    {
+      "baseline": {
+        "correctness": {
+          "acceptance_source": "https://github.com/fixture/dollars/pull/7#issuecomment-9",
+          "assessment_sha256": "e1f29995a649b7f696b4135c9af10865fb0f8b01da8989b183aae9a2a9d70a3d",
+          "ci_evidence": null,
+          "exact_acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
+          "frozen_intact": true,
+          "inputs_intact": true,
+          "native_blockers": [],
+          "native_complete": true,
+          "passed": true,
+          "problems": [],
+          "progress_counts": {
+            "discovery": 3
+          },
+          "results": [
+            {
+              "normalized": {
+                "complete": true,
+                "evidence": [
+                  "artifacts/hook-claim.json",
+                  "artifacts/hook-spec.json",
+                  "config/dk-workflows/v2/user.json"
+                ],
+                "execution": {
+                  "delegated": false,
+                  "mode": "current native coordinator, direct in-session fixture work"
+                },
+                "findings": [],
+                "permissions": {
+                  "agents_permitted": false,
+                  "checkout_edits_performed": false,
+                  "network_permitted": false,
+                  "remote_writes_permitted": false,
+                  "writes": "Only private bookkeeping and evidence within the assigned workspace."
+                },
+                "summary": "Retained the configured fixture-hook receipt for discovery/c1/before_cycle. Executed in the current coordinator. No recursive workflow invocation or domain writes. This receipt provides no reviewer or CI coverage."
+              },
+              "original_sha256": "d0672fc78e1199f4840a1a834dd8de403ef7f98d20f6cc055ab6b464e4f8cbe4",
+              "status": "complete",
+              "task": "cycle-hook:1cf66aadb43b7f3227b08a58d070b540c2111dabfc0c27ffeb789e55fce3cf47"
+            },
+            {
+              "normalized": {
+                "complete": true,
+                "evidence": [
+                  "artifacts/finalizer-plan.json",
+                  "artifacts/ordinary-record.json",
+                  "artifacts/ordinary-original.txt",
+                  "artifacts/ordinary-reuse.json",
+                  "artifacts/hook-record.json",
+                  "artifacts/acceptance.txt",
+                  "artifacts/preferences-original.json"
+                ],
+                "execution": {
+                  "delegated": false,
+                  "mode": "current native coordinator, direct in-session fixture work"
+                },
+                "findings": [],
+                "permissions": {
+                  "agents_permitted": false,
+                  "checkout_edits_performed": false,
+                  "network_permitted": false,
+                  "remote_writes_permitted": false,
+                  "writes": "Only private bookkeeping and evidence within the assigned workspace."
+                },
+                "summary": "Retained fixture finalizer evidence after the configured before hook and ordinary assessment completed. Preserved the full F1 report and exact human acceptance/source, scoped P1 input and original claim receipts. No remote writes. The selected one-item finalizer plan is complete; CI, commit cleanup, feedback synchronization, publication and overall PR readiness are not established."
+              },
+              "original_sha256": "1ef13b6c4535917f96bc4d6edce461e4278fd2107ca125de7fcf8a2f535f3b02",
+              "status": "complete",
+              "task": "finalizer:1835ac988063c6c5d92cc26f651fb2685e69f39e8c0192bda0f413c62a89e696"
+            },
+            {
+              "normalized": {
+                "complete": true,
+                "evidence": [
+                  "artifacts/review-base-value.py.txt",
+                  "artifacts/review-head-value.py.txt",
+                  "artifacts/review.diff",
+                  "inputs/skill.md",
+                  "inputs/preferences.json",
+                  "inputs/scenario.json"
+                ],
+                "execution": {
+                  "delegated": false,
+                  "mode": "current native coordinator, direct in-session fixture work"
+                },
+                "findings": [
+                  {
+                    "body": "The pinned diff changes the public binding from VALUE = 1 to VALUE = 2. VALUE remains public and is not renamed. This is the sole changed file. The supplied acceptance explicitly accepts F1 and retains VALUE exactly; no source change is requested.",
+                    "id": "F1",
+                    "kind": "accepted observation",
+                    "line": 1,
+                    "path": "value.py",
+                    "title": "VALUE changes from 1 to 2"
+                  }
+                ],
+                "permissions": {
+                  "agents_permitted": false,
+                  "checkout_edits_performed": false,
+                  "network_permitted": false,
+                  "remote_writes_permitted": false,
+                  "writes": "Only private bookkeeping and evidence within the assigned workspace."
+                },
+                "summary": "Completed direct inspection of the complete pinned one-file diff and both versions. Applied the supplied P1 handoff only to value.py. Retained F1 and its full text without renaming VALUE. F1 is an accepted observation; the fixture supplies an F1 identifier and acceptance but no earlier original finding report. This report is newly authored by the current coordinator and does not assert recovered historical finding text."
+              },
+              "original_sha256": "32b9a62c6016134dc8212c00da9479b1aa5722a13493b7ed42547917d21bf14f",
+              "status": "complete",
+              "task": "content-review"
+            }
+          ],
+          "retained_counters": {
+            "discovery": {
+              "ci_repairs": {},
+              "ci_reruns": {},
+              "cycles": [
+                "c1"
+              ],
+              "retries": {}
+            }
+          }
+        },
+        "freeze": {
+          "additional_resources": {
+            "config/dk-workflows/v2/user.json": "621b857c245d9d7d6cbb2b06bc138dac3ef94729ee7d5b948717429293f7bdfe",
+            "interface.py": "9cda3fdebb2cc79768732a455462ba60b9aefbc3afa676b1c05891466d228fcb"
+          },
+          "files": {
+            "frozen/.codex-plugin/plugin.json": "657bb13772c0de62666adb32f3506df63329376b23df9f880c83533498063b7f",
+            "frozen/codex/skills/dk-ci-flakes/SKILL.md": "ed4adab81c07006bcc4d786fefaa2ee8bc88ef333f45609770375c8d613dfe68",
+            "frozen/codex/skills/dk-ci/SKILL.md": "877baa0a2e2a9c15b403823de2cb3b3f46369136ddc405301f32ec30150cb0cd",
+            "frozen/codex/skills/dk-commit-message/SKILL.md": "b8f38c792a368455520698b08349a342c4d7a4196feff45e2bd379eb69764c28",
+            "frozen/codex/skills/dk-commit-split/SKILL.md": "a79569b9f663b74cc847ab5156db5945efacdb40b668f379962f6a31225a4e00",
+            "frozen/codex/skills/dk-config/SKILL.md": "253517c6f297e8e7d2d149efa7d57562987518d0c5042555ab001346b3806f51",
+            "frozen/codex/skills/dk-issue/SKILL.md": "f7089f74f39dca8114907c1416700e02bbfee25020c838178b865617a9b22e51",
+            "frozen/codex/skills/dk-pr-decisions/SKILL.md": "23295a1c1b40ba645b10c4f9bfff52774458dea102b743deb714a20598aa95c4",
+            "frozen/codex/skills/dk-pr-description/SKILL.md": "049825f87354e0b0d3af31c21d71fd2d9b30a7c9eabdc9160dc2641ffcaa45c9",
+            "frozen/codex/skills/dk-pr-feedback-address/SKILL.md": "97be7819277f009beee7e746860e67caf7da4ec66b3025812bad05368b8d8f51",
+            "frozen/codex/skills/dk-pr-feedback-read/SKILL.md": "44e9c5245b4b922d38c0afb41b11a2a566fbed1ff391f9956ab229620abee632",
+            "frozen/codex/skills/dk-pr-feedback-reply/SKILL.md": "fb1cb71abd546443637804daf40819e739a2306fddc703040a3fd5e186e333b2",
+            "frozen/codex/skills/dk-pr-fix/SKILL.md": "35c3c463d0ab1ad0a50f2806d39712ebeeb252cc491af31f0a47f1093e28f278",
+            "frozen/codex/skills/dk-pr-iter/SKILL.md": "6f388a6daba6bc54677e6041e75e676456ab34206ff8c21ec2230d55833450e0",
+            "frozen/codex/skills/dk-pr-publish/SKILL.md": "add9a36691dd7bcf5423ff1c136e6f147941123498cab3208a5fe35be907d6ee",
+            "frozen/codex/skills/dk-pr-review-post/SKILL.md": "30a56599951caa65838d66e7749e2df8be08c0fb339aaa92c53f564086afcd44",
+            "frozen/codex/skills/dk-pr-review/SKILL.md": "85328b876b88ff6b878d211532356f29d888c8909dc861246ea547ea01504e23",
+            "frozen/codex/skills/dk-pr-reviewers-run/SKILL.md": "604b7989fb54df0c75a147d06d8d0008c14f0777fd6266759d53c9d634d2f8a4",
+            "frozen/codex/skills/dk-pr-split/SKILL.md": "72beffba09c8325230dfb8bdbec32240064fac83e8d3c39d7ad872ea200904bb",
+            "frozen/codex/skills/dk-preferences/SKILL.md": "1f336106230b1104320112ac6f5f9626ddf468193324a0587af9664916df03ed",
+            "frozen/docs/acceptance.md": "c23c1399bfece45106fbbe458beca74f76e3205ee50143fcd37d234381ac5944",
+            "frozen/docs/capture-performance.md": "7f859e240273a6bb38f61f62a9d0a871c8b096fbd1fcaee9e1ed50ed4d9ac5b0",
+            "frozen/docs/commit-policy.md": "1f11d7638a46bac786ea72220fd080deac01f90de9dc8d5b874bd76fc852d379",
+            "frozen/docs/configuration.md": "925fe5fe75bc8599b627e7545e40e376d8e2c48477bc9925271e7fdb8afadecc",
+            "frozen/docs/cycle-hooks.md": "32931c711f0fe799161f5982b4d6a291f736afe09aa28d5c1424b46b2941b04e",
+            "frozen/docs/dollar-experiment-plan.md": "2f079b52f5ffb0b7aa59c4775b6b33ae1b442692b20fbc6cfcd695e0fa680f23",
+            "frozen/docs/finalizers.md": "1974a24f1322033bda7725f1e267b61fa61e8ddc987575085461096792a3c9ef",
+            "frozen/docs/native-commit-policy-exercise.md": "c5f3dea89c04615194cf284f57b2afb01493f6d4f81ff338d850acab61d9fe55",
+            "frozen/docs/native-dollar-experiments.md": "11519811f921ec6a531563817251013ab9383cfb2fa573abfebf4d0177a2a7ee",
+            "frozen/docs/native-evidence-exercise.md": "96b486d8e1701bfd1b64995516fc0c1a287907914a335e32d6eeed717ee68e80",
+            "frozen/docs/native-iteration-exercise.md": "2789b5af19462d961042bdb104927b7801fa7f6c27265bd90ef9249017cc6d53",
+            "frozen/docs/native-review.md": "e3a96f780965783e56997aaa999568e87c76a07f56b8f92dbca98b022cbe3580",
+            "frozen/docs/pr/commit-cleanup-evaluation.md": "5c53f3bf6b05c289537111892fbeddc98628ff611505585cf034dde4ee92fc4b",
+            "frozen/docs/pr/commit-cleanup.md": "8aae1328411a3b9a76204380a449e6f6aff7a0ee8d552778367be183b6fbb820",
+            "frozen/docs/pr/configuration.md": "7d358908b935c88efd67b3caeee0f9256d8f972349698c06a947dee1ca3c7b4a",
+            "frozen/docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+            "frozen/docs/pr/default-completion.md": "146ea8123b8abc8b3174681a1818940c167aa593a6b48154a8f99311730cedae",
+            "frozen/docs/pr/partition-cleanup.md": "875064929ca00fd884925c73a1bfe6a15e2b9c3e57229979e1c64b4b8b3f3f60",
+            "frozen/docs/pr/publication.md": "37f30c639000a74242d27ec28be865156633fd87c4674d6cd375974e2e38fa54",
+            "frozen/docs/pr/supplied-evidence.md": "0e78b6740a376251780b537c84d56324f1b0dcfede4d6a3a936fc3d59220641c",
+            "frozen/docs/preferences.md": "ee8e0a734004fc1e17d246d20e73aa3c363f841a48c21bb5a0f39d5cadaf4211",
+            "frozen/docs/status-diagnostics.md": "12096c055fbea5ce892005c7d790efffc009824e682d2271a76006201dceb092",
+            "frozen/docs/task-state.md": "2b4a7809c07cf277488886619d77f7f1a29032251182c00dc0c312345af95c1b",
+            "frozen/runtime/commit_policy.py": "ef69e3c31ffa694c20fa7f895c4458293a30dda1a2edc47a85972f0579167563",
+            "frozen/runtime/config.py": "fd723d4c5428bfad31899e310c78c731dca1cdf51244a5c3a324a89047c60fc8",
+            "frozen/runtime/dk-ci/scripts/ci_wait.py": "e58c77cf160aa862264f35ed146b437b4ca05f4ef3656750096095a0aab63975",
+            "frozen/runtime/dk-ci/scripts/flaky_tests.py": "f8716fc2308240a9308fde3b52a7ef0af0b060ab3e1b92db3a89a93eaf1eec46",
+            "frozen/runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212",
+            "frozen/runtime/dk-issue-description/references/field-schema.md": "a96f6e080634b51425dbd09d6095dfad2feb65e687f3054195de1962164c8efa",
+            "frozen/runtime/dk-pr-address-reviews/scripts/fetch_pr_conversation.py": "7ba3b7c542df2ad2c2776213cc80cc4178e3b32691356347e67ecdb0c3d7a153",
+            "frozen/runtime/dk-pr-address-reviews/scripts/fetch_unresolved_review_threads.py": "2b6bcb9173a37a70c62feceb0320847559c278de1500ad320b9a7d55fd5ff677",
+            "frozen/runtime/dk-pr-address-reviews/scripts/pr_evidence.py": "b3a8a7a4ca10ad10000a6f66632e8d7514e1554600f2988d1e21c95911d8417e",
+            "frozen/runtime/dk-pr-decisions/references/language.md": "5d8cc76db86b18063ac8413f01431189bfea02c52f7bfdde0e8dac088b1bdd26",
+            "frozen/runtime/dk-pr-description/references/decisions.md": "8664c120dae95cd15d23618db097d639a22726bf2a497a8e278de8a4affb1a88",
+            "frozen/runtime/dk-pr-description/references/field-schema.md": "2133fac542c60a3e5a67eab9a070d03dfffb33690be7d048145b5db064f0561b",
+            "frozen/runtime/pr-iter.md": "d5fb270f98ee6caa63ce941be2b3bd0fdb7287a2388c01ea38f5ddc8a788bc88",
+            "frozen/runtime/pr-review.md": "46bcfa0f10bd5131ae3f5a7afe01c06dbc73e54df0304229d1b01abe1676d546",
+            "frozen/runtime/pr-reviewers.md": "9106163f6a47e112ae71d72b2c6b991e9ba85fbfb748ca6b70ccffe24c0ce422",
+            "frozen/runtime/pr.md": "8b350a1ae81e89bd710b7003c2e084a831d5777ccb9b2cdbe8285b774461b28c",
+            "frozen/runtime/preferences.py": "f3a480838200244858940a3ce777c986193d6e2652ef72ca44d362f227109d1b",
+            "frozen/runtime/shared/ci_deadline.py": "a67a89a01ebadcb908318fefa3f236fa26fb02193ae4a8a147f99545d6eae5cc",
+            "frozen/runtime/shared/ci_exceptions.py": "5670182617749ea39b702446b635b3c0c6d65ba1ff3dec571403c9f9ab76c818",
+            "frozen/runtime/shared/ci_observation.py": "4db3592772c211447cadc92c0372ba903e9c66149c9f4a413c74073bc052a5d9",
+            "frozen/runtime/shared/ci_policy.py": "2aefddcedfc16af0c0aa16f779e97592df4980a20dfd3712fa989ab05824965e",
+            "frozen/runtime/shared/commit_message_lines.py": "eea2ef3542ccba90fcaf18f4aa114356fcb6082faa7a0de89a3428758bc7db42",
+            "frozen/runtime/shared/diagnostics.py": "310632258f549eca2da39413b8619912ae6752d06528af6e3e9fb027b35e75e6",
+            "frozen/runtime/shared/flaky_actions.py": "57c3acc08a473f3e717b6ee0776224b23c3d8e9db8791dcc561c694f4696825c",
+            "frozen/runtime/shared/flaky_tests.py": "587da99d33e425561acc3d7b88f77d8ec51ac0314376e861e85f61f49f9c4711",
+            "frozen/runtime/shared/github_publications.py": "bc9f75a91da9217d57031c4b3814b4099d1aa725697956ec77b11642d01bf13a",
+            "frozen/runtime/shared/github_reads.py": "26ecebf883df47722a78afaee05c12b37bf3b5498a1251ee7f4680ea3901c0e3",
+            "frozen/runtime/shared/pr_identity.py": "00c63b68e3ca1ed8eb9da08049cf8ef6278c380022b01d2fa456fe6e3aa67281",
+            "frozen/runtime/shared/pr_merge.py": "c813ac52f162256b15195aa8f0f173830964105a4c09a29a54e36476a081d3c3",
+            "frozen/runtime/shared/pr_ownership.py": "1f17763f34bc1a7c8ed1347a388f744e599fa611a82bccfa463e275cbe48c95a",
+            "frozen/runtime/shared/pr_partition_policy.py": "6b59b3b8b32bd38483d2596ef3f94ae90777469fe37f6121ea26c5f63d495b53",
+            "frozen/runtime/shared/pr_size.py": "3afab1739f59f932cceb4219df91d88941a36d48017b3752d784cd6fe9d5009d",
+            "frozen/runtime/shared/private_state.py": "b900f4dde3d653c504ca815e36baea83de2a8077162da5e9ba997c7dd8e7cee2",
+            "frozen/runtime/shared/publication.py": "f915654e88ac5426941ee9558f1f5e7ff03b6b6d5c9a7fdabd74e11a7f7ce714",
+            "frozen/runtime/shared/repository_scope.py": "7e61014337ce7cb7680c56026d26a525bd16b5c0be225760cda5bec2e5ff12e5",
+            "frozen/runtime/shared/test_evidence.py": "b1fb0030187954e2d343040f8e6bf58bb843dfc1f7ec04eadab67cf57451b786",
+            "frozen/runtime/shared/workflow_storage.py": "2e191d8a71406593c82cdc2e19b00d4a1314bddf7513412ccbc8a6bd86da9ce3",
+            "frozen/runtime/state.py": "b81bde89c672c77387c72b78d74c63d6bf163b68453217bb81a7486d93b80aad",
+            "frozen/scripts/check.py": "f87b43fcdab136bb3ebc8eccfefee0fdf1697fa08ce418ca5671424aa2fa5e05",
+            "frozen/scripts/commit_policy.py": "069ccf6cc5920942e4b01740c2218baf7044d7f2b1e5fad247cf5d736af5ea82",
+            "frozen/scripts/commit_series.py": "109a60b3d9a946572cae85828c2f3bdb84b52a9bcb010d4cdb5a39f0b9fc5497",
+            "frozen/scripts/config.py": "0b0838cd222b01ed431918b7531803cd0fad2192ce4e21030572ac4a984f1841",
+            "frozen/scripts/dk.py": "cea060c6696d89917ea2b47592addb53fa26a44f84ff20cd532b6e65c97fa3ee",
+            "frozen/scripts/pr_config.py": "b1f770c88b47989aeb91ce07551fc1ab6b03b3b5234531a7814d6e15a805270b",
+            "frozen/scripts/pr_route.py": "88eb3b22661675e970dbfe3843dd29e03c0991680327e541d05424146b851fd7",
+            "frozen/scripts/preferences.py": "72ed8d7bce29ef159942254f1c7b8a0773cab0cbb138bba4b37bd3bc3d3be757",
+            "frozen/scripts/publish.py": "ae599a10c8d806b4feedbb063cf90b9d3bccf636a9b38827b2a3bece5f1bdb5a",
+            "frozen/scripts/release_validation.py": "15e26ccc4a6fbff27821842b5793e0ce427050f42fd4ea256787b44f88218914",
+            "frozen/scripts/sync_skills.py": "2115e63403ac5ff1a74f7b87fe16b09c0488af2e0eb96272bf166bc58dea2efd",
+            "frozen/scripts/test.py": "c3ac6701351860eea3f66b989b466c7675dedd98a248b07c7e52cad499b09697",
+            "frozen/scripts/version.py": "da502bf0d6bf195099190c0674c554b946fc1a0164645fe71f2864ac82eebd16"
+          },
+          "guidance": "2edf8985b07c733087ed8061c0a677fdeb53cb86c9ea5e6f78f8f4093bfd3d6a",
+          "input_hash": "3383dd1f350d4ed3a4633177b619d233196fbb0306067d1af9ab4f17fafa5628",
+          "resources": "c4e20f0b292036242c39d4f667a0e8065d447f2ce064995832912b714d0a5955",
+          "runtime": "5faa83c12cc0cce272fdf9dfa4ef0d7614a9d7a2d946dfd025d16864fe3a6575"
+        },
+        "usage": {
+          "api_equivalent_cost_usd": "0.2367000",
+          "billing_basis": "API-equivalent estimate; not actual account billing",
+          "coordination_calls": 0,
+          "descendants_observed": 0,
+          "estimated_api_cost_usd": "0.2367000",
+          "host_exit_code": 0,
+          "host_thread_id": "01a1ad1d-bedd-7b10-8c9a-91067fa2965b",
+          "independent_response_inventory": "SSE response.created and response.completed",
+          "independent_turn_total": "exec turn.completed",
+          "participant_count": 1,
+          "pins": {
+            "assignment": "237e2c7dd7bd40212b76a04a840b953e4f2041bc575b09b96ada896635baed5e",
+            "conditions": "44a52d5ed8f2640e2bb4d5c345d5db16245a92768c502a7d15aa563e34e5eb6a",
+            "guidance": "2edf8985b07c733087ed8061c0a677fdeb53cb86c9ea5e6f78f8f4093bfd3d6a",
+            "resources": "c4e20f0b292036242c39d4f667a0e8065d447f2ce064995832912b714d0a5955",
+            "runtime": "5faa83c12cc0cce272fdf9dfa4ef0d7614a9d7a2d946dfd025d16864fe3a6575",
+            "scenario": "3383dd1f350d4ed3a4633177b619d233196fbb0306067d1af9ab4f17fafa5628"
+          },
+          "price_date": "2026-11-05",
+          "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+          "rate_card": {
+            "billing_basis": "API-equivalent cost; not actual account billing",
+            "date": "2026-11-05",
+            "long_context_input_multiplier": "2",
+            "long_context_output_multiplier": "1.5",
+            "long_context_threshold": 272000,
+            "model": "gpt-6.1-sol",
+            "per_million_usd": {
+              "cache_read": ".1",
+              "cache_write_12h": "5",
+              "cache_write_30m": "2.5",
+              "input": "2",
+              "output": "10"
+            },
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "regional_multiplier": "1.1",
+            "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+            "tiers": {
+              "batch": "0.5",
+              "default": "1",
+              "fast": "2",
+              "flex": "0.5",
+              "priority": "2",
+              "standard": "1",
+              "ultrafast": "6"
+            }
+          },
+          "raw_rollout_sha256": "0d2d7007e626f2bddd5f6e4199ca25a4f763b9ec265fde78dd755748a2637499",
+          "response_count": 14,
+          "response_ids": [
+            "resp_0aa81dd4f140a814016aecd46d1cac87d1a748186d04c73e11",
+            "resp_0aa81dd4f140a814016aecd4715ad487d18781d8b6a86253b3",
+            "resp_0aa81dd4f140a814016aecd474290887d18fbdeb3736482e51",
+            "resp_0aa81dd4f140a814016aecd477e72c87d1ae0e68abdb961d1c",
+            "resp_0aa81dd4f140a814016aecd47db88487d1a9a77d624cf8e4f4",
+            "resp_0aa81dd4f140a814016aecd48588b487d1ad530acf72e4859b",
+            "resp_0aa81dd4f140a814016aecd4925c2c87d18756a6befcf00b92",
+            "resp_0aa81dd4f140a814016aecd49c5b9887d1b949e6a59eb12ed3",
+            "resp_0aa81dd4f140a814016aecd4d4312c87d188862b6b27e023bb",
+            "resp_0aa81dd4f140a814016aecd4db349487d1bba293fe74dce4c0",
+            "resp_0aa81dd4f140a814016aecd4fee30087d19d9028ff4fce8d3c",
+            "resp_0aa81dd4f140a814016aecd505223487d1b21cfe2dcad3e46b",
+            "resp_0aa81dd4f140a814016aecd50a9efc87d1b592dece025a9f77",
+            "resp_0aa81dd4f140a814016aecd53df95487d1a20998122172f844"
+          ],
+          "settings": [
+            {
+              "effort": "high",
+              "model": "gpt-6.1-sol",
+              "service_tier": "default"
+            }
+          ],
+          "telemetry_complete": true,
+          "terminal_assessment_sha256": "30d29e8aaa60563c5864703f14f4c1a529d4727002cb9a96877923c9e664149b",
+          "tokens": {
+            "cache_write_input_tokens": 0,
+            "cached_input_tokens": 487040,
+            "fresh_input_tokens": 52168,
+            "input_tokens": 539208,
+            "output_tokens": 8366,
+            "reasoning_output_tokens": 1286,
+            "total_tokens": 547574
+          }
+        }
+      },
+      "candidate": {
+        "correctness": {
+          "acceptance_source": "https://github.com/fixture/dollars/pull/7#issuecomment-9",
+          "assessment_sha256": "27b9eb4112945361c0662e00be8c907bf42b5e6e3a0dc016104e941190df5708",
+          "ci_evidence": null,
+          "exact_acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
+          "frozen_intact": true,
+          "inputs_intact": true,
+          "native_blockers": [],
+          "native_complete": true,
+          "passed": true,
+          "problems": [],
+          "progress_counts": {
+            "discovery": 3
+          },
+          "results": [
+            {
+              "normalized": {
+                "ci_coverage": false,
+                "complete": true,
+                "findings": [],
+                "receipt": {
+                  "cycle": "c1",
+                  "id": "fixture-hook",
+                  "phase": "before_cycle",
+                  "run": "discovery"
+                },
+                "remote_writes": [],
+                "reviewer_coverage": false
+              },
+              "original_sha256": "4e5a5c067589148833d7970955be6238f81e0cdeda4efaa107f0d373b5a1661c",
+              "status": "complete",
+              "task": "cycle-hook:1cf66aadb43b7f3227b08a58d070b540c2111dabfc0c27ffeb789e55fce3cf47"
+            },
+            {
+              "normalized": {
+                "acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
+                "complete": true,
+                "evidence": "artifacts/finalizer-evidence-validation.json",
+                "findings": [],
+                "pr_readiness_verified": false,
+                "remote_writes": [],
+                "retained_findings": [
+                  {
+                    "id": "F1",
+                    "text": "Rename VALUE."
+                  }
+                ],
+                "selected_plan_complete": true,
+                "source": "https://github.com/fixture/dollars/pull/7#issuecomment-9"
+              },
+              "original_sha256": "9538d0e90fe0b9508c5344a3f7ba4171d484a0d27002966982a3c4d0bb44828b",
+              "status": "complete",
+              "task": "finalizer:1835ac988063c6c5d92cc26f651fb2685e69f39e8c0192bda0f413c62a89e696"
+            },
+            {
+              "normalized": {
+                "complete": true,
+                "dispositions": [
+                  {
+                    "acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
+                    "disposition": "accepted",
+                    "finding": "F1",
+                    "source": "https://github.com/fixture/dollars/pull/7#issuecomment-9"
+                  }
+                ],
+                "findings": [
+                  {
+                    "id": "F1",
+                    "text": "Rename VALUE."
+                  }
+                ],
+                "remote_writes": [],
+                "scope": [
+                  "value.py"
+                ]
+              },
+              "original_sha256": "cf82f50f9b1e98a48e0e184197fb16c92de8e7268f192e4bc2d2bb3ff069f5e5",
+              "status": "complete",
+              "task": "content-review"
+            }
+          ],
+          "retained_counters": {
+            "discovery": {
+              "ci_repairs": {},
+              "ci_reruns": {},
+              "cycles": [
+                "c1"
+              ],
+              "retries": {}
+            }
+          }
+        },
+        "freeze": {
+          "additional_resources": {
+            "config/dk-workflows/v2/user.json": "621b857c245d9d7d6cbb2b06bc138dac3ef94729ee7d5b948717429293f7bdfe",
+            "interface.py": "9cda3fdebb2cc79768732a455462ba60b9aefbc3afa676b1c05891466d228fcb"
+          },
+          "files": {
+            "frozen/.codex-plugin/plugin.json": "657bb13772c0de62666adb32f3506df63329376b23df9f880c83533498063b7f",
+            "frozen/codex/skills/dk-ci-flakes/SKILL.md": "ed4adab81c07006bcc4d786fefaa2ee8bc88ef333f45609770375c8d613dfe68",
+            "frozen/codex/skills/dk-ci/SKILL.md": "877baa0a2e2a9c15b403823de2cb3b3f46369136ddc405301f32ec30150cb0cd",
+            "frozen/codex/skills/dk-commit-message/SKILL.md": "b8f38c792a368455520698b08349a342c4d7a4196feff45e2bd379eb69764c28",
+            "frozen/codex/skills/dk-commit-split/SKILL.md": "a79569b9f663b74cc847ab5156db5945efacdb40b668f379962f6a31225a4e00",
+            "frozen/codex/skills/dk-config/SKILL.md": "253517c6f297e8e7d2d149efa7d57562987518d0c5042555ab001346b3806f51",
+            "frozen/codex/skills/dk-issue/SKILL.md": "f7089f74f39dca8114907c1416700e02bbfee25020c838178b865617a9b22e51",
+            "frozen/codex/skills/dk-pr-decisions/SKILL.md": "23295a1c1b40ba645b10c4f9bfff52774458dea102b743deb714a20598aa95c4",
+            "frozen/codex/skills/dk-pr-description/SKILL.md": "049825f87354e0b0d3af31c21d71fd2d9b30a7c9eabdc9160dc2641ffcaa45c9",
+            "frozen/codex/skills/dk-pr-feedback-address/SKILL.md": "97be7819277f009beee7e746860e67caf7da4ec66b3025812bad05368b8d8f51",
+            "frozen/codex/skills/dk-pr-feedback-read/SKILL.md": "44e9c5245b4b922d38c0afb41b11a2a566fbed1ff391f9956ab229620abee632",
+            "frozen/codex/skills/dk-pr-feedback-reply/SKILL.md": "fb1cb71abd546443637804daf40819e739a2306fddc703040a3fd5e186e333b2",
+            "frozen/codex/skills/dk-pr-fix/SKILL.md": "35c3c463d0ab1ad0a50f2806d39712ebeeb252cc491af31f0a47f1093e28f278",
+            "frozen/codex/skills/dk-pr-iter/SKILL.md": "6f388a6daba6bc54677e6041e75e676456ab34206ff8c21ec2230d55833450e0",
+            "frozen/codex/skills/dk-pr-publish/SKILL.md": "add9a36691dd7bcf5423ff1c136e6f147941123498cab3208a5fe35be907d6ee",
+            "frozen/codex/skills/dk-pr-review-post/SKILL.md": "30a56599951caa65838d66e7749e2df8be08c0fb339aaa92c53f564086afcd44",
+            "frozen/codex/skills/dk-pr-review/SKILL.md": "85328b876b88ff6b878d211532356f29d888c8909dc861246ea547ea01504e23",
+            "frozen/codex/skills/dk-pr-reviewers-run/SKILL.md": "604b7989fb54df0c75a147d06d8d0008c14f0777fd6266759d53c9d634d2f8a4",
+            "frozen/codex/skills/dk-pr-split/SKILL.md": "72beffba09c8325230dfb8bdbec32240064fac83e8d3c39d7ad872ea200904bb",
+            "frozen/codex/skills/dk-preferences/SKILL.md": "1f336106230b1104320112ac6f5f9626ddf468193324a0587af9664916df03ed",
+            "frozen/docs/acceptance.md": "c23c1399bfece45106fbbe458beca74f76e3205ee50143fcd37d234381ac5944",
+            "frozen/docs/capture-performance.md": "7f859e240273a6bb38f61f62a9d0a871c8b096fbd1fcaee9e1ed50ed4d9ac5b0",
+            "frozen/docs/commit-policy.md": "1f11d7638a46bac786ea72220fd080deac01f90de9dc8d5b874bd76fc852d379",
+            "frozen/docs/configuration.md": "925fe5fe75bc8599b627e7545e40e376d8e2c48477bc9925271e7fdb8afadecc",
+            "frozen/docs/cycle-hooks.md": "32931c711f0fe799161f5982b4d6a291f736afe09aa28d5c1424b46b2941b04e",
+            "frozen/docs/dollar-experiment-plan.md": "2f079b52f5ffb0b7aa59c4775b6b33ae1b442692b20fbc6cfcd695e0fa680f23",
+            "frozen/docs/finalizers.md": "1974a24f1322033bda7725f1e267b61fa61e8ddc987575085461096792a3c9ef",
+            "frozen/docs/native-commit-policy-exercise.md": "c5f3dea89c04615194cf284f57b2afb01493f6d4f81ff338d850acab61d9fe55",
+            "frozen/docs/native-dollar-experiments.md": "11519811f921ec6a531563817251013ab9383cfb2fa573abfebf4d0177a2a7ee",
+            "frozen/docs/native-evidence-exercise.md": "96b486d8e1701bfd1b64995516fc0c1a287907914a335e32d6eeed717ee68e80",
+            "frozen/docs/native-iteration-exercise.md": "2789b5af19462d961042bdb104927b7801fa7f6c27265bd90ef9249017cc6d53",
+            "frozen/docs/native-review.md": "e3a96f780965783e56997aaa999568e87c76a07f56b8f92dbca98b022cbe3580",
+            "frozen/docs/pr/commit-cleanup-evaluation.md": "5c53f3bf6b05c289537111892fbeddc98628ff611505585cf034dde4ee92fc4b",
+            "frozen/docs/pr/commit-cleanup.md": "8aae1328411a3b9a76204380a449e6f6aff7a0ee8d552778367be183b6fbb820",
+            "frozen/docs/pr/configuration.md": "7d358908b935c88efd67b3caeee0f9256d8f972349698c06a947dee1ca3c7b4a",
+            "frozen/docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+            "frozen/docs/pr/default-completion.md": "146ea8123b8abc8b3174681a1818940c167aa593a6b48154a8f99311730cedae",
+            "frozen/docs/pr/partition-cleanup.md": "875064929ca00fd884925c73a1bfe6a15e2b9c3e57229979e1c64b4b8b3f3f60",
+            "frozen/docs/pr/publication.md": "37f30c639000a74242d27ec28be865156633fd87c4674d6cd375974e2e38fa54",
+            "frozen/docs/pr/supplied-evidence.md": "0e78b6740a376251780b537c84d56324f1b0dcfede4d6a3a936fc3d59220641c",
+            "frozen/docs/preferences.md": "ee8e0a734004fc1e17d246d20e73aa3c363f841a48c21bb5a0f39d5cadaf4211",
+            "frozen/docs/status-diagnostics.md": "12096c055fbea5ce892005c7d790efffc009824e682d2271a76006201dceb092",
+            "frozen/docs/task-state.md": "066a05658a085b525feaf3c242847767f8595f9c6694f010210f024ca3b9241e",
+            "frozen/runtime/commit_policy.py": "ef69e3c31ffa694c20fa7f895c4458293a30dda1a2edc47a85972f0579167563",
+            "frozen/runtime/config.py": "fd723d4c5428bfad31899e310c78c731dca1cdf51244a5c3a324a89047c60fc8",
+            "frozen/runtime/dk-ci/scripts/ci_wait.py": "e58c77cf160aa862264f35ed146b437b4ca05f4ef3656750096095a0aab63975",
+            "frozen/runtime/dk-ci/scripts/flaky_tests.py": "f8716fc2308240a9308fde3b52a7ef0af0b060ab3e1b92db3a89a93eaf1eec46",
+            "frozen/runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212",
+            "frozen/runtime/dk-issue-description/references/field-schema.md": "a96f6e080634b51425dbd09d6095dfad2feb65e687f3054195de1962164c8efa",
+            "frozen/runtime/dk-pr-address-reviews/scripts/fetch_pr_conversation.py": "7ba3b7c542df2ad2c2776213cc80cc4178e3b32691356347e67ecdb0c3d7a153",
+            "frozen/runtime/dk-pr-address-reviews/scripts/fetch_unresolved_review_threads.py": "2b6bcb9173a37a70c62feceb0320847559c278de1500ad320b9a7d55fd5ff677",
+            "frozen/runtime/dk-pr-address-reviews/scripts/pr_evidence.py": "b3a8a7a4ca10ad10000a6f66632e8d7514e1554600f2988d1e21c95911d8417e",
+            "frozen/runtime/dk-pr-decisions/references/language.md": "5d8cc76db86b18063ac8413f01431189bfea02c52f7bfdde0e8dac088b1bdd26",
+            "frozen/runtime/dk-pr-description/references/decisions.md": "8664c120dae95cd15d23618db097d639a22726bf2a497a8e278de8a4affb1a88",
+            "frozen/runtime/dk-pr-description/references/field-schema.md": "2133fac542c60a3e5a67eab9a070d03dfffb33690be7d048145b5db064f0561b",
+            "frozen/runtime/pr-iter.md": "d5fb270f98ee6caa63ce941be2b3bd0fdb7287a2388c01ea38f5ddc8a788bc88",
+            "frozen/runtime/pr-review.md": "46bcfa0f10bd5131ae3f5a7afe01c06dbc73e54df0304229d1b01abe1676d546",
+            "frozen/runtime/pr-reviewers.md": "9106163f6a47e112ae71d72b2c6b991e9ba85fbfb748ca6b70ccffe24c0ce422",
+            "frozen/runtime/pr.md": "8b350a1ae81e89bd710b7003c2e084a831d5777ccb9b2cdbe8285b774461b28c",
+            "frozen/runtime/preferences.py": "f3a480838200244858940a3ce777c986193d6e2652ef72ca44d362f227109d1b",
+            "frozen/runtime/shared/ci_deadline.py": "a67a89a01ebadcb908318fefa3f236fa26fb02193ae4a8a147f99545d6eae5cc",
+            "frozen/runtime/shared/ci_exceptions.py": "5670182617749ea39b702446b635b3c0c6d65ba1ff3dec571403c9f9ab76c818",
+            "frozen/runtime/shared/ci_observation.py": "4db3592772c211447cadc92c0372ba903e9c66149c9f4a413c74073bc052a5d9",
+            "frozen/runtime/shared/ci_policy.py": "2aefddcedfc16af0c0aa16f779e97592df4980a20dfd3712fa989ab05824965e",
+            "frozen/runtime/shared/commit_message_lines.py": "eea2ef3542ccba90fcaf18f4aa114356fcb6082faa7a0de89a3428758bc7db42",
+            "frozen/runtime/shared/diagnostics.py": "310632258f549eca2da39413b8619912ae6752d06528af6e3e9fb027b35e75e6",
+            "frozen/runtime/shared/flaky_actions.py": "57c3acc08a473f3e717b6ee0776224b23c3d8e9db8791dcc561c694f4696825c",
+            "frozen/runtime/shared/flaky_tests.py": "587da99d33e425561acc3d7b88f77d8ec51ac0314376e861e85f61f49f9c4711",
+            "frozen/runtime/shared/github_publications.py": "bc9f75a91da9217d57031c4b3814b4099d1aa725697956ec77b11642d01bf13a",
+            "frozen/runtime/shared/github_reads.py": "26ecebf883df47722a78afaee05c12b37bf3b5498a1251ee7f4680ea3901c0e3",
+            "frozen/runtime/shared/pr_identity.py": "00c63b68e3ca1ed8eb9da08049cf8ef6278c380022b01d2fa456fe6e3aa67281",
+            "frozen/runtime/shared/pr_merge.py": "c813ac52f162256b15195aa8f0f173830964105a4c09a29a54e36476a081d3c3",
+            "frozen/runtime/shared/pr_ownership.py": "1f17763f34bc1a7c8ed1347a388f744e599fa611a82bccfa463e275cbe48c95a",
+            "frozen/runtime/shared/pr_partition_policy.py": "6b59b3b8b32bd38483d2596ef3f94ae90777469fe37f6121ea26c5f63d495b53",
+            "frozen/runtime/shared/pr_size.py": "3afab1739f59f932cceb4219df91d88941a36d48017b3752d784cd6fe9d5009d",
+            "frozen/runtime/shared/private_state.py": "b900f4dde3d653c504ca815e36baea83de2a8077162da5e9ba997c7dd8e7cee2",
+            "frozen/runtime/shared/publication.py": "f915654e88ac5426941ee9558f1f5e7ff03b6b6d5c9a7fdabd74e11a7f7ce714",
+            "frozen/runtime/shared/repository_scope.py": "7e61014337ce7cb7680c56026d26a525bd16b5c0be225760cda5bec2e5ff12e5",
+            "frozen/runtime/shared/test_evidence.py": "b1fb0030187954e2d343040f8e6bf58bb843dfc1f7ec04eadab67cf57451b786",
+            "frozen/runtime/shared/workflow_storage.py": "2e191d8a71406593c82cdc2e19b00d4a1314bddf7513412ccbc8a6bd86da9ce3",
+            "frozen/runtime/state.py": "b81bde89c672c77387c72b78d74c63d6bf163b68453217bb81a7486d93b80aad",
+            "frozen/scripts/check.py": "f87b43fcdab136bb3ebc8eccfefee0fdf1697fa08ce418ca5671424aa2fa5e05",
+            "frozen/scripts/commit_policy.py": "069ccf6cc5920942e4b01740c2218baf7044d7f2b1e5fad247cf5d736af5ea82",
+            "frozen/scripts/commit_series.py": "109a60b3d9a946572cae85828c2f3bdb84b52a9bcb010d4cdb5a39f0b9fc5497",
+            "frozen/scripts/config.py": "0b0838cd222b01ed431918b7531803cd0fad2192ce4e21030572ac4a984f1841",
+            "frozen/scripts/dk.py": "3048373db1952d3c8dcfd5584fcf10efe93d7016c5bd9a080caec48e3202bbfd",
+            "frozen/scripts/dk_reference.py": "0017179e99c88c90e09cebe5c9b5b73e38493c8a4b63153ee243198a48c1ed51",
+            "frozen/scripts/pr_config.py": "b1f770c88b47989aeb91ce07551fc1ab6b03b3b5234531a7814d6e15a805270b",
+            "frozen/scripts/pr_route.py": "88eb3b22661675e970dbfe3843dd29e03c0991680327e541d05424146b851fd7",
+            "frozen/scripts/preferences.py": "72ed8d7bce29ef159942254f1c7b8a0773cab0cbb138bba4b37bd3bc3d3be757",
+            "frozen/scripts/publish.py": "ae599a10c8d806b4feedbb063cf90b9d3bccf636a9b38827b2a3bece5f1bdb5a",
+            "frozen/scripts/release_validation.py": "15e26ccc4a6fbff27821842b5793e0ce427050f42fd4ea256787b44f88218914",
+            "frozen/scripts/sync_skills.py": "2115e63403ac5ff1a74f7b87fe16b09c0488af2e0eb96272bf166bc58dea2efd",
+            "frozen/scripts/test.py": "c3ac6701351860eea3f66b989b466c7675dedd98a248b07c7e52cad499b09697",
+            "frozen/scripts/version.py": "da502bf0d6bf195099190c0674c554b946fc1a0164645fe71f2864ac82eebd16"
+          },
+          "guidance": "cac6091a8499e36d2e1765cdb25d0665a97280e93ec596e225f1cb0325858435",
+          "input_hash": "3383dd1f350d4ed3a4633177b619d233196fbb0306067d1af9ab4f17fafa5628",
+          "resources": "c4e20f0b292036242c39d4f667a0e8065d447f2ce064995832912b714d0a5955",
+          "runtime": "7e47178fa7efd3afe9bf91aaaf38a94102fd1bfd0be34c201a891214a65f7f25"
+        },
+        "usage": {
+          "api_equivalent_cost_usd": "0.2843668",
+          "billing_basis": "API-equivalent estimate; not actual account billing",
+          "coordination_calls": 0,
+          "descendants_observed": 0,
+          "estimated_api_cost_usd": "0.2843668",
+          "host_exit_code": 0,
+          "host_thread_id": "01a1ad21-08b8-7f81-9939-dd17a64d381e",
+          "independent_response_inventory": "SSE response.created and response.completed",
+          "independent_turn_total": "exec turn.completed",
+          "participant_count": 1,
+          "pins": {
+            "assignment": "237e2c7dd7bd40212b76a04a840b953e4f2041bc575b09b96ada896635baed5e",
+            "conditions": "44a52d5ed8f2640e2bb4d5c345d5db16245a92768c502a7d15aa563e34e5eb6a",
+            "guidance": "cac6091a8499e36d2e1765cdb25d0665a97280e93ec596e225f1cb0325858435",
+            "resources": "c4e20f0b292036242c39d4f667a0e8065d447f2ce064995832912b714d0a5955",
+            "runtime": "7e47178fa7efd3afe9bf91aaaf38a94102fd1bfd0be34c201a891214a65f7f25",
+            "scenario": "3383dd1f350d4ed3a4633177b619d233196fbb0306067d1af9ab4f17fafa5628"
+          },
+          "price_date": "2026-11-05",
+          "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+          "rate_card": {
+            "billing_basis": "API-equivalent cost; not actual account billing",
+            "date": "2026-11-05",
+            "long_context_input_multiplier": "2",
+            "long_context_output_multiplier": "1.5",
+            "long_context_threshold": 272000,
+            "model": "gpt-6.1-sol",
+            "per_million_usd": {
+              "cache_read": ".1",
+              "cache_write_12h": "5",
+              "cache_write_30m": "2.5",
+              "input": "2",
+              "output": "10"
+            },
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "regional_multiplier": "1.1",
+            "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+            "tiers": {
+              "batch": "0.5",
+              "default": "1",
+              "fast": "2",
+              "flex": "0.5",
+              "priority": "2",
+              "standard": "1",
+              "ultrafast": "6"
+            }
+          },
+          "raw_rollout_sha256": "66e7a47ea0c8d7b9b40aa46ef3a754028b1e3981cf247f9cb8c938059d42992d",
+          "response_count": 11,
+          "response_ids": [
+            "resp_02be6aa8ca2cb40b016aecd544721087d1bf26dfd67473c329",
+            "resp_02be6aa8ca2cb40b016aecd549f66c87d1a0f16523b8af2a2b",
+            "resp_02be6aa8ca2cb40b016aecd54de05887d1acba8eaea495bd26",
+            "resp_02be6aa8ca2cb40b016aecd555173487d1b80d79b867979b00",
+            "resp_02be6aa8ca2cb40b016aecd562988487d19a603b67d603f467",
+            "resp_02be6aa8ca2cb40b016aecd56e0be487d1bcb552ba44af1707",
+            "resp_02be6aa8ca2cb40b016aecd595a12087d197e0120362717f24",
+            "resp_02be6aa8ca2cb40b016aecd5a983a487d1bcd883ab59ca9239",
+            "resp_02be6aa8ca2cb40b016aecd5c3186087d1b9c482aec8596100",
+            "resp_02be6aa8ca2cb40b016aecd5ebbd4c87d1b767fc3b5bd9cb81",
+            "resp_02be6aa8ca2cb40b016aecd61fa05087d1ab420ae2c6810d99"
+          ],
+          "settings": [
+            {
+              "effort": "high",
+              "model": "gpt-6.1-sol",
+              "service_tier": "default"
+            }
+          ],
+          "telemetry_complete": true,
+          "terminal_assessment_sha256": "5974352ed7802edbaf16bf4d5be0f42de484786c689614266a7d727e7eb31762",
+          "tokens": {
+            "cache_write_input_tokens": 0,
+            "cached_input_tokens": 416768,
+            "fresh_input_tokens": 76150,
+            "input_tokens": 492918,
+            "output_tokens": 9039,
+            "reasoning_output_tokens": 1041,
+            "total_tokens": 501957
+          }
+        }
+      },
+      "order": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    {
+      "baseline": {
+        "correctness": {
+          "acceptance_source": "https://github.com/fixture/dollars/pull/7#issuecomment-9",
+          "assessment_sha256": "87db4af6050ec08ea116a659f56d1d72c71de972cf349c433250b76285919cb0",
+          "ci_evidence": null,
+          "exact_acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
+          "frozen_intact": true,
+          "inputs_intact": true,
+          "native_blockers": [],
+          "native_complete": true,
+          "passed": true,
+          "problems": [],
+          "progress_counts": {
+            "discovery": 3
+          },
+          "results": [
+            {
+              "normalized": {
+                "complete": true,
+                "coverage": "configured before_cycle occurrence only",
+                "findings": []
+              },
+              "original_sha256": "fa5bde24c2c5b42f3afc6ea66a0c1fbfeda8d10d393fb4cfb9ccd6e447ee7924",
+              "status": "complete",
+              "task": "cycle-hook:1cf66aadb43b7f3227b08a58d070b540c2111dabfc0c27ffeb789e55fce3cf47"
+            },
+            {
+              "normalized": {
+                "complete": true,
+                "coverage": "configured evidence-retention finalizer only",
+                "findings": [],
+                "remote_writes": false
+              },
+              "original_sha256": "d5f89e6fa4c93af621ec33f10c862acc90ef6c82784dd3ee4e9e77ef76d96c78",
+              "status": "complete",
+              "task": "finalizer:1835ac988063c6c5d92cc26f651fb2685e69f39e8c0192bda0f413c62a89e696"
+            },
+            {
+              "normalized": {
+                "complete": true,
+                "coverage": {
+                  "base": "daf1530525ae3458f330d04d5ebb86f6ff37ad58",
+                  "head": "901273f9826a49ffe9449afb9c37beb249daf086",
+                  "paths": [
+                    "value.py"
+                  ]
+                },
+                "findings": [
+                  {
+                    "id": "F1",
+                    "text": "Rename VALUE."
+                  }
+                ],
+                "original_fixture_report": "Original F1: retain public VALUE."
+              },
+              "original_sha256": "a4bae677ffe9959f78695310f2e557271bb46dc42708e17faf6dcf9b326331d1",
+              "status": "complete",
+              "task": "content-review"
+            }
+          ],
+          "retained_counters": {
+            "discovery": {
+              "ci_repairs": {},
+              "ci_reruns": {},
+              "cycles": [
+                "c1"
+              ],
+              "retries": {}
+            }
+          }
+        },
+        "freeze": {
+          "additional_resources": {
+            "config/dk-workflows/v2/user.json": "621b857c245d9d7d6cbb2b06bc138dac3ef94729ee7d5b948717429293f7bdfe",
+            "interface.py": "9cda3fdebb2cc79768732a455462ba60b9aefbc3afa676b1c05891466d228fcb"
+          },
+          "files": {
+            "frozen/.codex-plugin/plugin.json": "657bb13772c0de62666adb32f3506df63329376b23df9f880c83533498063b7f",
+            "frozen/codex/skills/dk-ci-flakes/SKILL.md": "ed4adab81c07006bcc4d786fefaa2ee8bc88ef333f45609770375c8d613dfe68",
+            "frozen/codex/skills/dk-ci/SKILL.md": "877baa0a2e2a9c15b403823de2cb3b3f46369136ddc405301f32ec30150cb0cd",
+            "frozen/codex/skills/dk-commit-message/SKILL.md": "b8f38c792a368455520698b08349a342c4d7a4196feff45e2bd379eb69764c28",
+            "frozen/codex/skills/dk-commit-split/SKILL.md": "a79569b9f663b74cc847ab5156db5945efacdb40b668f379962f6a31225a4e00",
+            "frozen/codex/skills/dk-config/SKILL.md": "253517c6f297e8e7d2d149efa7d57562987518d0c5042555ab001346b3806f51",
+            "frozen/codex/skills/dk-issue/SKILL.md": "f7089f74f39dca8114907c1416700e02bbfee25020c838178b865617a9b22e51",
+            "frozen/codex/skills/dk-pr-decisions/SKILL.md": "23295a1c1b40ba645b10c4f9bfff52774458dea102b743deb714a20598aa95c4",
+            "frozen/codex/skills/dk-pr-description/SKILL.md": "049825f87354e0b0d3af31c21d71fd2d9b30a7c9eabdc9160dc2641ffcaa45c9",
+            "frozen/codex/skills/dk-pr-feedback-address/SKILL.md": "97be7819277f009beee7e746860e67caf7da4ec66b3025812bad05368b8d8f51",
+            "frozen/codex/skills/dk-pr-feedback-read/SKILL.md": "44e9c5245b4b922d38c0afb41b11a2a566fbed1ff391f9956ab229620abee632",
+            "frozen/codex/skills/dk-pr-feedback-reply/SKILL.md": "fb1cb71abd546443637804daf40819e739a2306fddc703040a3fd5e186e333b2",
+            "frozen/codex/skills/dk-pr-fix/SKILL.md": "35c3c463d0ab1ad0a50f2806d39712ebeeb252cc491af31f0a47f1093e28f278",
+            "frozen/codex/skills/dk-pr-iter/SKILL.md": "6f388a6daba6bc54677e6041e75e676456ab34206ff8c21ec2230d55833450e0",
+            "frozen/codex/skills/dk-pr-publish/SKILL.md": "add9a36691dd7bcf5423ff1c136e6f147941123498cab3208a5fe35be907d6ee",
+            "frozen/codex/skills/dk-pr-review-post/SKILL.md": "30a56599951caa65838d66e7749e2df8be08c0fb339aaa92c53f564086afcd44",
+            "frozen/codex/skills/dk-pr-review/SKILL.md": "85328b876b88ff6b878d211532356f29d888c8909dc861246ea547ea01504e23",
+            "frozen/codex/skills/dk-pr-reviewers-run/SKILL.md": "604b7989fb54df0c75a147d06d8d0008c14f0777fd6266759d53c9d634d2f8a4",
+            "frozen/codex/skills/dk-pr-split/SKILL.md": "72beffba09c8325230dfb8bdbec32240064fac83e8d3c39d7ad872ea200904bb",
+            "frozen/codex/skills/dk-preferences/SKILL.md": "1f336106230b1104320112ac6f5f9626ddf468193324a0587af9664916df03ed",
+            "frozen/docs/acceptance.md": "c23c1399bfece45106fbbe458beca74f76e3205ee50143fcd37d234381ac5944",
+            "frozen/docs/capture-performance.md": "7f859e240273a6bb38f61f62a9d0a871c8b096fbd1fcaee9e1ed50ed4d9ac5b0",
+            "frozen/docs/commit-policy.md": "1f11d7638a46bac786ea72220fd080deac01f90de9dc8d5b874bd76fc852d379",
+            "frozen/docs/configuration.md": "925fe5fe75bc8599b627e7545e40e376d8e2c48477bc9925271e7fdb8afadecc",
+            "frozen/docs/cycle-hooks.md": "32931c711f0fe799161f5982b4d6a291f736afe09aa28d5c1424b46b2941b04e",
+            "frozen/docs/dollar-experiment-plan.md": "2f079b52f5ffb0b7aa59c4775b6b33ae1b442692b20fbc6cfcd695e0fa680f23",
+            "frozen/docs/finalizers.md": "1974a24f1322033bda7725f1e267b61fa61e8ddc987575085461096792a3c9ef",
+            "frozen/docs/native-commit-policy-exercise.md": "c5f3dea89c04615194cf284f57b2afb01493f6d4f81ff338d850acab61d9fe55",
+            "frozen/docs/native-dollar-experiments.md": "11519811f921ec6a531563817251013ab9383cfb2fa573abfebf4d0177a2a7ee",
+            "frozen/docs/native-evidence-exercise.md": "96b486d8e1701bfd1b64995516fc0c1a287907914a335e32d6eeed717ee68e80",
+            "frozen/docs/native-iteration-exercise.md": "2789b5af19462d961042bdb104927b7801fa7f6c27265bd90ef9249017cc6d53",
+            "frozen/docs/native-review.md": "e3a96f780965783e56997aaa999568e87c76a07f56b8f92dbca98b022cbe3580",
+            "frozen/docs/pr/commit-cleanup-evaluation.md": "5c53f3bf6b05c289537111892fbeddc98628ff611505585cf034dde4ee92fc4b",
+            "frozen/docs/pr/commit-cleanup.md": "8aae1328411a3b9a76204380a449e6f6aff7a0ee8d552778367be183b6fbb820",
+            "frozen/docs/pr/configuration.md": "7d358908b935c88efd67b3caeee0f9256d8f972349698c06a947dee1ca3c7b4a",
+            "frozen/docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+            "frozen/docs/pr/default-completion.md": "146ea8123b8abc8b3174681a1818940c167aa593a6b48154a8f99311730cedae",
+            "frozen/docs/pr/partition-cleanup.md": "875064929ca00fd884925c73a1bfe6a15e2b9c3e57229979e1c64b4b8b3f3f60",
+            "frozen/docs/pr/publication.md": "37f30c639000a74242d27ec28be865156633fd87c4674d6cd375974e2e38fa54",
+            "frozen/docs/pr/supplied-evidence.md": "0e78b6740a376251780b537c84d56324f1b0dcfede4d6a3a936fc3d59220641c",
+            "frozen/docs/preferences.md": "ee8e0a734004fc1e17d246d20e73aa3c363f841a48c21bb5a0f39d5cadaf4211",
+            "frozen/docs/status-diagnostics.md": "12096c055fbea5ce892005c7d790efffc009824e682d2271a76006201dceb092",
+            "frozen/docs/task-state.md": "2b4a7809c07cf277488886619d77f7f1a29032251182c00dc0c312345af95c1b",
+            "frozen/runtime/commit_policy.py": "ef69e3c31ffa694c20fa7f895c4458293a30dda1a2edc47a85972f0579167563",
+            "frozen/runtime/config.py": "fd723d4c5428bfad31899e310c78c731dca1cdf51244a5c3a324a89047c60fc8",
+            "frozen/runtime/dk-ci/scripts/ci_wait.py": "e58c77cf160aa862264f35ed146b437b4ca05f4ef3656750096095a0aab63975",
+            "frozen/runtime/dk-ci/scripts/flaky_tests.py": "f8716fc2308240a9308fde3b52a7ef0af0b060ab3e1b92db3a89a93eaf1eec46",
+            "frozen/runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212",
+            "frozen/runtime/dk-issue-description/references/field-schema.md": "a96f6e080634b51425dbd09d6095dfad2feb65e687f3054195de1962164c8efa",
+            "frozen/runtime/dk-pr-address-reviews/scripts/fetch_pr_conversation.py": "7ba3b7c542df2ad2c2776213cc80cc4178e3b32691356347e67ecdb0c3d7a153",
+            "frozen/runtime/dk-pr-address-reviews/scripts/fetch_unresolved_review_threads.py": "2b6bcb9173a37a70c62feceb0320847559c278de1500ad320b9a7d55fd5ff677",
+            "frozen/runtime/dk-pr-address-reviews/scripts/pr_evidence.py": "b3a8a7a4ca10ad10000a6f66632e8d7514e1554600f2988d1e21c95911d8417e",
+            "frozen/runtime/dk-pr-decisions/references/language.md": "5d8cc76db86b18063ac8413f01431189bfea02c52f7bfdde0e8dac088b1bdd26",
+            "frozen/runtime/dk-pr-description/references/decisions.md": "8664c120dae95cd15d23618db097d639a22726bf2a497a8e278de8a4affb1a88",
+            "frozen/runtime/dk-pr-description/references/field-schema.md": "2133fac542c60a3e5a67eab9a070d03dfffb33690be7d048145b5db064f0561b",
+            "frozen/runtime/pr-iter.md": "d5fb270f98ee6caa63ce941be2b3bd0fdb7287a2388c01ea38f5ddc8a788bc88",
+            "frozen/runtime/pr-review.md": "46bcfa0f10bd5131ae3f5a7afe01c06dbc73e54df0304229d1b01abe1676d546",
+            "frozen/runtime/pr-reviewers.md": "9106163f6a47e112ae71d72b2c6b991e9ba85fbfb748ca6b70ccffe24c0ce422",
+            "frozen/runtime/pr.md": "8b350a1ae81e89bd710b7003c2e084a831d5777ccb9b2cdbe8285b774461b28c",
+            "frozen/runtime/preferences.py": "f3a480838200244858940a3ce777c986193d6e2652ef72ca44d362f227109d1b",
+            "frozen/runtime/shared/ci_deadline.py": "a67a89a01ebadcb908318fefa3f236fa26fb02193ae4a8a147f99545d6eae5cc",
+            "frozen/runtime/shared/ci_exceptions.py": "5670182617749ea39b702446b635b3c0c6d65ba1ff3dec571403c9f9ab76c818",
+            "frozen/runtime/shared/ci_observation.py": "4db3592772c211447cadc92c0372ba903e9c66149c9f4a413c74073bc052a5d9",
+            "frozen/runtime/shared/ci_policy.py": "2aefddcedfc16af0c0aa16f779e97592df4980a20dfd3712fa989ab05824965e",
+            "frozen/runtime/shared/commit_message_lines.py": "eea2ef3542ccba90fcaf18f4aa114356fcb6082faa7a0de89a3428758bc7db42",
+            "frozen/runtime/shared/diagnostics.py": "310632258f549eca2da39413b8619912ae6752d06528af6e3e9fb027b35e75e6",
+            "frozen/runtime/shared/flaky_actions.py": "57c3acc08a473f3e717b6ee0776224b23c3d8e9db8791dcc561c694f4696825c",
+            "frozen/runtime/shared/flaky_tests.py": "587da99d33e425561acc3d7b88f77d8ec51ac0314376e861e85f61f49f9c4711",
+            "frozen/runtime/shared/github_publications.py": "bc9f75a91da9217d57031c4b3814b4099d1aa725697956ec77b11642d01bf13a",
+            "frozen/runtime/shared/github_reads.py": "26ecebf883df47722a78afaee05c12b37bf3b5498a1251ee7f4680ea3901c0e3",
+            "frozen/runtime/shared/pr_identity.py": "00c63b68e3ca1ed8eb9da08049cf8ef6278c380022b01d2fa456fe6e3aa67281",
+            "frozen/runtime/shared/pr_merge.py": "c813ac52f162256b15195aa8f0f173830964105a4c09a29a54e36476a081d3c3",
+            "frozen/runtime/shared/pr_ownership.py": "1f17763f34bc1a7c8ed1347a388f744e599fa611a82bccfa463e275cbe48c95a",
+            "frozen/runtime/shared/pr_partition_policy.py": "6b59b3b8b32bd38483d2596ef3f94ae90777469fe37f6121ea26c5f63d495b53",
+            "frozen/runtime/shared/pr_size.py": "3afab1739f59f932cceb4219df91d88941a36d48017b3752d784cd6fe9d5009d",
+            "frozen/runtime/shared/private_state.py": "b900f4dde3d653c504ca815e36baea83de2a8077162da5e9ba997c7dd8e7cee2",
+            "frozen/runtime/shared/publication.py": "f915654e88ac5426941ee9558f1f5e7ff03b6b6d5c9a7fdabd74e11a7f7ce714",
+            "frozen/runtime/shared/repository_scope.py": "7e61014337ce7cb7680c56026d26a525bd16b5c0be225760cda5bec2e5ff12e5",
+            "frozen/runtime/shared/test_evidence.py": "b1fb0030187954e2d343040f8e6bf58bb843dfc1f7ec04eadab67cf57451b786",
+            "frozen/runtime/shared/workflow_storage.py": "2e191d8a71406593c82cdc2e19b00d4a1314bddf7513412ccbc8a6bd86da9ce3",
+            "frozen/runtime/state.py": "b81bde89c672c77387c72b78d74c63d6bf163b68453217bb81a7486d93b80aad",
+            "frozen/scripts/check.py": "f87b43fcdab136bb3ebc8eccfefee0fdf1697fa08ce418ca5671424aa2fa5e05",
+            "frozen/scripts/commit_policy.py": "069ccf6cc5920942e4b01740c2218baf7044d7f2b1e5fad247cf5d736af5ea82",
+            "frozen/scripts/commit_series.py": "109a60b3d9a946572cae85828c2f3bdb84b52a9bcb010d4cdb5a39f0b9fc5497",
+            "frozen/scripts/config.py": "0b0838cd222b01ed431918b7531803cd0fad2192ce4e21030572ac4a984f1841",
+            "frozen/scripts/dk.py": "cea060c6696d89917ea2b47592addb53fa26a44f84ff20cd532b6e65c97fa3ee",
+            "frozen/scripts/pr_config.py": "b1f770c88b47989aeb91ce07551fc1ab6b03b3b5234531a7814d6e15a805270b",
+            "frozen/scripts/pr_route.py": "88eb3b22661675e970dbfe3843dd29e03c0991680327e541d05424146b851fd7",
+            "frozen/scripts/preferences.py": "72ed8d7bce29ef159942254f1c7b8a0773cab0cbb138bba4b37bd3bc3d3be757",
+            "frozen/scripts/publish.py": "ae599a10c8d806b4feedbb063cf90b9d3bccf636a9b38827b2a3bece5f1bdb5a",
+            "frozen/scripts/release_validation.py": "15e26ccc4a6fbff27821842b5793e0ce427050f42fd4ea256787b44f88218914",
+            "frozen/scripts/sync_skills.py": "2115e63403ac5ff1a74f7b87fe16b09c0488af2e0eb96272bf166bc58dea2efd",
+            "frozen/scripts/test.py": "c3ac6701351860eea3f66b989b466c7675dedd98a248b07c7e52cad499b09697",
+            "frozen/scripts/version.py": "da502bf0d6bf195099190c0674c554b946fc1a0164645fe71f2864ac82eebd16"
+          },
+          "guidance": "2edf8985b07c733087ed8061c0a677fdeb53cb86c9ea5e6f78f8f4093bfd3d6a",
+          "input_hash": "3383dd1f350d4ed3a4633177b619d233196fbb0306067d1af9ab4f17fafa5628",
+          "resources": "c4e20f0b292036242c39d4f667a0e8065d447f2ce064995832912b714d0a5955",
+          "runtime": "5faa83c12cc0cce272fdf9dfa4ef0d7614a9d7a2d946dfd025d16864fe3a6575"
+        },
+        "usage": {
+          "api_equivalent_cost_usd": "0.1798040",
+          "billing_basis": "API-equivalent estimate; not actual account billing",
+          "coordination_calls": 0,
+          "descendants_observed": 0,
+          "estimated_api_cost_usd": "0.1798040",
+          "host_exit_code": 0,
+          "host_thread_id": "01a1ad27-c7be-7412-bd1e-575ed4e52fe8",
+          "independent_response_inventory": "SSE response.created and response.completed",
+          "independent_turn_total": "exec turn.completed",
+          "participant_count": 1,
+          "pins": {
+            "assignment": "237e2c7dd7bd40212b76a04a840b953e4f2041bc575b09b96ada896635baed5e",
+            "conditions": "44a52d5ed8f2640e2bb4d5c345d5db16245a92768c502a7d15aa563e34e5eb6a",
+            "guidance": "2edf8985b07c733087ed8061c0a677fdeb53cb86c9ea5e6f78f8f4093bfd3d6a",
+            "resources": "c4e20f0b292036242c39d4f667a0e8065d447f2ce064995832912b714d0a5955",
+            "runtime": "5faa83c12cc0cce272fdf9dfa4ef0d7614a9d7a2d946dfd025d16864fe3a6575",
+            "scenario": "3383dd1f350d4ed3a4633177b619d233196fbb0306067d1af9ab4f17fafa5628"
+          },
+          "price_date": "2026-11-05",
+          "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+          "rate_card": {
+            "billing_basis": "API-equivalent cost; not actual account billing",
+            "date": "2026-11-05",
+            "long_context_input_multiplier": "2",
+            "long_context_output_multiplier": "1.5",
+            "long_context_threshold": 272000,
+            "model": "gpt-6.1-sol",
+            "per_million_usd": {
+              "cache_read": ".1",
+              "cache_write_12h": "5",
+              "cache_write_30m": "2.5",
+              "input": "2",
+              "output": "10"
+            },
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "regional_multiplier": "1.1",
+            "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+            "tiers": {
+              "batch": "0.5",
+              "default": "1",
+              "fast": "2",
+              "flex": "0.5",
+              "priority": "2",
+              "standard": "1",
+              "ultrafast": "6"
+            }
+          },
+          "raw_rollout_sha256": "418faba96b0b9677fae5dd45dcd77e20aceb70bc9bd7dbbf5682557276bd65c9",
+          "response_count": 14,
+          "response_ids": [
+            "resp_0f5e8dea895cbf4f016aecd6ff824887d18c162a78533cb7be",
+            "resp_0f5e8dea895cbf4f016aecd7044dc087d1837714dff4716ee8",
+            "resp_0f5e8dea895cbf4f016aecd70789b087d1bf0771003a4f4c4d",
+            "resp_0f5e8dea895cbf4f016aecd70a097c87d1ac068928b59ed50a",
+            "resp_0f5e8dea895cbf4f016aecd70e387c87d183bffc00b236f2a3",
+            "resp_0f5e8dea895cbf4f016aecd712959887d19f9c87c676057fc6",
+            "resp_0f5e8dea895cbf4f016aecd716dafc87d1aafa92c073a8e615",
+            "resp_0f5e8dea895cbf4f016aecd721dc5c87d1a3b19234dead03d4",
+            "resp_0f5e8dea895cbf4f016aecd729b17087d1a4bfa663c078cd74",
+            "resp_0f5e8dea895cbf4f016aecd73b956887d1bf90f758203b69ba",
+            "resp_0f5e8dea895cbf4f016aecd756974487d1ad45af8d903518b0",
+            "resp_0f5e8dea895cbf4f016aecd76a5c9c87d189d2853906812d73",
+            "resp_0f5e8dea895cbf4f016aecd782292c87d1bc2a093110ebcb53",
+            "resp_0f5e8dea895cbf4f016aecd7b6ae3487d1a1fc45660475b5c3"
+          ],
+          "settings": [
+            {
+              "effort": "high",
+              "model": "gpt-6.1-sol",
+              "service_tier": "default"
+            }
+          ],
+          "telemetry_complete": true,
+          "terminal_assessment_sha256": "ef247a0f882e2c8fa68ee1c205880feb123a3f99f365867b38303495b6a219be",
+          "tokens": {
+            "cache_write_input_tokens": 0,
+            "cached_input_tokens": 437760,
+            "fresh_input_tokens": 33539,
+            "input_tokens": 471299,
+            "output_tokens": 6895,
+            "reasoning_output_tokens": 1052,
+            "total_tokens": 478194
+          }
+        }
+      },
+      "candidate": {
+        "correctness": {
+          "acceptance_source": "https://github.com/fixture/dollars/pull/7#issuecomment-9",
+          "assessment_sha256": "7f67f8a6a1b818abcd308a0e668940f55415ea29a9273917e84c0d033ac00336",
+          "ci_evidence": null,
+          "exact_acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
+          "frozen_intact": true,
+          "inputs_intact": true,
+          "native_blockers": [],
+          "native_complete": true,
+          "passed": true,
+          "problems": [],
+          "progress_counts": {
+            "discovery": 3
+          },
+          "results": [
+            {
+              "normalized": {
+                "complete": true,
+                "coverage": "bounded local hook assignment only",
+                "dispositions": [],
+                "evidence": [
+                  "artifacts/hook-executed-head-value.txt",
+                  "artifacts/hook-ownership.json"
+                ],
+                "execution_mode": "direct current coordinator; no delegated agent",
+                "findings": [],
+                "preferences": {
+                  "applicable_paths": [
+                    "value.py"
+                  ],
+                  "condition_decisions": [
+                    {
+                      "applies": true,
+                      "id": "P1"
+                    }
+                  ],
+                  "records": [
+                    {
+                      "id": "P1",
+                      "instruction": "Keep VALUE public.",
+                      "paths": [
+                        "value.py"
+                      ],
+                      "scope": "implementation"
+                    }
+                  ]
+                }
+              },
+              "original_sha256": "8ada72d36f431291a96466371db5ce5e3c067cc966687d5251bcc257b947c0ef",
+              "status": "complete",
+              "task": "cycle-hook:1cf66aadb43b7f3227b08a58d070b540c2111dabfc0c27ffeb789e55fce3cf47"
+            },
+            {
+              "normalized": {
+                "complete": true,
+                "coverage": "bounded local finalizer assignment only",
+                "dispositions": [],
+                "evidence": [
+                  "artifacts/finalizer-executed-head-value.txt",
+                  "artifacts/finalizer-ownership.json"
+                ],
+                "execution_mode": "direct current coordinator; no delegated agent",
+                "findings": [],
+                "preferences": {
+                  "applicable_paths": [
+                    "value.py"
+                  ],
+                  "condition_decisions": [
+                    {
+                      "applies": true,
+                      "id": "P1"
+                    }
+                  ],
+                  "records": [
+                    {
+                      "id": "P1",
+                      "instruction": "Keep VALUE public.",
+                      "paths": [
+                        "value.py"
+                      ],
+                      "scope": "implementation"
+                    }
+                  ]
+                }
+              },
+              "original_sha256": "a7cb553eee6158882a7bb31d115314f2e1e5efbd479bc4257399a678e1dd38b1",
+              "status": "complete",
+              "task": "finalizer:1835ac988063c6c5d92cc26f651fb2685e69f39e8c0192bda0f413c62a89e696"
+            },
+            {
+              "normalized": {
+                "complete": true,
+                "coverage": "bounded local ordinary assignment only",
+                "dispositions": [
+                  {
+                    "acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
+                    "disposition": "accepted",
+                    "finding": "F1",
+                    "source": "https://github.com/fixture/dollars/pull/7#issuecomment-9"
+                  }
+                ],
+                "evidence": [
+                  "artifacts/ordinary-executed-head-value.txt",
+                  "artifacts/ordinary-ownership.json"
+                ],
+                "execution_mode": "direct current coordinator; no delegated agent",
+                "findings": [
+                  {
+                    "id": "F1",
+                    "text": "Rename VALUE."
+                  }
+                ],
+                "preferences": {
+                  "applicable_paths": [
+                    "value.py"
+                  ],
+                  "condition_decisions": [
+                    {
+                      "applies": true,
+                      "id": "P1"
+                    }
+                  ],
+                  "records": [
+                    {
+                      "id": "P1",
+                      "instruction": "Keep VALUE public.",
+                      "paths": [
+                        "value.py"
+                      ],
+                      "scope": "implementation"
+                    }
+                  ]
+                }
+              },
+              "original_sha256": "903ec69ddd8df6f5810a07af41a7701dd9ec7648883ed03bbb3121ab684af1a5",
+              "status": "complete",
+              "task": "content-review"
+            }
+          ],
+          "retained_counters": {
+            "discovery": {
+              "ci_repairs": {},
+              "ci_reruns": {},
+              "cycles": [
+                "c1"
+              ],
+              "retries": {}
+            }
+          }
+        },
+        "freeze": {
+          "additional_resources": {
+            "config/dk-workflows/v2/user.json": "621b857c245d9d7d6cbb2b06bc138dac3ef94729ee7d5b948717429293f7bdfe",
+            "interface.py": "9cda3fdebb2cc79768732a455462ba60b9aefbc3afa676b1c05891466d228fcb"
+          },
+          "files": {
+            "frozen/.codex-plugin/plugin.json": "657bb13772c0de62666adb32f3506df63329376b23df9f880c83533498063b7f",
+            "frozen/codex/skills/dk-ci-flakes/SKILL.md": "ed4adab81c07006bcc4d786fefaa2ee8bc88ef333f45609770375c8d613dfe68",
+            "frozen/codex/skills/dk-ci/SKILL.md": "877baa0a2e2a9c15b403823de2cb3b3f46369136ddc405301f32ec30150cb0cd",
+            "frozen/codex/skills/dk-commit-message/SKILL.md": "b8f38c792a368455520698b08349a342c4d7a4196feff45e2bd379eb69764c28",
+            "frozen/codex/skills/dk-commit-split/SKILL.md": "a79569b9f663b74cc847ab5156db5945efacdb40b668f379962f6a31225a4e00",
+            "frozen/codex/skills/dk-config/SKILL.md": "253517c6f297e8e7d2d149efa7d57562987518d0c5042555ab001346b3806f51",
+            "frozen/codex/skills/dk-issue/SKILL.md": "f7089f74f39dca8114907c1416700e02bbfee25020c838178b865617a9b22e51",
+            "frozen/codex/skills/dk-pr-decisions/SKILL.md": "23295a1c1b40ba645b10c4f9bfff52774458dea102b743deb714a20598aa95c4",
+            "frozen/codex/skills/dk-pr-description/SKILL.md": "049825f87354e0b0d3af31c21d71fd2d9b30a7c9eabdc9160dc2641ffcaa45c9",
+            "frozen/codex/skills/dk-pr-feedback-address/SKILL.md": "97be7819277f009beee7e746860e67caf7da4ec66b3025812bad05368b8d8f51",
+            "frozen/codex/skills/dk-pr-feedback-read/SKILL.md": "44e9c5245b4b922d38c0afb41b11a2a566fbed1ff391f9956ab229620abee632",
+            "frozen/codex/skills/dk-pr-feedback-reply/SKILL.md": "fb1cb71abd546443637804daf40819e739a2306fddc703040a3fd5e186e333b2",
+            "frozen/codex/skills/dk-pr-fix/SKILL.md": "35c3c463d0ab1ad0a50f2806d39712ebeeb252cc491af31f0a47f1093e28f278",
+            "frozen/codex/skills/dk-pr-iter/SKILL.md": "6f388a6daba6bc54677e6041e75e676456ab34206ff8c21ec2230d55833450e0",
+            "frozen/codex/skills/dk-pr-publish/SKILL.md": "add9a36691dd7bcf5423ff1c136e6f147941123498cab3208a5fe35be907d6ee",
+            "frozen/codex/skills/dk-pr-review-post/SKILL.md": "30a56599951caa65838d66e7749e2df8be08c0fb339aaa92c53f564086afcd44",
+            "frozen/codex/skills/dk-pr-review/SKILL.md": "85328b876b88ff6b878d211532356f29d888c8909dc861246ea547ea01504e23",
+            "frozen/codex/skills/dk-pr-reviewers-run/SKILL.md": "604b7989fb54df0c75a147d06d8d0008c14f0777fd6266759d53c9d634d2f8a4",
+            "frozen/codex/skills/dk-pr-split/SKILL.md": "72beffba09c8325230dfb8bdbec32240064fac83e8d3c39d7ad872ea200904bb",
+            "frozen/codex/skills/dk-preferences/SKILL.md": "1f336106230b1104320112ac6f5f9626ddf468193324a0587af9664916df03ed",
+            "frozen/docs/acceptance.md": "c23c1399bfece45106fbbe458beca74f76e3205ee50143fcd37d234381ac5944",
+            "frozen/docs/capture-performance.md": "7f859e240273a6bb38f61f62a9d0a871c8b096fbd1fcaee9e1ed50ed4d9ac5b0",
+            "frozen/docs/commit-policy.md": "1f11d7638a46bac786ea72220fd080deac01f90de9dc8d5b874bd76fc852d379",
+            "frozen/docs/configuration.md": "925fe5fe75bc8599b627e7545e40e376d8e2c48477bc9925271e7fdb8afadecc",
+            "frozen/docs/cycle-hooks.md": "32931c711f0fe799161f5982b4d6a291f736afe09aa28d5c1424b46b2941b04e",
+            "frozen/docs/dollar-experiment-plan.md": "2f079b52f5ffb0b7aa59c4775b6b33ae1b442692b20fbc6cfcd695e0fa680f23",
+            "frozen/docs/finalizers.md": "1974a24f1322033bda7725f1e267b61fa61e8ddc987575085461096792a3c9ef",
+            "frozen/docs/native-commit-policy-exercise.md": "c5f3dea89c04615194cf284f57b2afb01493f6d4f81ff338d850acab61d9fe55",
+            "frozen/docs/native-dollar-experiments.md": "11519811f921ec6a531563817251013ab9383cfb2fa573abfebf4d0177a2a7ee",
+            "frozen/docs/native-evidence-exercise.md": "96b486d8e1701bfd1b64995516fc0c1a287907914a335e32d6eeed717ee68e80",
+            "frozen/docs/native-iteration-exercise.md": "2789b5af19462d961042bdb104927b7801fa7f6c27265bd90ef9249017cc6d53",
+            "frozen/docs/native-review.md": "e3a96f780965783e56997aaa999568e87c76a07f56b8f92dbca98b022cbe3580",
+            "frozen/docs/pr/commit-cleanup-evaluation.md": "5c53f3bf6b05c289537111892fbeddc98628ff611505585cf034dde4ee92fc4b",
+            "frozen/docs/pr/commit-cleanup.md": "8aae1328411a3b9a76204380a449e6f6aff7a0ee8d552778367be183b6fbb820",
+            "frozen/docs/pr/configuration.md": "7d358908b935c88efd67b3caeee0f9256d8f972349698c06a947dee1ca3c7b4a",
+            "frozen/docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+            "frozen/docs/pr/default-completion.md": "146ea8123b8abc8b3174681a1818940c167aa593a6b48154a8f99311730cedae",
+            "frozen/docs/pr/partition-cleanup.md": "875064929ca00fd884925c73a1bfe6a15e2b9c3e57229979e1c64b4b8b3f3f60",
+            "frozen/docs/pr/publication.md": "37f30c639000a74242d27ec28be865156633fd87c4674d6cd375974e2e38fa54",
+            "frozen/docs/pr/supplied-evidence.md": "0e78b6740a376251780b537c84d56324f1b0dcfede4d6a3a936fc3d59220641c",
+            "frozen/docs/preferences.md": "ee8e0a734004fc1e17d246d20e73aa3c363f841a48c21bb5a0f39d5cadaf4211",
+            "frozen/docs/status-diagnostics.md": "12096c055fbea5ce892005c7d790efffc009824e682d2271a76006201dceb092",
+            "frozen/docs/task-state.md": "066a05658a085b525feaf3c242847767f8595f9c6694f010210f024ca3b9241e",
+            "frozen/runtime/commit_policy.py": "ef69e3c31ffa694c20fa7f895c4458293a30dda1a2edc47a85972f0579167563",
+            "frozen/runtime/config.py": "fd723d4c5428bfad31899e310c78c731dca1cdf51244a5c3a324a89047c60fc8",
+            "frozen/runtime/dk-ci/scripts/ci_wait.py": "e58c77cf160aa862264f35ed146b437b4ca05f4ef3656750096095a0aab63975",
+            "frozen/runtime/dk-ci/scripts/flaky_tests.py": "f8716fc2308240a9308fde3b52a7ef0af0b060ab3e1b92db3a89a93eaf1eec46",
+            "frozen/runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212",
+            "frozen/runtime/dk-issue-description/references/field-schema.md": "a96f6e080634b51425dbd09d6095dfad2feb65e687f3054195de1962164c8efa",
+            "frozen/runtime/dk-pr-address-reviews/scripts/fetch_pr_conversation.py": "7ba3b7c542df2ad2c2776213cc80cc4178e3b32691356347e67ecdb0c3d7a153",
+            "frozen/runtime/dk-pr-address-reviews/scripts/fetch_unresolved_review_threads.py": "2b6bcb9173a37a70c62feceb0320847559c278de1500ad320b9a7d55fd5ff677",
+            "frozen/runtime/dk-pr-address-reviews/scripts/pr_evidence.py": "b3a8a7a4ca10ad10000a6f66632e8d7514e1554600f2988d1e21c95911d8417e",
+            "frozen/runtime/dk-pr-decisions/references/language.md": "5d8cc76db86b18063ac8413f01431189bfea02c52f7bfdde0e8dac088b1bdd26",
+            "frozen/runtime/dk-pr-description/references/decisions.md": "8664c120dae95cd15d23618db097d639a22726bf2a497a8e278de8a4affb1a88",
+            "frozen/runtime/dk-pr-description/references/field-schema.md": "2133fac542c60a3e5a67eab9a070d03dfffb33690be7d048145b5db064f0561b",
+            "frozen/runtime/pr-iter.md": "d5fb270f98ee6caa63ce941be2b3bd0fdb7287a2388c01ea38f5ddc8a788bc88",
+            "frozen/runtime/pr-review.md": "46bcfa0f10bd5131ae3f5a7afe01c06dbc73e54df0304229d1b01abe1676d546",
+            "frozen/runtime/pr-reviewers.md": "9106163f6a47e112ae71d72b2c6b991e9ba85fbfb748ca6b70ccffe24c0ce422",
+            "frozen/runtime/pr.md": "8b350a1ae81e89bd710b7003c2e084a831d5777ccb9b2cdbe8285b774461b28c",
+            "frozen/runtime/preferences.py": "f3a480838200244858940a3ce777c986193d6e2652ef72ca44d362f227109d1b",
+            "frozen/runtime/shared/ci_deadline.py": "a67a89a01ebadcb908318fefa3f236fa26fb02193ae4a8a147f99545d6eae5cc",
+            "frozen/runtime/shared/ci_exceptions.py": "5670182617749ea39b702446b635b3c0c6d65ba1ff3dec571403c9f9ab76c818",
+            "frozen/runtime/shared/ci_observation.py": "4db3592772c211447cadc92c0372ba903e9c66149c9f4a413c74073bc052a5d9",
+            "frozen/runtime/shared/ci_policy.py": "2aefddcedfc16af0c0aa16f779e97592df4980a20dfd3712fa989ab05824965e",
+            "frozen/runtime/shared/commit_message_lines.py": "eea2ef3542ccba90fcaf18f4aa114356fcb6082faa7a0de89a3428758bc7db42",
+            "frozen/runtime/shared/diagnostics.py": "310632258f549eca2da39413b8619912ae6752d06528af6e3e9fb027b35e75e6",
+            "frozen/runtime/shared/flaky_actions.py": "57c3acc08a473f3e717b6ee0776224b23c3d8e9db8791dcc561c694f4696825c",
+            "frozen/runtime/shared/flaky_tests.py": "587da99d33e425561acc3d7b88f77d8ec51ac0314376e861e85f61f49f9c4711",
+            "frozen/runtime/shared/github_publications.py": "bc9f75a91da9217d57031c4b3814b4099d1aa725697956ec77b11642d01bf13a",
+            "frozen/runtime/shared/github_reads.py": "26ecebf883df47722a78afaee05c12b37bf3b5498a1251ee7f4680ea3901c0e3",
+            "frozen/runtime/shared/pr_identity.py": "00c63b68e3ca1ed8eb9da08049cf8ef6278c380022b01d2fa456fe6e3aa67281",
+            "frozen/runtime/shared/pr_merge.py": "c813ac52f162256b15195aa8f0f173830964105a4c09a29a54e36476a081d3c3",
+            "frozen/runtime/shared/pr_ownership.py": "1f17763f34bc1a7c8ed1347a388f744e599fa611a82bccfa463e275cbe48c95a",
+            "frozen/runtime/shared/pr_partition_policy.py": "6b59b3b8b32bd38483d2596ef3f94ae90777469fe37f6121ea26c5f63d495b53",
+            "frozen/runtime/shared/pr_size.py": "3afab1739f59f932cceb4219df91d88941a36d48017b3752d784cd6fe9d5009d",
+            "frozen/runtime/shared/private_state.py": "b900f4dde3d653c504ca815e36baea83de2a8077162da5e9ba997c7dd8e7cee2",
+            "frozen/runtime/shared/publication.py": "f915654e88ac5426941ee9558f1f5e7ff03b6b6d5c9a7fdabd74e11a7f7ce714",
+            "frozen/runtime/shared/repository_scope.py": "7e61014337ce7cb7680c56026d26a525bd16b5c0be225760cda5bec2e5ff12e5",
+            "frozen/runtime/shared/test_evidence.py": "b1fb0030187954e2d343040f8e6bf58bb843dfc1f7ec04eadab67cf57451b786",
+            "frozen/runtime/shared/workflow_storage.py": "2e191d8a71406593c82cdc2e19b00d4a1314bddf7513412ccbc8a6bd86da9ce3",
+            "frozen/runtime/state.py": "b81bde89c672c77387c72b78d74c63d6bf163b68453217bb81a7486d93b80aad",
+            "frozen/scripts/check.py": "f87b43fcdab136bb3ebc8eccfefee0fdf1697fa08ce418ca5671424aa2fa5e05",
+            "frozen/scripts/commit_policy.py": "069ccf6cc5920942e4b01740c2218baf7044d7f2b1e5fad247cf5d736af5ea82",
+            "frozen/scripts/commit_series.py": "109a60b3d9a946572cae85828c2f3bdb84b52a9bcb010d4cdb5a39f0b9fc5497",
+            "frozen/scripts/config.py": "0b0838cd222b01ed431918b7531803cd0fad2192ce4e21030572ac4a984f1841",
+            "frozen/scripts/dk.py": "3048373db1952d3c8dcfd5584fcf10efe93d7016c5bd9a080caec48e3202bbfd",
+            "frozen/scripts/dk_reference.py": "0017179e99c88c90e09cebe5c9b5b73e38493c8a4b63153ee243198a48c1ed51",
+            "frozen/scripts/pr_config.py": "b1f770c88b47989aeb91ce07551fc1ab6b03b3b5234531a7814d6e15a805270b",
+            "frozen/scripts/pr_route.py": "88eb3b22661675e970dbfe3843dd29e03c0991680327e541d05424146b851fd7",
+            "frozen/scripts/preferences.py": "72ed8d7bce29ef159942254f1c7b8a0773cab0cbb138bba4b37bd3bc3d3be757",
+            "frozen/scripts/publish.py": "ae599a10c8d806b4feedbb063cf90b9d3bccf636a9b38827b2a3bece5f1bdb5a",
+            "frozen/scripts/release_validation.py": "15e26ccc4a6fbff27821842b5793e0ce427050f42fd4ea256787b44f88218914",
+            "frozen/scripts/sync_skills.py": "2115e63403ac5ff1a74f7b87fe16b09c0488af2e0eb96272bf166bc58dea2efd",
+            "frozen/scripts/test.py": "c3ac6701351860eea3f66b989b466c7675dedd98a248b07c7e52cad499b09697",
+            "frozen/scripts/version.py": "da502bf0d6bf195099190c0674c554b946fc1a0164645fe71f2864ac82eebd16"
+          },
+          "guidance": "cac6091a8499e36d2e1765cdb25d0665a97280e93ec596e225f1cb0325858435",
+          "input_hash": "3383dd1f350d4ed3a4633177b619d233196fbb0306067d1af9ab4f17fafa5628",
+          "resources": "c4e20f0b292036242c39d4f667a0e8065d447f2ce064995832912b714d0a5955",
+          "runtime": "7e47178fa7efd3afe9bf91aaaf38a94102fd1bfd0be34c201a891214a65f7f25"
+        },
+        "usage": {
+          "api_equivalent_cost_usd": "0.2376092",
+          "billing_basis": "API-equivalent estimate; not actual account billing",
+          "coordination_calls": 0,
+          "descendants_observed": 0,
+          "estimated_api_cost_usd": "0.2376092",
+          "host_exit_code": 0,
+          "host_thread_id": "01a1ad24-8467-76a1-b612-e7271f11fd9e",
+          "independent_response_inventory": "SSE response.created and response.completed",
+          "independent_turn_total": "exec turn.completed",
+          "participant_count": 1,
+          "pins": {
+            "assignment": "237e2c7dd7bd40212b76a04a840b953e4f2041bc575b09b96ada896635baed5e",
+            "conditions": "44a52d5ed8f2640e2bb4d5c345d5db16245a92768c502a7d15aa563e34e5eb6a",
+            "guidance": "cac6091a8499e36d2e1765cdb25d0665a97280e93ec596e225f1cb0325858435",
+            "resources": "c4e20f0b292036242c39d4f667a0e8065d447f2ce064995832912b714d0a5955",
+            "runtime": "7e47178fa7efd3afe9bf91aaaf38a94102fd1bfd0be34c201a891214a65f7f25",
+            "scenario": "3383dd1f350d4ed3a4633177b619d233196fbb0306067d1af9ab4f17fafa5628"
+          },
+          "price_date": "2026-11-05",
+          "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+          "rate_card": {
+            "billing_basis": "API-equivalent cost; not actual account billing",
+            "date": "2026-11-05",
+            "long_context_input_multiplier": "2",
+            "long_context_output_multiplier": "1.5",
+            "long_context_threshold": 272000,
+            "model": "gpt-6.1-sol",
+            "per_million_usd": {
+              "cache_read": ".1",
+              "cache_write_12h": "5",
+              "cache_write_30m": "2.5",
+              "input": "2",
+              "output": "10"
+            },
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "regional_multiplier": "1.1",
+            "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+            "tiers": {
+              "batch": "0.5",
+              "default": "1",
+              "fast": "2",
+              "flex": "0.5",
+              "priority": "2",
+              "standard": "1",
+              "ultrafast": "6"
+            }
+          },
+          "raw_rollout_sha256": "be581a3a07f7c37b9fe39f62c666940cbdb0bdebecda378fdb01cfe8553af7ff",
+          "response_count": 13,
+          "response_ids": [
+            "resp_0bc4e5364926bcf6016aecd6299ac887d1b86011515e939c28",
+            "resp_0bc4e5364926bcf6016aecd62d6c0887d19620d8f180859979",
+            "resp_0bc4e5364926bcf6016aecd6302cc887d19e3cfa611643515d",
+            "resp_0bc4e5364926bcf6016aecd6335fe487d1a8f513ea516f848e",
+            "resp_0bc4e5364926bcf6016aecd63803ec87d196dea17fb8a5f856",
+            "resp_0bc4e5364926bcf6016aecd63f955887d1a4d90c8db7ac6357",
+            "resp_0bc4e5364926bcf6016aecd6470dd487d1855bfc9d830fbced",
+            "resp_0bc4e5364926bcf6016aecd64b1e2887d192eb010bf5ae9e8a",
+            "resp_0bc4e5364926bcf6016aecd65329cc87d1aede2f0d58ca6368",
+            "resp_0bc4e5364926bcf6016aecd67b68ec87d187f72a142ecdb187",
+            "resp_0bc4e5364926bcf6016aecd6add89887d1a1038c39f3539a61",
+            "resp_0bc4e5364926bcf6016aecd6c0984087d1972fe68b7c01166b",
+            "resp_0bc4e5364926bcf6016aecd6f6426487d18d5a574366bc4c6b"
+          ],
+          "settings": [
+            {
+              "effort": "high",
+              "model": "gpt-6.1-sol",
+              "service_tier": "default"
+            }
+          ],
+          "telemetry_complete": true,
+          "terminal_assessment_sha256": "14700e8261bcf256f1b9e3ebcb3b5902975858a5100071fc98ab3993846c04c9",
+          "tokens": {
+            "cache_write_input_tokens": 0,
+            "cached_input_tokens": 456832,
+            "fresh_input_tokens": 53338,
+            "input_tokens": 510170,
+            "output_tokens": 8525,
+            "reasoning_output_tokens": 1660,
+            "total_tokens": 518695
+          }
+        }
+      },
+      "order": [
+        "candidate",
+        "baseline"
+      ]
+    },
+    {
+      "baseline": {
+        "correctness": {
+          "acceptance_source": "https://github.com/fixture/dollars/pull/7#issuecomment-9",
+          "assessment_sha256": "738a8f688dbc839f5ab8489fd6ce89a9b2e841c74285806d2250923816e95188",
+          "ci_evidence": null,
+          "exact_acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
+          "frozen_intact": true,
+          "inputs_intact": true,
+          "native_blockers": [],
+          "native_complete": true,
+          "passed": true,
+          "problems": [],
+          "progress_counts": {
+            "discovery": 3
+          },
+          "results": [
+            {
+              "normalized": {
+                "complete": true,
+                "coverage": "Bounded fixture assignment only.",
+                "findings": []
+              },
+              "original_sha256": "8ec718e3350137114d10c7ef28132864c73bd91d3e7a17c1e3b18572f1e90121",
+              "status": "complete",
+              "task": "cycle-hook:1cf66aadb43b7f3227b08a58d070b540c2111dabfc0c27ffeb789e55fce3cf47"
+            },
+            {
+              "normalized": {
+                "complete": true,
+                "coverage": "Bounded fixture assignment only.",
+                "findings": []
+              },
+              "original_sha256": "b20b65c0d96a7e930650eef59e17d1cf9c92ee8817bf8ce80ef9f331082b9c7b",
+              "status": "complete",
+              "task": "finalizer:1835ac988063c6c5d92cc26f651fb2685e69f39e8c0192bda0f413c62a89e696"
+            },
+            {
+              "normalized": {
+                "complete": true,
+                "coverage": "Bounded fixture assignment only.",
+                "findings": [
+                  {
+                    "id": "F1",
+                    "text": "Rename VALUE."
+                  }
+                ]
+              },
+              "original_sha256": "046d83f3c924fe22af5eb81959f6a45e09f186a3df3de69b44d540a892a88716",
+              "status": "complete",
+              "task": "content-review"
+            }
+          ],
+          "retained_counters": {
+            "discovery": {
+              "ci_repairs": {},
+              "ci_reruns": {},
+              "cycles": [
+                "c1"
+              ],
+              "retries": {}
+            }
+          }
+        },
+        "freeze": {
+          "additional_resources": {
+            "config/dk-workflows/v2/user.json": "621b857c245d9d7d6cbb2b06bc138dac3ef94729ee7d5b948717429293f7bdfe",
+            "interface.py": "9cda3fdebb2cc79768732a455462ba60b9aefbc3afa676b1c05891466d228fcb"
+          },
+          "files": {
+            "frozen/.codex-plugin/plugin.json": "657bb13772c0de62666adb32f3506df63329376b23df9f880c83533498063b7f",
+            "frozen/codex/skills/dk-ci-flakes/SKILL.md": "ed4adab81c07006bcc4d786fefaa2ee8bc88ef333f45609770375c8d613dfe68",
+            "frozen/codex/skills/dk-ci/SKILL.md": "877baa0a2e2a9c15b403823de2cb3b3f46369136ddc405301f32ec30150cb0cd",
+            "frozen/codex/skills/dk-commit-message/SKILL.md": "b8f38c792a368455520698b08349a342c4d7a4196feff45e2bd379eb69764c28",
+            "frozen/codex/skills/dk-commit-split/SKILL.md": "a79569b9f663b74cc847ab5156db5945efacdb40b668f379962f6a31225a4e00",
+            "frozen/codex/skills/dk-config/SKILL.md": "253517c6f297e8e7d2d149efa7d57562987518d0c5042555ab001346b3806f51",
+            "frozen/codex/skills/dk-issue/SKILL.md": "f7089f74f39dca8114907c1416700e02bbfee25020c838178b865617a9b22e51",
+            "frozen/codex/skills/dk-pr-decisions/SKILL.md": "23295a1c1b40ba645b10c4f9bfff52774458dea102b743deb714a20598aa95c4",
+            "frozen/codex/skills/dk-pr-description/SKILL.md": "049825f87354e0b0d3af31c21d71fd2d9b30a7c9eabdc9160dc2641ffcaa45c9",
+            "frozen/codex/skills/dk-pr-feedback-address/SKILL.md": "97be7819277f009beee7e746860e67caf7da4ec66b3025812bad05368b8d8f51",
+            "frozen/codex/skills/dk-pr-feedback-read/SKILL.md": "44e9c5245b4b922d38c0afb41b11a2a566fbed1ff391f9956ab229620abee632",
+            "frozen/codex/skills/dk-pr-feedback-reply/SKILL.md": "fb1cb71abd546443637804daf40819e739a2306fddc703040a3fd5e186e333b2",
+            "frozen/codex/skills/dk-pr-fix/SKILL.md": "35c3c463d0ab1ad0a50f2806d39712ebeeb252cc491af31f0a47f1093e28f278",
+            "frozen/codex/skills/dk-pr-iter/SKILL.md": "6f388a6daba6bc54677e6041e75e676456ab34206ff8c21ec2230d55833450e0",
+            "frozen/codex/skills/dk-pr-publish/SKILL.md": "add9a36691dd7bcf5423ff1c136e6f147941123498cab3208a5fe35be907d6ee",
+            "frozen/codex/skills/dk-pr-review-post/SKILL.md": "30a56599951caa65838d66e7749e2df8be08c0fb339aaa92c53f564086afcd44",
+            "frozen/codex/skills/dk-pr-review/SKILL.md": "85328b876b88ff6b878d211532356f29d888c8909dc861246ea547ea01504e23",
+            "frozen/codex/skills/dk-pr-reviewers-run/SKILL.md": "604b7989fb54df0c75a147d06d8d0008c14f0777fd6266759d53c9d634d2f8a4",
+            "frozen/codex/skills/dk-pr-split/SKILL.md": "72beffba09c8325230dfb8bdbec32240064fac83e8d3c39d7ad872ea200904bb",
+            "frozen/codex/skills/dk-preferences/SKILL.md": "1f336106230b1104320112ac6f5f9626ddf468193324a0587af9664916df03ed",
+            "frozen/docs/acceptance.md": "c23c1399bfece45106fbbe458beca74f76e3205ee50143fcd37d234381ac5944",
+            "frozen/docs/capture-performance.md": "7f859e240273a6bb38f61f62a9d0a871c8b096fbd1fcaee9e1ed50ed4d9ac5b0",
+            "frozen/docs/commit-policy.md": "1f11d7638a46bac786ea72220fd080deac01f90de9dc8d5b874bd76fc852d379",
+            "frozen/docs/configuration.md": "925fe5fe75bc8599b627e7545e40e376d8e2c48477bc9925271e7fdb8afadecc",
+            "frozen/docs/cycle-hooks.md": "32931c711f0fe799161f5982b4d6a291f736afe09aa28d5c1424b46b2941b04e",
+            "frozen/docs/dollar-experiment-plan.md": "2f079b52f5ffb0b7aa59c4775b6b33ae1b442692b20fbc6cfcd695e0fa680f23",
+            "frozen/docs/finalizers.md": "1974a24f1322033bda7725f1e267b61fa61e8ddc987575085461096792a3c9ef",
+            "frozen/docs/native-commit-policy-exercise.md": "c5f3dea89c04615194cf284f57b2afb01493f6d4f81ff338d850acab61d9fe55",
+            "frozen/docs/native-dollar-experiments.md": "11519811f921ec6a531563817251013ab9383cfb2fa573abfebf4d0177a2a7ee",
+            "frozen/docs/native-evidence-exercise.md": "96b486d8e1701bfd1b64995516fc0c1a287907914a335e32d6eeed717ee68e80",
+            "frozen/docs/native-iteration-exercise.md": "2789b5af19462d961042bdb104927b7801fa7f6c27265bd90ef9249017cc6d53",
+            "frozen/docs/native-review.md": "e3a96f780965783e56997aaa999568e87c76a07f56b8f92dbca98b022cbe3580",
+            "frozen/docs/pr/commit-cleanup-evaluation.md": "5c53f3bf6b05c289537111892fbeddc98628ff611505585cf034dde4ee92fc4b",
+            "frozen/docs/pr/commit-cleanup.md": "8aae1328411a3b9a76204380a449e6f6aff7a0ee8d552778367be183b6fbb820",
+            "frozen/docs/pr/configuration.md": "7d358908b935c88efd67b3caeee0f9256d8f972349698c06a947dee1ca3c7b4a",
+            "frozen/docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+            "frozen/docs/pr/default-completion.md": "146ea8123b8abc8b3174681a1818940c167aa593a6b48154a8f99311730cedae",
+            "frozen/docs/pr/partition-cleanup.md": "875064929ca00fd884925c73a1bfe6a15e2b9c3e57229979e1c64b4b8b3f3f60",
+            "frozen/docs/pr/publication.md": "37f30c639000a74242d27ec28be865156633fd87c4674d6cd375974e2e38fa54",
+            "frozen/docs/pr/supplied-evidence.md": "0e78b6740a376251780b537c84d56324f1b0dcfede4d6a3a936fc3d59220641c",
+            "frozen/docs/preferences.md": "ee8e0a734004fc1e17d246d20e73aa3c363f841a48c21bb5a0f39d5cadaf4211",
+            "frozen/docs/status-diagnostics.md": "12096c055fbea5ce892005c7d790efffc009824e682d2271a76006201dceb092",
+            "frozen/docs/task-state.md": "2b4a7809c07cf277488886619d77f7f1a29032251182c00dc0c312345af95c1b",
+            "frozen/runtime/commit_policy.py": "ef69e3c31ffa694c20fa7f895c4458293a30dda1a2edc47a85972f0579167563",
+            "frozen/runtime/config.py": "fd723d4c5428bfad31899e310c78c731dca1cdf51244a5c3a324a89047c60fc8",
+            "frozen/runtime/dk-ci/scripts/ci_wait.py": "e58c77cf160aa862264f35ed146b437b4ca05f4ef3656750096095a0aab63975",
+            "frozen/runtime/dk-ci/scripts/flaky_tests.py": "f8716fc2308240a9308fde3b52a7ef0af0b060ab3e1b92db3a89a93eaf1eec46",
+            "frozen/runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212",
+            "frozen/runtime/dk-issue-description/references/field-schema.md": "a96f6e080634b51425dbd09d6095dfad2feb65e687f3054195de1962164c8efa",
+            "frozen/runtime/dk-pr-address-reviews/scripts/fetch_pr_conversation.py": "7ba3b7c542df2ad2c2776213cc80cc4178e3b32691356347e67ecdb0c3d7a153",
+            "frozen/runtime/dk-pr-address-reviews/scripts/fetch_unresolved_review_threads.py": "2b6bcb9173a37a70c62feceb0320847559c278de1500ad320b9a7d55fd5ff677",
+            "frozen/runtime/dk-pr-address-reviews/scripts/pr_evidence.py": "b3a8a7a4ca10ad10000a6f66632e8d7514e1554600f2988d1e21c95911d8417e",
+            "frozen/runtime/dk-pr-decisions/references/language.md": "5d8cc76db86b18063ac8413f01431189bfea02c52f7bfdde0e8dac088b1bdd26",
+            "frozen/runtime/dk-pr-description/references/decisions.md": "8664c120dae95cd15d23618db097d639a22726bf2a497a8e278de8a4affb1a88",
+            "frozen/runtime/dk-pr-description/references/field-schema.md": "2133fac542c60a3e5a67eab9a070d03dfffb33690be7d048145b5db064f0561b",
+            "frozen/runtime/pr-iter.md": "d5fb270f98ee6caa63ce941be2b3bd0fdb7287a2388c01ea38f5ddc8a788bc88",
+            "frozen/runtime/pr-review.md": "46bcfa0f10bd5131ae3f5a7afe01c06dbc73e54df0304229d1b01abe1676d546",
+            "frozen/runtime/pr-reviewers.md": "9106163f6a47e112ae71d72b2c6b991e9ba85fbfb748ca6b70ccffe24c0ce422",
+            "frozen/runtime/pr.md": "8b350a1ae81e89bd710b7003c2e084a831d5777ccb9b2cdbe8285b774461b28c",
+            "frozen/runtime/preferences.py": "f3a480838200244858940a3ce777c986193d6e2652ef72ca44d362f227109d1b",
+            "frozen/runtime/shared/ci_deadline.py": "a67a89a01ebadcb908318fefa3f236fa26fb02193ae4a8a147f99545d6eae5cc",
+            "frozen/runtime/shared/ci_exceptions.py": "5670182617749ea39b702446b635b3c0c6d65ba1ff3dec571403c9f9ab76c818",
+            "frozen/runtime/shared/ci_observation.py": "4db3592772c211447cadc92c0372ba903e9c66149c9f4a413c74073bc052a5d9",
+            "frozen/runtime/shared/ci_policy.py": "2aefddcedfc16af0c0aa16f779e97592df4980a20dfd3712fa989ab05824965e",
+            "frozen/runtime/shared/commit_message_lines.py": "eea2ef3542ccba90fcaf18f4aa114356fcb6082faa7a0de89a3428758bc7db42",
+            "frozen/runtime/shared/diagnostics.py": "310632258f549eca2da39413b8619912ae6752d06528af6e3e9fb027b35e75e6",
+            "frozen/runtime/shared/flaky_actions.py": "57c3acc08a473f3e717b6ee0776224b23c3d8e9db8791dcc561c694f4696825c",
+            "frozen/runtime/shared/flaky_tests.py": "587da99d33e425561acc3d7b88f77d8ec51ac0314376e861e85f61f49f9c4711",
+            "frozen/runtime/shared/github_publications.py": "bc9f75a91da9217d57031c4b3814b4099d1aa725697956ec77b11642d01bf13a",
+            "frozen/runtime/shared/github_reads.py": "26ecebf883df47722a78afaee05c12b37bf3b5498a1251ee7f4680ea3901c0e3",
+            "frozen/runtime/shared/pr_identity.py": "00c63b68e3ca1ed8eb9da08049cf8ef6278c380022b01d2fa456fe6e3aa67281",
+            "frozen/runtime/shared/pr_merge.py": "c813ac52f162256b15195aa8f0f173830964105a4c09a29a54e36476a081d3c3",
+            "frozen/runtime/shared/pr_ownership.py": "1f17763f34bc1a7c8ed1347a388f744e599fa611a82bccfa463e275cbe48c95a",
+            "frozen/runtime/shared/pr_partition_policy.py": "6b59b3b8b32bd38483d2596ef3f94ae90777469fe37f6121ea26c5f63d495b53",
+            "frozen/runtime/shared/pr_size.py": "3afab1739f59f932cceb4219df91d88941a36d48017b3752d784cd6fe9d5009d",
+            "frozen/runtime/shared/private_state.py": "b900f4dde3d653c504ca815e36baea83de2a8077162da5e9ba997c7dd8e7cee2",
+            "frozen/runtime/shared/publication.py": "f915654e88ac5426941ee9558f1f5e7ff03b6b6d5c9a7fdabd74e11a7f7ce714",
+            "frozen/runtime/shared/repository_scope.py": "7e61014337ce7cb7680c56026d26a525bd16b5c0be225760cda5bec2e5ff12e5",
+            "frozen/runtime/shared/test_evidence.py": "b1fb0030187954e2d343040f8e6bf58bb843dfc1f7ec04eadab67cf57451b786",
+            "frozen/runtime/shared/workflow_storage.py": "2e191d8a71406593c82cdc2e19b00d4a1314bddf7513412ccbc8a6bd86da9ce3",
+            "frozen/runtime/state.py": "b81bde89c672c77387c72b78d74c63d6bf163b68453217bb81a7486d93b80aad",
+            "frozen/scripts/check.py": "f87b43fcdab136bb3ebc8eccfefee0fdf1697fa08ce418ca5671424aa2fa5e05",
+            "frozen/scripts/commit_policy.py": "069ccf6cc5920942e4b01740c2218baf7044d7f2b1e5fad247cf5d736af5ea82",
+            "frozen/scripts/commit_series.py": "109a60b3d9a946572cae85828c2f3bdb84b52a9bcb010d4cdb5a39f0b9fc5497",
+            "frozen/scripts/config.py": "0b0838cd222b01ed431918b7531803cd0fad2192ce4e21030572ac4a984f1841",
+            "frozen/scripts/dk.py": "cea060c6696d89917ea2b47592addb53fa26a44f84ff20cd532b6e65c97fa3ee",
+            "frozen/scripts/pr_config.py": "b1f770c88b47989aeb91ce07551fc1ab6b03b3b5234531a7814d6e15a805270b",
+            "frozen/scripts/pr_route.py": "88eb3b22661675e970dbfe3843dd29e03c0991680327e541d05424146b851fd7",
+            "frozen/scripts/preferences.py": "72ed8d7bce29ef159942254f1c7b8a0773cab0cbb138bba4b37bd3bc3d3be757",
+            "frozen/scripts/publish.py": "ae599a10c8d806b4feedbb063cf90b9d3bccf636a9b38827b2a3bece5f1bdb5a",
+            "frozen/scripts/release_validation.py": "15e26ccc4a6fbff27821842b5793e0ce427050f42fd4ea256787b44f88218914",
+            "frozen/scripts/sync_skills.py": "2115e63403ac5ff1a74f7b87fe16b09c0488af2e0eb96272bf166bc58dea2efd",
+            "frozen/scripts/test.py": "c3ac6701351860eea3f66b989b466c7675dedd98a248b07c7e52cad499b09697",
+            "frozen/scripts/version.py": "da502bf0d6bf195099190c0674c554b946fc1a0164645fe71f2864ac82eebd16"
+          },
+          "guidance": "2edf8985b07c733087ed8061c0a677fdeb53cb86c9ea5e6f78f8f4093bfd3d6a",
+          "input_hash": "3383dd1f350d4ed3a4633177b619d233196fbb0306067d1af9ab4f17fafa5628",
+          "resources": "c4e20f0b292036242c39d4f667a0e8065d447f2ce064995832912b714d0a5955",
+          "runtime": "5faa83c12cc0cce272fdf9dfa4ef0d7614a9d7a2d946dfd025d16864fe3a6575"
+        },
+        "usage": {
+          "api_equivalent_cost_usd": "0.2604020",
+          "billing_basis": "API-equivalent estimate; not actual account billing",
+          "coordination_calls": 0,
+          "descendants_observed": 0,
+          "estimated_api_cost_usd": "0.2604020",
+          "host_exit_code": 0,
+          "host_thread_id": "01a1ad2a-cb43-73e2-b6ea-d911614ab68b",
+          "independent_response_inventory": "SSE response.created and response.completed",
+          "independent_turn_total": "exec turn.completed",
+          "participant_count": 1,
+          "pins": {
+            "assignment": "237e2c7dd7bd40212b76a04a840b953e4f2041bc575b09b96ada896635baed5e",
+            "conditions": "44a52d5ed8f2640e2bb4d5c345d5db16245a92768c502a7d15aa563e34e5eb6a",
+            "guidance": "2edf8985b07c733087ed8061c0a677fdeb53cb86c9ea5e6f78f8f4093bfd3d6a",
+            "resources": "c4e20f0b292036242c39d4f667a0e8065d447f2ce064995832912b714d0a5955",
+            "runtime": "5faa83c12cc0cce272fdf9dfa4ef0d7614a9d7a2d946dfd025d16864fe3a6575",
+            "scenario": "3383dd1f350d4ed3a4633177b619d233196fbb0306067d1af9ab4f17fafa5628"
+          },
+          "price_date": "2026-11-05",
+          "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+          "rate_card": {
+            "billing_basis": "API-equivalent cost; not actual account billing",
+            "date": "2026-11-05",
+            "long_context_input_multiplier": "2",
+            "long_context_output_multiplier": "1.5",
+            "long_context_threshold": 272000,
+            "model": "gpt-6.1-sol",
+            "per_million_usd": {
+              "cache_read": ".1",
+              "cache_write_12h": "5",
+              "cache_write_30m": "2.5",
+              "input": "2",
+              "output": "10"
+            },
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "regional_multiplier": "1.1",
+            "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+            "tiers": {
+              "batch": "0.5",
+              "default": "1",
+              "fast": "2",
+              "flex": "0.5",
+              "priority": "2",
+              "standard": "1",
+              "ultrafast": "6"
+            }
+          },
+          "raw_rollout_sha256": "5f4677fb530d33acf4fd8d5ffac2e95d930b4c819298b3fc7b5d1d5e98635a76",
+          "response_count": 12,
+          "response_ids": [
+            "resp_07d16c43210b88f2016aecd7c4402087d1956eed6c88dedfac",
+            "resp_07d16c43210b88f2016aecd7c89b1887d18f191c06b5f7278a",
+            "resp_07d16c43210b88f2016aecd7cc2ae887d1ba943f86da2aa050",
+            "resp_07d16c43210b88f2016aecd7d1655087d19b4f53dbf242f2f2",
+            "resp_07d16c43210b88f2016aecd7db794c87d1a581398c91536e3b",
+            "resp_07d16c43210b88f2016aecd7e71ec887d18df883141255e9e9",
+            "resp_07d16c43210b88f2016aecd7f3ad9887d1a0f78acbffe016e4",
+            "resp_07d16c43210b88f2016aecd805725087d19054ead89f3eeb9a",
+            "resp_07d16c43210b88f2016aecd835499c87d18fcd1472863e3210",
+            "resp_07d16c43210b88f2016aecd839b86c87d1b4aa499412d1b4c7",
+            "resp_07d16c43210b88f2016aecd84a291087d188a7342e8db24135",
+            "resp_07d16c43210b88f2016aecd87f2b0087d1a39a157cc45b431e"
+          ],
+          "settings": [
+            {
+              "effort": "high",
+              "model": "gpt-6.1-sol",
+              "service_tier": "default"
+            }
+          ],
+          "telemetry_complete": true,
+          "terminal_assessment_sha256": "ca74a8ea75f8d1d8f2b4fc8e730d6a126dbbb2184fbc54582d98b6a5d01fea73",
+          "tokens": {
+            "cache_write_input_tokens": 0,
+            "cached_input_tokens": 345600,
+            "fresh_input_tokens": 79371,
+            "input_tokens": 424971,
+            "output_tokens": 6710,
+            "reasoning_output_tokens": 1207,
+            "total_tokens": 431681
+          }
+        }
+      },
+      "candidate": {
+        "correctness": {
+          "acceptance_source": "https://github.com/fixture/dollars/pull/7#issuecomment-9",
+          "assessment_sha256": "8f5e643e57d06ab946d74f7f4696af70dd98923a13e2b7d0c621e411040648d6",
+          "ci_evidence": null,
+          "exact_acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
+          "frozen_intact": true,
+          "inputs_intact": true,
+          "native_blockers": [],
+          "native_complete": true,
+          "passed": true,
+          "problems": [],
+          "progress_counts": {
+            "discovery": 3
+          },
+          "results": [
+            {
+              "normalized": {
+                "complete": true,
+                "coverage": "configured before_cycle receipt only",
+                "findings": [],
+                "occurrence": {
+                  "cycle": "c1",
+                  "id": "fixture-hook",
+                  "phase": "before_cycle",
+                  "run": "discovery"
+                }
+              },
+              "original_sha256": "250240705a27bab06b511a364af7890e3c717dee5124c1086120235eebf62b26",
+              "status": "complete",
+              "task": "cycle-hook:1cf66aadb43b7f3227b08a58d070b540c2111dabfc0c27ffeb789e55fce3cf47"
+            },
+            {
+              "normalized": {
+                "complete": true,
+                "coverage": "selected fixture finalizer receipt only",
+                "findings": [],
+                "plan": [
+                  [
+                    "/skill/fixture:finalizer"
+                  ]
+                ],
+                "pr_readiness_verified": false,
+                "remote_writes_performed": false
+              },
+              "original_sha256": "27059458728fa437b31e513a2af9e31ded6b704874b14e683b82601bbab4e13a",
+              "status": "complete",
+              "task": "finalizer:1835ac988063c6c5d92cc26f651fb2685e69f39e8c0192bda0f413c62a89e696"
+            },
+            {
+              "normalized": {
+                "complete": true,
+                "coverage": [
+                  "value.py",
+                  "pinned base/head diff",
+                  "P1 scoped handoff"
+                ],
+                "dispositions": [
+                  {
+                    "acceptance": "Retain VALUE exactly; accept F1 without renaming.\r\n",
+                    "disposition": "accepted",
+                    "finding": "F1",
+                    "source": "https://github.com/fixture/dollars/pull/7#issuecomment-9"
+                  }
+                ],
+                "execution": "direct native coordinator; no delegation",
+                "findings": [
+                  {
+                    "id": "F1",
+                    "text": "Rename VALUE."
+                  }
+                ]
+              },
+              "original_sha256": "c0ba8a552668cad05f1fca5c5ec44958544879932cf0f27ec392c78657aa468c",
+              "status": "complete",
+              "task": "content-review"
+            }
+          ],
+          "retained_counters": {
+            "discovery": {
+              "ci_repairs": {},
+              "ci_reruns": {},
+              "cycles": [
+                "c1"
+              ],
+              "retries": {}
+            }
+          }
+        },
+        "freeze": {
+          "additional_resources": {
+            "config/dk-workflows/v2/user.json": "621b857c245d9d7d6cbb2b06bc138dac3ef94729ee7d5b948717429293f7bdfe",
+            "interface.py": "9cda3fdebb2cc79768732a455462ba60b9aefbc3afa676b1c05891466d228fcb"
+          },
+          "files": {
+            "frozen/.codex-plugin/plugin.json": "657bb13772c0de62666adb32f3506df63329376b23df9f880c83533498063b7f",
+            "frozen/codex/skills/dk-ci-flakes/SKILL.md": "ed4adab81c07006bcc4d786fefaa2ee8bc88ef333f45609770375c8d613dfe68",
+            "frozen/codex/skills/dk-ci/SKILL.md": "877baa0a2e2a9c15b403823de2cb3b3f46369136ddc405301f32ec30150cb0cd",
+            "frozen/codex/skills/dk-commit-message/SKILL.md": "b8f38c792a368455520698b08349a342c4d7a4196feff45e2bd379eb69764c28",
+            "frozen/codex/skills/dk-commit-split/SKILL.md": "a79569b9f663b74cc847ab5156db5945efacdb40b668f379962f6a31225a4e00",
+            "frozen/codex/skills/dk-config/SKILL.md": "253517c6f297e8e7d2d149efa7d57562987518d0c5042555ab001346b3806f51",
+            "frozen/codex/skills/dk-issue/SKILL.md": "f7089f74f39dca8114907c1416700e02bbfee25020c838178b865617a9b22e51",
+            "frozen/codex/skills/dk-pr-decisions/SKILL.md": "23295a1c1b40ba645b10c4f9bfff52774458dea102b743deb714a20598aa95c4",
+            "frozen/codex/skills/dk-pr-description/SKILL.md": "049825f87354e0b0d3af31c21d71fd2d9b30a7c9eabdc9160dc2641ffcaa45c9",
+            "frozen/codex/skills/dk-pr-feedback-address/SKILL.md": "97be7819277f009beee7e746860e67caf7da4ec66b3025812bad05368b8d8f51",
+            "frozen/codex/skills/dk-pr-feedback-read/SKILL.md": "44e9c5245b4b922d38c0afb41b11a2a566fbed1ff391f9956ab229620abee632",
+            "frozen/codex/skills/dk-pr-feedback-reply/SKILL.md": "fb1cb71abd546443637804daf40819e739a2306fddc703040a3fd5e186e333b2",
+            "frozen/codex/skills/dk-pr-fix/SKILL.md": "35c3c463d0ab1ad0a50f2806d39712ebeeb252cc491af31f0a47f1093e28f278",
+            "frozen/codex/skills/dk-pr-iter/SKILL.md": "6f388a6daba6bc54677e6041e75e676456ab34206ff8c21ec2230d55833450e0",
+            "frozen/codex/skills/dk-pr-publish/SKILL.md": "add9a36691dd7bcf5423ff1c136e6f147941123498cab3208a5fe35be907d6ee",
+            "frozen/codex/skills/dk-pr-review-post/SKILL.md": "30a56599951caa65838d66e7749e2df8be08c0fb339aaa92c53f564086afcd44",
+            "frozen/codex/skills/dk-pr-review/SKILL.md": "85328b876b88ff6b878d211532356f29d888c8909dc861246ea547ea01504e23",
+            "frozen/codex/skills/dk-pr-reviewers-run/SKILL.md": "604b7989fb54df0c75a147d06d8d0008c14f0777fd6266759d53c9d634d2f8a4",
+            "frozen/codex/skills/dk-pr-split/SKILL.md": "72beffba09c8325230dfb8bdbec32240064fac83e8d3c39d7ad872ea200904bb",
+            "frozen/codex/skills/dk-preferences/SKILL.md": "1f336106230b1104320112ac6f5f9626ddf468193324a0587af9664916df03ed",
+            "frozen/docs/acceptance.md": "c23c1399bfece45106fbbe458beca74f76e3205ee50143fcd37d234381ac5944",
+            "frozen/docs/capture-performance.md": "7f859e240273a6bb38f61f62a9d0a871c8b096fbd1fcaee9e1ed50ed4d9ac5b0",
+            "frozen/docs/commit-policy.md": "1f11d7638a46bac786ea72220fd080deac01f90de9dc8d5b874bd76fc852d379",
+            "frozen/docs/configuration.md": "925fe5fe75bc8599b627e7545e40e376d8e2c48477bc9925271e7fdb8afadecc",
+            "frozen/docs/cycle-hooks.md": "32931c711f0fe799161f5982b4d6a291f736afe09aa28d5c1424b46b2941b04e",
+            "frozen/docs/dollar-experiment-plan.md": "2f079b52f5ffb0b7aa59c4775b6b33ae1b442692b20fbc6cfcd695e0fa680f23",
+            "frozen/docs/finalizers.md": "1974a24f1322033bda7725f1e267b61fa61e8ddc987575085461096792a3c9ef",
+            "frozen/docs/native-commit-policy-exercise.md": "c5f3dea89c04615194cf284f57b2afb01493f6d4f81ff338d850acab61d9fe55",
+            "frozen/docs/native-dollar-experiments.md": "11519811f921ec6a531563817251013ab9383cfb2fa573abfebf4d0177a2a7ee",
+            "frozen/docs/native-evidence-exercise.md": "96b486d8e1701bfd1b64995516fc0c1a287907914a335e32d6eeed717ee68e80",
+            "frozen/docs/native-iteration-exercise.md": "2789b5af19462d961042bdb104927b7801fa7f6c27265bd90ef9249017cc6d53",
+            "frozen/docs/native-review.md": "e3a96f780965783e56997aaa999568e87c76a07f56b8f92dbca98b022cbe3580",
+            "frozen/docs/pr/commit-cleanup-evaluation.md": "5c53f3bf6b05c289537111892fbeddc98628ff611505585cf034dde4ee92fc4b",
+            "frozen/docs/pr/commit-cleanup.md": "8aae1328411a3b9a76204380a449e6f6aff7a0ee8d552778367be183b6fbb820",
+            "frozen/docs/pr/configuration.md": "7d358908b935c88efd67b3caeee0f9256d8f972349698c06a947dee1ca3c7b4a",
+            "frozen/docs/pr/contracts.md": "f773135ab35ff12ed894665d6694661605421e22247b7e565598e7f1a3731291",
+            "frozen/docs/pr/default-completion.md": "146ea8123b8abc8b3174681a1818940c167aa593a6b48154a8f99311730cedae",
+            "frozen/docs/pr/partition-cleanup.md": "875064929ca00fd884925c73a1bfe6a15e2b9c3e57229979e1c64b4b8b3f3f60",
+            "frozen/docs/pr/publication.md": "37f30c639000a74242d27ec28be865156633fd87c4674d6cd375974e2e38fa54",
+            "frozen/docs/pr/supplied-evidence.md": "0e78b6740a376251780b537c84d56324f1b0dcfede4d6a3a936fc3d59220641c",
+            "frozen/docs/preferences.md": "ee8e0a734004fc1e17d246d20e73aa3c363f841a48c21bb5a0f39d5cadaf4211",
+            "frozen/docs/status-diagnostics.md": "12096c055fbea5ce892005c7d790efffc009824e682d2271a76006201dceb092",
+            "frozen/docs/task-state.md": "066a05658a085b525feaf3c242847767f8595f9c6694f010210f024ca3b9241e",
+            "frozen/runtime/commit_policy.py": "ef69e3c31ffa694c20fa7f895c4458293a30dda1a2edc47a85972f0579167563",
+            "frozen/runtime/config.py": "fd723d4c5428bfad31899e310c78c731dca1cdf51244a5c3a324a89047c60fc8",
+            "frozen/runtime/dk-ci/scripts/ci_wait.py": "e58c77cf160aa862264f35ed146b437b4ca05f4ef3656750096095a0aab63975",
+            "frozen/runtime/dk-ci/scripts/flaky_tests.py": "f8716fc2308240a9308fde3b52a7ef0af0b060ab3e1b92db3a89a93eaf1eec46",
+            "frozen/runtime/dk-commit-message/references/field-schema.md": "454e04f58314eff0438d9c8a08b56adebf3b5c53c5b07e11faf1565fd443f212",
+            "frozen/runtime/dk-issue-description/references/field-schema.md": "a96f6e080634b51425dbd09d6095dfad2feb65e687f3054195de1962164c8efa",
+            "frozen/runtime/dk-pr-address-reviews/scripts/fetch_pr_conversation.py": "7ba3b7c542df2ad2c2776213cc80cc4178e3b32691356347e67ecdb0c3d7a153",
+            "frozen/runtime/dk-pr-address-reviews/scripts/fetch_unresolved_review_threads.py": "2b6bcb9173a37a70c62feceb0320847559c278de1500ad320b9a7d55fd5ff677",
+            "frozen/runtime/dk-pr-address-reviews/scripts/pr_evidence.py": "b3a8a7a4ca10ad10000a6f66632e8d7514e1554600f2988d1e21c95911d8417e",
+            "frozen/runtime/dk-pr-decisions/references/language.md": "5d8cc76db86b18063ac8413f01431189bfea02c52f7bfdde0e8dac088b1bdd26",
+            "frozen/runtime/dk-pr-description/references/decisions.md": "8664c120dae95cd15d23618db097d639a22726bf2a497a8e278de8a4affb1a88",
+            "frozen/runtime/dk-pr-description/references/field-schema.md": "2133fac542c60a3e5a67eab9a070d03dfffb33690be7d048145b5db064f0561b",
+            "frozen/runtime/pr-iter.md": "d5fb270f98ee6caa63ce941be2b3bd0fdb7287a2388c01ea38f5ddc8a788bc88",
+            "frozen/runtime/pr-review.md": "46bcfa0f10bd5131ae3f5a7afe01c06dbc73e54df0304229d1b01abe1676d546",
+            "frozen/runtime/pr-reviewers.md": "9106163f6a47e112ae71d72b2c6b991e9ba85fbfb748ca6b70ccffe24c0ce422",
+            "frozen/runtime/pr.md": "8b350a1ae81e89bd710b7003c2e084a831d5777ccb9b2cdbe8285b774461b28c",
+            "frozen/runtime/preferences.py": "f3a480838200244858940a3ce777c986193d6e2652ef72ca44d362f227109d1b",
+            "frozen/runtime/shared/ci_deadline.py": "a67a89a01ebadcb908318fefa3f236fa26fb02193ae4a8a147f99545d6eae5cc",
+            "frozen/runtime/shared/ci_exceptions.py": "5670182617749ea39b702446b635b3c0c6d65ba1ff3dec571403c9f9ab76c818",
+            "frozen/runtime/shared/ci_observation.py": "4db3592772c211447cadc92c0372ba903e9c66149c9f4a413c74073bc052a5d9",
+            "frozen/runtime/shared/ci_policy.py": "2aefddcedfc16af0c0aa16f779e97592df4980a20dfd3712fa989ab05824965e",
+            "frozen/runtime/shared/commit_message_lines.py": "eea2ef3542ccba90fcaf18f4aa114356fcb6082faa7a0de89a3428758bc7db42",
+            "frozen/runtime/shared/diagnostics.py": "310632258f549eca2da39413b8619912ae6752d06528af6e3e9fb027b35e75e6",
+            "frozen/runtime/shared/flaky_actions.py": "57c3acc08a473f3e717b6ee0776224b23c3d8e9db8791dcc561c694f4696825c",
+            "frozen/runtime/shared/flaky_tests.py": "587da99d33e425561acc3d7b88f77d8ec51ac0314376e861e85f61f49f9c4711",
+            "frozen/runtime/shared/github_publications.py": "bc9f75a91da9217d57031c4b3814b4099d1aa725697956ec77b11642d01bf13a",
+            "frozen/runtime/shared/github_reads.py": "26ecebf883df47722a78afaee05c12b37bf3b5498a1251ee7f4680ea3901c0e3",
+            "frozen/runtime/shared/pr_identity.py": "00c63b68e3ca1ed8eb9da08049cf8ef6278c380022b01d2fa456fe6e3aa67281",
+            "frozen/runtime/shared/pr_merge.py": "c813ac52f162256b15195aa8f0f173830964105a4c09a29a54e36476a081d3c3",
+            "frozen/runtime/shared/pr_ownership.py": "1f17763f34bc1a7c8ed1347a388f744e599fa611a82bccfa463e275cbe48c95a",
+            "frozen/runtime/shared/pr_partition_policy.py": "6b59b3b8b32bd38483d2596ef3f94ae90777469fe37f6121ea26c5f63d495b53",
+            "frozen/runtime/shared/pr_size.py": "3afab1739f59f932cceb4219df91d88941a36d48017b3752d784cd6fe9d5009d",
+            "frozen/runtime/shared/private_state.py": "b900f4dde3d653c504ca815e36baea83de2a8077162da5e9ba997c7dd8e7cee2",
+            "frozen/runtime/shared/publication.py": "f915654e88ac5426941ee9558f1f5e7ff03b6b6d5c9a7fdabd74e11a7f7ce714",
+            "frozen/runtime/shared/repository_scope.py": "7e61014337ce7cb7680c56026d26a525bd16b5c0be225760cda5bec2e5ff12e5",
+            "frozen/runtime/shared/test_evidence.py": "b1fb0030187954e2d343040f8e6bf58bb843dfc1f7ec04eadab67cf57451b786",
+            "frozen/runtime/shared/workflow_storage.py": "2e191d8a71406593c82cdc2e19b00d4a1314bddf7513412ccbc8a6bd86da9ce3",
+            "frozen/runtime/state.py": "b81bde89c672c77387c72b78d74c63d6bf163b68453217bb81a7486d93b80aad",
+            "frozen/scripts/check.py": "f87b43fcdab136bb3ebc8eccfefee0fdf1697fa08ce418ca5671424aa2fa5e05",
+            "frozen/scripts/commit_policy.py": "069ccf6cc5920942e4b01740c2218baf7044d7f2b1e5fad247cf5d736af5ea82",
+            "frozen/scripts/commit_series.py": "109a60b3d9a946572cae85828c2f3bdb84b52a9bcb010d4cdb5a39f0b9fc5497",
+            "frozen/scripts/config.py": "0b0838cd222b01ed431918b7531803cd0fad2192ce4e21030572ac4a984f1841",
+            "frozen/scripts/dk.py": "3048373db1952d3c8dcfd5584fcf10efe93d7016c5bd9a080caec48e3202bbfd",
+            "frozen/scripts/dk_reference.py": "0017179e99c88c90e09cebe5c9b5b73e38493c8a4b63153ee243198a48c1ed51",
+            "frozen/scripts/pr_config.py": "b1f770c88b47989aeb91ce07551fc1ab6b03b3b5234531a7814d6e15a805270b",
+            "frozen/scripts/pr_route.py": "88eb3b22661675e970dbfe3843dd29e03c0991680327e541d05424146b851fd7",
+            "frozen/scripts/preferences.py": "72ed8d7bce29ef159942254f1c7b8a0773cab0cbb138bba4b37bd3bc3d3be757",
+            "frozen/scripts/publish.py": "ae599a10c8d806b4feedbb063cf90b9d3bccf636a9b38827b2a3bece5f1bdb5a",
+            "frozen/scripts/release_validation.py": "15e26ccc4a6fbff27821842b5793e0ce427050f42fd4ea256787b44f88218914",
+            "frozen/scripts/sync_skills.py": "2115e63403ac5ff1a74f7b87fe16b09c0488af2e0eb96272bf166bc58dea2efd",
+            "frozen/scripts/test.py": "c3ac6701351860eea3f66b989b466c7675dedd98a248b07c7e52cad499b09697",
+            "frozen/scripts/version.py": "da502bf0d6bf195099190c0674c554b946fc1a0164645fe71f2864ac82eebd16"
+          },
+          "guidance": "cac6091a8499e36d2e1765cdb25d0665a97280e93ec596e225f1cb0325858435",
+          "input_hash": "3383dd1f350d4ed3a4633177b619d233196fbb0306067d1af9ab4f17fafa5628",
+          "resources": "c4e20f0b292036242c39d4f667a0e8065d447f2ce064995832912b714d0a5955",
+          "runtime": "7e47178fa7efd3afe9bf91aaaf38a94102fd1bfd0be34c201a891214a65f7f25"
+        },
+        "usage": {
+          "api_equivalent_cost_usd": "0.2439592",
+          "billing_basis": "API-equivalent estimate; not actual account billing",
+          "coordination_calls": 0,
+          "descendants_observed": 0,
+          "estimated_api_cost_usd": "0.2439592",
+          "host_exit_code": 0,
+          "host_thread_id": "01a1ad2d-ca48-75b0-8b6a-787a0c5541f6",
+          "independent_response_inventory": "SSE response.created and response.completed",
+          "independent_turn_total": "exec turn.completed",
+          "participant_count": 1,
+          "pins": {
+            "assignment": "237e2c7dd7bd40212b76a04a840b953e4f2041bc575b09b96ada896635baed5e",
+            "conditions": "44a52d5ed8f2640e2bb4d5c345d5db16245a92768c502a7d15aa563e34e5eb6a",
+            "guidance": "cac6091a8499e36d2e1765cdb25d0665a97280e93ec596e225f1cb0325858435",
+            "resources": "c4e20f0b292036242c39d4f667a0e8065d447f2ce064995832912b714d0a5955",
+            "runtime": "7e47178fa7efd3afe9bf91aaaf38a94102fd1bfd0be34c201a891214a65f7f25",
+            "scenario": "3383dd1f350d4ed3a4633177b619d233196fbb0306067d1af9ab4f17fafa5628"
+          },
+          "price_date": "2026-11-05",
+          "price_source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+          "rate_card": {
+            "billing_basis": "API-equivalent cost; not actual account billing",
+            "date": "2026-11-05",
+            "long_context_input_multiplier": "2",
+            "long_context_output_multiplier": "1.5",
+            "long_context_threshold": 272000,
+            "model": "gpt-6.1-sol",
+            "per_million_usd": {
+              "cache_read": ".1",
+              "cache_write_12h": "5",
+              "cache_write_30m": "2.5",
+              "input": "2",
+              "output": "10"
+            },
+            "pricing_source": "https://developers.openai.com/api/docs/pricing",
+            "regional_multiplier": "1.1",
+            "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+            "tiers": {
+              "batch": "0.5",
+              "default": "1",
+              "fast": "2",
+              "flex": "0.5",
+              "priority": "2",
+              "standard": "1",
+              "ultrafast": "6"
+            }
+          },
+          "raw_rollout_sha256": "85d5d92eb12985ba29ebac7c37efbe7223accee64c40ad4b246b74044a711859",
+          "response_count": 14,
+          "response_ids": [
+            "resp_06375513650125ed016aecd888982c87d1bfc68320213714e2",
+            "resp_06375513650125ed016aecd88d60c887d1a260156d55ab8aeb",
+            "resp_06375513650125ed016aecd890336c87d1bca30a3e65cba5a0",
+            "resp_06375513650125ed016aecd893e8b887d18dd232019a7eda6f",
+            "resp_06375513650125ed016aecd898f96887d189d8e24bcc535407",
+            "resp_06375513650125ed016aecd8a0fac087d1a7acbc8412f1b5a2",
+            "resp_06375513650125ed016aecd8a6bd6c87d1ad5fa504aee30ce0",
+            "resp_06375513650125ed016aecd8ab518087d1a6bca22a92cd7b1a",
+            "resp_06375513650125ed016aecd8b9876087d1b572848ca3157896",
+            "resp_06375513650125ed016aecd8c9754087d19524b560f6edb479",
+            "resp_06375513650125ed016aecd9150f1887d1ab5e2a1a52aa2fe3",
+            "resp_06375513650125ed016aecd91b62b487d1bec0813fb3c52187",
+            "resp_06375513650125ed016aecd921896c87d1b168954c90622c13",
+            "resp_06375513650125ed016aecd95a960487d1be0e1ea58113ce53"
+          ],
+          "settings": [
+            {
+              "effort": "high",
+              "model": "gpt-6.1-sol",
+              "service_tier": "default"
+            }
+          ],
+          "telemetry_complete": true,
+          "terminal_assessment_sha256": "b975df48da6c4ded90e22e50dadd094d4cf2c9f60f2e088407ca6a103cd46d6d",
+          "tokens": {
+            "cache_write_input_tokens": 0,
+            "cached_input_tokens": 493952,
+            "fresh_input_tokens": 56887,
+            "input_tokens": 550839,
+            "output_tokens": 8079,
+            "reasoning_output_tokens": 1139,
+            "total_tokens": 558918
+          }
+        }
+      },
+      "order": [
+        "baseline",
+        "candidate"
+      ]
+    }
+  ],
+  "private_archive_sha256": "d107f6264e64571e212faa734ed4d611dafc56c676ed0b9822efb58a2b447cbc",
+  "proposal": 5
+}
