@@ -30,3 +30,14 @@ PR skills, helpers, tests and fixtures are bundled in dk-workflows. Its workflow
 The full recipe test in tests/test_recipe_integration.py drives separate helper/skill processes and a real local Git remote. It covers feedback, Decisions/description synchronization, partition assessment, interrupted and partial reviews, retained retry/cycle budgets, findings fixes, tree-preserving squash cleanup, final coverage, replies/resolution, final CI/rerun receipts, re-review and completion. It verifies that CI is not observed before reviews and cleanup, that the normal path observes only the final head, and that a final CI repair refreshes review and cleanup before the new head is observed. It then repeats standalone review and iteration, asserting zero reviewer launches and no duplicate publications. This is deterministic integration coverage; native-agent adherence also needs a controlled skill exercise when recipes change materially.
 
 The [bounded native iteration exercise](native-iteration-exercise.md) compares fresh agents on pinned equivalent resumed tasks and records observed reads, calls, byte sizes, task outcomes and retained counters. Its offline domain stand-ins and narrow scenario remain distinct from complete-recipe fixture coverage; unavailable host/token/context evidence is unknown.
+
+[Private workflow reporting](private-reporting.md) governs every skill and all
+handoffs, including direct publication. Package checks reject a skill that omits
+its contract. Offline regressions check inheritance and conflicting instructions,
+findings-only review transport, unavailable publication evidence and uncertain
+writes with durable private diagnostics and single-dispatch recovery. They do
+not classify model-authored prose. The separate [bounded native reporting
+exercise](native-private-reporting-exercise.md) checks public payloads and private
+user reports for failed/missing reviewers, inaccessible sources, incomplete
+verification, exhausted budgets and publication uncertainty. Ordinary tests do
+not invoke a model or establish native adherence.

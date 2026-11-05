@@ -3,9 +3,11 @@ name: dk-pr-feedback-reply
 description: Reply to affected PR feedback and resolve fully answered inline threads when authorized.
 ---
 
+Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
+
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
-Read the original thread, comment or review, plus current code and validation. Reply only with a supported answer. Select the destination from the structured original source in the complete PR evidence, following [publication and recovery](../../../docs/pr/publication.md):
+Read the original thread, comment or review, plus current code and validation. Reply only with a supported repository answer. If internal failures prevent that answer, withhold the affected reply and report the reason privately; never substitute a diagnostic reply. Select the destination from the structured original source in the complete PR evidence, following [publication and recovery](../../../docs/pr/publication.md):
 
 - For an actual inline review comment, use `reply-inline` inside its originating thread. Set `parent` to that thread's root comment database id, even when answering a later reply. Preserve the answered comment's own id and exact URL separately from this routing parent.
 - For a review body or top-level comment without an inline parent, use `reply-comment`. Begin the exact body with `In Reply To: [descriptive source label](https://github.com/owner/repo/pull/7#pullrequestreview-789)`, then a blank line and the substantive response. Use the original review or comment URL, including its fragment. A file/line reference, quoted inline finding or code link embedded in a review body does not create an inline parent. Other inline comments attached to the same review do not change the review body's destination.

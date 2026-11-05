@@ -1,5 +1,7 @@
 # PR fix finalizers
 
+Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
+
 `dk-pr-fix` runs `finalizers` after review/fix work and pending `after_cycle` hooks finish. Save the list through `dk-config` with the other workflow settings:
 
 ```json
