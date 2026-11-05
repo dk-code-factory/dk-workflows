@@ -103,20 +103,45 @@ def collect(root, exit_code):
     return summary
 
 
+def observed_partial(root, exit_code, error):
+    """Retain observed spending even when completeness cannot be established."""
+    from decimal import Decimal
+    events = rows(root/'exec.jsonl')
+    thread = next((e.get('thread_id') for e in events if e.get('type') == 'thread.started'), None)
+    paths = list((Path.home()/'.codex/sessions').glob('*/*/*/*'+str(thread)+'*.jsonl'))
+    totals = {key: 0 for key in native_usage.TOKEN_FIELDS}
+    cost = Decimal(0)
+    records = native_usage.read_records(paths) if paths else {}
+    selected = [r for r in records.values() if r['thread_id'] == thread]
+    for record in selected:
+        for key in totals:
+            totals[key] += record['usage'][key]
+        cost += dollars.response_cost(record['usage'], service_tier='default')
+    if paths:
+        save(root/'private-rollout-reference.json', {'path': str(paths[0])})
+    return {'telemetry_complete': False, 'error': error, 'host_exit_code': exit_code,
+            'host_thread_id': thread, 'observed_tokens': totals,
+            'observed_response_count': len(selected), 'observed_api_equivalent_cost_usd': str(cost),
+            'host_terminal_usage': [e['usage'] for e in events if e['type'] == 'turn.completed'],
+            'rate_card': dollars.RATE_CARD,
+            'limitation': 'Observed responses only; complete scope and terminal-response inventory unverified'}
+
+
 def launch(root):
     if (root/'exec.jsonl').exists():
         raise ValueError('Never rerun an initiated native arm')
     env = {**os.environ, 'XDG_STATE_HOME':str(root/'state'), 'XDG_CONFIG_HOME':str(root/'config'),
            'XDG_DATA_HOME':str(root/'data'), 'PATH':str(root/'bin')+os.pathsep+os.environ['PATH'],
            'RUST_LOG':'warn,codex_api::sse::responses=trace'}
-    command = ['codex','exec','--disable','responses_websockets','--disable','responses_websockets_v2',
+    command = ['codex','exec','-c','model_provider="dollar-sse"','-c',
+               'model_providers.dollar-sse={name="OpenAI",wire_api="responses",requires_openai_auth=true,supports_websockets=false,include_internal_metadata=true}',
                '--dangerously-bypass-approvals-and-sandbox','--skip-git-repo-check',
                '--color','never','--json','-C',str(root),'-o',str(root/'last-message.txt'),'-']
     config = Path.home()/'.codex/config.toml'
     conditions = {'codex_version':subprocess.check_output(['codex','--version'],text=True).strip(),
                   'config_sha256':sha(config.read_bytes()),
                   'model':'gpt-6.1-sol','effort':'high','service_tier':'default',
-                  'transport':'SSE with private response tracing', 'personal_settings_changed':False}
+                  'transport':'SSE forced through provider capability with private response tracing', 'personal_settings_changed':False}
     save(root/'conditions.json', conditions)
     with (root/'exec.jsonl').open('w') as out, (root/'native.stderr').open('w') as err:
         result = subprocess.run(command, input=ASSIGNMENT.replace('ARM',str(root)),text=True,
@@ -124,7 +149,7 @@ def launch(root):
     save(root/'host-outcome.json',{'exit_code':result.returncode})
     try: summary = collect(root, result.returncode)
     except (ValueError, KeyError, OSError, StopIteration, TypeError) as error:
-        summary = {'telemetry_complete':False,'error':str(error),'host_exit_code':result.returncode}
+        summary = observed_partial(root, result.returncode, str(error))
         save(root/'usage.json', summary)
     return summary
 

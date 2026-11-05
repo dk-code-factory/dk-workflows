@@ -170,8 +170,16 @@ else:
 
 def verify(root):
     frozen = json.loads((root/'freeze.json').read_text())
-    intact = all((root/name).is_file() and sha((root/name).read_bytes()) == digest
-                 for name, digest in frozen['files'].items())
+    actual_files = {str(p.relative_to(root)) for p in (root/'frozen').rglob('*')
+                    if p.is_file() and '__pycache__' not in p.parts}
+    expected_files = {name:digest for name,digest in frozen['files'].items()
+                      if '__pycache__' not in Path(name).parts}
+    intact = actual_files == set(expected_files) and all(
+        (root/name).is_file() and sha((root/name).read_bytes()) == digest
+        for name, digest in expected_files.items())
+    input_hashes = {str(p.relative_to(root)): sha(p.read_bytes().replace(str(root).encode(), b'ARM'))
+                    for p in sorted((root/'inputs').rglob('*')) if p.is_file()}
+    inputs_intact = sha(json.dumps(input_hashes, sort_keys=True).encode()) == frozen['input_hash']
     paths = list((root/'state/dk-workflows/v2').glob('*/manifest.json'))
     manifest = json.loads(paths[0].read_text()) if paths else {'entries': {}, 'runs': {}}
     scenario = json.loads((root/'inputs/scenario.json').read_text())
@@ -183,7 +191,7 @@ def verify(root):
             results.append({'task': entry['components']['task']['id'], 'status': result['status'],
                             'normalized': result['normalized'],
                             'original': base64.b64decode(result['original']).decode(errors='replace')})
-    return {'frozen_intact': intact, 'manifest': manifest, 'results': results,
+    return {'frozen_intact': intact, 'inputs_intact': inputs_intact, 'manifest': manifest, 'results': results,
             'assessment': json.loads((root/'artifacts/assessment.json').read_text())
                           if (root/'artifacts/assessment.json').exists() else None,
             'scenario': scenario}
