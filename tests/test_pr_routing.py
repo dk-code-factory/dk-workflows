@@ -108,7 +108,7 @@ def test_review_policy_inherits_each_action_without_enabling_others():
     write(config.path('github.com/upstream/repo'), {'incoming_review': {'merge': True}})
     write(config.path('github.com/fork/repo'), {'incoming_review': {'post': False, 'approve': False}})
     policy = config.effective('github.com/fork/repo', 'github.com/upstream/repo')['settings']['incoming_review']
-    assert policy == {'post': False, 'approve': False, 'merge': True, 'merge_method': 'squash'}
+    assert policy == {'post': False, 'approve_ci': True, 'approve': False, 'merge': True, 'merge_method': 'squash'}
     assert config.effective('github.com/other/repo')['settings']['incoming_review']['merge'] is False
 
 
@@ -122,3 +122,18 @@ def test_review_policy_inherits_each_action_without_enabling_others():
 def test_malformed_action_policy_and_personal_identity_are_rejected(settings):
     with pytest.raises(ValueError):
         config.validate(settings)
+
+
+def test_ci_approval_policy_and_role_inherit_independently():
+    repository, upstream = 'github.com/fork/repo', 'github.com/upstream/repo'
+    assert config.DEFAULTS['incoming_review']['approve_ci'] is True
+    write(config.path(), {'incoming_review': {'approve_ci': False},
+                          'skills': {'ci_approve': 'custom:ci-approve'}})
+    write(config.path(upstream), {'incoming_review': {'approve_ci': True}})
+    write(config.path(repository), {'incoming_review': {'approve': False, 'merge': False}})
+    settings = config.effective(repository, upstream)['settings']
+    assert settings['incoming_review']['approve_ci'] is True
+    assert settings['skills']['ci_approve'] == 'custom:ci-approve'
+    assert not settings['incoming_review']['approve'] and not settings['incoming_review']['merge']
+    write(config.path(repository), {'incoming_review': {'approve_ci': False}})
+    assert config.effective(repository, upstream)['settings']['incoming_review']['approve_ci'] is False

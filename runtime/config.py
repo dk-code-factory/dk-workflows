@@ -38,6 +38,7 @@ DEFAULTS = {
         'partition': 'dk-workflows:dk-pr-split',
         'cleanup': 'dk-workflows:dk-commit-split',
         'ci': 'dk-workflows:dk-ci',
+        'ci_approve': 'dk-workflows:dk-ci-approve',
         'flaky_tests': 'dk-workflows:dk-ci-flakes',
         'publish': 'dk-workflows:dk-pr-publish',
         'read_feedback': 'dk-workflows:dk-pr-feedback-read',
@@ -49,7 +50,7 @@ DEFAULTS = {
     'domain_settings': {},
     'cycle_hooks': {phase: [] for phase in CYCLE_PHASES},
     'identities': [],
-    'incoming_review': {'post': True, 'approve': False, 'merge': False,
+    'incoming_review': {'post': True, 'approve_ci': True, 'approve': False, 'merge': False,
                         'merge_method': 'squash'},
 }
 DEFAULTS['finalizers'] = ['/skill/' + DEFAULTS['skills'][role] for role in FINALIZER_ROLES]
