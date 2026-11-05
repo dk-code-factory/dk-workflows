@@ -3,6 +3,8 @@ name: dk-pr-publish
 description: Publish prepared PR changes, replies, reviews and authorized merges with current checks and recovery records.
 ---
 
+Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
+
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
 Follow [publication and recovery](../../../docs/pr/publication.md). Use `scripts/publish.py` for description edits, replies and pushes with exact leases. Use its `resolve-thread`, `request-review`, `create-draft-pr`, `ci-rerun`, `ci-approve`, `post-review` and `merge-pr` handlers for other actions. This skill checks GitHub state and handles recovery independently of the workflow cache.

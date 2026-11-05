@@ -1,5 +1,7 @@
 # Coordinate PR review
 
+Follow [private workflow reporting](../docs/private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
+
 Resolve all selected skills through [workflow configuration](../docs/configuration.md) before work. If none are selected, report that reviewers must be configured. Preserve reviewer order and required or optional status.
 
 Standalone review uses `preflight --workflow review`; fix callers keep their fix preflight, including finalizers.

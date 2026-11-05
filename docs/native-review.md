@@ -1,5 +1,7 @@
 # Native reviewer handoffs
 
+Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
+
 Use the host's native agent tools to invoke selected reviewer skills. A complete review requires successful host execution, a complete skill report, and coordinator-captured host observations establishing the selected skill's required independent passes and deeper-look commands. Exit success, aggregate `complete:true`, valid findings JSON, and an empty findings list do not establish execution coverage.
 
 The coordinator is the trusted collector of native tool observations. The store checks their structure, invocation and input bindings; it cannot authenticate arbitrary supplied JSON or prove semantic adherence to every instruction. Reviewer-written role files or an aggregate claim are not host observations. When the host cannot expose the necessary child/tool inventory, record incomplete with unavailable-provenance diagnostics. Missing telemetry does not prove nonexecution. Do not launch model subprocesses to replace unavailable native evidence.

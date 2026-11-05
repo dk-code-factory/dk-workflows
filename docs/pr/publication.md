@@ -1,6 +1,8 @@
 # Publication and recovery
 
-Confirm that the caller authorized the concrete action. Prepare the exact payload and expected live identity. Save intent before dispatch. After an uncertain write, reconcile read-only before preparing or attempting a replacement. Never reset pending intent after a timeout. Compare actor, target, exact payload, head, lease and remote receipt. Missing or ambiguous objects remain unresolved. Keep confirmed publications recorded even if readiness changes. They do not authorize another write.
+Follow [private workflow reporting](../private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
+
+Confirm that the caller authorized the concrete action. Inspect every exact public text field against the private reporting contract before preparing the payload and expected live identity. Keep private reports separate from publication requests; the helper does not classify prose. Save intent before dispatch. After an uncertain write, reconcile read-only before preparing or attempting a replacement. Never reset pending intent after a timeout. Compare actor, target, exact payload, head, lease and remote receipt. Missing or ambiguous objects remain unresolved. Keep confirmed publications recorded even if readiness changes. They do not authorize another write.
 
 Run `python3 PACKAGE_ROOT/scripts/publish.py prepare --file REQUEST.json` to save intent and get an operation path. `publish --operation FILE` checks current state and sends at most once. `reconcile --operation FILE` only reads. Repeating publish for pending or verified operations also only reads. Return the operation path and reuse it on resume. Other publishers may reuse `runtime/shared/publication.py` with their own check, send and observe callbacks.
 

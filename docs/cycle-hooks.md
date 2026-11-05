@@ -1,5 +1,7 @@
 # Cycle hooks
 
+Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
+
 Use `dk-config` to save ordered agent instructions or selected native skills before and after each new PR review cycle. Hooks apply to `dk-pr-fix` and `dk-pr-review`, including calls routed through `dk-pr-iter`. Standalone supporting skills do not invoke them.
 
 For example, include this in the workflow settings JSON passed to `scripts/config.py --repository HOST/OWNER/REPO set --scope repo --file SETTINGS.json`:

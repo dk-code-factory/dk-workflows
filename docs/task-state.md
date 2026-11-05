@@ -1,5 +1,7 @@
 # Task state contract v2
 
+Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
+
 Native agents resolve and invoke skills. Python fingerprints inputs, claims tasks, and saves outputs and counters. Keep private state, specs and outputs outside repositories. State lives under `${XDG_STATE_HOME:-~/.local/state}/dk-workflows/v2/`. Save the printed manifest path.
 
 Run commands as `python3 PLUGIN_ROOT/scripts/dk.py --repository HOST/OWNER/REPO --pr https://HOST/OWNER/REPO/pull/N --checkout REPO COMMAND`. Direct skill calls use this cache only when their caller manages them with these commands.
