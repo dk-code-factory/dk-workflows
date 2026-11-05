@@ -213,7 +213,9 @@ changes are retained separately from native performance inputs. The release is
 synchronized to 3.4.1. Production commands, configuration schemas, private formats
 and native guidance match integrated main. Final validation records distinguish
 the prior 3.3.1 integration and its passing 792-test/seven-subtest suite from the
-new main integration. The earlier published head received no CI checks after main
+new 3.4.1 integration, which passes 842 tests and seven subtests on Python 3.12.
+Package, distribution synchronization, whitespace and current-base release checks
+also pass. The earlier published head received no CI checks after main
 advanced and caused conflicts; that observation is not a passing CI result.
 
 Earlier local attempts remain recorded: missing parallel dependencies and a

@@ -42,14 +42,14 @@
       "python": "3.12.13 (main, Jun  2 2026, 22:27:15) [Clang 22.1.3 ]"
     },
     "exit_code": 0,
-    "passed": 792,
-    "private_log_sha256": "2e04b96cb4f98e31f2b4b8f72a2b06b904634ff87a5f9fa021186a8e46154674",
+    "passed": 842,
+    "private_log_sha256": "bdecd24f44dc5bc77305a7ad102dcb49880ec65eaad2bd3fb4bd5ce7e1cb31f6",
     "subtests_passed": 7,
     "suite_summaries": [
-      "411 passed in 15.75s",
-      "8 passed in 34.87s",
-      "106 passed, 7 subtests passed in 0.64s",
-      "267 passed, 1 warning in 4.34s"
+      "461 passed in 21.84s",
+      "8 passed in 37.12s",
+      "106 passed, 7 subtests passed in 0.75s",
+      "267 passed, 1 warning in 5.39s"
     ],
     "warnings": [
       "One existing pytest deprecation warning for a non-Collection iterable passed to parametrize."
@@ -57,13 +57,13 @@
   },
   "independent_integration_review": {
     "findings": 0,
-    "private_review_sha256": "f77f1bc13168402293f64d9639db425bf308b52f1802ef16b5731f769a4aec4f",
+    "private_review_sha256": "7cc60f689f62a85ca422de98f95d68ba16ac3152b3f3e357367cfeed4d81813c",
     "scope": "Current main comparison, unchanged production interfaces, synchronized distributions/releases, preserved ancestry, final evidence and pinned-native versus integrated-source distinction."
   },
-  "integrated_main_revision": "32f8cce503d2d7314f1aad7bb18cca82a30e1add",
+  "integrated_main_revision": "d18c6eb7be2c4f8588fc99dc2060565e4e641429",
   "integration_parents": [
-    "01c6fefc2ae10d686d9180e74bdb7da3351aeffb",
-    "32f8cce503d2d7314f1aad7bb18cca82a30e1add"
+    "d6dc00d92953b46b8ca84c70d40d0b59ad2bfd5e",
+    "d18c6eb7be2c4f8588fc99dc2060565e4e641429"
   ],
   "invariants": {
     "automatic_PR_merge_authorized_or_performed": false,
@@ -77,18 +77,18 @@
   "original_experiment_base": "0f927a9d01066080665be1ab7e8bd20eb38ae1d5",
   "package_sync_whitespace_and_release": {
     "base_aware_release_checks": {
-      "base_version": "3.3.0",
-      "current_main": "32f8cce503d2d7314f1aad7bb18cca82a30e1add",
+      "base_version": "3.4.0",
+      "current_main": "d18c6eb7be2c4f8588fc99dc2060565e4e641429",
       "original_PR_base": "0f927a9d01066080665be1ab7e8bd20eb38ae1d5",
       "result": "passed",
-      "result_version": "3.3.1"
+      "result_version": "3.4.1"
     },
     "distribution_sync": "passed with no residual changes",
     "identical_skills_per_host": 19,
     "package_check": "passed",
     "whitespace": "passed"
   },
-  "package_version": "3.3.1",
+  "package_version": "3.4.1",
   "preserved_experiment_commits": [
     "d49031b6fe26ed5c7bbd2ee787ca3b53d6dfc446",
     "d3fe8142599b3fd1e8ba3b70e49ee3f53c98118f",
@@ -97,6 +97,126 @@
     "4490536ea34035da284c8a9aead1da3583930567",
     "01c6fefc2ae10d686d9180e74bdb7da3351aeffb"
   ],
+  "prior_integrations": [
+    {
+      "CI_observation": {
+        "private_observer_receipt_sha256": "667f5078f7395d7c825c112c0ccf4968b3cdcd57fc2ca56d3db110ff93e8590c",
+        "reason": "New main3.4.0 caused release conflicts, confirmed GitHub mergeable CONFLICTING; no passing check claimed.",
+        "result": "no_checks"
+      },
+      "published_revision": "d6dc00d92953b46b8ca84c70d40d0b59ad2bfd5e",
+      "validation": {
+        "earlier_validation_attempts": [
+          {
+            "command": "python3 scripts/test.py --workers 2",
+            "log_sha256": "dee9acdf3df669a13f4f4d8ce87ec1b29ce95cab5457cd64a140a354aadf45f4",
+            "outcome": "Root suite411 passed; recipe suite failed to start because xdist unavailable.",
+            "python": "3.14.4"
+          },
+          {
+            "command": "python3 -m venv --system-site-packages PRIVATE/final-test-venv",
+            "outcome": "Creation failed: ensurepip unavailable; no system packages/settings changed."
+          },
+          {
+            "command": "python3 scripts/test.py",
+            "log_sha256": "309617ab989194c91816a534c7d4e6a712b59547d8dc8b23bd6d5a1db306ed33",
+            "outcome": "1 failed,418 passed in root suite. Existing test_start_batch_process_count_comparison[False] expected(42,28,21),observed(42,35,21). No assertion changed; cause not established.",
+            "python": "3.14.4"
+          }
+        ],
+        "experiment_decisions": {
+          "1": "rejected",
+          "2": "rejected",
+          "3": "rejected",
+          "4": "rejected",
+          "5": "rejected"
+        },
+        "final_exact_head_CI": {
+          "record_location": "Final PR145 Validation and retained private exact-head observer receipt. This artifact does not attest future CI.",
+          "requirement": "Observe after final artifact publication; only success or verified accepted flake/exception outcomes satisfy completion.",
+          "waiter": "runtime/dk-ci/scripts/ci_wait.py"
+        },
+        "focused_checks": {
+          "experiment_4_accounting_fixture": 65,
+          "experiment_5_accounting_fixture_execution_preferences": 79
+        },
+        "full_bundled_suite": {
+          "command": "TMPDIR=PRIVATE_TMP PYTHONDONTWRITEBYTECODE=1 python scripts/test.py --workers 2",
+          "environment": {
+            "pytest": "9.2.0",
+            "pytest-subtests": "0.15.0",
+            "pytest-xdist": "3.8.0",
+            "python": "3.12.13 (main, Jun  2 2026, 22:27:15) [Clang 22.1.3 ]"
+          },
+          "exit_code": 0,
+          "passed": 792,
+          "private_log_sha256": "2e04b96cb4f98e31f2b4b8f72a2b06b904634ff87a5f9fa021186a8e46154674",
+          "subtests_passed": 7,
+          "suite_summaries": [
+            "411 passed in 15.75s",
+            "8 passed in 34.87s",
+            "106 passed, 7 subtests passed in 0.64s",
+            "267 passed, 1 warning in 4.34s"
+          ],
+          "warnings": [
+            "One existing pytest deprecation warning for a non-Collection iterable passed to parametrize."
+          ]
+        },
+        "independent_integration_review": {
+          "findings": 0,
+          "private_review_sha256": "f77f1bc13168402293f64d9639db425bf308b52f1802ef16b5731f769a4aec4f",
+          "scope": "Current main comparison, unchanged production interfaces, synchronized distributions/releases, preserved ancestry, final evidence and pinned-native versus integrated-source distinction."
+        },
+        "integrated_main_revision": "32f8cce503d2d7314f1aad7bb18cca82a30e1add",
+        "integration_parents": [
+          "01c6fefc2ae10d686d9180e74bdb7da3351aeffb",
+          "32f8cce503d2d7314f1aad7bb18cca82a30e1add"
+        ],
+        "invariants": {
+          "automatic_PR_merge_authorized_or_performed": false,
+          "candidate_guidance_removed": true,
+          "model_CLI_or_production_execution_engine_added": false,
+          "original_worktree_clean_and_head": "4f4d53b0179d73cb62bfafb15c86d2bb64bd98d8",
+          "public_commands_schemas_private_state_formats_unchanged_by_PR": true,
+          "runtime_scripts_and_skills_equal_integrated_main": true,
+          "task_edits_to_personal_or_compaction_settings": false
+        },
+        "original_experiment_base": "0f927a9d01066080665be1ab7e8bd20eb38ae1d5",
+        "package_sync_whitespace_and_release": {
+          "base_aware_release_checks": {
+            "base_version": "3.3.0",
+            "current_main": "32f8cce503d2d7314f1aad7bb18cca82a30e1add",
+            "original_PR_base": "0f927a9d01066080665be1ab7e8bd20eb38ae1d5",
+            "result": "passed",
+            "result_version": "3.3.1"
+          },
+          "distribution_sync": "passed with no residual changes",
+          "identical_skills_per_host": 19,
+          "package_check": "passed",
+          "whitespace": "passed"
+        },
+        "package_version": "3.3.1",
+        "preserved_experiment_commits": [
+          "d49031b6fe26ed5c7bbd2ee787ca3b53d6dfc446",
+          "d3fe8142599b3fd1e8ba3b70e49ee3f53c98118f",
+          "e478bc205342ac802d76594f6be6c8a536588641",
+          "91e19e5db555a5189ea1c4c6ed0f96cf2f585594",
+          "4490536ea34035da284c8a9aead1da3583930567",
+          "01c6fefc2ae10d686d9180e74bdb7da3351aeffb"
+        ],
+        "retry_scope": "Regression validation retries after environment/test failures; completed native performance trials were never rerun.",
+        "settings_observation": {
+          "effective_native_settings_verified_per_participant": true,
+          "limitation": "The whole personal configuration hash differs from the initial retained observation. No experiment action edits that file or compaction settings; unrelated changed bytes cannot be attributed or claimed unchanged. Native effective model/effort/tier records, including intentional effort treatments, are authoritative.",
+          "model_effort_tier_keys_match_initial": true,
+          "whole_personal_config_file_hash_matches_initial": false
+        },
+        "source_scope_limitation": "Native trial sources are pinned in each experiment report. Upstream finalizer/preflight additions are validated by this integrated regression suite; they were not native-performance measured. Root-owner harness orchestration is outside isolated effort tasks.",
+        "tested_revision": "5e399fc6782a3e6764e65c41ea21f9213ec44e08",
+        "tested_tree": "1014089f85a5d72c28f4f86df758b57c923c5bd9"
+      }
+    }
+  ],
   "retry_scope": "Regression validation retries after environment/test failures; completed native performance trials were never rerun.",
   "settings_observation": {
     "effective_native_settings_verified_per_participant": true,
@@ -104,7 +224,7 @@
     "model_effort_tier_keys_match_initial": true,
     "whole_personal_config_file_hash_matches_initial": false
   },
-  "source_scope_limitation": "Native trial sources are pinned in each experiment report. Upstream finalizer/preflight additions are validated by this integrated regression suite; they were not native-performance measured. Root-owner harness orchestration is outside isolated effort tasks.",
-  "tested_revision": "5e399fc6782a3e6764e65c41ea21f9213ec44e08",
-  "tested_tree": "1014089f85a5d72c28f4f86df758b57c923c5bd9"
+  "source_scope_limitation": "Native trial sources are pinned in each report. Upstream finalizer/preflight and commit grouping/message-policy changes are validated by integrated regressions, not native-performance measured. Root-owner harness orchestration is outside isolated effort tasks.",
+  "tested_revision": "dd3d80d6a485fd23a707f83ce0ff6920d62f4fe2",
+  "tested_tree": "1b7bee4f51c0a47ba52bbb5e14ef6718b6cf0e04"
 }
