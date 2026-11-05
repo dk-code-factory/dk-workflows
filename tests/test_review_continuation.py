@@ -1,10 +1,10 @@
 """Explicit continuation preserves retained execution and fresh coverage requirements."""
-from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import json
 from pathlib import Path
 import subprocess
 import sys
+from time import monotonic
 
 import pytest
 
@@ -185,9 +185,31 @@ def test_cannot_extend_unexhausted_run_and_concurrent_replays_grant_once(case):
     for index in range(1, 5):
         spec['options'] = {'pass': index}
         done(store, spec, run='run', cycle=f'c{index}')
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        responses = list(pool.map(lambda _: store.continue_run(**request()), range(2)))
+    args = request()
+    command = cli('continue-run', '--run', args['run'], '--request-id', args['request_id'],
+                  '--authorization', args['authorization'], '--source', args['source'],
+                  '--cycles', str(args['cycles']))
+    processes = []
+    responses = []
+    deadline = monotonic() + 60
+    try:
+        # Launch both callers before waiting; a blocked lock must fail locally.
+        for _ in range(2):
+            processes.append(subprocess.Popen(command, stdout=subprocess.PIPE,
+                                              stderr=subprocess.PIPE, text=True))
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=max(0, deadline - monotonic()))
+            assert process.returncode == 0, stdout + stderr
+            responses.append(json.loads(stdout))
+    finally:
+        # Kill all blocked callers before reaping any of them, including on spawn failure.
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+        for process in processes:
+            process.communicate(timeout=10)
     assert sorted(r['action'] for r in responses) == ['continued', 'reuse']
+    assert responses[0]['allowance'] == responses[1]['allowance']
     run = store.status([], run='run')['runs']['run']
     assert len(run['review_allowances']) == 1 and run['review_budget']['limit'] == 7
     before = store.manifest.read_bytes()
