@@ -63,3 +63,17 @@ Failed exploratory commands and progress-write attempts remain included in the
 measurements. Both arms prohibited relay agents, so the sample cannot establish
 the benefit of removing actual relay coordinators. The normalized report retains
 the rejected patch as nonexecuting evidence; raw traces remain private.
+
+## Experiment 2: review cycles
+
+The [three-pair report](evidence/145-experiment-2.json) rejects the additional
+coverage-preflight and stage-completion guidance. Median total usage increased
+from 674,573 to 852,207 tokens; one pair improved. Median estimated API cost rose
+from $0.2015252 to $0.2329612. The candidate guidance was removed.
+
+Independent review reproduced all raw accounting and verified retained findings,
+selective refresh, required coverage and final fixture outcomes. Candidates did
+not retry the unavailable optional provider, while one baseline did. A candidate
+progress append failed without losing original progress or immutable results.
+Strict all-trial adherence therefore failed as well as the numeric gate. Hook
+execution remains separately covered by regressions.
