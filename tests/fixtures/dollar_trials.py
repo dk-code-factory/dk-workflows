@@ -23,7 +23,7 @@ ORDERS = [['baseline', 'candidate'], ['candidate', 'baseline'], ['baseline', 'ca
 ASSIGNMENT = '''You are a fresh native coordinator in a controlled offline workflow experiment.
 Work exclusively within ARM. Read inputs/scenario.json and complete its assignment using real frozen production helpers under frozen/. Discover applicable guidance in frozen/docs/task-state.md and helper help/source as needed. Choose your own operations and write wrappers under artifacts/ if useful. Do not change frozen/, inputs/, initial-manifest.json, interface.py or freeze.json. Do not launch agents, access a network, change personal settings, use a different runtime, or write outside ARM. Local fixture Git and gh transports are authorized; no real publication is authorized.
 Your shell environment sets isolated XDG state/config/data and PATH for local gh when present. Invoke helpers normally with python3. Baseline capabilities may require your own bookkeeping wrapper; candidate capabilities are available through helper help/source and guidance. Preserve complete original findings and exact acceptance text/source, scoped preference inputs, active claim ownership and retained counters. Fixture initialization is not native work. Do not infer success from command exit alone.
-Write an accurate JSON terminal assessment to artifacts/assessment.json with complete, findings, blockers, operations/evidence references, acceptance and source, reuse and coverage observations. Then give a short terminal assessment. Do not run the fixture verifier: the evaluator independently verifies your saved outcomes.
+The complete field means the bounded assigned exercise is complete; report overall workflow coverage/readiness separately. Write an accurate JSON terminal assessment to artifacts/assessment.json with complete, findings, blockers, operations/evidence references, acceptance and source, reuse and coverage observations. Then give a short terminal assessment. Do not run the fixture verifier: the evaluator independently verifies your saved outcomes.
 '''
 
 
@@ -68,7 +68,10 @@ def collect(root, exit_code):
         if event.get('type') == 'response.created':
             created.append(event['response']['id'])
         if event.get('type') == 'response.completed':
-            responses.append(event['response']['id'])
+            response = event['response']
+            if response.get('model') != 'gpt-6.1-sol' or response.get('service_tier') != 'default':
+                raise ValueError('Response controls differ from frozen model/service tier')
+            responses.append(response['id'])
     created = list(dict.fromkeys(created))
     responses = list(dict.fromkeys(responses))
     if not responses or created != responses:
@@ -169,6 +172,7 @@ def main():
     p.add_argument('--baseline',type=Path,required=True)
     p.add_argument('--candidate',type=Path,required=True)
     p.add_argument('--experiment',type=int,required=True)
+    p.add_argument('--bundle',help='Explicit accepted proposal numbers for combined validation')
     a=p.parse_args()
     a.root.mkdir(parents=True,exist_ok=True)
     # All six inputs freeze before the first assignment, never between trials.
@@ -178,7 +182,8 @@ def main():
             if not root.exists():
                 subprocess.run([sys.executable, str(Path(fixture.__file__)), '--root',str(root),
                     '--source',str(a.baseline if arm=='baseline' else a.candidate),
-                    '--experiment',str(a.experiment),'init'],check=True,stdout=subprocess.DEVNULL)
+                    '--experiment',str(a.experiment), *(['--bundle',a.bundle] if a.bundle else []),
+                    'init'],check=True,stdout=subprocess.DEVNULL)
     for i, order in enumerate(ORDERS,1):
         for arm in order:
             root=a.root/(str(i)+'-'+arm)

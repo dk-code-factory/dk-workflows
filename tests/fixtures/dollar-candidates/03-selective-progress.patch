@@ -1,0 +1,206 @@
+diff --git a/docs/task-state.md b/docs/task-state.md
+index 57773ef..78c52f6 100644
+--- a/docs/task-state.md
++++ b/docs/task-state.md
+@@ -90,3 +90,9 @@ Caching never replaces live CI, publication checks, reconciliation or final comp
+ ## Structured resume packet
+ 
+ `resume --run RUN --spec CURRENT_SPEC.json` reads one locked snapshot containing retained budgets, progress references, task captures, validated evidence references, native handles when retained, and PR-wide unfinished claims. Repeat `--spec` for known current tasks. Current specs use ordinary freshness checks; an omitted governing spec remains explicitly missing and never implies reusable coverage. Missing or damaged original evidence remains explicit. Read the referenced original results and progress before assessing findings or exact acceptances. The packet makes no mutations, infers no governing inputs and never authorizes recovery or publication. Reconcile unfinished native/domain work and obtain the existing recovery authority before using ordinary recovery commands.
++
++## Selective progress and original task evidence
++
++`progress --run RUN [--task TASK_KEY] [--after CURSOR] [--limit 20]` returns complete progress entries with their original positions, a scanned count, total history count and `next_cursor`. Keep the cursor even at the end to retrieve later appends. Cursors bind the PR, run, task filter and consumed history prefix; changed or truncated consumed history blocks reuse of the cursor. Page reads and task filters never establish review coverage or authorize recovery. Task filtering uses retained claim ownership, not inferred finding text. Unassociated historical entries remain available in the unfiltered full history.
++
++`task-evidence --key TASK_KEY` returns validated, complete original results and normalized findings from every retained attempt, with missing or damaged artifacts explicit. Original output remains base64 encoded with its original byte hash. Evidence access does not check freshness: supply current specs to ordinary status/start before relying on reuse. Existing compact/full status and original artifacts remain available. Use full progress when assessing complete dispositions or exact human acceptances beyond the selected page/filter.
+diff --git a/runtime/state.py b/runtime/state.py
+index 8445f60..cb1faf7 100644
+--- a/runtime/state.py
++++ b/runtime/state.py
+@@ -678,6 +678,71 @@ class Store:
+                                'missing_inputs_inferred':False,
+                                'freshness_requires_supplied_current_specs':True}}
+ 
++    def progress(self, *, run, after=None, task=None, limit=20):
++        """Read append-only progress pages; cursors convey no execution authority."""
++        if type(limit) is not int or not 1 <= limit <= 100:
++            raise ValueError('Progress limit must be between 1 and 100')
++        with self.locked() as manifest:
++            if run not in manifest['runs']:
++                raise ValueError('Unknown run id: '+run)
++            if task is not None and task not in manifest['entries']:
++                raise ValueError('Unknown task key: '+task)
++            values = manifest['runs'][run]['progress']
++            offset = 0
++            if after is not None:
++                try:
++                    cursor = json.loads(base64.b64decode(after+'='*((-len(after)) % 4),
++                                                         altchars=b'-_', validate=True))
++                except (ValueError, TypeError) as exc:
++                    raise ValueError('Invalid progress cursor') from exc
++                if (not isinstance(cursor, dict) or set(cursor) != {
++                        'version','subject','run','task','offset','prefix_hash'} or
++                        type(cursor['version']) is not int or cursor['version'] != 1 or
++                        cursor['subject'] != digest(self.subject) or cursor['run'] != run or
++                        cursor['task'] != task or type(cursor['offset']) is not int or
++                        not 0 <= cursor['offset'] <= len(values)):
++                    raise ValueError('Progress cursor scope or position differs')
++                offset = cursor['offset']
++                if cursor['prefix_hash'] != digest(values[:offset]):
++                    raise ValueError('Progress history changed before the cursor; inspect full history')
++            claim_ids = {a['id'] for a in manifest['entries'].get(task, {}).get('attempts', [])} if task else None
++            selected = []
++            start = offset
++            while offset < len(values) and len(selected) < limit:
++                value = values[offset]
++                if claim_ids is None or value.get('claim') in claim_ids:
++                    selected.append({'position':offset,'progress':value})
++                offset += 1
++            cursor = {'version':1,'subject':digest(self.subject),'run':run,'task':task,
++                      'offset':offset,'prefix_hash':digest(values[:offset])}
++            encoded = base64.urlsafe_b64encode(json.dumps(cursor,sort_keys=True).encode()).decode().rstrip('=')
++            return {'page_version':1,'manifest':str(self.manifest),'run':run,'task':task,
++                    'items':selected,'scanned_count':offset-start,'total_progress_count':len(values),
++                    'end_reached':offset == len(values),'next_cursor':encoded,
++                    'coverage_assessed':False}
++
++    def task_evidence(self, key):
++        """Return complete validated original results, including earlier attempts."""
++        with self.locked() as manifest:
++            if key not in manifest['entries']:
++                raise ValueError('Unknown task key: '+key)
++            entry = manifest['entries'][key]
++            attempts = []
++            for attempt in entry.get('attempts', []):
++                filename = attempt.get('result')
++                if filename:
++                    reference = {'file':filename,
++                                 'hash':filename[:-5] if isinstance(filename,str) and filename.endswith('.json') else None,
++                                 'fingerprint':attempt.get('fingerprint')}
++                    result, problem = self._load_saved({'key':key,'result':reference})
++                else:
++                    result, problem = None, 'missing_result'
++                attempts.append({'claim':attempt['id'],'status':attempt.get('status'),
++                                 'handle':attempt.get('handle'),'result':result,'problem':problem})
++            return {'evidence_version':1,'key':key,'manifest':str(self.manifest),
++                    'claim':entry.get('claim'),'attempts':attempts,
++                    'coverage_assessed':False,'freshness_requires_current_spec':True}
++
+     @staticmethod
+     def budget(manifest, *, run, cycle, retry, ci_repair, ci_rerun, head, task):
+         if not run:
+diff --git a/scripts/dk.py b/scripts/dk.py
+index b8ce32a..20de9e1 100644
+--- a/scripts/dk.py
++++ b/scripts/dk.py
+@@ -37,6 +37,13 @@ def main():
+     p = sub.add_parser('resume', help='Read retained run, task and evidence references without authorizing recovery')
+     p.add_argument('--spec', type=Path, action='append', default=[])
+     p.add_argument('--run', required=True)
++    p = sub.add_parser('progress', help='Read cursor-based progress without changing coverage')
++    p.add_argument('--run', required=True)
++    p.add_argument('--after')
++    p.add_argument('--task', help='Task key; filter using retained claim ownership')
++    p.add_argument('--limit', type=int, default=20)
++    p = sub.add_parser('task-evidence', help='Read complete validated originals for all attempts of one task')
++    p.add_argument('--key', required=True)
+     p = sub.add_parser('status')
+     p.add_argument('--spec', type=Path, action='append', default=[])
+     p.add_argument('--compact', action='store_true', help='Replace run progress with counts and references')
+@@ -94,6 +101,10 @@ def main():
+     store = Store(args.repository, args.pr, checkout=args.checkout)
+     if args.command == 'resume':
+         result = store.resume([read(p) for p in args.spec], run=args.run)
++    elif args.command == 'progress':
++        result = store.progress(run=args.run, after=args.after, task=args.task, limit=args.limit)
++    elif args.command == 'task-evidence':
++        result = store.task_evidence(args.key)
+     elif args.command == 'status':
+         result = store.status([read(p) for p in args.spec], compact=args.compact, run=args.run, explain=args.explain)
+     elif args.command == 'start':
+diff --git a/tests/test_selective_progress.py b/tests/test_selective_progress.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_selective_progress.py
+@@ -0,0 +1,82 @@
++"""Progress cursors preserve exact evidence, ownership, append positions and views."""
++import base64
++from copy import deepcopy
++from pathlib import Path
++import pytest
++from test_state import case
++import state
++
++
++def recorded(store, spec, progress, *, run='run'):
++    claim = store.start(spec,run=run)['claim']
++    store.record(spec,claim['id'],b'Original findings\x00\r\n',
++                 {'complete':True,'findings':[{'id':'F1','source':'original'}]},'complete',progress=progress)
++    return claim
++
++
++def test_cursor_filter_append_and_original_artifacts(case):
++    spec,store=case
++    exact={'acceptance':'Keep the original spelling.\r\n','source':spec['pr']+'#issuecomment-9'}
++    first=recorded(store,spec,exact)
++    other=deepcopy(spec);other['task']['id']='other'
++    recorded(store,other,{'unrelated':'retained'})
++    before=store.manifest.read_bytes()
++    key=first['key']
++    page=store.progress(run='run',task=key,limit=1)
++    assert page['items'][0]['progress']['value']==exact
++    drained=store.progress(run='run',task=key,after=page['next_cursor'])
++    assert drained['end_reached'] and drained['items']==[]
++    assert store.manifest.read_bytes()==before
++    with store.locked() as manifest:
++        manifest['runs']['run']['progress'].append({'claim':first['id'],'value':{'new':'append'}})
++        state.write(store.manifest,manifest)
++    appended=store.progress(run='run',task=key,after=drained['next_cursor'])
++    assert [r['progress']['value'] for r in appended['items']]==[{'new':'append'}]
++    assert appended['items'][0]['position']==2
++    assert not appended['coverage_assessed']
++    evidence=store.task_evidence(key)
++    result=evidence['attempts'][0]['result']
++    assert base64.b64decode(result['original'])==b'Original findings\x00\r\n'
++    assert result['normalized']['findings'][0]['id']=='F1'
++    assert store.status([spec])['tasks'][0]['reusable']
++    assert len(store.status([])['runs']['run']['progress'])==3
++    assert store.status([],compact=True)['runs']['run']['progress_count']==3
++
++
++def test_cursor_rejects_rewritten_prefix_changed_filter_and_invalid_tokens(case):
++    spec,store=case
++    claim=recorded(store,spec,{'exact':'original'})
++    page=store.progress(run='run')
++    with pytest.raises(ValueError,match='scope'):
++        store.progress(run='run',task=claim['key'],after=page['next_cursor'])
++    with pytest.raises(ValueError,match='cursor'):
++        store.progress(run='run',after='not json!')
++    with store.locked() as manifest:
++        manifest['runs']['run']['progress'][0]['value']['exact']='changed'
++        state.write(store.manifest,manifest)
++    with pytest.raises(ValueError,match='history changed'):
++        store.progress(run='run',after=page['next_cursor'])
++
++
++def test_evidence_preserves_prior_results_and_marks_missing_artifacts(case):
++    spec,store=case
++    first=recorded(store,spec,{'one':1})
++    first_result=store.task_evidence(first['key'])['attempts'][0]['result']
++    Path(spec['instructions']['user']).write_text('Changed current instructions')
++    recorded(store,spec,{'two':2})
++    evidence=store.task_evidence(first['key'])
++    assert len(evidence['attempts'])==2
++    assert evidence['attempts'][0]['result']==first_result
++    Path(first_result['path']).unlink()
++    evidence=store.task_evidence(first['key'])
++    assert evidence['attempts'][0]['problem']=='missing_result_artifact'
++    assert evidence['attempts'][1]['result'] is not None
++    assert evidence['freshness_requires_current_spec']
++
++
++@pytest.mark.parametrize('limit',[0,-1,101,True])
++def test_limits_do_not_mutate_state(case,limit):
++    spec,store=case
++    with pytest.raises(ValueError,match='limit'):
++        store.progress(run='run',limit=limit)
++    assert not store.manifest.exists()

@@ -22,19 +22,19 @@ def assess(root, experiment):
     problems = []
     if not verified['frozen_intact'] or not verified['inputs_intact']:
         problems.append('Frozen runtime/guidance/inputs changed')
-    if assessment.get('complete') is not True or assessment.get('blockers'):
+    if assessment.get('complete') is not True or (assessment.get('blockers') and experiment != 3):
         problems.append('Native terminal assessment is incomplete or blocked')
-    if experiment in (1,2,3):
+    if experiment in (1,2,3,6):
         if assessment.get('acceptance') != scenario['acceptance']:
             problems.append('Terminal assessment does not retain exact acceptance')
         if assessment.get('source') != scenario['source']:
             problems.append('Terminal assessment does not retain exact acceptance source')
-    if experiment in (1,5):
+    if experiment in (1,5) or (experiment == 6 and 5 in scenario['accepted_proposals']):
         if not verified['results'] or any(e.get('claim') for e in manifest['entries'].values()):
             problems.append('Lifecycle completion is missing or has unfinished claims')
         if any(r['status'] != 'complete' or not r['original'].strip() for r in verified['results']):
             problems.append('Lifecycle lacks complete original outputs')
-    if experiment in (2,3) and verified['current_status']:
+    if experiment in (2,3,6) and verified['current_status']:
         initial = json.loads((root/'initial-manifest.json').read_text())
         prior_stable = next(e for e in initial['entries'].values() if e['components']['task']['id'] == 'stable')
         current_stable = manifest['entries'].get(prior_stable['key'], {})
@@ -47,7 +47,7 @@ def assess(root, experiment):
         current = {t['task']:t for t in verified['current_status']['tasks']}
         if not current['stable']['reusable']:
             problems.append('Unchanged original evidence is not currently reusable')
-        if experiment == 2:
+        if experiment in (2,6):
             if not all(t['reusable'] for t in current.values()):
                 problems.append('Resumed work lacks fresh complete evidence')
             if any(e.get('claim') for e in manifest['entries'].values()):
@@ -57,6 +57,9 @@ def assess(root, experiment):
             if any(r['status'] != 'complete' for r in verified['results']):
                 problems.append('Resumed tasks did not complete')
         else:
+            for key,old in initial['entries'].items():
+                if manifest['entries'].get(key) != old:
+                    problems.append('Read-only history assessment changed retained task state')
             if current['changed']['reusable'] or current['unfinished']['reusable']:
                 problems.append('Incomplete or changed work incorrectly satisfies coverage')
             if len(run.get('progress', [])) < 243:
@@ -65,6 +68,42 @@ def assess(root, experiment):
                 problems.append('Read-only coverage assessment changed cycles')
             if not any(e.get('claim') for e in manifest['entries'].values()):
                 problems.append('Incomplete coverage was incorrectly completed')
+    if experiment in (3,6) and (experiment == 3 or 3 in scenario['accepted_proposals']):
+        progress = manifest['runs'].get('retained',{}).get('progress',[])
+        initial = json.loads((root/'initial-manifest.json').read_text())['runs']['retained']['progress']
+        if progress[:len(initial)] != initial:
+            problems.append('Complete original progress was changed or lost')
+        before = json.loads((root/'initial-manifest.json').read_text())
+        unfinished = next(e['claim']['id'] for e in before['entries'].values() if e.get('claim'))
+        if not any(p.get('claim') == unfinished and p.get('value') for p in progress[len(initial):]):
+            problems.append('No new progress was retained for the unfinished claim')
+        if sum(p.get('value',{}).get('external_event') == 'append-1' for p in progress) > 1:
+            problems.append('Controlled appended event was duplicated')
+    if experiment == 5 or (experiment == 6 and 5 in scenario['accepted_proposals']):
+        entries = list(manifest['entries'].values())
+        roles = [e['components']['task']['id'] for e in entries]
+        if ('content-review' not in roles or not any(r.startswith('cycle-hook:') for r in roles) or
+                not any(r.startswith('finalizer:') for r in roles)):
+            problems.append('Discovery did not complete ordinary, hook and finalizer tasks')
+        for entry in entries:
+            if entry['components']['task']['id'].startswith(('cycle-hook:','finalizer:')):
+                if any(a.get('cycle') is not None for a in entry['attempts']):
+                    problems.append('Hook/finalizer consumed reviewer-cycle bookkeeping')
+    if experiment == 4 or (experiment == 6 and 4 in scenario['accepted_proposals']):
+        observations = list((root/'state').glob('**/ci-observations/pr-7.json'))
+        if len(observations) != 1:
+            problems.append('CI observation identity is missing or ambiguous')
+        else:
+            observation = json.loads(observations[0].read_text())['current']
+            if observation['head'] != scenario['head'] or observation['pr'] != scenario['pr']:
+                problems.append('CI observation identity changed')
+            if observation.get('last_result',{}).get('result') != 'success':
+                problems.append('CI did not observe successful exact-head checks')
+            if observation.get('deadline') != observation['started'] + observation['window_seconds']:
+                problems.append('CI deadline was reset or unnecessarily extended')
+        transport = json.loads((root/'ci-transport.json').read_text()) if (root/'ci-transport.json').exists() else {}
+        if transport.get('checks',0) < 3:
+            problems.append('Pending and terminal CI transports were not both consumed')
     result_refs = [{'task':r['task'],'status':r['status'],'normalized':r['normalized'],
                     'original_sha256':sha(r['original'].encode())} for r in verified['results']]
     return {'passed':not problems,'problems':problems,'frozen_intact':verified['frozen_intact'],

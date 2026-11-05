@@ -50,3 +50,22 @@ def test_frozen_workload_has_real_state_and_explicit_boundaries(tmp_path, experi
         assert finalizer['task']['id'].startswith('finalizer:')
     (root/'frozen/scripts/dk.py').write_text('changed')
     assert not exercise.verify(root)['frozen_intact']
+
+
+@pytest.mark.parametrize('bundle', [[2],[2,3],[2,4],[2,3,4,5]])
+def test_combined_workload_preserves_accepted_scope_and_frozen_inputs(tmp_path,bundle):
+    root=tmp_path/'combined'
+    subprocess.run([sys.executable,exercise.__file__,'--root',str(root),'--experiment','6',
+                    '--bundle',','.join(map(str,bundle)),'init'],check=True,capture_output=True)
+    verified=exercise.verify(root)
+    assert verified['frozen_intact'] and verified['inputs_intact']
+    assert verified['scenario']['accepted_proposals']==bundle
+    assert verified['manifest']['runs']['retained']['cycles']==['c1']
+    assert len(verified['manifest']['runs']['retained']['progress'])==(242 if 3 in bundle else 2)
+    if 3 in bundle:
+        subprocess.run([sys.executable,str(root/'interface.py'),'--root',str(root),'append'],
+                       check=True,capture_output=True)
+    if 4 in bundle:
+        assert (root/'bin/gh').exists()
+    if 5 in bundle:
+        assert (root/'inputs/finalizer-definition.json').exists()

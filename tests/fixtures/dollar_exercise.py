@@ -32,7 +32,9 @@ def run(argv, **kwargs):
     return subprocess.check_output(list(map(str, argv)), stderr=subprocess.PIPE, **kwargs).decode().strip()
 
 
-def initialize(root, source, experiment):
+def initialize(root, source, experiment, bundle=None):
+    if experiment == 6:
+        return initialize_bundle(root, source, bundle)
     if root.exists():
         raise ValueError('Never reset a trial directory')
     root.mkdir(parents=True)
@@ -125,13 +127,47 @@ def initialize(root, source, experiment):
         initialize_ci(root, head)
     if experiment == 5:
         initialize_config(root, definition)
-    frozen = {str(p.relative_to(root)): sha(p.read_bytes()) for p in sorted((root/'frozen').rglob('*')) if p.is_file()}
+    freeze(root)
+    return scenario
+
+
+def freeze(root):
+    frozen = {str(p.relative_to(root)): sha(p.read_bytes())
+              for p in sorted((root/'frozen').rglob('*'))
+              if p.is_file() and '__pycache__' not in p.parts}
     inputs = {str(p.relative_to(root)): sha(p.read_bytes().replace(str(root).encode(), b'ARM'))
               for p in sorted((root/'inputs').rglob('*')) if p.is_file()}
-    save(root/'freeze.json', {'files': frozen, 'input_hash': sha(json.dumps(inputs, sort_keys=True).encode()),
+    additional = {str(p.relative_to(root)): sha(p.read_bytes().replace(str(root).encode(), b'ARM'))
+                  for p in [root/'interface.py', *sorted((root/'bin').glob('*')),
+                            *sorted((root/'config').rglob('*.json'))] if p.is_file()}
+    input_hash = sha(json.dumps(inputs, sort_keys=True).encode())
+    save(root/'freeze.json', {'files': frozen, 'input_hash': input_hash,
+         'additional_resources': additional,
          'runtime': sha(json.dumps({k:v for k,v in frozen.items() if k.endswith('.py')}, sort_keys=True).encode()),
          'guidance': sha(json.dumps({k:v for k,v in frozen.items() if k.endswith('.md')}, sort_keys=True).encode()),
-         'resources': sha(json.dumps(inputs, sort_keys=True).encode())})
+         'resources': sha(json.dumps({'inputs':inputs,'additional':additional},sort_keys=True).encode())})
+
+
+def initialize_bundle(root, source, bundle):
+    if (not isinstance(bundle,list) or not bundle or bundle != sorted(set(bundle)) or
+            any(type(i) is not int or i not in range(1,6) for i in bundle) or 2 not in bundle or 1 in bundle):
+        raise ValueError('Bundle requires the explicitly accepted independent proposals, including resume')
+    scenario = initialize(root,source,3 if 3 in bundle else 2)
+    assignment = ['Validate the complete accepted bundle against the original baseline. '+
+        'Resume run retained using current governing inputs, preserve stable original findings, '+
+        'refresh changed work in a new cycle and reconcile/recover the stopped unfinished claim in its original cycle. '+
+        'Finish permitted review work, retain budgets and exact acceptance/source; no remote writes are permitted.']
+    if 3 in bundle:
+        assignment.append('Before completing changed/unfinished work, assess the large retained history and record its incomplete coverage. Retrieve relevant stable-task dispositions and complete original evidence. Retain an initial history position, deliver the controlled event with python3 interface.py --root . append, then retrieve appended progress. Preserve the complete history and exact acceptance.')
+    if 4 in bundle:
+        initialize_ci(root,scenario['head'])
+        assignment.append('Use the bin/gh transport to observe exact-head pending CI, interrupt, resume with the original observer deadline and consume terminal evidence. No negative CI outcome counts as success.')
+    if 5 in bundle:
+        initialize_config(root,json.loads((root/'inputs/definition.json').read_text()))
+        assignment.append('Discover the bookkeeping interface and perform an additional ordinary lifecycle from inputs/definition.json in run discovery, generate/claim/record configured hook fixture-hook in before_cycle/c1 and /skill/fixture:finalizer using the provided hook/finalizer definitions. Hook/finalizer claims use no reviewer-cycle budget flags. Demonstrate unchanged ordinary reuse.')
+    scenario.update(experiment=6,accepted_proposals=bundle,assignment=' '.join(assignment))
+    save(root/'inputs/scenario.json',scenario)
+    freeze(root)
     return scenario
 
 
@@ -154,17 +190,20 @@ def initialize_config(root, definition):
 def initialize_ci(root, head):
     (root/'bin').mkdir()
     transport = '''#!/usr/bin/env python3
-import json,sys
+import json,sys,os
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 args=sys.argv[1:]
 p=root/'ci-transport.json'
 state=json.loads(p.read_text()) if p.exists() else {'checks':0}
+state.setdefault('events',[]).append({'argv':args,'observer_pid':os.getppid()})
 if args[:2]==['pr','view']:
+ p.write_text(json.dumps(state))
  print(json.dumps({'headRefOid':HEAD_VALUE,'url':PR_VALUE}))
 elif args[:2]==['pr','checks']:
- state['checks']+=1;p.write_text(json.dumps(state))
+ state['checks']+=1
  bucket='pending' if state['checks']<=2 else 'pass'
+ state['events'][-1]['bucket']=bucket;p.write_text(json.dumps(state))
  print(json.dumps([{'name':'fixture','bucket':bucket,'state':'IN_PROGRESS' if bucket=='pending' else 'SUCCESS','link':'https://github.com/fixture/dollars/actions/runs/1/job/1','workflow':'Validate','startedAt':'2026-11-05T12:00:00Z','completedAt':None}]))
 else:
  print('Unsupported fixture gh call',file=sys.stderr);sys.exit(2)
@@ -175,7 +214,7 @@ else:
 def append(root):
     """Deliver a controlled external event; never choose retrieval or assessment."""
     scenario = json.loads((root/'inputs/scenario.json').read_text())
-    if scenario['experiment'] != 3:
+    if scenario['experiment'] != 3 and not (scenario['experiment'] == 6 and 3 in scenario['accepted_proposals']):
         raise ValueError('This workload has no external progress event')
     for key, folder in [('XDG_STATE_HOME','state'),('XDG_CONFIG_HOME','config'),('XDG_DATA_HOME','data')]:
         os.environ[key] = str(root/folder)
@@ -208,6 +247,9 @@ def verify(root):
     input_hashes = {str(p.relative_to(root)): sha(p.read_bytes().replace(str(root).encode(), b'ARM'))
                     for p in sorted((root/'inputs').rglob('*')) if p.is_file()}
     inputs_intact = sha(json.dumps(input_hashes, sort_keys=True).encode()) == frozen['input_hash']
+    for name,digest in frozen.get('additional_resources',{}).items():
+        inputs_intact = inputs_intact and (root/name).is_file() and sha(
+            (root/name).read_bytes().replace(str(root).encode(),b'ARM')) == digest
     paths = list((root/'state/dk-workflows/v2').glob('*/manifest.json'))
     manifest = json.loads(paths[0].read_text()) if paths else {'entries': {}, 'runs': {}}
     scenario = json.loads((root/'inputs/scenario.json').read_text())
@@ -220,7 +262,7 @@ def verify(root):
                             'normalized': result['normalized'],
                             'original': base64.b64decode(result['original']).decode(errors='replace')})
     current = None
-    if intact and inputs_intact and scenario['experiment'] in (2,3):
+    if intact and inputs_intact and scenario['experiment'] in (2,3,6):
         env = {**os.environ, 'XDG_STATE_HOME':str(root/'state'),
                'XDG_CONFIG_HOME':str(root/'config'), 'XDG_DATA_HOME':str(root/'data'),
                'PYTHONDONTWRITEBYTECODE':'1'}
@@ -241,10 +283,11 @@ def main():
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('command', choices=['init', 'verify', 'append'])
     parser.add_argument('--source', type=Path, default=ROOT)
-    parser.add_argument('--experiment', type=int, choices=range(1,6))
+    parser.add_argument('--experiment', type=int, choices=range(1,7))
+    parser.add_argument('--bundle', type=lambda value:list(map(int,value.split(','))))
     args = parser.parse_args()
     root = args.root.resolve()
-    result = (initialize(root, args.source, args.experiment) if args.command == 'init' else
+    result = (initialize(root, args.source, args.experiment, args.bundle) if args.command == 'init' else
               append(root) if args.command == 'append' else verify(root))
     print(json.dumps(result, sort_keys=True))
 

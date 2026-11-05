@@ -30,8 +30,8 @@ def collected(tmp_path, monkeypatch):
     c.commit();c.close()
     (root/'exec.jsonl').write_text(json.dumps({'type':'thread.started','thread_id':'parent'})+'\n'+
         json.dumps({'type':'turn.completed','usage':{k:v for k,v in usage.items() if k!='total_tokens'}})+'\n')
-    (root/'native.stderr').write_text('SSE event: '+json.dumps({'type':'response.created','response':{'id':'r1'}})+'\n'+
-        'SSE event: '+json.dumps({'type':'response.completed','response':{'id':'r1'}})+'\n')
+    (root/'native.stderr').write_text('SSE event: '+json.dumps({'type':'response.created','response':{'id':'r1','model':'gpt-6.1-sol','service_tier':'default'}})+'\n'+
+        'SSE event: '+json.dumps({'type':'response.completed','response':{'id':'r1','model':'gpt-6.1-sol','service_tier':'default'}})+'\n')
     (root/'last-message.txt').write_text('Completed the bounded assignment.')
     (root/'conditions.json').write_text('{}')
     (root/'freeze.json').write_text(json.dumps({k:'pinned' for k in ('runtime','guidance','resources','input_hash')}))
@@ -43,7 +43,7 @@ def test_independent_inventory_matches_deduplicated_response_usage(collected):
     with rollout.open('a') as stream:
         stream.write(json.dumps(record(writes=0))+'\n')
     with (root/'native.stderr').open('a') as stream:
-        stream.write('SSE event: '+json.dumps({'type':'response.completed','response':{'id':'r1'}})+'\n')
+        stream.write('SSE event: '+json.dumps({'type':'response.completed','response':{'id':'r1','model':'gpt-6.1-sol','service_tier':'default'}})+'\n')
     summary=trials.collect(root,0)
     assert summary['telemetry_complete']
     assert summary['response_count']==1
@@ -83,4 +83,12 @@ def test_unknown_cache_write_ttl_blocks_dollar_measurement(collected):
     events[-1]['usage']['cache_write_input_tokens']=10
     (root/'exec.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in events))
     with pytest.raises(ValueError,match='TTL'):
+        trials.collect(root,0)
+
+
+def test_actual_response_model_or_tier_cannot_use_a_different_rate_card(collected):
+    root,_,_=collected
+    path=root/'native.stderr'
+    path.write_text(path.read_text().replace('gpt-6.1-sol','different-model'))
+    with pytest.raises(ValueError,match='controls'):
         trials.collect(root,0)
