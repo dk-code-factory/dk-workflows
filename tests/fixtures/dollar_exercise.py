@@ -112,7 +112,7 @@ def initialize(root, source, experiment):
     task = {
         1: 'Complete a task lifecycle using inputs/definition.json: define a spec, claim it in run lifecycle, save native handle {host:codex,id:fixture-native-1}, retain progress with finding F1 and its exact acceptance/source from inputs/scenario.json, record complete original findings, demonstrate unchanged reuse, and submit an invalid request/command that does not mutate state. Baseline may author a wrapper and save its handle/progress in artifacts; use supported candidate operations where available.',
         2: 'Resume run retained. Inspect current governing specs/inputs and retained original findings. Retain reusable stable work, refresh changed inputs in a new cycle, and finish the unfinished claim after reconciling the stopped fixture worker. Preserve run/cycle/retry/CI budgets and exact acceptance/source. The prior worker is stopped and performed no domain writes. Claim recovery is authorized for this fixture only. Do not infer missing governing inputs or authorize remote writes.',
-        3: 'Assess the large retained history in run retained, retrieve relevant stable-task dispositions and exact F1 acceptance plus complete original evidence. Preserve unchanged stable work. Append progress for the already claimed unfinished task, then retrieve the appended progress without claiming complete review coverage: changed and unfinished tasks are not complete. Report precise coverage, acceptance/source, and retained progress counts. Do not recover or finish claims.',
+        3: 'Assess the large retained history in run retained, retrieve relevant stable-task dispositions and exact F1 acceptance plus complete original evidence. Preserve unchanged stable work. Append progress for the already claimed unfinished task, then retrieve the appended progress without claiming complete review coverage: changed and unfinished tasks are not complete. Report precise coverage, acceptance/source, and retained progress counts. Do not recover or finish claims. A controlled appended event can be delivered using python3 interface.py --root . append after retaining an initial history position.',
         4: 'Observe deterministic pending CI for the fixture exact head, interrupt after retaining pending evidence, resume using the same observer/deadline and consume the terminal result. Use the local gh transport in bin. Preserve ownership and do not treat head_changed, denied access, timeout, no_checks or failure as success. Describe identity, deadline, interruption and terminal evidence in the assessment.',
         5: 'Start without command knowledge. Discover the frozen bookkeeping CLI from its supported reference/help/source. Execute an ordinary lifecycle using inputs/definition.json, generate one configured before_cycle hook spec and one configured finalizer spec using inputs/hook-definition.json and inputs/finalizer-definition.json and run discovery/cycle c1. Claim and record those tasks without consuming extra reviewer budgets. Demonstrate ordinary reuse and report generated task identities and permissions accurately.',
     }[experiment]
@@ -140,7 +140,11 @@ def initialize_config(root, definition):
     import config
     for kind, identity in [('hook', 'dk-workflows:dk-pr-fix'), ('finalizer', 'fixture:finalizer')]:
         selected = dict(definition, skill_identity=identity)
-        selected.pop('responsibility'); selected.pop('assigned_instructions')
+        selected.pop('responsibility')
+        if kind == 'hook':
+            selected.pop('assigned_instructions')
+        else:
+            selected['assigned_instructions'] = 'Retain fixture finalizer evidence. No remote writes.'
         save(root/'inputs'/(kind+'-definition.json'), selected)
     save(root/'config/dk-workflows/v2/user.json', {
         'cycle_hooks': {'before_cycle': [{'id': 'fixture-hook', 'instructions': 'Retain fixture hook receipt.'}]},
@@ -168,6 +172,30 @@ else:
     path = root/'bin/gh'; path.write_text(transport); path.chmod(0o755)
 
 
+def append(root):
+    """Deliver a controlled external event; never choose retrieval or assessment."""
+    scenario = json.loads((root/'inputs/scenario.json').read_text())
+    if scenario['experiment'] != 3:
+        raise ValueError('This workload has no external progress event')
+    for key, folder in [('XDG_STATE_HOME','state'),('XDG_CONFIG_HOME','config'),('XDG_DATA_HOME','data')]:
+        os.environ[key] = str(root/folder)
+    sys.path.insert(0, str(root/'frozen/runtime'))
+    import state
+    store = state.Store(REPO,PR,checkout=root/'checkout')
+    with store.locked() as manifest:
+        run = manifest['runs']['retained']
+        if any(p.get('value',{}).get('external_event') == 'append-1' for p in run['progress']):
+            raise ValueError('External event already delivered; never duplicate progress')
+        claim = next(e['claim'] for e in manifest['entries'].values()
+                     if e['components']['task']['id'] == 'unfinished')
+        run['progress'].append({'claim':claim['id'],'value':{
+            'external_event':'append-1','task':'unfinished','finding':'F2',
+            'disposition':'pending','source':PR+'#issuecomment-10',
+            'reason':'New progress is evidence, not completed coverage.'}})
+        state.write(store.manifest,manifest)
+        return {'delivered':'append-1','progress_count':len(run['progress'])}
+
+
 def verify(root):
     frozen = json.loads((root/'freeze.json').read_text())
     actual_files = {str(p.relative_to(root)) for p in (root/'frozen').rglob('*')
@@ -191,7 +219,18 @@ def verify(root):
             results.append({'task': entry['components']['task']['id'], 'status': result['status'],
                             'normalized': result['normalized'],
                             'original': base64.b64decode(result['original']).decode(errors='replace')})
-    return {'frozen_intact': intact, 'inputs_intact': inputs_intact, 'manifest': manifest, 'results': results,
+    current = None
+    if intact and inputs_intact and scenario['experiment'] in (2,3):
+        env = {**os.environ, 'XDG_STATE_HOME':str(root/'state'),
+               'XDG_CONFIG_HOME':str(root/'config'), 'XDG_DATA_HOME':str(root/'data'),
+               'PYTHONDONTWRITEBYTECODE':'1'}
+        command = [sys.executable, str(root/'frozen/scripts/dk.py'), '--repository',REPO,
+                   '--pr',PR,'--checkout',str(root/'checkout'),'status','--compact','--explain']
+        for task in ('stable','changed','unfinished'):
+            command += ['--spec',str(root/'inputs'/(task+'-spec.json'))]
+        current = json.loads(subprocess.check_output(command,env=env))
+    return {'frozen_intact': intact, 'inputs_intact': inputs_intact, 'manifest': manifest,
+            'current_status':current, 'results': results,
             'assessment': json.loads((root/'artifacts/assessment.json').read_text())
                           if (root/'artifacts/assessment.json').exists() else None,
             'scenario': scenario}
@@ -200,12 +239,14 @@ def verify(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, required=True)
-    parser.add_argument('command', choices=['init', 'verify'])
+    parser.add_argument('command', choices=['init', 'verify', 'append'])
     parser.add_argument('--source', type=Path, default=ROOT)
     parser.add_argument('--experiment', type=int, choices=range(1,6))
     args = parser.parse_args()
-    print(json.dumps(initialize(args.root, args.source, args.experiment) if args.command == 'init'
-                     else verify(args.root), sort_keys=True))
+    root = args.root.resolve()
+    result = (initialize(root, args.source, args.experiment) if args.command == 'init' else
+              append(root) if args.command == 'append' else verify(root))
+    print(json.dumps(result, sort_keys=True))
 
 
 if __name__ == '__main__':

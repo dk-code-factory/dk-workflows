@@ -16,4 +16,10 @@ Accounting tests cover duplicate parent history and complete descendants, missin
 
 ## Decisions
 
-Native trials and final decisions are pending. No production proposal is accepted by this infrastructure commit.
+Proposal 1 is inconclusive: all six native correctness checks pass, but the original WebSocket transport lacks independent response inventories. Preserve all arms; no production change is adopted. Observed medians are $0.1619104 baseline and $0.1539644 candidate (4.91% savings, below the dollar threshold independently of incomplete telemetry). See [proposal 1 evidence](evidence/151-experiment-1.json) and the archived candidate patch under tests/fixtures/dollar-candidates/.
+
+Proposal 2 is accepted: all six native arms pass correctness and complete independent SSE/host/rollout inventories. Baseline costs are $0.2143820, $0.2183528 and $0.2303840; candidate costs are $0.1901388, $0.2310276 and $0.1873048. Median savings are 12.92%, total cost falls from $0.6631188 to $0.6084712 and two pairs improve. See [proposal 2 evidence](evidence/151-experiment-2.json). The second pair's regression is retained. First accepted production change synchronizes the patch release to 3.5.1.
+
+The resume packet was exercised against the original production baseline, without proposal 1. Its focused Python 3.12 suite passes 225 tests. Accounting, collection and frozen fixture construction pass 84 checks, including missing creation/completion inventories, unexpected descendants and unknown cache-write TTL. Later proposals and combined bundle validation remain pending; individual acceptance does not establish bundle readiness.
+
+For proposal 2 and later, an invocation-only provider with the same OpenAI endpoint/authentication and model disables WebSocket capability so raw SSE creation/completion inventories can be independently retained. Personal settings are unchanged. Both arms use the same gpt-6.1-sol/high/default controls and transport. Proposal 1 remains under its original frozen transport and is never rerun.

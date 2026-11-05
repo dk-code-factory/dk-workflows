@@ -69,6 +69,8 @@ def collect(root, exit_code):
             created.append(event['response']['id'])
         if event.get('type') == 'response.completed':
             responses.append(event['response']['id'])
+    created = list(dict.fromkeys(created))
+    responses = list(dict.fromkeys(responses))
     if not responses or created != responses:
         raise ValueError('Incomplete independent SSE response/terminal inventory')
     total = completed[0]['usage']
@@ -86,6 +88,12 @@ def collect(root, exit_code):
         'coordination_call_ids': []}
     save(root/'measurement-manifest.json', manifest)
     summary = native_usage.summarize([rollout], manifest)
+    if summary['tokens']['cache_write_input_tokens']:
+        raise ValueError('Cache-write TTL is not independently observed')
+    applied = [r['payload']['thread_settings'] for r in persisted if
+               r['type'] == 'event_msg' and r['payload'].get('type') == 'thread_settings_applied']
+    if not applied or any(s.get('service_tier') != 'default' for s in applied):
+        raise ValueError('Service tier was not independently pinned')
     freeze = json.loads((root/'freeze.json').read_text())
     summary.update(response_ids=responses, rate_card=dollars.RATE_CARD,
                    api_equivalent_cost_usd=summary['estimated_api_cost_usd'],

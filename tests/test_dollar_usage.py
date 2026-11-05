@@ -68,3 +68,7 @@ def test_cache_context_tier_and_reasoning_accounting():
     assert dollars.response_cost(usage, service_tier='default', cache_write_12h_tokens=20000) == ordinary + Decimal('.05')
     usage.update(input_tokens=272001, total_tokens=273001)
     assert dollars.response_cost(usage, service_tier='default') == Decimal('.743004')
+
+
+def test_missing_correctness_is_inconclusive():
+    assert dollars.evaluate_pairs(pairs([100]*3, [90]*3), correctness_passed=None)['decision'] == 'inconclusive'

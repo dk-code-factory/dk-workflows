@@ -34,7 +34,7 @@ def assess(root, experiment):
             problems.append('Lifecycle completion is missing or has unfinished claims')
         if any(r['status'] != 'complete' or not r['original'].strip() for r in verified['results']):
             problems.append('Lifecycle lacks complete original outputs')
-    if experiment in (2,3):
+    if experiment in (2,3) and verified['current_status']:
         initial = json.loads((root/'initial-manifest.json').read_text())
         prior_stable = next(e for e in initial['entries'].values() if e['components']['task']['id'] == 'stable')
         current_stable = manifest['entries'].get(prior_stable['key'], {})
@@ -44,7 +44,12 @@ def assess(root, experiment):
         for counter in ('retries','ci_repairs','ci_reruns'):
             if run.get(counter) != initial['runs']['retained'][counter]:
                 problems.append('Retained '+counter+' changed')
+        current = {t['task']:t for t in verified['current_status']['tasks']}
+        if not current['stable']['reusable']:
+            problems.append('Unchanged original evidence is not currently reusable')
         if experiment == 2:
+            if not all(t['reusable'] for t in current.values()):
+                problems.append('Resumed work lacks fresh complete evidence')
             if any(e.get('claim') for e in manifest['entries'].values()):
                 problems.append('Interrupted claim did not finish')
             if len(run.get('cycles', [])) != 2:
@@ -52,6 +57,8 @@ def assess(root, experiment):
             if any(r['status'] != 'complete' for r in verified['results']):
                 problems.append('Resumed tasks did not complete')
         else:
+            if current['changed']['reusable'] or current['unfinished']['reusable']:
+                problems.append('Incomplete or changed work incorrectly satisfies coverage')
             if len(run.get('progress', [])) < 243:
                 problems.append('Appended progress was not retained')
             if run.get('cycles') != ['c1']:
@@ -93,7 +100,8 @@ def report(root, experiment):
             observations[arm].append(Decimal(cost))
         pairs.append(pair)
     gate = dollar_usage.evaluate_pairs([{k:(v['usage'] if k != 'order' else v) for k,v in p.items()}
-                                       for p in pairs], correctness_passed=all(c['passed'] for c in checks))
+                                       for p in pairs], correctness_passed=(all(c['passed'] for c in checks)
+                                           if all(c['assessment_sha256'] for c in checks) else None))
     result = {'proposal':experiment, 'decision':gate,
               'correctness_passed':all(c['passed'] for c in checks),
               'native_arm_count':6, 'pairs':pairs,

@@ -43,6 +43,9 @@ def response_cost(usage, *, service_tier, cache_write_12h_tokens=0, regional=Fal
 def evaluate_pairs(pairs, *, correctness_passed):
     """Exactly three frozen alternating pairs; missing evidence is inconclusive."""
     reasons = []
+    if type(correctness_passed) is not bool:
+        return {'accepted': False, 'decision': 'inconclusive',
+                'reasons': ['Missing correctness assessment']}
     try:
         historical._require(isinstance(pairs, list) and len(pairs) == 3,
                             'Exactly three pairs required')
@@ -57,7 +60,8 @@ def evaluate_pairs(pairs, *, correctness_passed):
                 result = pair[arm]
                 historical._require(result['telemetry_complete'] is True,
                                     'Incomplete telemetry')
-                historical._usage(result['tokens'])
+                tokens = historical._usage(result['tokens'])
+                historical._require(tokens['total_tokens'] > 0, 'Empty trial usage')
                 pins = result['pins']
                 historical._require(all(historical._identifier(pins.get(k)) for k in PIN_FIELDS),
                                     'Missing experiment pins')

@@ -86,3 +86,7 @@ Reserve counters before dispatch:
 Batch options apply to each invocation. Group only tasks eligible for the same options. Otherwise use separate batches or single starts. Never edit manifests, erase claims or replace a run to bypass limits. Concurrent callers serialize per PR. Unfinished claims prevent duplicate launches. Immutable outputs identified by content retain original attempts and progress.
 
 Caching never replaces live CI, publication checks, reconciliation or final completion checks. See [the developer reference](capture-performance.md) for capture implementation and benchmark reproduction.
+
+## Structured resume packet
+
+`resume --run RUN --spec CURRENT_SPEC.json` reads one locked snapshot containing retained budgets, progress references, task captures, validated evidence references, native handles when retained, and PR-wide unfinished claims. Repeat `--spec` for known current tasks. Current specs use ordinary freshness checks; an omitted governing spec remains explicitly missing and never implies reusable coverage. Missing or damaged original evidence remains explicit. Read the referenced original results and progress before assessing findings or exact acceptances. The packet makes no mutations, infers no governing inputs and never authorizes recovery or publication. Reconcile unfinished native/domain work and obtain the existing recovery authority before using ordinary recovery commands.
