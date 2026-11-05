@@ -1,0 +1,49 @@
+{
+  "date": "2026-11-05",
+  "executor": "Current native Codex agent in the implementation session",
+  "independent_fresh_agent": false,
+  "separate_host_lifecycle_verified": false,
+  "scope": "Bounded native fixture policy interpretation and local Git application; no external service calls",
+  "provider_identity": "fixture:commit-policy",
+  "provider_resource": "tests/fixtures/commit-policy/SKILL.md",
+  "provider_sha256": "a70008c9642c3b63da084a1f65e64fa5016853ac833f5674c5e8758c355b196e",
+  "provider_report": {
+    "assessment": "The implementation and documentation both serve the single settled outcome of value() returning two. Both commits have the same verified fixture author; repository requirements do not require a message body.",
+    "blockers": [],
+    "complete": true,
+    "findings": [],
+    "policy_prompt": "Squash the complete PR series into one cohesive commit implementing and documenting value() returning two. Use a short descriptive imperative subject without a body. Preserve required repository conventions, authorship and current user constraints.",
+    "sources": [
+      "context.json",
+      "requirements.txt",
+      "user.txt",
+      "tests/fixtures/commit-policy/SKILL.md"
+    ]
+  },
+  "handoff_verified": true,
+  "unchanged_provider_inputs": "reuse",
+  "commits_before": 2,
+  "commits_after": 1,
+  "result": {
+    "ci": "local validation passed after publication",
+    "ci_head": "48f5b287a94d5edb30a633d3d0badf0a55e76cfc",
+    "commit_count": 1,
+    "complete": true,
+    "content_review": "reuse",
+    "external_actions": false,
+    "final_head": "48f5b287a94d5edb30a633d3d0badf0a55e76cfc",
+    "final_tree": "7fb8a39e88fc3e3f7701c4f10f55d3522b9caded",
+    "findings": [],
+    "local_exact_lease_push": true,
+    "provider": "in-session native fixture skill; no independent host execution",
+    "reviewed_head": "b9d5a44e953f85c7445296b6d812927f3c2748aa",
+    "reviewed_tree": "7fb8a39e88fc3e3f7701c4f10f55d3522b9caded",
+    "subject": "Return two and document usage"
+  },
+  "limitations": [
+    "Native provider and cleanup roles were performed in the same session.",
+    "Content review was a deterministic fixture report, not an independent native review.",
+    "CI was an actual local Python assertion against the resulting published fixture head; no GitHub Actions execution was observed.",
+    "Production publication and CI transports are covered separately by the bundled recipe tests."
+  ]
+}
