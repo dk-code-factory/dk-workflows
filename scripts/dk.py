@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'runtime'))
 from state import Store, make_spec, read
-from config import CYCLE_PHASES, make_hook_spec
+from config import CYCLE_PHASES, effective, finalizer_groups, make_finalizer_spec, make_hook_spec
 
 
 def main():
@@ -26,6 +26,13 @@ def main():
     p.add_argument('--hook-id', required=True)
     p.add_argument('--run', required=True)
     p.add_argument('--cycle', required=True)
+    p.add_argument('--upstream')
+    p = sub.add_parser('finalizer-plan', help='Read ordered finalizer groups; agents execute them')
+    p.add_argument('--upstream')
+    p = sub.add_parser('finalizer-spec', help='Define one configured finalizer in the retained run')
+    p.add_argument('--definition', type=Path, required=True)
+    p.add_argument('--finalizer', required=True, help='/skill/PLUGIN:SKILL reference')
+    p.add_argument('--run', required=True)
     p.add_argument('--upstream')
     p = sub.add_parser('status')
     p.add_argument('--spec', type=Path, action='append', default=[])
@@ -67,6 +74,18 @@ def main():
         result = make_hook_spec(repository=args.repository, pr=args.pr, run=args.run,
                                 cycle=args.cycle, phase=args.phase, hook_id=args.hook_id,
                                 definition=read(args.definition), upstream=args.upstream)
+        print(json.dumps(result, sort_keys=True))
+        return
+    if args.command == 'finalizer-plan':
+        loaded = effective(args.repository, args.upstream)
+        print(json.dumps({'groups': finalizer_groups(loaded['settings']['finalizers'],
+                                                   role_skills=loaded['settings']['skills'].values()),
+                          'sources': loaded['sources']}, sort_keys=True))
+        return
+    if args.command == 'finalizer-spec':
+        result = make_finalizer_spec(repository=args.repository, pr=args.pr, run=args.run,
+                                     finalizer=args.finalizer, definition=read(args.definition),
+                                     upstream=args.upstream)
         print(json.dumps(result, sort_keys=True))
         return
     store = Store(args.repository, args.pr, checkout=args.checkout)
