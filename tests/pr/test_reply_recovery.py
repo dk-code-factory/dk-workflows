@@ -71,8 +71,33 @@ def remote(monkeypatch):
     result = Remote()
     monkeypatch.setattr(publisher, 'metadata', lambda _: deepcopy(result.metadata))
     monkeypatch.setattr(publisher, 'api', result.api)
-    monkeypatch.setattr(publisher, 'replies', lambda _: deepcopy(result.comments))
+    monkeypatch.setattr(publisher, 'replies', lambda _, **kwargs: deepcopy(result.comments))
     return result
+
+
+@pytest.fixture
+def inline_operation(remote, monkeypatch):
+    request = remote.request(kind='reply-inline', parent=10,
+                            source={'kind': 'inline_comment', 'id': 10, 'url': PR+'#discussion_r10', 'thread_id': 'T'})
+    remote.source['html_url'] = request['source']['url']
+    original_api = remote.api
+    def api(pr, path, *, payload=None):
+        if payload is not None:
+            original_api(pr, path, payload=payload)
+            remote.comments[-1].update(in_reply_to_id=10, html_url=PR+'#discussion_r100')
+            return deepcopy(remote.comments[-1])
+        return original_api(pr, path)
+    monkeypatch.setattr(publisher, 'api', api)
+    original_handler = publisher.handler
+    class ThreadHandler:
+        def thread(self):
+            return deepcopy(remote.thread)
+    monkeypatch.setattr(publisher, 'handler', lambda request: ThreadHandler()
+                        if request.get('thread_id') == 'T' and request['kind'] == 'reply-inline'
+                        else original_handler(request))
+    operation = publisher.prepare(request)['operation']
+    publisher.publish(operation)
+    return operation
 
 
 @pytest.mark.parametrize('state', ['unavailable', 'edited'])
@@ -277,6 +302,43 @@ def test_malformed_reply_pages_cannot_settle_a_verified_reply(remote, monkeypatc
     assert saved['reply_observations'][-1]['state'] == 'evidence_unavailable'
     assert saved['reply_dispositions'] == [disposition]
     assert saved['request'] == original['request'] and saved['receipt'] == original['receipt']
+    assert len(remote.writes) == 1
+
+
+@pytest.mark.parametrize('members', [[{'id': 100}], [{'id': 100, 'in_reply_to_id': 77}],
+                                    [{}], [{'id': None}], [{'id': True}], [{'id': '100'}],
+                                    [{'id': 0}], [{'id': -1}],
+                                    [{'id': 11}, {'id': 11}]])
+def test_inline_recovery_rejects_ambiguous_raw_members_before_parent_filtering(
+        remote, monkeypatch, inline_operation, members):
+    operation = inline_operation
+    original = publication.load(operation)
+    remote.comments.clear()
+    remote.disposition(operation)
+    disposition = publication.load(operation)['reply_dispositions'][-1]
+    monkeypatch.setattr(publisher, 'replies', read_replies)
+    monkeypatch.setattr(publisher, 'run', lambda *args, **kwargs: [deepcopy(members)])
+    with pytest.raises((ValueError, subprocess.CalledProcessError)):
+        publisher.recovery().inspect(operation)
+    with pytest.raises((ValueError, subprocess.CalledProcessError)):
+        publisher.recovery().dispose(operation, {k: disposition[k] for k in ('decision', 'reason', 'observation')})
+    with pytest.raises(Diagnostic) as error:
+        publisher.publish(operation, reconcile=True)
+    assert error.value.code == 'publication_not_ready'
+    saved = publication.load(operation)
+    assert saved['reply_observations'][-1]['state'] == 'evidence_unavailable'
+    assert saved['reply_dispositions'] == [disposition]
+    assert all(saved[key] == original[key] for key in ('request', 'response', 'receipt'))
+    assert len(remote.writes) == 1
+
+
+def test_inline_recovery_allows_unrelated_root_comments_without_replaying(remote, monkeypatch, inline_operation):
+    remote.comments.clear()
+    monkeypatch.setattr(publisher, 'replies', read_replies)
+    members = [{'id': 10}, {'id': 77}, {'id': 78, 'in_reply_to_id': 77}]
+    monkeypatch.setattr(publisher, 'run', lambda *args, **kwargs: [deepcopy(members)])
+    remote.disposition(inline_operation)
+    assert publisher.publish(inline_operation, reconcile=True)['reply_obligation'] == 'no_replacement'
     assert len(remote.writes) == 1
 
 

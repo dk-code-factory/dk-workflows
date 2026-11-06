@@ -55,7 +55,7 @@ def remote_head(request):
     return rows[0][0]
 
 
-def replies(request):
+def replies(request, *, filter_parent=True):
     pr = request['pr']
     host, root, number = endpoint(pr)
     route = f'{root}/pulls/{number}/comments' if request['kind']=='reply-inline' else f'{root}/issues/{number}/comments'
@@ -64,7 +64,7 @@ def replies(request):
             or any(not isinstance(item, dict) for page in pages for item in page)):
         raise ValueError('Reply pages are unavailable or ambiguous')
     items = [item for page in pages for item in page]
-    if request['kind']=='reply-inline':
+    if request['kind']=='reply-inline' and filter_parent:
         items = [item for item in items if item.get('in_reply_to_id') == request['parent']]
     return items
 

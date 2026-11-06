@@ -75,9 +75,9 @@ class Recovery:
         receipt = value['receipt']
         route = (f'{root}/pulls/comments/' if request['kind'] == 'reply-inline'
                  else f'{root}/issues/comments/') + str(receipt['id'])
-        items = self.replies(request)
+        items = self.replies(request, filter_parent=False)
         ids = [item.get('id') for item in items]
-        if any(type(v) is not int for v in ids) or len(ids) != len(set(ids)):
+        if any(type(v) is not int or v <= 0 for v in ids) or len(ids) != len(set(ids)):
             raise ValueError('Reply read access is ambiguous')
         try:
             remote = self.api(pr, route)
