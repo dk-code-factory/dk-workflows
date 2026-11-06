@@ -45,12 +45,12 @@ def test_reply_destination_attribution_and_exact_source_survive_resume(tmp_path,
         assert len(state['replies']) == 3
         reply = state['replies'][-1]
         assert reply['in_reply_to_id'] == 41
-        assert not state['issue_comments']
+        assert [comment['id'] for comment in state['issue_comments']] == [901]
         assert saved['request']['approved']['parent'] == 41
     else:
         assert len(state['replies']) == 2
-        assert len(state['issue_comments']) == 1
-        reply = state['issue_comments'][0]
+        assert len(state['issue_comments']) == 2
+        reply = state['issue_comments'][-1]
         assert reply['body'].startswith('In Reply To: [Original feedback]('+source['url']+')\n\n')
     assert reply['body'] == body
     assert reply['user']['login'] == 'author'
@@ -77,7 +77,7 @@ def test_recovery_exercise_uses_real_journal_and_separate_obligation_disposition
 
 
 @pytest.mark.parametrize('state', ['unavailable', 'edited'])
-@pytest.mark.parametrize('source_kind', ['review', 'inline_comment'])
+@pytest.mark.parametrize('source_kind', ['review', 'inline_comment', 'issue_comment'])
 @pytest.mark.parametrize('lose_response', [False, True])
 def test_recovery_exercise_required_replacement_handles_response_outcomes_without_id_reuse(tmp_path, state, source_kind, lose_response):
     root = tmp_path/'exercise'
@@ -89,6 +89,9 @@ def test_recovery_exercise_required_replacement_handles_response_outcomes_withou
     if source_kind == 'inline_comment':
         source.update(id=99, url=pr+'#discussion_r99', thread_id='PRRT_fixture')
         request.update(kind='reply-inline', parent=41, body='Original inline answer.')
+    elif source_kind == 'issue_comment':
+        source.update(id=901, url=pr+'#issuecomment-901')
+        request['body'] = 'In Reply To: [Original feedback]('+source['url']+')\n\nOriginal answer.'
     operation = exercise.operate(root, 'submit', request)['operation']
     original = publication.load(operation)
     exercise.operate(root, 'change-reply', {'id': original['receipt']['id'], 'state': state, 'body': 'Edited answer'})

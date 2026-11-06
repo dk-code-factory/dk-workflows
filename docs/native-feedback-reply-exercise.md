@@ -50,8 +50,9 @@ write per reply. Record the native handle, result, operation paths and inspected
 state privately.
 
 For issue #162, first publish and reconcile one reply, then use `change-reply
---request FILE` with a fixture-only payload such as `{"id":300,"state":"unavailable"}`
-or `{"id":300,"state":"edited","body":"Revised answer"}`. Give a fresh native
+--request FILE` with the published receipt's id, for example
+`{"id":902,"state":"unavailable"}` or
+`{"id":902,"state":"edited","body":"Revised answer"}`. Give a fresh native
 agent the historical operation path, current guidance and evidence about the
 current answer obligation. Ask it to recover the finalizer through the offline
 interface without supplying the expected decision. The interface accepts

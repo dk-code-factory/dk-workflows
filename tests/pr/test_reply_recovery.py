@@ -15,6 +15,7 @@ spec = importlib.util.spec_from_file_location('recovery_publisher', ROOT/'script
 publisher = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(publisher)
 read_replies = publisher.replies
+read_handler = publisher.handler
 PR = 'https://github.com/owner/repo/pull/7'
 
 
@@ -71,20 +72,26 @@ def remote(monkeypatch):
     result = Remote()
     monkeypatch.setattr(publisher, 'metadata', lambda _: deepcopy(result.metadata))
     monkeypatch.setattr(publisher, 'api', result.api)
-    monkeypatch.setattr(publisher, 'replies', lambda _, **kwargs: deepcopy(result.comments))
+    monkeypatch.setattr(publisher, 'replies', lambda request, **kwargs: deepcopy(
+        result.comments + ([result.source] if request.get('source', {}).get('kind') != 'review' else [])))
     return result
 
 
 @pytest.fixture
-def inline_operation(remote, monkeypatch):
-    request = remote.request(kind='reply-inline', parent=10,
+def inline_operation(remote, monkeypatch, request):
+    parent = getattr(request, 'param', 10)
+    request = remote.request(kind='reply-inline', parent=parent,
                             source={'kind': 'inline_comment', 'id': 10, 'url': PR+'#discussion_r10', 'thread_id': 'T'})
+    if parent != 10:
+        remote.thread['comments'].insert(0, {'databaseId': parent})
+        remote.comments.append({'id': parent})
+        remote.source['in_reply_to_id'] = parent
     remote.source['html_url'] = request['source']['url']
     original_api = remote.api
     def api(pr, path, *, payload=None):
         if payload is not None:
-            original_api(pr, path, payload=payload)
-            remote.comments[-1].update(in_reply_to_id=10, html_url=PR+'#discussion_r100')
+            answer = original_api(pr, path, payload=payload)
+            remote.comments[-1].update(in_reply_to_id=parent, html_url=PR+'#discussion_r'+str(answer['id']))
             return deepcopy(remote.comments[-1])
         return original_api(pr, path)
     monkeypatch.setattr(publisher, 'api', api)
@@ -342,9 +349,201 @@ def test_inline_recovery_allows_unrelated_root_comments_without_replaying(remote
     assert len(remote.writes) == 1
 
 
+@pytest.mark.parametrize('field,value', [('id', True), ('id', 10.0), ('id', 0), ('id', -1),
+                                      ('id', None), ('user', None), ('user', []),
+                                      ('user', {'login': {'unexpected': ['reviewer']}}),
+                                      ('user', {'login': ['reviewer']}), ('user', {'login': True}),
+                                      ('user', {'login': ''}), ('user', {'login': '   '})])
+def test_malformed_individual_source_identity_cannot_receive_a_disposition(remote, field, value):
+    operation = remote.post()
+    original = publication.load(operation)
+    remote.comments.clear()
+    remote.source[field] = value
+    with pytest.raises(ValueError, match='feedback identity'):
+        remote.disposition(operation)
+    saved = publication.load(operation)
+    assert saved['reply_observations'][-1]['state'] == 'evidence_unavailable'
+    assert 'reply_dispositions' not in saved
+    assert all(saved[key] == original[key] for key in ('request', 'response', 'receipt'))
+    assert len(remote.writes) == 1
+
+
+@pytest.mark.parametrize('identity', [True, 100.0, 0, -1, None])
+def test_malformed_individual_reply_identity_cannot_receive_a_disposition(remote, monkeypatch, identity):
+    operation = remote.post()
+    remote.comments[0]['body'] = 'Edited historical answer'
+    original_api = remote.api
+    def api(pr, path, **kwargs):
+        result = original_api(pr, path, **kwargs)
+        if path.endswith('/100'):
+            result['id'] = identity
+        return result
+    monkeypatch.setattr(publisher, 'api', api)
+    with pytest.raises(ValueError, match='Reply identity'):
+        remote.disposition(operation)
+    assert not publication.load(operation).get('reply_dispositions')
+    assert len(remote.writes) == 1
+
+
+@pytest.mark.parametrize('identity', [True, 10.0, 0, -1, None])
+def test_malformed_individual_inline_parent_identity_cannot_receive_a_disposition(remote, inline_operation, identity):
+    remote.comments[0].update(body='Edited historical answer', in_reply_to_id=identity)
+    with pytest.raises(ValueError, match='Reply identity'):
+        remote.disposition(inline_operation)
+    assert not publication.load(inline_operation).get('reply_dispositions')
+    assert len(remote.writes) == 1
+
+
+@pytest.mark.parametrize('identity', [True, 10.0, 0, -1, None])
+@pytest.mark.parametrize('position', ['source', 'unrelated'])
+def test_malformed_thread_database_identity_cannot_receive_a_disposition(remote, inline_operation, identity, position):
+    remote.comments.clear()
+    if position == 'source':
+        remote.thread['comments'][0]['databaseId'] = identity
+    else:
+        remote.thread['comments'].append({'databaseId': identity})
+    with pytest.raises(ValueError, match='exact original thread'):
+        remote.disposition(inline_operation)
+    assert not publication.load(inline_operation).get('reply_dispositions')
+    assert len(remote.writes) == 1
+
+
+@pytest.mark.parametrize('inline', [False, True])
+def test_complete_reply_list_must_include_accessible_original_source(remote, monkeypatch, request, inline):
+    operation = request.getfixturevalue('inline_operation') if inline else remote.post()
+    remote.comments.clear()
+    remote.disposition(operation)
+    disposition = publication.load(operation)['reply_dispositions'][-1]
+    monkeypatch.setattr(publisher, 'replies', lambda *args, **kwargs: [])
+    with pytest.raises(ValueError, match='source or routing parent'):
+        remote.disposition(operation)
+    with pytest.raises(ValueError, match='source or routing parent'):
+        publisher.recovery().dispose(operation, {k: disposition[k] for k in ('decision', 'reason', 'observation')})
+    with pytest.raises(Diagnostic) as error:
+        publisher.publish(operation, reconcile=True)
+    assert error.value.code == 'publication_not_ready'
+    assert publication.load(operation)['reply_dispositions'] == [disposition]
+
+
+@pytest.mark.parametrize('inline_operation', [77], indirect=True)
+def test_complete_inline_list_must_include_distinct_routing_parent(remote, inline_operation):
+    remote.comments.clear()
+    with pytest.raises(ValueError, match='source or routing parent'):
+        remote.disposition(inline_operation)
+    assert not publication.load(inline_operation).get('reply_dispositions')
+
+
+@pytest.mark.parametrize('inline_operation', [10, 77], indirect=True)
+@pytest.mark.parametrize('claimed_parent', ['absent', None, 10, 43, True, 77.0, 0, -1])
+def test_inline_source_parent_must_agree_with_real_thread_root(
+        remote, monkeypatch, inline_operation, claimed_parent):
+    operation = inline_operation
+    original = publication.load(operation)
+    parent = original['request']['approved']['parent']
+    remote.comments[:] = [{'id': parent}] if parent != remote.source['id'] else []
+    monkeypatch.setattr(publisher, 'handler', read_handler)
+    calls = []
+    def run(argv, **kwargs):
+        assert argv[:2] == ['gh', 'api'] and 'graphql' in argv
+        calls.append(kwargs['payload']['variables']['id'])
+        return {'data': {'node': {
+            'id': 'T', 'isResolved': False, 'viewerCanResolve': True,
+            'pullRequest': {'url': PR, 'headRefOid': remote.metadata['headRefOid']},
+            'comments': {'nodes': [
+                {'id': 'comment-'+str(c['databaseId']), 'databaseId': c['databaseId'],
+                 'url': PR+'#discussion_r'+str(c['databaseId']), 'body': 'Question',
+                 'author': {'login': 'reviewer'}} for c in remote.thread['comments']],
+                'pageInfo': {'hasNextPage': False}}}}}
+    monkeypatch.setattr(publisher, 'run', run)
+    remote.disposition(operation)
+    assert publisher.publish(operation, reconcile=True)['reply_obligation'] == 'no_replacement'
+    disposition = publication.load(operation)['reply_dispositions'][-1]
+    assert calls and set(calls) == {'T'}
+    if claimed_parent == 'absent':
+        remote.source.pop('in_reply_to_id', None)
+    else:
+        remote.source['in_reply_to_id'] = claimed_parent
+    if parent == remote.source['id'] and claimed_parent in {'absent', None}:
+        remote.disposition(operation)
+        assert publisher.publish(operation, reconcile=True)['reply_obligation'] == 'no_replacement'
+        return
+    with pytest.raises(ValueError, match='source parent contradicts'):
+        publisher.recovery().inspect(operation)
+    with pytest.raises(ValueError, match='source parent contradicts'):
+        publisher.recovery().dispose(operation, {k: disposition[k] for k in ('decision', 'reason', 'observation')})
+    with pytest.raises(Diagnostic) as error:
+        publisher.publish(operation, reconcile=True)
+    assert error.value.code == 'publication_not_ready'
+    saved = publication.load(operation)
+    assert saved['reply_dispositions'] == [disposition]
+    assert all(saved[key] == original[key] for key in ('request', 'response', 'receipt'))
+    assert len(remote.writes) == 1
+
+
+@pytest.mark.parametrize('inline', [False, True])
+@pytest.mark.parametrize('field,value', [('body', 'A conflicting question'),
+                                      ('html_url', PR+'#issuecomment-99'),
+                                      ('user', {'login': 'another-reviewer'})])
+def test_original_source_list_and_individual_evidence_must_agree(remote, monkeypatch, request, inline, field, value):
+    operation = request.getfixturevalue('inline_operation') if inline else remote.post()
+    remote.comments.clear()
+    remote.disposition(operation)
+    disposition = publication.load(operation)['reply_dispositions'][-1]
+    listed = {**deepcopy(remote.source), field: value}
+    monkeypatch.setattr(publisher, 'replies', lambda *args, **kwargs: [deepcopy(listed)])
+    with pytest.raises(ValueError, match='feedback list and individual observation disagree'):
+        remote.disposition(operation)
+    with pytest.raises(ValueError, match='feedback list and individual observation disagree'):
+        publisher.recovery().dispose(operation, {k: disposition[k] for k in ('decision', 'reason', 'observation')})
+    with pytest.raises(Diagnostic) as error:
+        publisher.publish(operation, reconcile=True)
+    assert error.value.code == 'publication_not_ready'
+    assert publication.load(operation)['reply_dispositions'] == [disposition]
+    assert len(remote.writes) == 1
+
+
+@pytest.mark.parametrize('inline_operation', [77], indirect=True)
+@pytest.mark.parametrize('witness', ['source', 'reply'])
+@pytest.mark.parametrize('listed_parent', [True, 77.0, 0, -1])
+def test_list_routing_parent_requires_exact_integer_identity(
+        remote, monkeypatch, inline_operation, witness, listed_parent):
+    operation = inline_operation
+    remote.comments[-1]['body'] = 'Edited historical answer'
+    remote.disposition(operation)
+    disposition = publication.load(operation)['reply_dispositions'][-1]
+    def replies(*args, **kwargs):
+        items = deepcopy(remote.comments + [remote.source])
+        changed_id = remote.source['id'] if witness == 'source' else 100
+        next(item for item in items if item['id'] == changed_id)['in_reply_to_id'] = listed_parent
+        return items
+    monkeypatch.setattr(publisher, 'replies', replies)
+    with pytest.raises(ValueError, match='list and individual observation disagree'):
+        publisher.recovery().inspect(operation)
+    with pytest.raises(ValueError, match='list and individual observation disagree'):
+        publisher.recovery().dispose(operation, {k: disposition[k] for k in ('decision', 'reason', 'observation')})
+    with pytest.raises(Diagnostic) as error:
+        publisher.publish(operation, reconcile=True)
+    assert error.value.code == 'publication_not_ready'
+    assert publication.load(operation)['reply_dispositions'] == [disposition]
+    assert len(remote.writes) == 1
+
+
+def test_source_list_profile_metadata_need_not_match_individual_read(remote, monkeypatch):
+    operation = remote.post()
+    remote.comments.clear()
+    listed = deepcopy(remote.source)
+    listed['user']['avatar_url'] = 'https://example.test/avatar.png'
+    monkeypatch.setattr(publisher, 'replies', lambda *args, **kwargs: [deepcopy(listed)])
+    remote.disposition(operation)
+    assert publisher.publish(operation, reconcile=True)['reply_obligation'] == 'no_replacement'
+
+
 @pytest.mark.parametrize('pages', [[], [[]], [[], []]])
 def test_valid_empty_reply_pages_allow_explicit_obsolete_answer_disposition(remote, monkeypatch, pages):
-    operation = remote.post()
+    remote.source['html_url'] = PR+'#pullrequestreview-10'
+    request = remote.request(source={'kind': 'review', 'id': 10, 'url': remote.source['html_url']})
+    operation = publisher.prepare(request)['operation']
+    publisher.publish(operation)
     remote.comments.clear()
     monkeypatch.setattr(publisher, 'replies', read_replies)
     monkeypatch.setattr(publisher, 'run', lambda *args, **kwargs: deepcopy(pages))
@@ -588,28 +787,8 @@ def test_uncertain_replacement_cannot_be_cleared_by_another_disposition(remote, 
     assert len(remote.writes) == 2
 
 
-def test_inline_disposition_keeps_live_answer_requirement_for_resolution(remote, monkeypatch):
-    request = remote.request(kind='reply-inline', parent=10,
-                            source={'kind': 'inline_comment', 'id': 10, 'url': PR+'#discussion_r10', 'thread_id': 'T'})
-    remote.source['html_url'] = request['source']['url']
-    # Capture a genuinely verified reply with the normal publisher transport.
-    original_api = remote.api
-    def api(pr, path, *, payload=None):
-        if payload is not None:
-            answer = original_api(pr, path, payload=payload)
-            remote.comments[-1].update(in_reply_to_id=10, html_url=PR+'#discussion_r100')
-            return deepcopy(remote.comments[-1])
-        return original_api(pr, path)
-    monkeypatch.setattr(publisher, 'api', api)
-    original_handler = publisher.handler
-    class ThreadHandler:
-        def thread(self):
-            return deepcopy(remote.thread)
-    monkeypatch.setattr(publisher, 'handler', lambda request: ThreadHandler()
-                        if request.get('thread_id') == 'T' and request['kind'] == 'reply-inline'
-                        else original_handler(request))
-    operation = publisher.prepare(request)['operation']
-    publisher.publish(operation)
+def test_inline_disposition_keeps_live_answer_requirement_for_resolution(remote, monkeypatch, inline_operation):
+    operation = inline_operation
     remote.comments.clear()
     remote.disposition(operation)
     assert publisher.publish(operation, reconcile=True)['status'] == 'verified'

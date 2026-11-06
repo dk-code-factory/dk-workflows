@@ -41,7 +41,6 @@ def initialize(root):
          'user': {'login': 'reviewer'}, 'html_url': fixture.PR+'#discussion_r99',
          'pull_request_review_id': 789},
     ]
-    (root/'remote.json').write_text(json.dumps(state))
     evidence = {
         'pr': fixture.PR, 'head': fixture.HEAD,
         'validation': 'Empty input now returns an empty list; targeted check passes.',
@@ -56,6 +55,11 @@ def initialize(root):
         ],
         'affected_sources': ['comment-99', 'pullrequestreview-789', 'issuecomment-901'],
     }
+    state['issue_comments'] = [
+        {'id': source['id'], 'html_url': source['url'], 'body': source['text'],
+         'user': {'login': source['author']}}
+        for source in evidence['discussion'] if source['kind'] == 'issue_comment']
+    (root/'remote.json').write_text(json.dumps(state))
     (root/'evidence.json').write_text(json.dumps(evidence, indent=2)+'\n')
     for label, path in [('skill.md', ROOT/'codex/skills/dk-pr-feedback-reply/SKILL.md'),
                         ('publication.md', ROOT/'docs/pr/publication.md')]:
@@ -76,7 +80,7 @@ def operate(root, action, request=None, operation=None, lose_response=False):
             evidence = json.loads((root/'evidence.json').read_text())
             for source in evidence['discussion']:
                 route = ('/pulls/7/reviews/' if source['kind'] == 'review' else '/issues/comments/')
-                if path.endswith(route+str(source['id'])):
+                if source['kind'] == 'review' and path.endswith(route+str(source['id'])):
                     return {'id': source['id'], 'html_url': source['url'], 'body': source['text'],
                             'user': {'login': source['author']}}
             for prefix, key in [('/pulls/comments/', 'replies'), ('/issues/comments/', 'issue_comments')]:

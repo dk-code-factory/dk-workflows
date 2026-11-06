@@ -17,6 +17,14 @@ def same_comment_url(actual, expected):
     return separator == '#' and actual_pr.lower() == expected_pr.lower() and fragment == expected_fragment
 
 
+def positive_id(value):
+    return type(value) is int and value > 0
+
+
+def same_parent(actual, expected):
+    return (actual is None and expected is None) or (positive_id(actual) and positive_id(expected) and actual == expected)
+
+
 class Recovery:
     def __init__(self, *, api, metadata, endpoint, replies, handler):
         self.api, self.metadata, self.endpoint = api, metadata, endpoint
@@ -26,7 +34,7 @@ class Recovery:
         value = publication.load(path)
         if (value['request']['kind'] not in {'reply-inline', 'reply-comment'}
                 or value['status'] != 'verified'
-                or type(value.get('receipt', {}).get('id')) is not int):
+                or not positive_id(value.get('receipt', {}).get('id'))):
             raise ValueError('Reply recovery requires an original verified receipt; uncertain initial writes require reconciliation')
         return value
 
@@ -55,9 +63,11 @@ class Recovery:
                      'review': 'pullrequestreview-'}
         expected_url = pr + '#' + fragments[source['kind']] + str(source['id'])
         original = self.api(pr, routes[source['kind']] + str(source['id']))
-        if (not same_comment_url(source.get('url'), expected_url) or original.get('id') != source['id']
+        user = original.get('user') if isinstance(original, dict) else None
+        if (not isinstance(original, dict) or not positive_id(original.get('id'))
+                or not same_comment_url(source.get('url'), expected_url) or original.get('id') != source['id']
                 or not same_comment_url(original.get('html_url'), expected_url) or not isinstance(original.get('body'), str)
-                or not original.get('user', {}).get('login')):
+                or not isinstance(user, dict) or not isinstance(user.get('login'), str) or not user['login'].strip()):
             raise ValueError('Original feedback identity or read access is unavailable or ambiguous')
         context = None
         if request['kind'] == 'reply-inline':
@@ -66,9 +76,16 @@ class Recovery:
             thread = self.handler({**request, 'pr': live['url'], 'head': live['headRefOid'],
                                    'thread_id': source['thread_id']}).thread()
             ids = [c['databaseId'] for c in thread['comments']]
-            if (ids.count(source['id']) != 1 or ids.count(request['parent']) != 1
+            if (any(not positive_id(v) for v in ids) or len(ids) != len(set(ids))
+                    or not positive_id(request['parent'])
+                    or ids.count(source['id']) != 1 or ids.count(request['parent']) != 1
                     or not ids or ids[0] != request['parent']):
                 raise ValueError('Original source and routing parent are not in the exact original thread')
+            source_parent = original.get('in_reply_to_id')
+            if ((source['id'] == request['parent'] and source_parent is not None)
+                    or (source['id'] != request['parent'] and (not positive_id(source_parent)
+                        or source_parent != request['parent']))):
+                raise ValueError('Original source parent contradicts the retained routing parent and thread root')
             context = {'id': thread['id'], 'source': source['id'], 'parent': request['parent']}
         elif source['kind'] == 'inline_comment':
             raise ValueError('An inline source requires its originating thread')
@@ -77,8 +94,23 @@ class Recovery:
                  else f'{root}/issues/comments/') + str(receipt['id'])
         items = self.replies(request, filter_parent=False)
         ids = [item.get('id') for item in items]
-        if any(type(v) is not int or v <= 0 for v in ids) or len(ids) != len(set(ids)):
+        if any(not positive_id(v) for v in ids) or len(ids) != len(set(ids)):
             raise ValueError('Reply read access is ambiguous')
+        required = {source['id']} if source['kind'] != 'review' else set()
+        if request['kind'] == 'reply-inline':
+            required.add(request['parent'])
+        if not required.issubset(ids):
+            raise ValueError('Reply list omits the accessible original source or routing parent')
+        if source['kind'] != 'review':
+            listed_source = next(item for item in items if item['id'] == source['id'])
+            listed_user = listed_source.get('user')
+            if (('body' in listed_source and listed_source['body'] != original['body'])
+                    or ('in_reply_to_id' in listed_source
+                        and not same_parent(listed_source['in_reply_to_id'], original.get('in_reply_to_id')))
+                    or ('html_url' in listed_source and not same_comment_url(listed_source['html_url'], expected_url))
+                    or ('user' in listed_source and (not isinstance(listed_user, dict)
+                        or listed_user.get('login') != user['login']))):
+                raise ValueError('Original feedback list and individual observation disagree; refresh read evidence')
         try:
             remote = self.api(pr, route)
             if not isinstance(remote, dict):
@@ -92,12 +124,15 @@ class Recovery:
             state = 'unavailable'
         else:
             fragment = 'discussion_r' if request['kind'] == 'reply-inline' else 'issuecomment-'
-            if (remote.get('id') != receipt['id'] or not same_comment_url(remote.get('html_url'), pr+'#'+fragment+str(receipt['id']))
+            if (not positive_id(remote.get('id')) or remote.get('id') != receipt['id']
+                    or not same_comment_url(remote.get('html_url'), pr+'#'+fragment+str(receipt['id']))
                     or remote.get('user', {}).get('login') != actor or ids.count(receipt['id']) != 1
-                    or (request['kind'] == 'reply-inline' and remote.get('in_reply_to_id') != request['parent'])):
+                    or (request['kind'] == 'reply-inline' and (not positive_id(remote.get('in_reply_to_id'))
+                        or remote.get('in_reply_to_id') != request['parent']))):
                 raise ValueError('Reply identity, membership or read access is ambiguous')
             listed = next(item for item in items if item['id'] == receipt['id'])
-            if any(listed.get(key) != remote.get(key) for key in ('body', 'user', 'html_url', 'in_reply_to_id')):
+            if (any(listed.get(key) != remote.get(key) for key in ('body', 'user', 'html_url'))
+                    or not same_parent(listed.get('in_reply_to_id'), remote.get('in_reply_to_id'))):
                 raise ValueError('Reply list and individual observation disagree; refresh read evidence')
             state = 'present' if remote.get('body') == request['body'] else 'edited'
             if not isinstance(remote.get('body'), str):
