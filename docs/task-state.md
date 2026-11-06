@@ -2,16 +2,18 @@
 
 Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 
-Native agents resolve and invoke skills. Python fingerprints inputs, claims tasks, and saves outputs and counters. Keep private state, specs and outputs outside repositories. State lives under `${XDG_STATE_HOME:-~/.local/state}/dk-workflows/v2/`. Save the printed manifest path.
+Native agents resolve and invoke skills. Python manages bookkeeping. Follow [state admission](../DESIGN.md#objective-and-state-admission): persist something only when it reduces expected total token consumption, including the next run in a new session. Retain reusable analysis and minimum recovery records; avoid derived summaries, duplicate context and speculative telemetry. State and input artifacts stay outside repositories under `${XDG_STATE_HOME:-~/.local/state}/dk-workflows/v2/`. Save the manifest reference.
 
 Run commands as `python3 PLUGIN_ROOT/scripts/dk.py --repository HOST/OWNER/REPO --pr https://HOST/OWNER/REPO/pull/N --checkout REPO COMMAND`. Direct skill calls use this cache only when their caller manages them with these commands.
 
-## Define and capture tasks
+## Prepare, invoke and finish
 
-Generate a spec with `spec --definition /private/reviewer-definition.json`. Save stdout outside the repository. Global command arguments supply the canonical repository and PR. Example definition:
+Use `prepare --file REQUEST.json` once for the current independent task group. The helper builds specs, captures inputs, claims eligible work and saves the small replay definition atomically. No separate spec file, initial status call or native-binding call is necessary. Global arguments supply the canonical PR and repository. Example request:
 
 ```json
 {
+ "run": "RETAINED_RUN", "cycle": "RETAINED_CYCLE",
+ "tasks": [{"definition": {
   "skill_identity": "my-reviewer:review",
   "resources": {"skill": "/installed/reviewer/SKILL.md", "runtime": "/installed/reviewer/runtime"},
   "responsibility": "content-review",
@@ -22,17 +24,40 @@ Generate a spec with `spec --definition /private/reviewer-definition.json`. Save
   "options": {},
   "native_review": {"schema": 1, "skill_version": "RESOLVED_VERSION", "passes": []},
   "governing_inputs_complete": true
+ }}]
 }
 ```
 
-Python callers may use `state.make_spec(repository=..., pr=..., **definition)`. Generation normalizes identity. It does not read files, resolve refs, claim work or discover omitted inputs. Completeness defaults to false. Caching requires explicit completeness and nonempty resources. If capture is uncertain, use `cacheable:false`.
+The request file may be temporary; referenced inputs need stable private paths across sessions. The helper discovers neither omitted inputs nor semantic conditions. Caching requires explicit completeness and nonempty resources. If capture is uncertain, use `cacheable:false`. Native review contracts follow [native handoffs](native-review.md); empty passes are valid only for skills without required children.
+
+Each task returns a `key` and one action:
+
+- `reuse`: read necessary saved evidence using `result --key KEY --section findings|normalized|original`. Counts or empty findings alone cannot establish readiness or dispositions.
+- `invoke`: invoke the native skill with the prepared assignment. Retain the claim and actual host handle. The returned `native` field supplies expected observation bindings and requirements; it creates no execution evidence.
+- `recover_required`: reconcile the original agent and uncertain writes before explicit recovery. Completed siblings remain reusable.
+
+After actual terminal execution, call `finish --key KEY --claim CLAIM_ID --report REPORT.json --original OUTPUT --native-evidence OBSERVATIONS.json`. Reports require explicit `complete:true|false` and findings. Omit `--original` when report bytes are the original output; omit native evidence only for tasks without native review requirements. Prose skills retain original output and supply a normalized report. Optional `--status failed` preserves failed execution; otherwise completion determines complete/incomplete status. Check the returned status: missing native evidence downgrades completion. Record each successful sibling immediately. The helper recaptures live inputs before recording. Use `--progress PROGRESS.json` for sourced dispositions, exact acceptances and recovery information whose retention avoids reconstruction.
+
+## Resume in a new session
+
+Start with `resume`, optionally `--run RUN_ID`, repeated `--key KEY` or `--explain`. It regenerates specs, recaptures retained inputs, returns compact status and budgets, and exposes every unfinished PR claim. Missing sources or removed hooks remain refresh blockers without hiding successful siblings. Resume writes no state. Read findings and original output using `result`; read sourced dispositions and acceptances through bounded `progress --run RUN_ID --after OFFSET --limit 20` pages. Follow pagination until all evidence needed for the decision is read. Never load a whole manifest just to find outstanding work.
+
+Resume describes saved assignments and their saved Git pins. Confirm the current PR head, target, scope, instructions and selected tasks before accepting coverage. Saved definitions cannot discover newly selected reviewers or replace current guidance. Legacy entries appear under `unmanaged`; supply their current definition once through prepare to attach replay information without rerunning valid analysis or changing counters.
+
+Prepare saved tasks with `{"tasks":[{"key":"TASK_KEY"}],"run":"RUN_ID","cycle":"CYCLE_ID"}`. An optional `git` object on that item updates explicit target/base/head pins while preserving assignment and input maps. Refresh referenced context and preference handoffs first. Redefine tasks whose assignment, installation or input paths changed. Content reviews survive tree-preserving cleanup. Reuse alone creates no run or cycle; omit `--run` from resume until that run exists.
+
+Recovery adds `"recover":{"TASK_KEY":"CLAIM_ID"}` to prepare. Claims never expire: confirm the prior agent stopped and reconcile writes first. Retain the original run and unchanged-input cycle; changed review inputs use a new cycle. A lost prepare response requires resume and reconciliation before another launch. Use `invalidate --key KEY --reason TEXT --recover CLAIM_ID` to close a stopped claim when recapture is impossible. Never clear state to bypass limits.
+
+`coverage_complete` requires complete matching evidence, no unfinished claim or invalidation, and required native execution validation. `reusable` additionally requires cacheability. CI approval can accept current noncacheable evidence only with coverage complete. Saved results do not establish current CI or publication readiness. [Low-level spec/start/record commands](task-state-low-level.md) remain compatible for integrations; both interfaces share fingerprints and results.
+
+## Governing inputs and freshness
 
 Capture all governing inputs:
 
 - Complete target, base and head trees and binary diff. For ordinary content review, SHAs and checkout path record origin only. Set `history:true` for tasks that use history and `head_sensitive:true` for tasks tied to exact commits. Include head SHAs in ordinary context only when the task uses them. CI and publication normally use noncacheable tasks and current checks.
 - Exact original instructions, immutable source snapshots and execution options. Exclude generated progress, run and cycle ids, and reviewer order. Standalone review and iteration use the same reviewer identity, responsibility, assigned instructions and consumed inputs. Partition and cleanup have separate responsibilities.
-- [Cycle hook receipts](cycle-hooks.md) are scoped to a specific occurrence, so `hook-spec` deliberately includes run, cycle, phase and hook id in their task identity and options. Claim them with the run only, without reviewer budget flags. Their reuse confirms that occurrence completed; it never supplies reviewer or CI coverage.
-- [Finalizer receipts](finalizers.md) use `finalizer-spec` with the retained run and qualified skill reference. The helper includes the effective plan and source configuration. Sequential groups advance only after every current task completes. Parallel siblings record separately, and failed or interrupted siblings preserve successful work. Finalizer task identity follows the skill across reorderings; plan changes stale evidence without hiding unfinished claims. Claim with the run only, keeping CI repair/rerun budgets on their owning actions. CI and publication still need current checks.
+- [Cycle hook receipts](cycle-hooks.md) use a hook descriptor with run, cycle, phase and hook id. The helper derives the occurrence identity and keeps its claims outside reviewer budgets. Their reuse confirms that occurrence completed; it never supplies reviewer or CI coverage.
+- [Finalizer receipts](finalizers.md) use a finalizer descriptor with the retained run and qualified skill. The helper captures the effective plan and configuration. Groups advance only after every current sibling completes. Stable skill identity preserves unfinished claims across reordering; changed plans stale affected evidence. CI repair/rerun budgets belong to their owning actions. CI and publication still need current checks.
 - Every governing installed resource, including indirect references outside the skill directory. Capture exact bytes, executable modes, directory paths and symlink targets. Traversal excludes only `.git`, `__pycache__` and `.pytest_cache`. Missing resources block claims.
 
 - The [scoped preference handoff](preferences.md#workflow-handoffs-and-reuse) in `inputs.preferences`: complete selected records, applicable paths, consumed condition context and applicability decisions. Refresh selection before claims, recording and final coverage checks. Fingerprint the task-specific handoff rather than the catalog revision; relevant changes refresh affected work while unchanged selections and decisions permit reuse.
@@ -40,49 +65,9 @@ Capture all governing inputs:
 
 Reuse unchanged guidance already read in the current context. Check resource identity at each boundary. Reread changed guidance and references. Reload necessary guidance after context loss. Capture checks still apply. Recording and final coverage checks require fresh snapshots of live sources. Observed resource or context changes reject completion. Fingerprints compare explicit inputs, not equivalent meanings.
 
-## Inspect, claim and invoke
-
-| Command | Use |
-| --- | --- |
-| `status --compact --run RUN_ID --spec A.json --spec B.json` | Current coverage, validated result paths, budgets and all unfinished PR claims. |
-| `status --run RUN_ID` | Full progress. Read it and original results before assessing dispositions, exact acceptances or recovery. Omit `--run` when evidence spans runs. |
-| `status --explain --spec A.json` | Changed inputs and other reuse blockers. Can combine with compact and run options. |
-| `start-batch --spec A.json --spec B.json` | Claim tasks before invoking them or reading cached results, even when status reports reuse. |
-| `start --spec A.json` | Claim one task, including tasks needing different retry or budget options. |
-
-Without specs, status inspects runs and unfinished work. Run selection filters runs only; coverage and unfinished claims remain PR-wide. An unknown run is an error. Compact output omits progress bodies. Follow its references and validated original result paths. See [status details](status-diagnostics.md) for decoding.
-
-Task status reports `coverage_complete` only when a retained complete result matches current inputs, has no unfinished claim or invalidation, and satisfies required native execution validation. `reusable` additionally requires task and result cacheability. CI approval may accept a noncacheable result from the current retained run/cycle, but it still requires `coverage_complete`.
-
-For a new run, omit `--run` from status until a start actually invokes a task with that run id. Reuse alone does not create a run. Continue passing the chosen run id to starts so later invocations retain its budgets.
-
-Both start commands return an `action` for each task:
-
-- `reuse`: read the validated original result, including findings.
-- `invoke`: save the new claim and invoke the native skill with pinned inputs.
-- `recover_required`: resolve the unfinished claim before invoking this task. Other eligible tasks may proceed.
-
-For single-task `start`, `invoke` returns `claim`, `manifest` and `changed`; use `claim.key` for the task key and `claim.id` for recording or recovery. `reuse` and `recover_required` instead include top-level `key` and `task`, plus `result` or `unfinished` respectively. `start-batch` wraps results in `tasks` and includes top-level `key` and `task` in every item, regardless of action.
-
-Batch results preserve order and include the manifest and all unfinished PR claims. Capture, validation or budget errors save no new claims or counters. The batch captures every spec before mutation, checks claims and budgets under one PR lock, then replaces the manifest once. A lost response or storage failure leaves the outcome uncertain. Inspect status and reconcile before retrying.
-
-## Record and recover
-
-Run `record --spec A.json --claim CLAIM_ID --original OUTPUT --normalized RESULT.json --status complete|failed|incomplete`. For native reviewers also supply `--native-evidence OBSERVATIONS.json`, following [native reviewer handoffs](native-review.md). Preserve original bytes. Normalized results require `complete:true|false` and a `findings` list. Keep skill-owned fields. Failed and incomplete results use false. Record successful tasks immediately, even if others fail. Save stale, failed and incomplete attempts accurately. Recover explicitly when required.
-
-Use `record --progress PROGRESS.json` for append-only outcomes, dispositions and exact user acceptances with sources. Keep progress outside governing instruction and input files. Completed analysis may contain findings; assess readiness separately. Failed, incomplete, damaged, invalidated or unfinished results never satisfy coverage.
-
-Claims never expire. Confirm the prior agent stopped and reconcile its writes before recovery. Use `start --recover CLAIM_ID` or repeated `start-batch --recover TASK_KEY=CLAIM_ID`. Keep the original run and, for unchanged inputs, cycle. Changed review inputs require a new cycle.
-
-To close a stopped claim without replacement work, use `invalidate --key TASK_KEY --reason TEXT --recover CLAIM_ID`. This also works when missing resources prevent recapture. Repeat `--key` to invalidate several tasks.
-
-Follow [native reviewer handoffs](native-review.md). Save the host handle and terminal outcome in operational progress. Before recording success, the coordinator collects host execution evidence and checks skill completion. The store rejects empty or whitespace-only original output for complete tasks, including reuse of older empty results. Native review requirements are fingerprinted with resources and instructions. Reserved review responsibilities (`review` as a hyphen, underscore or colon delimited word, and `finding-verification`), explicit `native_review` tasks, and `code-review*` skill names require this contract even when omitted by the caller. Use `content-review` for configured reviewers; arbitrary generic responsibilities are not automatically classified from prose.
-
-`native-binding --spec A.json --claim CLAIM_ID` exposes expected claim, fingerprint, skill/version/resources and original pinned Git identities for a host collector. It creates no observed events. `record` validates the supplied observations, distinct child handles, terminal outputs and required driver tool outcomes. Missing contracts or unavailable, malformed or incomplete evidence downgrade requested completion to incomplete with an execution diagnostic. Original output, evidence bytes, requested normalized fields and findings remain retained; run, retry and cycle history are unchanged. Check the returned status. Reuse applies the same gate to historical reviewer artifacts without rewriting them. The trusted coordinator must obtain actual host observations; the store does not authenticate self-authored JSON or infer semantic adherence from report text. Failed or incomplete attempts may keep empty output.
-
 ## Retained budgets
 
-Pass `--run RUN_ID --cycle CYCLE_ID` for iteration reviewers. Reviewers in one pass share a stable cycle. Resume keeps it. The first actual invocation reserves the cycle atomically; reuse reserves none. New review after fixes uses a new cycle. The initial allowance is five cycles; full and compact status expose `review_budget` with used, limit and remaining counts, including for older retained runs.
+Supply `run` and `cycle` in prepare requests for iteration reviewers. Reviewers in one pass share a stable cycle. Resume keeps it. The first actual invocation reserves the cycle atomically; reuse reserves none. New review after fixes uses a new cycle. The initial allowance is five cycles; resume/status expose `review_budget`, including older retained runs.
 
 An interruption resume or automatic retry retains that allowance. When it is exhausted, stop and preserve state. A new explicit user invocation requesting further review, or a subsequent explicit instruction to continue, may authorize a fresh bounded allowance under the **same run**:
 
@@ -99,9 +84,9 @@ Continuation changes no existing cycles, retries, CI counters, task results, fin
 
 Reserve counters before dispatch:
 
-- `--retry`: one eligible retry per task in the same cycle. Keep the original incomplete attempt and reason.
-- `--ci-repair`: five repairs per cycle. Omit cycle for cycle zero before review.
-- `--ci-rerun --head SHA`: three transient reruns per head.
+- `retry:true`: one eligible retry per task in the same cycle. Keep the original incomplete attempt and reason.
+- `ci_repair:true`: five repairs per cycle. Omit cycle for cycle zero before review.
+- `ci_rerun:true` with `head:SHA`: three transient reruns per head.
 
 Batch options apply to each invocation. Group only tasks eligible for the same options. Otherwise use separate batches or single starts. Never edit manifests, erase claims or replace a run to bypass limits. Concurrent callers serialize per PR. Unfinished claims prevent duplicate launches. Immutable outputs identified by content retain original attempts and progress.
 

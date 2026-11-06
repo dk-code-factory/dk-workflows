@@ -5,6 +5,8 @@ description: Publish verified inline PR findings when authorized; report workflo
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
+Persist workflow state only when it reduces total token consumption, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
+
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
 Read original review results, verification dispositions, and the current head and diff. Publish only completed, verified findings. Each comment must map to a changed line and preserve its evidence. An incomplete review may post independently confirmed findings as `COMMENT`; report remaining coverage and verification blockers privately to the invoking user. Withhold findings whose evidence is insufficient.

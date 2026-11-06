@@ -6,6 +6,15 @@ from urllib.parse import urlparse
 from shared.github_reads import run as github_run
 
 
+def scope_keys(chain, scope='effective'):
+    """Repository, upstream, user precedence for whole-policy settings."""
+    if scope not in {'effective', 'repo', 'user'}:
+        raise ValueError('Scope must be effective, repo or user')
+    if not chain:
+        raise ValueError('Repository identity is required')
+    return [*chain, 'user'] if scope == 'effective' else ['user' if scope == 'user' else chain[0]]
+
+
 def checkout_roots(cwd):
     """Locate checkout and shared Git storage; a non-repository cwd protects neither."""
     cwd = Path(cwd).resolve()

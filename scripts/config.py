@@ -8,20 +8,27 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'runtime'))
 from state import read, write
 import config
+import settings
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--repository',required=True)
     p.add_argument('--upstream')
+    p.add_argument('--checkout', type=Path, default=Path.cwd())
+    p.add_argument('--pr')
     sub=p.add_subparsers(dest='action',required=True)
-    sub.add_parser('show')
+    c=sub.add_parser('show')
+    c.add_argument('--section', action='append', choices=settings.SECTIONS,
+                   help='Read selected workflow/PR domains together without storing a snapshot')
     for action in ('set','reset'):
         c=sub.add_parser(action);c.add_argument('--scope',choices=['repo','user'],default='repo')
         if action=='set':c.add_argument('--file',type=Path,required=True)
     c=sub.add_parser('preflight');c.add_argument('--available',type=Path,required=True)
     c.add_argument('--workflow',choices=['fix','review'],default='fix')
     a=p.parse_args()
-    if a.action=='show':result=config.effective(a.repository,a.upstream)
+    if a.action=='show':
+        result = (settings.load_sections(a.repository, checkout=a.checkout, pr=a.pr, upstream=a.upstream,
+                                         sections=a.section) if a.section else config.effective(a.repository,a.upstream))
     elif a.action=='preflight':result=config.preflight(config.effective(a.repository,a.upstream)['settings'],read(a.available),workflow=a.workflow)
     else:
         target=config.path(a.repository if a.scope=='repo' else None)

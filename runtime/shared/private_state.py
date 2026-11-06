@@ -9,23 +9,23 @@ import time
 from pathlib import Path
 
 from shared.ci_deadline import ACTIVE_BUDGET
+from shared.storage_paths import location
 
 def root(repo):
     parts = repo.split("/")
     if len(parts) != 3 or any(not re.fullmatch(r"[A-Za-z0-9_.-]+", p) or p in {".", ".."} for p in parts):
         raise ValueError("repo must be HOST/OWNER/REPO")
-    data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
-    if not data.is_absolute():
-        raise ValueError("XDG_DATA_HOME must be absolute")
-    return data / "dk-pr-iter" / Path(*parts)
+    return location('legacy_runs') / Path(*parts)
 
 
 def read(path, default):
     return json.loads(path.read_text()) if path.exists() else default
 
 
-def write(path, value):
-    atomic_text(path, json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + '\n')
+def write(path, value, *, ensure_ascii=False):
+    content = json.dumps(value, indent=2, sort_keys=True, ensure_ascii=ensure_ascii, allow_nan=False)
+    Path(path).parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    atomic_text(path, content + '\n')
 
 
 def sync_directory(path):

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Manage private settings for bundled PR skills."""
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import sys
@@ -9,7 +8,8 @@ import fcntl
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'runtime'))
 from shared import ci_exceptions, pr_size, pr_partition_policy
 from shared.repository_scope import identities, repository
-from shared.private_state import read, write, atomic_text
+from shared.private_state import write, atomic_text
+from settings import domain_load, domain_path
 import commit_policy
 
 
@@ -50,44 +50,14 @@ def main(arguments=None):
         value={k:getattr(a,k) for k in ('kind','workflow','job','test','signature','reason')} if a.action=='add' else None
         return ci_exceptions.configure(key,a.action,scope=a.scope,value=value,entry_id=getattr(a,'id',None))
     chain=identities(a.cwd,a.pr)
-    if a.command=='commit-policy' and a.action=='show':return commit_policy.load(chain,a.scope)
     if a.command=='pr-size':
         if a.action=='list':return pr_size.load(chain,a.scope)
         settings={k:getattr(a,k) for k in pr_size.DEFAULTS if getattr(a,k,None) is not None}
         return pr_size.configure(chain,a.action,scope=a.scope,settings=settings,keys=getattr(a,'keys',None))
-    data=ci_exceptions.data_root()
-    def location(key):
-        if a.command=='commit-policy':return commit_policy.path(key)
-        if a.command=='completion':
-            base=data.parent/'dk-pr-iter/completion-prompts'
-            return base/'user.txt' if key=='user' else base/'repositories'/(hashlib.sha256(key.encode()).hexdigest()[:24]+'.txt')
-        folder=(data/'user' if a.command=='rules' else data) if key=='user' else data/hashlib.sha256(key.encode()).hexdigest()[:24]
-        return folder/(a.command+'.json')
     if a.action=='show':
-        levels=chain+['user'] if a.scope=='effective' else ['user' if a.scope=='user' else chain[0]]
-        if a.command=='drafting':
-            merged, sources = {}, {}
-            for key in reversed(levels):
-                target=location(key)
-                if target.exists():
-                    for role,value in read(target,{}).items():
-                        merged[role]=value
-                        sources[role]={'source':key,'file':str(target)}
-            return {'value':merged,'sources':sources}
-        for key in levels:
-            target=location(key)
-            if target.exists():
-                value={'prompt':target.read_text()} if a.command=='completion' else read(target,None)
-                if a.command=='completion' and (not value['prompt'].strip() or '\x00' in value['prompt']):
-                    raise ValueError('Malformed completion prompt; repair it rather than falling back')
-                if a.command=='rules' and not value.get('rules'):continue
-                return {'value':value,'source':key,'file':str(target)}
-        if a.command=='completion':
-            target=Path(__file__).resolve().parents[1]/'docs/pr/default-completion.md'
-            return {'value':{'prompt':target.read_text()},'source':'default','file':str(target)}
-        return {'value':None,'source':'default'}
+        return domain_load(a.command, chain, a.scope)
     if a.scope=='effective':raise ValueError('Mutations require repo or user scope')
-    target=location('user' if a.scope=='user' else chain[0])
+    target=domain_path(a.command, 'user' if a.scope=='user' else chain[0])
     target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     with target.with_suffix('.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)

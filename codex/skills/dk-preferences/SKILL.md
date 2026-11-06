@@ -5,6 +5,8 @@ description: Add, update, list, inspect or remove personal and repository prefer
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
+Persist workflow state only when it reduces total token consumption, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
+
 Set PLUGIN_ROOT to this plugin's root directory. Read [the preference contract and commands](../../../docs/preferences.md). Use `scripts/preferences.py` for private catalog access. Existing saved PR rules are separate; do not convert them automatically.
 
 For listing or inspection, use `list` or `show` and `render` the persisted records. For removal, identify the requested records and use the observed revision. Preserve unrelated records.

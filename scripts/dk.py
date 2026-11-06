@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bookkeeping only: generate specs, inspect, claim and record. Agents invoke skills."""
+"""Prepare, finish and resume native tasks; agents invoke skills."""
 import argparse
 import json
 import os
@@ -16,6 +16,27 @@ def main():
     parser.add_argument('--pr', required=True, help='Canonical https PR URL')
     parser.add_argument('--checkout', type=Path, help='Repository whose state must remain external')
     sub = parser.add_subparsers(dest='command', required=True)
+    p = sub.add_parser('prepare', help='Define, capture and claim native tasks in one call')
+    p.add_argument('--file', type=Path, required=True, help='Tasks and retained run/cycle options')
+    p = sub.add_parser('resume', help='Recapture saved task definitions and return compact status')
+    p.add_argument('--key', action='append', default=[])
+    p.add_argument('--run')
+    p.add_argument('--explain', action='store_true')
+    p = sub.add_parser('result', help='Read one validated saved result section')
+    p.add_argument('--key', required=True)
+    p.add_argument('--section', choices=['findings', 'normalized', 'original'], default='findings')
+    p = sub.add_parser('progress', help='Read a bounded page of retained dispositions and acceptances')
+    p.add_argument('--run', required=True)
+    p.add_argument('--after', type=int, default=0)
+    p.add_argument('--limit', type=int, default=20)
+    p = sub.add_parser('finish', help='Record a native result using its retained definition')
+    p.add_argument('--key', required=True)
+    p.add_argument('--claim', required=True)
+    p.add_argument('--report', type=Path, required=True, help='Skill report with explicit complete boolean')
+    p.add_argument('--original', type=Path, help='Original output; defaults to report bytes')
+    p.add_argument('--status', choices=['complete', 'failed', 'incomplete'])
+    p.add_argument('--native-evidence', type=Path)
+    p.add_argument('--progress', type=Path)
     p = sub.add_parser('spec')
     p.add_argument('--definition', type=Path, required=True,
                    help='Explicit make_spec fields, excluding repository and pr')
@@ -76,6 +97,24 @@ def main():
     p.add_argument('--reason', required=True)
     p.add_argument('--recover', help='Close this stopped claim without invoking; reconcile domain writes first')
     args = parser.parse_args()
+    if args.command in {'prepare', 'resume', 'finish', 'result', 'progress'}:
+        from tasks import Tasks
+        tasks = Tasks(args.repository, args.pr, checkout=args.checkout)
+        if args.command == 'prepare':
+            result = tasks.prepare(read(args.file))
+        elif args.command == 'resume':
+            result = tasks.resume(keys=args.key, run=args.run, explain=args.explain)
+        elif args.command == 'result':
+            result = tasks.result(args.key, args.section)
+        elif args.command == 'progress':
+            result = tasks.progress(args.run, after=args.after, limit=args.limit)
+        else:
+            result = tasks.finish(args.key, args.claim, (args.original or args.report).read_bytes(),
+                                  read(args.report), status=args.status,
+                                  progress=read(args.progress) if args.progress else None,
+                                  native_evidence=args.native_evidence.read_bytes() if args.native_evidence else None)
+        print(json.dumps(result, sort_keys=True))
+        return
     if args.command == 'spec':
         result = make_spec(repository=args.repository, pr=args.pr, **read(args.definition))
         print(json.dumps(result, sort_keys=True))

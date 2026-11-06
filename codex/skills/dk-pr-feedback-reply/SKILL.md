@@ -5,6 +5,8 @@ description: Reply to affected PR feedback and resolve fully answered inline thr
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
+Persist workflow state only when it reduces total token consumption, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
+
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
 Read the original thread, comment or review, plus current code and validation. Reply only with a supported repository answer. If internal failures prevent that answer, withhold the affected reply and report the reason privately; never substitute a diagnostic reply. Select the destination from the structured original source in the complete PR evidence, following [publication and recovery](../../../docs/pr/publication.md):

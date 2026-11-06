@@ -4,6 +4,7 @@ import re
 
 from shared.ci_exceptions import data_root
 from shared.private_state import read
+from shared.repository_scope import scope_keys
 from state import capture, make_spec
 
 
@@ -26,10 +27,7 @@ def path(key):
 
 
 def load(chain, scope='effective'):
-    if scope not in {'effective', 'repo', 'user'}:
-        raise ValueError('Commit policy scope must be effective, repo or user')
-    levels = [*chain, 'user'] if scope == 'effective' else ['user' if scope == 'user' else chain[0]]
-    for key in levels:
+    for key in scope_keys(chain, scope):
         source = path(key)
         if source.exists():
             return {'value': validate(read(source, None)), 'source': key, 'file': str(source)}

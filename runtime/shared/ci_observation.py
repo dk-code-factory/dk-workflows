@@ -10,16 +10,16 @@ from pathlib import Path
 from shared.private_state import read, write, root as data_root
 from shared.publication import digest
 from shared import publication
+from shared.storage_paths import location
 
 ACTIVE = ContextVar('ci_observation', default=None)
 
 
 def root(repository):
     data_root(repository)  # validates the repository key without touching disk
-    base = Path(os.environ.get('XDG_STATE_HOME') or Path.home()/'.local/state')
-    path = base/'dk-pr-skills/v2/ci'/repository
+    path = location('ci')/repository
     from shared.repository_scope import inside_checkout
-    if (not base.is_absolute() or inside_checkout(path,Path.cwd())
+    if (inside_checkout(path,Path.cwd())
             or path.resolve().is_relative_to(Path(__file__).resolve().parents[2])):
         raise ValueError('CI state must remain outside repositories and package')
     return path

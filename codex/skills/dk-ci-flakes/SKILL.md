@@ -5,6 +5,8 @@ description: Find flaky tests linked to open issues and verify CI exceptions for
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
+Persist workflow state only when it reduces total token consumption, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
+
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
 Run `python3 PACKAGE_ROOT/runtime/dk-ci/scripts/flaky_tests.py --repo HOST/OWNER/REPO --cwd REPO discover`, using the PR's base repository. Discovery defaults to 30 days, 100 runs and 500 issues; narrow these with `--days`, `--max-runs` and `--max-issues`. Replace `discover` with `list` or `sync` to refresh saved issue evidence; `list --history` also includes observations.

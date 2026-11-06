@@ -1,8 +1,7 @@
 """Workflow settings managed alongside PR policies by the dk-config skill."""
-from pathlib import Path
-import os
 import re
 from state import digest, make_spec, read
+from shared.storage_paths import location
 
 CYCLE_PHASES = ('before_cycle', 'after_cycle')
 FINALIZER_ROLES = ('cleanup', 'decisions', 'description', 'reply', 'ci', 'publish')
@@ -127,10 +126,7 @@ def validate(settings):
 
 
 def path(repository=None):
-    base = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home()/'.config')
-    if not base.is_absolute():
-        raise ValueError('XDG_CONFIG_HOME must be absolute')
-    return base/'dk-workflows/v2'/((digest(repository.lower()) if repository else 'user') + '.json')
+    return location('config')/((digest(repository.lower()) if repository else 'user') + '.json')
 
 
 def effective(repository, upstream=None):
@@ -178,6 +174,34 @@ def preflight(settings, available, *, workflow='fix'):
     return {'ready': not missing, 'missing_selected_skills': missing}
 
 
+def _occurrence_spec(repository, pr, loaded, definition, occurrence, *, responsibility,
+                     prefix, options, assigned_instructions=None):
+    """Shared capture for hooks and finalizers; preserve their v2 fingerprints."""
+    allowed = {'skill_identity', 'resources', 'instructions', 'inputs', 'options',
+               'git', 'governing_inputs_complete', 'cacheable', 'native_review'}
+    if assigned_instructions is None:
+        allowed.add('assigned_instructions')
+    if not isinstance(definition, dict) or set(definition) - allowed:
+        raise ValueError(prefix + ' definitions supply execution resources, assignment and inputs')
+    if not isinstance(definition.get('options', {}), dict):
+        raise ValueError(prefix + ' execution options must be an object')
+    instructions = definition.get('instructions', {})
+    if not isinstance(instructions, dict):
+        raise ValueError(prefix + ' instructions must be a label-to-resource-path map')
+    instructions = dict(instructions)
+    for index, source in enumerate(loaded['sources']):
+        label = prefix + '_configuration_' + str(index)
+        if label in instructions:
+            raise ValueError('Reserved ' + prefix + ' configuration input label')
+        instructions[label] = source
+    execution = dict(definition)
+    execution.update(responsibility=responsibility + ':' + digest(occurrence),
+                     instructions=instructions, options=options)
+    if assigned_instructions is not None:
+        execution['assigned_instructions'] = assigned_instructions
+    return make_spec(repository=repository, pr=pr, **execution)
+
+
 def make_finalizer_spec(*, repository, pr, run, finalizer, definition, upstream=None):
     """Capture one configured finalizer; native agents execute the plan."""
     if not isinstance(run, str) or not run.strip():
@@ -188,32 +212,17 @@ def make_finalizer_spec(*, repository, pr, run, finalizer, definition, upstream=
     if not any(finalizer in group for group in groups):
         raise ValueError('No configured finalizer with this reference')
     skill = finalizer.removeprefix('/skill/')
-    if (not isinstance(definition, dict) or set(definition) - {
-            'skill_identity', 'resources', 'assigned_instructions', 'instructions', 'inputs',
-            'options', 'git', 'governing_inputs_complete', 'cacheable'}):
+    if not isinstance(definition, dict):
         raise ValueError('Finalizer definitions supply resolved resources, assignment and execution inputs')
     if definition.get('skill_identity') != skill:
         raise ValueError('Resolve and supply the configured finalizer skill identity')
-    if not isinstance(definition.get('options', {}), dict):
-        raise ValueError('Finalizer execution options must be an object')
-    instructions = definition.get('instructions', {})
-    if not isinstance(instructions, dict):
-        raise ValueError('Finalizer instructions must be a label-to-resource-path map')
-    instructions = dict(instructions)
-    for index, source in enumerate(loaded['sources']):
-        label = 'finalizer_configuration_' + str(index)
-        if label in instructions:
-            raise ValueError('Reserved finalizer configuration input label')
-        instructions[label] = source
     # Identity follows the skill across reorderings. Plan/context changes stale
     # its evidence without hiding an unfinished claim behind a new task id.
     occurrence = {'run': run, 'skill': skill}
-    execution = dict(definition)
-    execution.update(
-        responsibility='finalizer:' + digest(occurrence), instructions=instructions,
+    return _occurrence_spec(repository, pr, loaded, definition, occurrence,
+        responsibility='finalizer', prefix='finalizer',
         options={'finalization': {**occurrence, 'plan': loaded['settings']['finalizers']},
                  'execution': definition.get('options', {})})
-    return make_spec(repository=repository, pr=pr, **execution)
 
 
 def make_hook_spec(*, repository, pr, run, cycle, phase, hook_id, definition, upstream=None):
@@ -226,9 +235,7 @@ def make_hook_spec(*, repository, pr, run, cycle, phase, hook_id, definition, up
                  if entry['id'] == hook_id), None)
     if hook is None:
         raise ValueError('No configured hook for this phase and id')
-    if not isinstance(definition, dict) or set(definition) - {
-            'skill_identity', 'resources', 'instructions', 'inputs', 'options', 'git',
-            'governing_inputs_complete', 'cacheable'}:
+    if not isinstance(definition, dict):
         raise ValueError('Hook definitions supply execution resources and inputs; '
                          'identity and instructions come from the configured occurrence')
     runner = definition.get('skill_identity')
@@ -237,22 +244,8 @@ def make_hook_spec(*, repository, pr, run, cycle, phase, hook_id, definition, up
             raise ValueError('Resolve and supply the configured hook skill identity')
     elif runner not in {'dk-workflows:dk-pr-fix', 'dk-workflows:dk-pr-review'}:
         raise ValueError('Instruction hooks run in the owning PR workflow agent')
-    if not isinstance(definition.get('options', {}), dict):
-        raise ValueError('Hook execution options must be an object')
-    instructions = definition.get('instructions', {})
-    if not isinstance(instructions, dict):
-        raise ValueError('Hook instructions must be a label-to-resource-path map')
-    instructions = dict(instructions)
-    for index, source in enumerate(loaded['sources']):
-        label = 'cycle_hook_configuration_' + str(index)
-        if label in instructions:
-            raise ValueError('Reserved hook configuration input label')
-        instructions[label] = source
     occurrence = {'run': run, 'cycle': cycle, 'phase': phase, 'id': hook_id}
-    execution = dict(definition)
-    execution.update(
-        responsibility='cycle-hook:' + digest(occurrence),
-        assigned_instructions=hook['instructions'], instructions=instructions,
+    return _occurrence_spec(repository, pr, loaded, definition, occurrence,
+        responsibility='cycle-hook', prefix='cycle_hook', assigned_instructions=hook['instructions'],
         options={'cycle_hook': occurrence, 'configured': hook.get('options', {}),
                  'execution': definition.get('options', {})})
-    return make_spec(repository=repository, pr=pr, **execution)

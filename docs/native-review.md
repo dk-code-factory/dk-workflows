@@ -11,12 +11,12 @@ The coordinator is the trusted collector of native tool observations. The store 
 1. Resolve the skill and pin task inputs before launch. Use responsibility `content-review` for configured reviewers, and `finding-verification` for independent verification. Prepare immutable context and output paths outside the source checkout. Supply the exact task, pinned source, original guidance, resolved resources, permitted actions and required completion report. Keep source inspection read-only. The skill manages its private state and lifecycle.
    Include the complete [preference handoff](preferences.md#workflow-handoffs-and-reuse), retaining matched paths and conditional decisions. Reviewers and finding verifiers apply records only within that scope and request refreshed selection before expanding paths.
    Include a `native_review` contract in the task definition before claiming: schema `1`, resolved `skill_version`, and the complete applicable `passes` list. Each pass has a unique `role` and `drivers`, a list of exact argument arrays for its required deeper-look commands. Derive requirements from the installed skill and referenced procedures; capture those resources. Resolve conditional passes from pinned evidence and retain the applicability decision in governing inputs. An empty pass list is valid only when the selected skill requires no independent children; it still requires successful native root evidence. Do not weaken requirements after execution to match observed work.
-2. After `start-batch` returns `invoke`, launch the reviewer with native tools. Save its handle with the task key and claim id in private operational progress, outside fingerprinted inputs. Let the skill manage its internal passes and required resources.
+2. After `prepare` returns `invoke`, launch the reviewer with native tools. Save its actual handle with the key and claim in private operational progress, outside fingerprinted inputs. Let the skill manage its internal passes and resources.
 3. Wait on that handle for a terminal host outcome. Running, queued, observation timeout and progress-only responses are incomplete. Save the terminal outcome and original final output. Collect each required child's actual spawn observation, distinct native handle, parent relationship, successful terminal observation and separate original output, plus each required driver's successful completed tool observation in that same child session. Reading or printing a driver's instructions does not establish driver execution. If native delegation or its evidence transport is unavailable, report incomplete. Do not invent a handle or reconstruct completed-session provenance.
 
 ## Capture host observations
 
-Call `native-binding --spec REVIEW.json --claim CLAIM_ID` through the task-state helper. It returns the expected `binding` and frozen `requirements` for that active, unchanged claim; it does not create execution evidence. Copy the binding fields into a private observation object, then populate only observed host facts:
+Use prepare's `native.binding` and `native.requirements` for the active claim; these expectations create no execution evidence. Low-level integrations may still call `native-binding --spec REVIEW.json --claim CLAIM_ID`. Copy binding fields into a private observation object, then populate only observed host facts:
 
 ```json
 {
@@ -42,7 +42,7 @@ Call `native-binding --spec REVIEW.json --claim CLAIM_ID` through the task-state
 }
 ```
 
-The example omits binding fields for readability; all fields returned in `binding` are required. Include every applicable role, in any order, and its drivers in declared order. Host handle and tool-call identities must be distinct. Preserve exact evidence bytes with `record --native-evidence OBSERVATIONS.json`. If transport is unsupported or unavailable, retain `availability:"unsupported"` or `"unavailable"` and record incomplete. Set `inventory_complete:true` only after observing the complete required child and tool execution inventory; a parent's incomplete trace cannot establish it.
+The example omits binding fields for readability; all binding fields are required. Include every applicable role and its drivers in declared order. Host handles and tool-call identities must be distinct. Preserve exact evidence bytes with `finish --native-evidence OBSERVATIONS.json`. Unsupported/unavailable transport remains incomplete. Set `inventory_complete:true` only after observing the complete required inventory.
 
 ## Record the outcome
 
