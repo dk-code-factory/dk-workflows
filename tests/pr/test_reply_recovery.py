@@ -1,5 +1,6 @@
 """Historical reply recovery never silently repeats a remote mutation."""
 from copy import deepcopy
+import fcntl
 import importlib.util
 from pathlib import Path
 import subprocess
@@ -34,7 +35,7 @@ def remote(monkeypatch):
                 return {'login': self.actor}
             if payload is not None:
                 value = {'id': 100+len(self.writes), 'body': payload['body'], 'user': {'login': self.actor},
-                         'html_url': PR+'#issuecomment-'+str(100+len(self.writes))}
+                         'html_url': self.metadata['url']+'#issuecomment-'+str(100+len(self.writes))}
                 self.comments.append(value)
                 self.writes.append(deepcopy(value))
                 if self.lose_response:
@@ -101,8 +102,40 @@ def test_verified_reply_disposition_preserves_receipt_and_unblocks_repeated_reco
     assert saved['request'] == original['request']
     assert len(saved['reply_dispositions']) == 1
     assert len(remote.writes) == 1
-    # A later distinct authorized action is no longer held behind a pending reply.
+    # A distinct authorized action remains preparable with the historical receipt retained.
     assert publisher.prepare(remote.request(body='A new answer', action_id='new-question'))['status'] == 'prepared'
+
+
+@pytest.mark.parametrize('state', ['unavailable', 'edited'])
+@pytest.mark.parametrize('source_kind,fragment', [('issue_comment', 'issuecomment-'), ('review', 'pullrequestreview-')])
+def test_recovery_preserves_canonical_mixed_case_urls(remote, state, source_kind, fragment):
+    canonical_pr = PR.replace('/owner/repo/', '/Owner/Repo/')
+    remote.metadata['url'] = canonical_pr
+    remote.source['html_url'] = canonical_pr+'#'+fragment+'10'
+    request = remote.request(pr=canonical_pr)
+    request['source']['kind'] = source_kind
+    operation = publisher.prepare(request)['operation']
+    publisher.publish(operation)
+    original = publication.load(operation)
+    if state == 'unavailable':
+        remote.comments.clear()
+    else:
+        remote.comments[0]['body'] = 'The historical answer was edited.'
+    remote.disposition(operation)
+    assert publisher.publish(operation, reconcile=True)['reply_obligation'] == 'no_replacement'
+    saved = publication.load(operation)
+    assert saved['request'] == original['request']
+    assert saved['receipt'] == original['receipt']
+    assert saved['request']['approved']['source']['url'] == remote.source['html_url']
+    assert len(remote.writes) == 1
+
+
+def test_inspection_rejects_outside_storage_before_creating_a_lock(remote, tmp_path):
+    operation = tmp_path/'outside-publication.json'
+    with pytest.raises(ValueError, match='private workflow storage'):
+        publisher.recovery().inspect(operation)
+    assert not operation.exists()
+    assert not operation.with_name(operation.name+'.lock').exists()
 
 
 def test_required_replacement_is_separately_authorized_linked_and_sent_once(remote):
@@ -284,6 +317,8 @@ def test_disposition_waits_for_replacement_dispatch_before_superseding(remote, m
     prechecked, resume, disposing, disposed = (threading.Event() for _ in range(4))
     failures = []
     original_write = publication.write
+    original_flock = fcntl.flock
+    dispatch_path = Path(operation).parent.parent/'.dispatch.lock'
 
     def write(path, value):
         if str(path) == replacement and value['status'] == 'pending':
@@ -294,6 +329,18 @@ def test_disposition_waits_for_replacement_dispatch_before_superseding(remote, m
 
     monkeypatch.setattr(publication, 'write', write)
 
+    def flock(lock, flags):
+        if threading.current_thread() is disposition and Path(lock.name) == dispatch_path:
+            try:
+                original_flock(lock, flags | fcntl.LOCK_NB)
+            except BlockingIOError:
+                disposing.set()
+            else:
+                raise AssertionError('Disposition acquired the dispatch lock while publication was paused')
+        return original_flock(lock, flags)
+
+    monkeypatch.setattr(fcntl, 'flock', flock)
+
     def publish():
         try:
             publisher.publish(replacement)
@@ -301,7 +348,6 @@ def test_disposition_waits_for_replacement_dispatch_before_superseding(remote, m
             failures.append(exc)
 
     def dispose():
-        disposing.set()
         try:
             remote.disposition(operation)
         except BaseException as exc:
@@ -315,8 +361,8 @@ def test_disposition_waits_for_replacement_dispatch_before_superseding(remote, m
     try:
         assert prechecked.wait(5), 'Replacement did not reach the pre-dispatch window'
         disposition.start()
-        assert disposing.wait(5)
-        assert not disposed.wait(0.1), 'Disposition superseded a replacement after its precheck'
+        assert disposing.wait(5), 'Disposition did not reach the held dispatch lock'
+        assert not disposed.is_set(), 'Disposition superseded a replacement after its precheck'
     finally:
         resume.set()
         publishing.join(5)

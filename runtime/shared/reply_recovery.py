@@ -9,6 +9,14 @@ from shared import publication
 from shared.private_state import write
 
 
+def same_comment_url(actual, expected):
+    if not isinstance(actual, str):
+        return False
+    actual_pr, separator, fragment = actual.partition('#')
+    expected_pr, _, expected_fragment = expected.partition('#')
+    return separator == '#' and actual_pr.lower() == expected_pr.lower() and fragment == expected_fragment
+
+
 class Recovery:
     def __init__(self, *, api, metadata, endpoint, replies, handler):
         self.api, self.metadata, self.endpoint = api, metadata, endpoint
@@ -43,8 +51,8 @@ class Recovery:
                      'review': 'pullrequestreview-'}
         expected_url = pr + '#' + fragments[source['kind']] + str(source['id'])
         original = self.api(pr, routes[source['kind']] + str(source['id']))
-        if (source.get('url') != expected_url or original.get('id') != source['id']
-                or original.get('html_url') != expected_url or not isinstance(original.get('body'), str)
+        if (not same_comment_url(source.get('url'), expected_url) or original.get('id') != source['id']
+                or not same_comment_url(original.get('html_url'), expected_url) or not isinstance(original.get('body'), str)
                 or not original.get('user', {}).get('login')):
             raise ValueError('Original feedback identity or read access is unavailable or ambiguous')
         context = None
@@ -80,7 +88,7 @@ class Recovery:
             state = 'unavailable'
         else:
             fragment = 'discussion_r' if request['kind'] == 'reply-inline' else 'issuecomment-'
-            if (remote.get('id') != receipt['id'] or remote.get('html_url') != pr+'#'+fragment+str(receipt['id'])
+            if (remote.get('id') != receipt['id'] or not same_comment_url(remote.get('html_url'), pr+'#'+fragment+str(receipt['id']))
                     or remote.get('user', {}).get('login') != actor or ids.count(receipt['id']) != 1
                     or (request['kind'] == 'reply-inline' and remote.get('in_reply_to_id') != request['parent'])):
                 raise ValueError('Reply identity, membership or read access is ambiguous')
@@ -95,6 +103,7 @@ class Recovery:
 
     def inspect(self, path):
         path = Path(path).resolve()
+        self.load(path)
         with path.with_name(path.name + '.lock').open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             value = self.load(path)
