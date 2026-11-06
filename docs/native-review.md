@@ -6,6 +6,8 @@ Use the host's native agent tools to invoke selected reviewer skills. A complete
 
 The coordinator is the trusted collector of native tool observations. The store checks their structure, invocation and input bindings; it cannot authenticate arbitrary supplied JSON or prove semantic adherence to every instruction. Reviewer-written role files or an aggregate claim are not host observations. When the host cannot expose the necessary child/tool inventory, record incomplete with unavailable-provenance diagnostics. Missing telemetry does not prove nonexecution. Do not launch model subprocesses to replace unavailable native evidence.
 
+Reviewers and independent finding verifiers use the same [invocation contract](invocations.md) as process agents, supporting skills, hooks and drafting. Preserve the custom prompt and skill options, and honor configured `agent.model` and `agent.reasoning_effort` through native launch controls. Verify host support before claiming work. A fixed native role or unavailable model that prevents honoring a request is a blocker; do not silently inherit different settings. Save the requested invocation and observable actual execution settings with the handle. Follow host restrictions on context inheritance when selecting another model.
+
 ## Launch and wait
 
 1. Resolve the skill and pin task inputs before launch. Use responsibility `content-review` for configured reviewers, and `finding-verification` for independent verification. Prepare immutable context and output paths outside the source checkout. Supply the exact task, pinned source, original guidance, resolved resources, permitted actions and required completion report. Keep source inspection read-only. The skill manages its private state and lifecycle.

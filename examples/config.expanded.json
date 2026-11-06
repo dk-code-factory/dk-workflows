@@ -1,0 +1,120 @@
+{
+  "$schema": "../schemas/config.schema.json",
+  "schema_version": 1,
+  "accounts": {
+    "personal": []
+  },
+  "skill_settings": {},
+  "processes": {
+    "pr-iter": {
+      "run": "dk-pr-iter",
+      "routes": {
+        "own_pr": "pr-fix",
+        "other_pr": "pr-review"
+      }
+    },
+    "pr-fix": {
+      "run": "dk-pr-fix",
+      "skills": [
+        "dk-pr-feedback-read",
+        "dk-pr-decisions",
+        "dk-pr-feedback-address",
+        "dk-pr-split",
+        "dk-pr-reviewers-run",
+        "dk-commit-split",
+        "dk-commit-message",
+        "dk-pr-description",
+        "dk-pr-feedback-reply",
+        "dk-ci",
+        "dk-ci-flakes",
+        "dk-pr-publish"
+      ],
+      "limits": {
+        "review_cycles": 5,
+        "retries_per_task": 1,
+        "ci_repairs_per_cycle": 5,
+        "ci_reruns_per_head": 3
+      },
+      "finalizers": [
+        "dk-commit-split",
+        "dk-pr-decisions",
+        "dk-pr-description",
+        "dk-pr-feedback-reply",
+        "dk-ci",
+        "dk-pr-publish"
+      ],
+      "actions": {
+        "push_commits": true,
+        "rewrite_commits": true,
+        "edit_pr": true,
+        "reply_to_feedback": true,
+        "resolve_threads": true,
+        "create_draft_prs": true,
+        "request_review": true,
+        "post_findings": false,
+        "approve_ci": false,
+        "approve": false,
+        "merge": {
+          "enabled": false,
+          "method": "squash"
+        }
+      },
+      "hooks": {
+        "before_cycle": [],
+        "after_cycle": []
+      }
+    },
+    "pr-review": {
+      "run": "dk-pr-review",
+      "verification": {
+        "skill": "dk-pr-review",
+        "instructions": "Independently verify candidate findings against pinned source and governing instructions. Return confirmed, rejected or uncertain findings with evidence. Do not edit or publish."
+      },
+      "skills": [
+        "dk-pr-feedback-read",
+        "dk-pr-reviewers-run",
+        "dk-pr-review-post",
+        "dk-ci-approve",
+        "dk-ci",
+        "dk-ci-flakes",
+        "dk-pr-publish"
+      ],
+      "limits": {
+        "review_cycles": 5,
+        "retries_per_task": 1,
+        "ci_repairs_per_cycle": 5,
+        "ci_reruns_per_head": 3
+      },
+      "actions": {
+        "push_commits": false,
+        "rewrite_commits": false,
+        "edit_pr": false,
+        "reply_to_feedback": false,
+        "resolve_threads": false,
+        "create_draft_prs": false,
+        "request_review": false,
+        "post_findings": true,
+        "approve_ci": true,
+        "approve": false,
+        "merge": {
+          "enabled": false,
+          "method": "squash"
+        }
+      },
+      "hooks": {
+        "before_cycle": [],
+        "after_cycle": []
+      }
+    },
+    "commit-message": {
+      "run": "dk-commit-message"
+    },
+    "issue": {
+      "run": "dk-issue"
+    },
+    "pr-reviewers-run": {
+      "run": "dk-pr-reviewers-run"
+    }
+  },
+  "extensions": {}
+}

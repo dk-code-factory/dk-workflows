@@ -11,15 +11,17 @@ from state import write
 
 
 def test_settings_precedence_and_missing_selected_skills():
-    write(config.path(),{'reviewers':[{'skill':'review:a'}],'skills':{'reply':'custom:reply'}})
-    write(config.path('github.com/upstream/repo'),{'reviewers':[{'skill':'review:b','required':False}]})
-    write(config.path('github.com/fork/repo'),{'skills':{'description':'custom:description'}})
+    write(config.path(),{'skill_settings':{'dk-pr-reviewers-run':{'options':{'reviewers':['review:a']}}},
+                         'processes':{'pr-fix':{'skills':['custom:reply']}}})
+    write(config.path('github.com/upstream/repo'),{'skill_settings':{'dk-pr-reviewers-run':{
+        'options':{'reviewers':[{'skill':'review:b','required':False}]}}}})
+    write(config.path('github.com/fork/repo'),{'processes':{'issue':{'run':'custom:description'}}})
     effective=config.effective('github.com/fork/repo','github.com/upstream/repo')['settings']
-    assert effective['reviewers']==[{'skill':'review:b','required':False}]
-    assert effective['skills']['reply']=='custom:reply'
-    assert effective['skills']['description']=='custom:description'
+    assert effective['skill_settings']['dk-pr-reviewers-run']['options']['reviewers']==[{'skill':'review:b','required':False}]
+    assert effective['processes']['pr-fix']['skills']==['custom:reply']
+    assert effective['processes']['issue']['run']=='custom:description'
     assert config.preflight(effective,[])['missing_selected_skills']
-    available=list(effective['skills'].values())+['review:b']
+    available=sorted({call['skill'] for _,call in config.calls(effective) if 'skill' in call})
     assert config.preflight(effective,available)['ready']
 
 
@@ -46,42 +48,41 @@ def test_bundled_helpers_work_from_a_copied_plugin_without_an_external_repositor
     assert not (installed/'test-dependencies.json').exists()
 
 
-def test_default_roles_resolve_to_bundled_skills():
+def test_default_process_invocations_resolve_to_bundled_skills():
     skills={p.parent.name for p in (ROOT/'codex/skills').glob('*/SKILL.md')}
     assert len(skills)==20
-    for identity in config.DEFAULTS['skills'].values():
-        owner,name=identity.split(':',1)
-        assert owner=='dk-workflows' and name in skills
+    for _,call in config.calls(config.DEFAULTS):
+        assert call['skill'] in skills
 
 
 def test_settings_roundtrip_preserves_native_options_and_references(tmp_path):
     import json
-    settings={'reviewers':[{'skill':'custom:review','required':False,'options':{'passes':['spec']}}],
-              'skills':{'reply':'custom:reply'}, 'domain_settings':{'custom':'private/settings'}}
+    settings={'skill_settings':{'dk-pr-reviewers-run':{'options':{'reviewers':[
+        {'skill':'custom:review','required':False,'options':{'passes':['spec']}}]}}},
+              'processes':{'pr-fix':{'skills':['custom:reply']}}, 'extensions':{'custom':'private/settings'}}
     source=tmp_path/'settings.json';source.write_text(json.dumps(settings))
     command=[sys.executable,str(ROOT/'scripts/config.py'),'--repository','github.com/owner/repo']
     result=subprocess.run([*command,'set','--file',str(source)],capture_output=True,text=True)
     assert result.returncode==0,result.stderr
     assert json.loads(config.path('github.com/owner/repo').read_text())==settings
-    result=subprocess.run([*command,'show'],capture_output=True,text=True)
+    result=subprocess.run([*command,'show','--expanded'],capture_output=True,text=True)
     assert result.returncode==0,result.stderr
     effective=json.loads(result.stdout)['settings']
-    for key,value in settings.items():
-        assert (all(effective[key][k]==v for k,v in value.items())
-                if isinstance(value,dict) else effective[key]==value)
+    assert effective['processes']['pr-fix']['skills']==['custom:reply']
+    assert effective['skill_settings']==settings['skill_settings']
+    assert effective['extensions']==settings['extensions']
 
 
 def test_direct_runtime_reads_preserve_stores_and_refresh_changed_selections(tmp_path):
     import json
     import os
     repository, upstream = 'github.com/fork/repo', 'github.com/upstream/repo'
-    write(config.path(), {'reviewers': [{'skill': 'custom:review'}],
-                          'incoming_review': {'merge': True}})
-    write(config.path(upstream), {'finalizers': [],
-                                  'incoming_review': {'approve': True}})
-    write(config.path(repository), {'incoming_review': {'merge': False}})
+    write(config.path(), {'skill_settings': {'dk-pr-reviewers-run': {'options': {'reviewers': ['custom:review']}}},
+                          'processes': {'pr-review': {'actions': {'merge': {'enabled': True}}}}})
+    write(config.path(upstream), {'processes': {'pr-fix': {'finalizers': []}, 'pr-review': {'actions': {'approve': True}}}})
+    write(config.path(repository), {'processes': {'pr-review': {'actions': {'merge': {'enabled': False}}}}})
     available = tmp_path/'available.json'
-    available.write_text(json.dumps(list(config.DEFAULTS['skills'].values())))
+    available.write_text(json.dumps(sorted({call['skill'] for _,call in config.calls(config.DEFAULTS) if 'skill' in call})))
     command = [sys.executable, str(ROOT/'scripts/config.py'),
                '--repository', repository, '--upstream', upstream]
 
@@ -96,25 +97,25 @@ def test_direct_runtime_reads_preserve_stores_and_refresh_changed_selections(tmp
         return json.loads(result.stdout)
 
     original = snapshot()
-    loaded = read('show')
-    assert loaded['settings']['finalizers'] == []
-    assert loaded['settings']['incoming_review']['approve'] is True
-    assert loaded['settings']['incoming_review']['merge'] is False
+    loaded = read('show', '--expanded')
+    assert loaded['settings']['processes']['pr-fix']['finalizers'] == []
+    assert loaded['settings']['processes']['pr-review']['actions']['approve'] is True
+    assert loaded['settings']['processes']['pr-review']['actions']['merge']['enabled'] is False
     assert set(loaded['sources']) == {str(config.path()), str(config.path(upstream)),
                                      str(config.path(repository))}
-    for workflow in ('fix', 'review'):
-        missing = read('preflight', '--workflow', workflow, '--available', str(available))
-        assert missing == {'ready': False, 'missing_selected_skills': ['custom:review']}
+    for workflow in ('pr-fix', 'pr-review'):
+        missing = read('preflight', '--process', workflow, '--available', str(available))
+        assert not missing['ready'] and missing['missing_selected_skills'] == ['custom:review']
     assert snapshot() == original
 
     # Simulate a separately authorized configuration edit between stages.
     # Runtime reads must see it, without changing any other saved value.
-    write(config.path(repository), {'reviewers': [], 'finalizers': [],
-                                    'incoming_review': {'merge': True}})
+    write(config.path(repository), {'skill_settings': {'dk-pr-reviewers-run': {'options': {'reviewers': []}}},
+                                    'processes': {'pr-fix': {'finalizers': []}, 'pr-review': {'actions': {'merge': {'enabled': True}}}}})
     changed = snapshot()
-    refreshed = read('show')['settings']
-    assert refreshed['reviewers'] == [] and refreshed['incoming_review']['merge'] is True
-    assert refreshed['incoming_review']['approve'] is True
+    refreshed = read('show', '--expanded')['settings']
+    assert refreshed['skill_settings']['dk-pr-reviewers-run']['options']['reviewers'] == [] and refreshed['processes']['pr-review']['actions']['merge']['enabled'] is True
+    assert refreshed['processes']['pr-review']['actions']['approve'] is True
     assert read('preflight', '--available', str(available))['ready'] is True
     assert snapshot() == changed
 

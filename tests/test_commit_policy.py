@@ -30,7 +30,9 @@ def settings(monkeypatch):
     return pr_config.main
 
 
-@pytest.mark.parametrize('value', [{'prompt': PROMPT}, {'skill': 'my-plugin:commit-policy'}, {'skill': 'local-policy'}])
+@pytest.mark.parametrize('value', [{'prompt': PROMPT}, 'local-policy', {'skill': 'my-plugin:commit-policy'},
+    {'skill': 'local-policy', 'instructions': 'Return instructions only.',
+     'options': {'style': 'short'}, 'agent': {'model': 'chosen', 'reasoning_effort': 'high'}}])
 def test_policy_round_trip_reset_and_other_settings_unchanged(settings, tmp_path, value):
     rules = tmp_path/'rules.json'
     write(rules, {'rules': [{'text': 'Keep the original rule.'}]})
@@ -177,6 +179,28 @@ def test_selected_provider_handoff_and_unchanged_managed_reuse(context, tmp_path
     write(policy.path('user').parent/'drafting.json', {'issue_description': 'other:issue'})
     assert store.start(prepare(context), run='run')['action'] == 'reuse'
     assert store.start(cleanup, run='run')['action'] == 'reuse'
+
+
+@pytest.mark.parametrize('value', [
+    'policy',
+    {'skill': 'policy', 'instructions': 'Return policy instructions only.',
+     'options': {'style': 'short'}, 'agent': {'model': 'chosen', 'reasoning_effort': 'high'}},
+    {'instructions': 'Choose logical commit groups.', 'agent': {}},
+])
+def test_provider_uses_shared_invocation_and_preserves_controls(context, value):
+    import invocation
+    from state import capture
+    write(policy.path('user'), value)
+    call = invocation.normalize(value)
+    context['skill_identity'] = 'team:policy' if 'skill' in call else 'dk-workflows:dk-commit-split'
+    task = prepare(context)
+    assert task['options']['invocation'] == call
+    assert task['options']['configured'] == call.get('options', {})
+    assert task['task']['instructions'] == call.get('instructions', context['assigned_instructions'])
+    assert policy.handoff(chain=CHAIN, spec=task, report=report())['policy_prompt'] == PROMPT
+    fingerprint = capture(task)['fingerprint']
+    write(policy.path('user'), {**call, 'agent': {'model': 'different'}})
+    assert capture(prepare(context))['fingerprint'] != fingerprint
 
 
 @pytest.mark.parametrize('changed', ['configuration', 'provider', 'requirements', 'constraints', 'context', 'history'])

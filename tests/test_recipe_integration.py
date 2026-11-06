@@ -133,8 +133,8 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
     if merge_after_iteration:
         routed=command(ROOT/'scripts/pr_route.py','--pr',PR)
         assert routed['ownership']=='mine' and routed['skill']=='dk-workflows:dk-pr-fix'
-        settings=command(ROOT/'scripts/config.py','--repository',REPO,'show')['settings']
-        assert settings['incoming_review']['merge'] is False
+        settings=command(ROOT/'scripts/config.py','--repository',REPO,'show','--expanded')['settings']
+        assert settings['processes']['pr-review']['actions']['merge']['enabled'] is False
     def publish(request):
         request_file=save('request.json',request)
         prepared=command(PR_PACKAGE/'scripts/publish.py','prepare','--file',request_file)
@@ -203,9 +203,9 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
         return cache('record',*args)
     finalizer_groups=cache('finalizer-plan')['groups']
     assert finalizer_groups==[[reference] for reference in [
-        '/skill/dk-workflows:dk-commit-split','/skill/dk-workflows:dk-pr-decisions',
-        '/skill/dk-workflows:dk-pr-description','/skill/dk-workflows:dk-pr-feedback-reply',
-        '/skill/dk-workflows:dk-ci','/skill/dk-workflows:dk-pr-publish']]
+        'dk-commit-split','dk-pr-decisions',
+        'dk-pr-description','dk-pr-feedback-reply',
+        'dk-ci','dk-pr-publish']]
     finalizer_references=dict(zip(('cleanup','decisions','description','reply','ci','publish'),
                                    (group[0] for group in finalizer_groups)))
     finalizer_calls=[]

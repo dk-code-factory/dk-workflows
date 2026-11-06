@@ -14,15 +14,18 @@ def main():
     p.add_argument('--repository',required=True)
     p.add_argument('--upstream')
     sub=p.add_subparsers(dest='action',required=True)
-    sub.add_parser('show')
+    c=sub.add_parser('show');c.add_argument('--expanded',action='store_true')
     for action in ('set','reset'):
         c=sub.add_parser(action);c.add_argument('--scope',choices=['repo','user'],default='repo')
         if action=='set':c.add_argument('--file',type=Path,required=True)
     c=sub.add_parser('preflight');c.add_argument('--available',type=Path,required=True)
-    c.add_argument('--workflow',choices=['fix','review'],default='fix')
+    c.add_argument('--capabilities',type=Path)
+    c.add_argument('--process')
     a=p.parse_args()
-    if a.action=='show':result=config.effective(a.repository,a.upstream)
-    elif a.action=='preflight':result=config.preflight(config.effective(a.repository,a.upstream)['settings'],read(a.available),workflow=a.workflow)
+    if a.action=='show':result=config.effective(a.repository,a.upstream,expanded=a.expanded)
+    elif a.action=='preflight':result=config.preflight(
+        config.effective(a.repository,a.upstream)['settings'],read(a.available),
+        read(a.capabilities) if a.capabilities else None,process=a.process)
     else:
         target=config.path(a.repository if a.scope=='repo' else None)
         if a.action=='set':write(target,config.validate(read(a.file)))

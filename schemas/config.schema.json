@@ -1,0 +1,235 @@
+{
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*\\u0000)[\\s\\S]*$"
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "default": 1
+    },
+    "accounts": {
+      "type": "object",
+      "properties": {
+        "personal": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "host": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$",
+                "not": {
+                  "pattern": "\\s"
+                }
+              },
+              "id": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "host",
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    },
+    "skill_settings": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*(?::[A-Za-z0-9][A-Za-z0-9_.-]*)?$",
+        "not": {
+          "pattern": "\\s"
+        },
+        "description": "Installed skill name, optionally qualified as plugin:name. No /skills/ prefix."
+      },
+      "additionalProperties": {
+        "$ref": "invocation.schema.json#/$defs/settings",
+        "unevaluatedProperties": false
+      }
+    },
+    "processes": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+        "not": {
+          "pattern": "\\s"
+        }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "$ref": "invocation.schema.json"
+          },
+          "verification": {
+            "$ref": "invocation.schema.json"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "invocation.schema.json"
+            }
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "review_cycles": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5,
+                "default": 5
+              },
+              "retries_per_task": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1,
+                "default": 1
+              },
+              "ci_repairs_per_cycle": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5,
+                "default": 5
+              },
+              "ci_reruns_per_head": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3,
+                "default": 3
+              }
+            },
+            "additionalProperties": false
+          },
+          "actions": {
+            "type": "object",
+            "properties": {
+              "push_commits": {
+                "type": "boolean"
+              },
+              "rewrite_commits": {
+                "type": "boolean"
+              },
+              "edit_pr": {
+                "type": "boolean"
+              },
+              "reply_to_feedback": {
+                "type": "boolean"
+              },
+              "resolve_threads": {
+                "type": "boolean"
+              },
+              "create_draft_prs": {
+                "type": "boolean"
+              },
+              "request_review": {
+                "type": "boolean"
+              },
+              "post_findings": {
+                "type": "boolean"
+              },
+              "approve": {
+                "type": "boolean"
+              },
+              "merge": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "method": {
+                    "enum": [
+                      "squash",
+                      "merge"
+                    ],
+                    "default": "squash"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "approve_ci": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "hooks": {
+            "type": "object",
+            "properties": {
+              "before_cycle": {
+                "type": "array",
+                "items": {
+                  "$ref": "invocation.schema.json"
+                }
+              },
+              "after_cycle": {
+                "type": "array",
+                "items": {
+                  "$ref": "invocation.schema.json"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "routes": {
+            "type": "object",
+            "properties": {
+              "own_pr": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+                "not": {
+                  "pattern": "\\s"
+                }
+              },
+              "other_pr": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+                "not": {
+                  "pattern": "\\s"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "finalizers": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "invocation.schema.json"
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "$ref": "invocation.schema.json"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/dk-code-factory/dk-workflows/main/schemas/config.schema.json",
+  "title": "Workflow configuration",
+  "description": "Compact overrides for bundled process defaults. Objects merge by key; invocation lists replace. Cross-record identity, routing, capability and receipt checks remain in Python."
+}

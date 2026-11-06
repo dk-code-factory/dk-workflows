@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'runtime'))
 import config
+import invocation
 from shared.github_reads import run
 from shared.pr_ownership import classify
 
@@ -40,8 +41,17 @@ def route(pr, *, upstream=None, api=None):
             or not re.fullmatch('[0-9a-f]{40}', pull['head']['sha'])):
         raise ValueError('PR identity is unavailable or inconsistent')
     settings = config.effective(repository, upstream)['settings']
+    ownership = classify(host, pull.get('user'), api('user'), settings['accounts']['personal'])
+    route = 'own_pr' if ownership['ownership'] == 'mine' else 'other_pr'
+    process = settings['processes']['pr-iter']['routes'][route]
+    call = config.select(settings, process)
+    skill = call.get('skill')
+    if skill and ':' not in skill:
+        bundled = Path(__file__).resolve().parents[1]/'codex/skills'/skill/'SKILL.md'
+        if bundled.is_file():
+            skill = 'dk-workflows:' + skill
     return {'pr': canonical, 'repository': repository, 'head': pull['head']['sha'],
-            **classify(host, pull.get('user'), api('user'), settings['identities'])}
+            **ownership, 'process': process, 'skill': skill, 'invocation': call}
 
 
 def main():
