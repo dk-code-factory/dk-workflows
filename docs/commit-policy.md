@@ -1,5 +1,7 @@
 # Commit grouping and message policies
 
+Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
+
 `dk-commit-split` owns assessment, Git organization, validation and authorized publication. A commit policy supplies instructions for grouping and messages. With no configured policy, existing cleanup and message defaults apply. Explicit policies replace built-in stylistic defaults, including optional body and line-length preferences. Required repository conventions and current user constraints still govern. Settle material conflicts before rewriting.
 
 Configure a policy through `dk-config`, for example:
@@ -8,7 +10,7 @@ Configure a policy through `dk-config`, for example:
 
 > Use dk-config to select my-plugin:commit-policy as this repository's commit policy.
 
-Save exactly one source in a private JSON file:
+Save a literal policy or a provider invocation in a private JSON file:
 
 ```json
 {"prompt":"Squash all PR changes into one commit. Use a short, descriptive subject without a body."}
@@ -17,8 +19,10 @@ Save exactly one source in a private JSON file:
 or:
 
 ```json
-{"skill":"my-plugin:commit-policy"}
+{"skill":"my-plugin:commit-policy","instructions":"Return grouping and message instructions only.","agent":{"model":"chosen","reasoning_effort":"high"}}
 ```
+
+Providers use the shared [invocation contract](invocations.md), including short skill names, custom instructions, options and optional native model/effort controls. Instruction-only providers use the cleanup identity. Preflight provider installation and agent capabilities with the same shared invocation validator; unsupported requests block cleanup. Literal `prompt` policies are text and do not invoke an agent.
 
 Then use the existing configuration conventions:
 

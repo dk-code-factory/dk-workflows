@@ -13,15 +13,15 @@ from state import Store, capture, write
 
 REPOSITORY = 'github.com/owner/repo'
 PR = 'https://github.com/owner/repo/pull/1'
-FIRST = '/skill/external:first'
-LEFT = '/skill/team:left'
-RIGHT = '/skill/team:right'
-LAST = '/skill/external:last'
+FIRST = 'external:first'
+LEFT = 'team:left'
+RIGHT = 'team:right'
+LAST = 'external:last'
 PLAN = [FIRST, [LEFT, RIGHT], LAST]
 
 
 def definition(tmp_path, reference):
-    skill = reference.removeprefix('/skill/')
+    skill = reference.removeprefix('')
     resource = tmp_path/(skill.replace(':', '-')+'.md')
     if not resource.exists():
         resource.write_text('Fixture native skill. Return explicit completion and original evidence.\n')
@@ -43,56 +43,50 @@ def finish(store, task, claim, *, complete=True):
                         'complete' if complete else 'incomplete')
 
 
-def test_default_plan_preserves_effective_roles_and_deduplicates_shared_implementations():
+def test_default_plan_uses_shared_invocations_and_keeps_defaults_immutable():
     original = config.effective(REPOSITORY)['settings']
-    assert original['finalizers'] == [
-        '/skill/dk-workflows:dk-commit-split', '/skill/dk-workflows:dk-pr-decisions',
-        '/skill/dk-workflows:dk-pr-description', '/skill/dk-workflows:dk-pr-feedback-reply',
-        '/skill/dk-workflows:dk-ci', '/skill/dk-workflows:dk-pr-publish']
-    write(config.path(), {'skills': {'cleanup': 'team:series'}})
-    write(config.path(REPOSITORY), {'skills': {'description': 'team:metadata', 'decisions': 'team:metadata'}})
-    selected = config.effective(REPOSITORY)['settings']['finalizers']
-    assert selected[:2] == ['/skill/team:series', '/skill/team:metadata']
-    assert selected.count('/skill/team:metadata') == 1
-    assert config.DEFAULTS['finalizers'] == original['finalizers']
+    assert original['processes']['pr-fix']['finalizers'] == config.FINALIZER_DEFAULTS
+    write(config.path(), {'skill_settings': {'dk-commit-split': {'options': {'format': 'short'}}}})
+    selected = config.effective(REPOSITORY)['settings']
+    assert config.select(selected, 'pr-fix', 'finalizer', 0)['options'] == {'format': 'short'}
+    assert config.DEFAULTS['processes']['pr-fix']['finalizers'] == original['processes']['pr-fix']['finalizers']
 
 
 def test_scoped_lists_replace_inherit_disable_and_include_external_skills_in_preflight():
     upstream = 'github.com/upstream/repo'
-    write(config.path(), {'finalizers': [FIRST]})
-    write(config.path(upstream), {'finalizers': PLAN})
-    write(config.path(REPOSITORY), {'skills': {'ci': 'team:ci'}})
+    write(config.path(), {'processes': {'pr-fix': {'finalizers': [FIRST]}}})
+    write(config.path(upstream), {'processes': {'pr-fix': {'finalizers': PLAN}}})
+    write(config.path(REPOSITORY), {})
     inherited = config.effective(REPOSITORY, upstream)['settings']
-    assert inherited['finalizers'] == PLAN
+    assert inherited['processes']['pr-fix']['finalizers'] == PLAN
     assert config.finalizer_groups(PLAN) == [[FIRST], [LEFT, RIGHT], [LAST]]
-    available = list(inherited['skills'].values())
-    assert config.preflight(inherited, available) == {
-        'ready': False, 'missing_selected_skills': ['external:first', 'external:last', 'team:left', 'team:right']}
+    available = sorted({call['skill'] for _, call in config.calls(config.DEFAULTS) if 'skill' in call})
+    assert config.preflight(inherited, available)['missing_selected_skills'] == ['external:first', 'external:last', 'team:left', 'team:right']
     assert config.preflight(inherited, available + ['external:first', 'external:last', 'team:left', 'team:right'])['ready']
-    assert config.preflight(inherited, available, workflow='review')['ready']
-    write(config.path(REPOSITORY), {'finalizers': []})
+    assert config.preflight(inherited, available, process='pr-review')['ready']
+    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'finalizers': []}}})
     disabled = config.effective(REPOSITORY, upstream)['settings']
-    assert disabled['finalizers'] == []
-    assert config.preflight(disabled, list(disabled['skills'].values()))['ready']
-    assert config.effective(REPOSITORY)['settings']['finalizers'] == []
+    assert disabled['processes']['pr-fix']['finalizers'] == []
+    assert config.preflight(disabled, available)['ready']
+    assert config.effective(REPOSITORY)['settings']['processes']['pr-fix']['finalizers'] == []
     config.path(REPOSITORY).unlink()
-    assert config.effective(REPOSITORY)['settings']['finalizers'] == [FIRST]
-    assert config.effective(REPOSITORY, upstream)['settings']['finalizers'] == PLAN
+    assert config.effective(REPOSITORY)['settings']['processes']['pr-fix']['finalizers'] == [FIRST]
+    assert config.effective(REPOSITORY, upstream)['settings']['processes']['pr-fix']['finalizers'] == PLAN
 
 
 def test_default_plan_keeps_unqualified_native_roles_through_public_cli(tmp_path):
     native = 'local-cleanup'
-    reference = '/skill/' + native
-    write(config.path(REPOSITORY), config.validate({'skills': {'cleanup': native}}))
+    reference = '' + native
+    write(config.path(REPOSITORY), config.validate({'processes': {'pr-fix': {'finalizers': [native]}}}))
     command = [sys.executable, str(ROOT/'scripts/config.py'), '--repository', REPOSITORY]
-    shown = subprocess.run([*command, 'show'], check=True, capture_output=True, text=True)
+    shown = subprocess.run([*command, 'show', '--expanded'], check=True, capture_output=True, text=True)
     settings = json.loads(shown.stdout)['settings']
-    assert settings['finalizers'][0] == reference
+    assert settings['processes']['pr-fix']['finalizers'][0] == reference
     available = tmp_path/'available.json'
-    write(available, list(settings['skills'].values()))
-    for workflow in ('fix', 'review'):
+    write(available, sorted({call['skill'] for _,call in config.calls(settings) if 'skill' in call}))
+    for workflow in ('pr-fix', 'pr-review'):
         checked = subprocess.run([*command, 'preflight', '--available', str(available),
-                                  '--workflow', workflow], check=True, capture_output=True, text=True)
+                                  '--process', workflow], check=True, capture_output=True, text=True)
         assert json.loads(checked.stdout)['ready']
     dk = [sys.executable, str(ROOT/'scripts/dk.py'), '--repository', REPOSITORY, '--pr', PR]
     planned = subprocess.run([*dk, 'finalizer-plan'], check=True, capture_output=True, text=True)
@@ -102,24 +96,23 @@ def test_default_plan_keeps_unqualified_native_roles_through_public_cli(tmp_path
     generated = subprocess.run([*dk, 'finalizer-spec', '--run', 'run', '--finalizer', reference,
                                 '--definition', str(selected)], check=True, capture_output=True, text=True)
     assert json.loads(generated.stdout)['skill']['identity'] == native
-    with pytest.raises(ValueError, match='/skill/PLUGIN:SKILL'):
-        config.validate({'skills': {'cleanup': native}, 'finalizers': [reference]})
+    config.validate({'processes': {'pr-fix': {'finalizers': [{'skill': reference, 'agent': {'model': 'chosen'}}]}}})
 
 
 @pytest.mark.parametrize('value', [
-    None, {}, FIRST, [None], [True], [3], [{'skill': FIRST}], [[]],
+    None, {}, FIRST, [None], [True], [3], [{'skill': '/skills/bad'}], [[]],
     [[[FIRST]]], [FIRST, FIRST], [[FIRST], FIRST], [[FIRST, FIRST]],
-    ['/skill/unqualified'], ['team:first'], ['/agent/team:first'], ['/skill/:first'],
-    ['/skill/team:'], ['/skill/team:first/extra'], ['/skill/team:first:extra'],
-    ['/skill/team:first\n'], ['/skill/team:bad name'], ['/skill/team:first\x00'],
+    ['/skills/unqualified'], [{'skill': 'team:first', 'agent': {'bad': True}}], ['/agent/team:first'], [':first'],
+    ['team:'], ['team:first/extra'], ['team:first:extra'],
+    ['team:first\n'], ['team:bad name'], ['team:first\x00'],
 ])
 def test_invalid_format_is_rejected(value):
     with pytest.raises(ValueError):
-        config.validate({'finalizers': value})
+        config.validate({'processes': {'pr-fix': {'finalizers': value}}})
 
 
 def test_finalizer_claim_resume_recovery_and_new_run_isolation(tmp_path):
-    write(config.path(REPOSITORY), {'finalizers': PLAN})
+    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'finalizers': PLAN}}})
     store = Store(REPOSITORY, PR)
     task = spec(tmp_path)
     started = store.start(task, run='run')
@@ -140,13 +133,14 @@ def test_finalizer_claim_resume_recovery_and_new_run_isolation(tmp_path):
 
 
 def test_plan_and_resource_drift_stale_evidence_without_hiding_unfinished_work(tmp_path):
-    write(config.path(REPOSITORY), {'finalizers': PLAN})
+    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'finalizers': PLAN}}})
     store = Store(REPOSITORY, PR)
     task = spec(tmp_path)
     first = store.start(task, run='run')
-    write(config.path(REPOSITORY), {'finalizers': [LAST, [RIGHT, LEFT], FIRST]})
+    original_key = capture(task)['key']
+    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'finalizers': [LAST, [RIGHT, LEFT], FIRST]}}})
     changed = spec(tmp_path)
-    assert capture(changed)['key'] == capture(task)['key']
+    assert capture(changed)['key'] == original_key
     with pytest.raises(ValueError, match='Inputs changed'):
         finish(store, changed, first['claim'])
     assert store.start(changed, run='run')['action'] == 'recover_required'
@@ -156,7 +150,7 @@ def test_plan_and_resource_drift_stale_evidence_without_hiding_unfinished_work(t
     Path(changed['skill']['resources']['skill']).write_text('New governing instructions.\n')
     assert not store.status([spec(tmp_path)])['tasks'][0]['reusable']
     next_claim = store.start(spec(tmp_path), run='run')
-    write(config.path(REPOSITORY), {'finalizers': []})
+    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'finalizers': []}}})
     with pytest.raises(ValueError, match='No configured finalizer'):
         spec(tmp_path)
     # Removing a finalizer cannot erase the prior task's pending effects.
@@ -164,29 +158,29 @@ def test_plan_and_resource_drift_stale_evidence_without_hiding_unfinished_work(t
 
 
 def test_spec_captures_whole_plan_and_rejects_wrong_runner_or_assignment(tmp_path):
-    write(config.path(REPOSITORY), {'finalizers': PLAN})
+    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'finalizers': PLAN}}})
     task = spec(tmp_path)
     assert task['skill']['identity'] == 'external:first'
     assert task['options']['finalization'] == {'run': 'run', 'skill': 'external:first', 'plan': PLAN}
     assert task['options']['execution'] == {'host': 'native'}
-    assert str(config.path(REPOSITORY)) in task['instructions'].values()
-    with pytest.raises(ValueError, match='configured finalizer skill'):
+    assert str(config.path(REPOSITORY)) in task['configuration']['sources']
+    with pytest.raises(ValueError, match='configured invocation skill'):
         spec(tmp_path, skill_identity='team:wrong')
     with pytest.raises(ValueError, match='No configured finalizer'):
-        spec(tmp_path, '/skill/team:missing')
+        spec(tmp_path, 'team:missing')
     with pytest.raises(ValueError, match='retained run'):
         spec(tmp_path, run=' ')
     with pytest.raises(ValueError, match='execution options'):
         spec(tmp_path, options=[])
-    with pytest.raises(ValueError, match='Reserved finalizer'):
-        spec(tmp_path, instructions={'finalizer_configuration_0': 'override'})
+    with pytest.raises(ValueError, match='Reserved invocation'):
+        spec(tmp_path, resources={'invocation_contract': 'override'})
     with pytest.raises(ValueError, match='Nonempty assigned'):
         spec(tmp_path, assigned_instructions='')
 
 
 def test_noncacheable_ci_finalizer_requires_new_live_observation(tmp_path):
-    reference = '/skill/dk-workflows:dk-ci'
-    write(config.path(REPOSITORY), {'finalizers': [reference]})
+    reference = 'dk-workflows:dk-ci'
+    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'finalizers': [reference]}}})
     store = Store(REPOSITORY, PR)
     task = spec(tmp_path, reference, cacheable=False)
     started = store.start(task, run='run')
@@ -195,13 +189,22 @@ def test_noncacheable_ci_finalizer_requires_new_live_observation(tmp_path):
     assert store.start(task, run='run')['action'] == 'invoke'
 
 
+def test_instruction_only_finalizers_have_distinct_list_positions(tmp_path):
+    plan = [{'instructions': 'Check scope.'}, {'instructions': 'Check publication receipts.'}]
+    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'finalizers': plan}}})
+    tasks = [config.make_finalizer_spec(repository=REPOSITORY, pr=PR, run='run', index=index,
+        definition=definition(tmp_path, 'dk-workflows:dk-pr-fix')) for index in range(2)]
+    assert capture(tasks[0])['key'] != capture(tasks[1])['key']
+    assert [task['task']['instructions'] for task in tasks] == [call['instructions'] for call in plan]
+
+
 def test_public_cli_roundtrip_plan_spec_and_empty_plan(tmp_path):
     settings = tmp_path/'settings.json'
-    write(settings, {'finalizers': PLAN})
+    write(settings, {'processes': {'pr-fix': {'finalizers': PLAN}}})
     command = [sys.executable, str(ROOT/'scripts/config.py'), '--repository', REPOSITORY]
     subprocess.run([*command, 'set', '--file', str(settings)], check=True, capture_output=True)
-    shown = subprocess.run([*command, 'show'], check=True, capture_output=True, text=True)
-    assert json.loads(shown.stdout)['settings']['finalizers'] == PLAN
+    shown = subprocess.run([*command, 'show', '--expanded'], check=True, capture_output=True, text=True)
+    assert json.loads(shown.stdout)['settings']['processes']['pr-fix']['finalizers'] == PLAN
     dk = [sys.executable, str(ROOT/'scripts/dk.py'), '--repository', REPOSITORY, '--pr', PR]
     planned = subprocess.run([*dk, 'finalizer-plan'], check=True, capture_output=True, text=True)
     assert json.loads(planned.stdout)['groups'] == [[FIRST], [LEFT, RIGHT], [LAST]]
@@ -214,7 +217,7 @@ def test_public_cli_roundtrip_plan_spec_and_empty_plan(tmp_path):
                               '--definition', str(selected)], capture_output=True, text=True)
     assert missing.returncode == 2
     assert json.loads(missing.stdout)['status'] == 'blocked'
-    write(config.path(REPOSITORY), {'finalizers': []})
+    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'finalizers': []}}})
     planned = subprocess.run([*dk, 'finalizer-plan'], check=True, capture_output=True, text=True)
     assert json.loads(planned.stdout)['groups'] == []
 
@@ -225,7 +228,7 @@ def test_parallel_group_executes_concurrently_and_failed_sibling_blocks_later_gr
     Each parallel fixture waits for its sibling's launch marker, so a serial
     dispatch fails. Native/model invocation itself is outside this offline test.
     """
-    write(config.path(REPOSITORY), {'finalizers': PLAN})
+    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'finalizers': PLAN}}})
     store = Store(REPOSITORY, PR)
     first = spec(tmp_path)
     started = store.start(first, run='run')

@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/dk-code-factory/dk-workflows/main/schemas/invocation.schema.json",
+  "title": "Native invocation",
+  "description": "Shared by process entrypoints, supporting skills, reviewers, hooks and drafting selections.",
+  "$ref": "#/$defs/invocation",
+  "$defs": {
+    "skill": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*(?::[A-Za-z0-9][A-Za-z0-9_.-]*)?$",
+      "not": {
+        "pattern": "\\s"
+      },
+      "description": "Installed skill name, optionally qualified as plugin:name. No /skills/ prefix."
+    },
+    "instructions": {
+      "type": "string",
+      "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*\\u0000)[\\s\\S]*$",
+      "description": "Original task-specific prompt, preserved verbatim alongside the skill's governing instructions."
+    },
+    "agent": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*\\u0000)[\\s\\S]*$",
+          "description": "Model identifier verified against the native host's available models."
+        },
+        "reasoning_effort": {
+          "type": "string",
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "description": "Presence requests a separate native agent; omission uses normal process execution."
+    },
+    "options": {
+      "type": "object",
+      "properties": {
+        "reviewers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/invocation"
+          },
+          "description": "Ordered reviewer invocations. Each uses this same invocation schema."
+        }
+      },
+      "additionalProperties": true,
+      "default": {}
+    },
+    "settings": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "$ref": "#/$defs/instructions"
+        },
+        "options": {
+          "$ref": "#/$defs/options"
+        },
+        "agent": {
+          "$ref": "#/$defs/agent"
+        },
+        "required": {
+          "type": "boolean",
+          "default": true,
+          "description": "Required work must complete before its caller can claim required coverage."
+        }
+      }
+    },
+    "invocation": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/skill"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/settings"
+            }
+          ],
+          "type": "object",
+          "properties": {
+            "skill": {
+              "$ref": "#/$defs/skill"
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "skill"
+              ]
+            },
+            {
+              "required": [
+                "instructions"
+              ]
+            }
+          ],
+          "unevaluatedProperties": false
+        }
+      ]
+    }
+  }
+}

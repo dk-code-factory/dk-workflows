@@ -1,0 +1,39 @@
+{
+  "$schema": "../schemas/config.schema.json",
+  "schema_version": 1,
+  "skill_settings": {
+    "dk-pr-reviewers-run": {
+      "options": {
+        "reviewers": [
+          {
+            "skill": "code-review-ad:code-review-ad",
+            "instructions": "Focus on correctness, permission checks and missing validation.",
+            "agent": {
+              "model": "gpt-6.1-sol",
+              "reasoning_effort": "high"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "processes": {
+    "pr-fix": {
+      "limits": {
+        "review_cycles": 3
+      },
+      "hooks": {
+        "after_cycle": [
+          {
+            "instructions": "Check invariants affected by this cycle."
+          }
+        ]
+      }
+    },
+    "pr-review": {
+      "actions": {
+        "post_findings": false
+      }
+    }
+  }
+}

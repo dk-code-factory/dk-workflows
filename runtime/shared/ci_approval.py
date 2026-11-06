@@ -77,7 +77,7 @@ class Approval:
         if value.get('repository') != repository:
             raise ValueError('Review evidence belongs to another repository')
         settings = config.effective(repository, value.get('upstream'))
-        if value.get('settings') != settings or not settings['settings']['incoming_review']['approve_ci']:
+        if value.get('settings') != settings or not settings['settings']['processes']['pr-review']['actions']['approve_ci']:
             raise ValueError('CI approval policy or governing configuration changed or is disabled')
         instructions = value.get('instructions')
         if not isinstance(instructions, dict) or not instructions:
@@ -92,7 +92,7 @@ class Approval:
                 or context['state'] != 'open' or context['draft'] is not False):
             raise ValueError('CI approval requires an open non-draft PR at the reviewed head and target')
         actor = h.api(request['pr'], 'user')
-        if classify(h.host, context['user'], actor, settings['settings']['identities'])['ownership'] != 'others':
+        if classify(h.host, context['user'], actor, settings['settings']['accounts']['personal'])['ownership'] != 'others':
             raise ValueError('CI approval requires another author\'s PR')
         store = Store(repository, request['pr'], checkout=value['checkout'])
         results, specs = {}, {}
@@ -125,24 +125,45 @@ class Approval:
             return current['key'], saved['normalized']
 
         discovery = value.get('discovery', [])
-        selected = settings['settings']['reviewers']
+        selected = [config.select(settings['settings'], 'pr-review', 'reviewer', index)
+                    for index, _ in enumerate(config.reviewers(settings['settings'], 'pr-review'))]
         if not discovery or not selected:
             raise ValueError('Complete selected discovery coverage is required')
-        candidates, identities = [], []
+        candidates, identities, discovery_specs = [], [], {}
         for path in discovery:
             key, result = completed(path)
             identities.append(specs[key]['skill']['identity'])
+            discovery_specs[specs[key]['skill']['identity']] = specs[key]
             candidates.extend((key, index) for index, _ in enumerate(result.get('findings', [])))
-        if sorted(identities) != sorted(r['skill'] for r in selected):
+        remaining = list(identities)
+        for call in selected:
+            expected = call.get('skill', config.invocation.normalize(
+                settings['settings']['processes']['pr-review']['run']).get('skill'))
+            matches = [identity for identity in remaining if config.invocation.matches(expected, identity)]
+            if len(matches) != 1:
+                raise ValueError('Current selected reviewer coverage is incomplete or duplicated')
+            selected_call = config.invocation.configured(call, settings['settings']['skill_settings'], identity=matches[0])
+            actual = discovery_specs[matches[0]]['options'].get('invocation', {'skill': call.get('skill')})
+            if actual != selected_call:
+                raise ValueError('Reviewer evidence must retain the selected invocation controls')
+            remaining.remove(matches[0])
+        if remaining:
             raise ValueError('Current selected reviewer coverage is incomplete or duplicated')
         verification = value.get('verification')
         if candidates and not verification:
             raise ValueError('Candidate findings require independent verification and dispositions')
         if verification:
             key, result = completed(verification)
-            if (specs[key]['skill']['identity'] != 'dk-workflows:dk-pr-review'
+            verifier = config.select(settings['settings'], 'pr-review', 'verification')
+            expected = verifier.get('skill', config.invocation.normalize(
+                settings['settings']['processes']['pr-review']['run']).get('skill'))
+            if (not config.invocation.matches(expected, specs[key]['skill']['identity'])
                     or specs[key]['task']['id'] != 'finding-verification'):
                 raise ValueError('Expected the incoming-review finding verification task')
+            verifier = config.invocation.configured(verifier, settings['settings']['skill_settings'],
+                                                    identity=specs[key]['skill']['identity'])
+            if specs[key]['options'].get('invocation') != verifier:
+                raise ValueError('Verification evidence must retain the selected invocation controls')
             original_inputs = set(specs[key].get('inputs', {}).values())
             if any(results[task]['path'] not in original_inputs for task, _ in candidates):
                 raise ValueError('Verification must capture the original current candidate reports')
@@ -165,9 +186,9 @@ class Approval:
             if (occurrence.get('run') != value.get('run') or occurrence.get('cycle') != value.get('cycle')
                     or result.get('findings')):
                 raise ValueError('Hook evidence does not cover the current review cycle')
-            occurrences.append((occurrence.get('phase'), occurrence.get('id')))
-        required_hooks = [(phase, hook['id']) for phase, hooks in settings['settings']['cycle_hooks'].items()
-                          for hook in hooks]
+            occurrences.append((occurrence.get('phase'), occurrence.get('index')))
+        required_hooks = [(phase, index) for phase, hooks in settings['settings']['processes']['pr-review']['hooks'].items()
+                          for index, _ in enumerate(hooks)]
         if sorted(occurrences) != sorted(required_hooks):
             raise ValueError('Current review cycle hooks are incomplete')
         for path in value.get('publications', []):

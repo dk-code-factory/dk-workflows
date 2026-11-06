@@ -12,6 +12,8 @@ from shared.repository_scope import identities, repository
 from shared.private_state import read, write, atomic_text
 import commit_policy
 
+import invocation
+
 
 def main(arguments=None):
     p=argparse.ArgumentParser(description=__doc__)
@@ -71,6 +73,8 @@ def main(arguments=None):
                 target=location(key)
                 if target.exists():
                     for role,value in read(target,{}).items():
+                        if role == '$schema':continue
+                        invocation.validate(value)
                         merged[role]=value
                         sources[role]={'source':key,'file':str(target)}
             return {'value':merged,'sources':sources}
@@ -100,7 +104,13 @@ def main(arguments=None):
             else:
                 value=json.loads(a.file.read_text())
                 if a.command=='commit-policy':value=commit_policy.validate(value)
-                if not isinstance(value,dict) or not value:raise ValueError('Nonempty domain settings object required')
+                if a.command!='commit-policy' and (not isinstance(value,dict) or not value):
+                    raise ValueError('Nonempty domain settings object required')
+                if a.command=='drafting':
+                    for role,selection in value.items():
+                        if role == '$schema':
+                            if not invocation.text(selection):raise ValueError('Nonempty $schema reference required')
+                        else:invocation.validate(selection)
                 write(target,value)
     return {'action':a.action,'file':str(target)}
 
