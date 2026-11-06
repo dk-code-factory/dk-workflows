@@ -69,6 +69,18 @@ def remote(monkeypatch):
                        'observation': observed['fingerprint']}
             return publisher.recovery().dispose(operation, payload)
 
+        def thread_comments(self):
+            def node(comment):
+                return {'id': 'comment-'+str(comment['id']), 'databaseId': comment['id'],
+                        'url': comment.get('html_url'), 'body': comment.get('body'),
+                        'author': deepcopy(comment.get('user'))}
+            comments = [{'id': 'comment-'+str(c['databaseId']),
+                         **(node(self.source) if c['databaseId'] == self.source['id'] else {}), **deepcopy(c)}
+                        for c in self.thread['comments']]
+            ids = {c['databaseId'] for c in comments}
+            comments.extend(node(c) for c in self.comments if c['id'] >= 100 and c['id'] not in ids)
+            return comments
+
     result = Remote()
     monkeypatch.setattr(publisher, 'metadata', lambda _: deepcopy(result.metadata))
     monkeypatch.setattr(publisher, 'api', result.api)
@@ -98,7 +110,7 @@ def inline_operation(remote, monkeypatch, request):
     original_handler = publisher.handler
     class ThreadHandler:
         def thread(self):
-            return deepcopy(remote.thread)
+            return {**deepcopy(remote.thread), 'comments': remote.thread_comments()}
     monkeypatch.setattr(publisher, 'handler', lambda request: ThreadHandler()
                         if request.get('thread_id') == 'T' and request['kind'] == 'reply-inline'
                         else original_handler(request))
@@ -198,6 +210,9 @@ def test_inline_recovery_uses_canonical_thread_identity_without_relaxing_checks(
         remote.comments.clear()
     else:
         remote.comments[0]['body'] = 'The historical inline answer was edited.'
+        node['comments']['nodes'].append({
+            'id': 'answer', 'databaseId': 100, 'url': remote.comments[0]['html_url'],
+            'body': remote.comments[0]['body'], 'author': remote.comments[0]['user']})
     if thread_change == 'pr':
         node['pullRequest']['url'] = canonical_pr.replace('/pull/7', '/pull/8')
     elif thread_change == 'head':
@@ -449,10 +464,7 @@ def test_inline_source_parent_must_agree_with_real_thread_root(
         return {'data': {'node': {
             'id': 'T', 'isResolved': False, 'viewerCanResolve': True,
             'pullRequest': {'url': PR, 'headRefOid': remote.metadata['headRefOid']},
-            'comments': {'nodes': [
-                {'id': 'comment-'+str(c['databaseId']), 'databaseId': c['databaseId'],
-                 'url': PR+'#discussion_r'+str(c['databaseId']), 'body': 'Question',
-                 'author': {'login': 'reviewer'}} for c in remote.thread['comments']],
+            'comments': {'nodes': remote.thread_comments(),
                 'pageInfo': {'hasNextPage': False}}}}}
     monkeypatch.setattr(publisher, 'run', run)
     remote.disposition(operation)
@@ -499,6 +511,88 @@ def test_original_source_list_and_individual_evidence_must_agree(remote, monkeyp
         publisher.publish(operation, reconcile=True)
     assert error.value.code == 'publication_not_ready'
     assert publication.load(operation)['reply_dispositions'] == [disposition]
+    assert len(remote.writes) == 1
+
+
+@pytest.mark.parametrize('decision', ['no_replacement', 'replacement_required'])
+@pytest.mark.parametrize('field,value', [('body', 'A conflicting question'),
+                                      ('url', PR+'#discussion_r99'),
+                                      ('author', {'login': 'another-reviewer'}),
+                                      ('author', None), ('in_reply_to_id', True)])
+def test_original_source_thread_and_individual_evidence_must_agree(
+        remote, inline_operation, decision, field, value):
+    operation = inline_operation
+    original = publication.load(operation)
+    remote.comments.clear()
+    remote.disposition(operation, decision)
+    disposition = publication.load(operation)['reply_dispositions'][-1]
+    remote.thread['comments'][0][field] = value
+    with pytest.raises(ValueError, match='feedback thread and individual observation disagree'):
+        publisher.recovery().inspect(operation)
+    with pytest.raises(ValueError, match='feedback thread and individual observation disagree'):
+        publisher.recovery().dispose(operation, {k: disposition[k] for k in ('decision', 'reason', 'observation')})
+    with pytest.raises(Diagnostic) as error:
+        publisher.publish(operation, reconcile=True)
+    assert error.value.code == 'publication_not_ready'
+    saved = publication.load(operation)
+    assert saved['reply_dispositions'] == [disposition]
+    assert saved['reply_observations'][-1]['state'] == 'evidence_unavailable'
+    assert all(saved[key] == original[key] for key in ('request', 'response', 'receipt'))
+    assert len(remote.writes) == 1
+
+
+@pytest.mark.parametrize('decision', ['no_replacement', 'replacement_required'])
+@pytest.mark.parametrize('conflict', ['thread_only', 'rest_only', 'body', 'url', 'author', 'parent'])
+def test_historical_reply_thread_and_individual_evidence_must_agree(
+        remote, monkeypatch, inline_operation, decision, conflict):
+    operation = inline_operation
+    original = publication.load(operation)
+    if conflict == 'thread_only':
+        remote.comments.clear()
+    else:
+        remote.comments[0]['body'] = 'Edited historical answer'
+    remote.disposition(operation, decision)
+    disposition = publication.load(operation)['reply_dispositions'][-1]
+    if conflict == 'rest_only':
+        original_comments = remote.thread_comments
+        monkeypatch.setattr(remote, 'thread_comments', lambda: [c for c in original_comments() if c['databaseId'] != 100])
+    else:
+        witness = {'id': 'answer', 'databaseId': 100, 'url': PR+'#discussion_r100',
+                   'body': remote.writes[0]['body'] if conflict == 'thread_only' else remote.comments[0]['body'],
+                   'author': {'login': remote.actor}}
+        changes = {'body': ('body', 'A conflicting answer'), 'url': ('url', PR+'#discussion_r999'),
+                   'author': ('author', {'login': 'another-actor'}), 'parent': ('in_reply_to_id', 77)}
+        if conflict in changes:
+            field, value = changes[conflict]
+            witness[field] = value
+        remote.thread['comments'].append(witness)
+    with pytest.raises(ValueError, match='Reply thread and individual observation disagree'):
+        publisher.recovery().inspect(operation)
+    with pytest.raises(ValueError, match='Reply thread and individual observation disagree'):
+        publisher.recovery().dispose(operation, {k: disposition[k] for k in ('decision', 'reason', 'observation')})
+    with pytest.raises(Diagnostic) as error:
+        publisher.publish(operation, reconcile=True)
+    assert error.value.code == 'publication_not_ready'
+    saved = publication.load(operation)
+    assert saved['reply_dispositions'] == [disposition]
+    assert saved['reply_observations'][-1]['state'] == 'evidence_unavailable'
+    assert all(saved[key] == original[key] for key in ('request', 'response', 'receipt'))
+    assert len(remote.writes) == 1
+
+
+@pytest.mark.parametrize('inline_operation', [10, 77], indirect=True)
+def test_consistent_thread_identity_allows_profile_metadata_and_canonical_urls(remote, inline_operation):
+    remote.comments[-1]['body'] = 'Edited historical answer'
+    source = next(c for c in remote.thread['comments'] if c['databaseId'] == remote.source['id'])
+    canonical_pr = PR.replace('/owner/repo/', '/Owner/Repo/')
+    source.update(url=canonical_pr+'#discussion_r10', in_reply_to_id=remote.source.get('in_reply_to_id'),
+                  author={'login': 'reviewer', 'avatar_url': 'https://example.test/reviewer.png'})
+    parent = publication.load(inline_operation)['request']['approved']['parent']
+    remote.thread['comments'].append({'id': 'answer', 'databaseId': 100, 'url': canonical_pr+'#discussion_r100',
+                                     'body': remote.comments[-1]['body'], 'in_reply_to_id': parent,
+                                     'author': {'login': remote.actor, 'avatar_url': 'https://example.test/author.png'}})
+    remote.disposition(inline_operation)
+    assert publisher.publish(inline_operation, reconcile=True)['reply_obligation'] == 'no_replacement'
     assert len(remote.writes) == 1
 
 

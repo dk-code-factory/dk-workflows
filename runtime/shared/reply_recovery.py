@@ -25,6 +25,15 @@ def same_parent(actual, expected):
     return (actual is None and expected is None) or (positive_id(actual) and positive_id(expected) and actual == expected)
 
 
+def same_thread_comment(comment, original):
+    author = comment.get('author')
+    return (same_comment_url(comment.get('url'), original['html_url'])
+            and comment.get('body') == original['body']
+            and isinstance(author, dict) and author.get('login') == original['user']['login']
+            and ('in_reply_to_id' not in comment
+                 or same_parent(comment['in_reply_to_id'], original.get('in_reply_to_id'))))
+
+
 class Recovery:
     def __init__(self, *, api, metadata, endpoint, replies, handler):
         self.api, self.metadata, self.endpoint = api, metadata, endpoint
@@ -69,7 +78,7 @@ class Recovery:
                 or not same_comment_url(original.get('html_url'), expected_url) or not isinstance(original.get('body'), str)
                 or not isinstance(user, dict) or not isinstance(user.get('login'), str) or not user['login'].strip()):
             raise ValueError('Original feedback identity or read access is unavailable or ambiguous')
-        context = None
+        context, thread = None, None
         if request['kind'] == 'reply-inline':
             if source['kind'] != 'inline_comment' or not source.get('thread_id'):
                 raise ValueError('Inline recovery requires the original thread identity')
@@ -86,6 +95,9 @@ class Recovery:
                     or (source['id'] != request['parent'] and (not positive_id(source_parent)
                         or source_parent != request['parent']))):
                 raise ValueError('Original source parent contradicts the retained routing parent and thread root')
+            thread_source = next(c for c in thread['comments'] if c['databaseId'] == source['id'])
+            if not same_thread_comment(thread_source, original):
+                raise ValueError('Original feedback thread and individual observation disagree; refresh read evidence')
             context = {'id': thread['id'], 'source': source['id'], 'parent': request['parent']}
         elif source['kind'] == 'inline_comment':
             raise ValueError('An inline source requires its originating thread')
@@ -137,6 +149,11 @@ class Recovery:
             state = 'present' if remote.get('body') == request['body'] else 'edited'
             if not isinstance(remote.get('body'), str):
                 raise ValueError('Reply payload is unavailable')
+        if thread is not None:
+            thread_reply = next((c for c in thread['comments'] if c['databaseId'] == receipt['id']), None)
+            if ((thread_reply is None) != (remote is None)
+                    or (remote is not None and not same_thread_comment(thread_reply, remote))):
+                raise ValueError('Reply thread and individual observation disagree; refresh read evidence')
         return {'pr': live, 'actor': actor, 'source': original, 'thread': context,
                 'reply_state': state, 'reply': remote}
 
