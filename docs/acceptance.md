@@ -2,6 +2,12 @@
 
 Required behavior: unchanged reruns invoke zero reviewers; failed or interrupted tasks retain completed siblings; five initial review/fix cycles with retained same-cycle retries and explicit bounded continuation; tree-preserving commit cleanup; fresh publication reconciliation after interruption; exact-head CI; existing partition settings and explicit human acceptances.
 
+Routine PR execution reads current settings directly without invoking `dk-config`.
+Requests to change, inspect or explain configuration still use that skill; scoped
+preferences use `dk-preferences`. The [native decision exercise](native-config-invocation-exercise.md)
+covers collected request shapes and boundary cases. Offline helper tests verify
+unchanged stores, scope precedence, settings refresh and missing-skill blockers.
+
 [Review continuation](task-state.md#retained-budgets) distinguishes ordinary interruption resume from renewed explicit user review authorization. The helper appends a bounded allowance to an exhausted run under a stable request identity without resetting history, counters or claims. Tests cover legacy cross-session exhaustion, target advancement after a clean pass, idempotent authorization/replay, preserved evidence and concurrent requests. The separate [bounded native exercise](native-review-continuation-exercise.md) checks coordinator interpretation with isolated synthetic state.
 
 [Scoped preferences](preferences.md) have deterministic file, directory, glob, exclusion and rename matching, atomic personal/repository admission with stale-revision rejection, and separate implementation/review modes. Native admission settles contradictions with the user before saving. Coordinators evaluate conditions and preserve complete records and applicable paths downstream. Task-specific selections and decisions are fingerprinted; relevant changes refresh affected work and unchanged selections preserve review reuse. Preference unit, handoff and full-recipe fixtures cover the storage and consumption boundaries; they do not establish independent native semantic-admission adherence.

@@ -71,6 +71,54 @@ def test_settings_roundtrip_preserves_native_options_and_references(tmp_path):
                 if isinstance(value,dict) else effective[key]==value)
 
 
+def test_direct_runtime_reads_preserve_stores_and_refresh_changed_selections(tmp_path):
+    import json
+    import os
+    repository, upstream = 'github.com/fork/repo', 'github.com/upstream/repo'
+    write(config.path(), {'reviewers': [{'skill': 'custom:review'}],
+                          'incoming_review': {'merge': True}})
+    write(config.path(upstream), {'finalizers': [],
+                                  'incoming_review': {'approve': True}})
+    write(config.path(repository), {'incoming_review': {'merge': False}})
+    available = tmp_path/'available.json'
+    available.write_text(json.dumps(list(config.DEFAULTS['skills'].values())))
+    command = [sys.executable, str(ROOT/'scripts/config.py'),
+               '--repository', repository, '--upstream', upstream]
+
+    def snapshot():
+        return {str(p): (p.read_bytes(), p.stat().st_mtime_ns)
+                for key in ('XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME')
+                for p in Path(os.environ[key]).rglob('*') if p.is_file()}
+
+    def read(*arguments):
+        result = subprocess.run([*command, *arguments], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+
+    original = snapshot()
+    loaded = read('show')
+    assert loaded['settings']['finalizers'] == []
+    assert loaded['settings']['incoming_review']['approve'] is True
+    assert loaded['settings']['incoming_review']['merge'] is False
+    assert set(loaded['sources']) == {str(config.path()), str(config.path(upstream)),
+                                     str(config.path(repository))}
+    for workflow in ('fix', 'review'):
+        missing = read('preflight', '--workflow', workflow, '--available', str(available))
+        assert missing == {'ready': False, 'missing_selected_skills': ['custom:review']}
+    assert snapshot() == original
+
+    # Simulate a separately authorized configuration edit between stages.
+    # Runtime reads must see it, without changing any other saved value.
+    write(config.path(repository), {'reviewers': [], 'finalizers': [],
+                                    'incoming_review': {'merge': True}})
+    changed = snapshot()
+    refreshed = read('show')['settings']
+    assert refreshed['reviewers'] == [] and refreshed['incoming_review']['merge'] is True
+    assert refreshed['incoming_review']['approve'] is True
+    assert read('preflight', '--available', str(available))['ready'] is True
+    assert snapshot() == changed
+
+
 def test_test_runner_skips_empty_runtime_suites(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location('test_runner', ROOT/'scripts/test.py')
     runner = importlib.util.module_from_spec(spec)

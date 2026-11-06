@@ -1,0 +1,21 @@
+{
+  "description": "Generalized requests from a private session audit, followed by boundary cases. Repository names and operational context are synthetic; original transcripts stay private.",
+  "cases": [
+    {"id": "routing-1", "origin": "collected", "request": "$dk-workflows:dk-pr-iter", "context": "The checkout has an open PR on a fork. The authenticated actor and author differ; a saved upstream personal-account mapping may make it yours."},
+    {"id": "routing-2", "origin": "collected", "request": "$dk-workflows:dk-pr-iter", "context": "The checkout has your open PR. Read effective reviewers and finalizers for the selected fix workflow."},
+    {"id": "routing-3", "origin": "collected", "request": "$dk-workflows:dk-pr-iter", "context": "The checkout has your open PR and a retained run. Resume existing claims and budgets with current settings evidence."},
+    {"id": "routing-merge", "origin": "collected", "request": "$dk-workflows:dk-pr-iter\nmerge when done", "context": "The checkout has your open PR. incoming_review.merge is false. No request to change settings was made."},
+    {"id": "routing-4", "origin": "collected", "request": "$dk-workflows:dk-pr-iter", "context": "The checkout has an open PR. Identify ownership, then hand off to the appropriate workflow."},
+    {"id": "commit-policy-question", "origin": "collected", "request": "I want to instruct dk-workflows to squash all changes into a single commit and have a simple commit message, with a custom policy per repo. How do I do that? And a global rule too.", "context": "Explain supported settings and scope; do not save a policy unless requested."},
+    {"id": "split-question", "origin": "collected", "request": "How do I configure commit splitting behavior?", "context": "The user is asking about configuration, rather than asking to split the current PR."},
+    {"id": "schema-question", "origin": "collected", "request": "Show me the complete configuration scheme.", "context": "Explain the dk-workflows configuration schema and supported scopes."},
+    {"id": "runtime-split", "origin": "boundary", "request": "Use dk-pr-split to assess this PR under my existing size and partition policies.", "context": "The canonical PR is https://github.com/example/project/pull/7. Preserve its per-PR opt-out and instructions."},
+    {"id": "runtime-review", "origin": "boundary", "request": "Review this PR with my configured reviewers. Analysis only.", "context": "The author is another person. Keep saved policies; preflight for the review workflow."},
+    {"id": "explicit-inspection", "origin": "boundary", "request": "Use dk-config to show my effective reviewers and where each setting comes from.", "context": "Inspection is the user's task. Make no settings changes."},
+    {"id": "explicit-change", "origin": "boundary", "request": "Set this repository's finalizers to an empty list.", "context": "Preserve every other setting and explain the skipped default finalizers."},
+    {"id": "preference", "origin": "boundary", "request": "Save a repository implementation preference: use pathlib for new Python filesystem code.", "context": "This is a scoped implementation preference, not a workflow role or PR rule."},
+    {"id": "missing-reviewer", "origin": "boundary", "request": "Continue fixing this PR using my current settings.", "context": "The configured required reviewer is not installed. Do not install, deselect or replace it without a request."},
+    {"id": "changed-policy", "origin": "boundary", "request": "Resume the PR fix and finish the configured finalizers.", "context": "A downstream handoff has old settings. The repository finalizer list and merge permission have since changed. Refresh consumed settings before dependent actions."},
+    {"id": "source-inspection", "origin": "boundary", "request": "Fix a bug in scripts/config.py where repository scope is ignored.", "context": "This is source development in dk-workflows. Inspect relevant source, docs, skills and tests as needed; no saved settings change was requested."}
+  ]
+}
