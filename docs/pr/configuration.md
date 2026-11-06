@@ -1,6 +1,6 @@
 # PR configuration
 
-Use `dk-config` for these policies and [workflow settings](../configuration.md). Keep existing helpers and private storage paths so saved choices remain effective.
+Use `dk-config` for requests to change, inspect or explain these policies and [workflow settings](../configuration.md). During PR execution, read the policies needed by the current stage directly with the commands below: `show` for rules, drafting, completion, commit policy and per-PR partition settings; `list` for size settings and CI exceptions. No configuration-skill invocation is required. Keep existing helpers, scope precedence and private storage paths so saved choices remain effective.
 
 Run `python3 PACKAGE_ROOT/scripts/pr_config.py --cwd REPO [--pr PR_URL] COMMAND`:
 

@@ -1,9 +1,11 @@
 ---
 name: dk-config
-description: Manage reviewers, cycle hooks, finalizers, accounts, PR rules, scoped preferences, drafting, commit policies, splitting, CI exceptions and completion settings.
+description: Change, inspect or explain saved dk-workflows settings when configuration is the user's task. Routine PR routing, review, fixing, splitting and finalization read settings directly without invoking this skill.
 ---
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
+
+Use this skill for configuration requests, including questions about available settings and their effective values or sources. During ordinary workflow execution, use the read-only helpers in [workflow configuration](../../../docs/configuration.md) and [PR configuration](../../../docs/pr/configuration.md) directly. Consuming an existing policy, checking selected-skill availability or merging a PR under current permissions does not require invoking this skill or changing saved settings. Source inspection while developing or troubleshooting this package is ordinary repository work.
 
 Set PLUGIN_ROOT to this plugin's root directory. Read [workflow configuration](../../../docs/configuration.md). Use `scripts/config.py` for reviewers, skill roles, before/after cycle hooks, personal accounts and incoming review policies. Hooks are ordered agent instructions with an optional selected skill. Preserve their exact instructions and scope; an empty phase list disables inherited hooks for that phase. Follow [cycle hooks](../../../docs/cycle-hooks.md) for boundaries, task definitions and recovery.
 

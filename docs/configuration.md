@@ -1,5 +1,9 @@
 # Workflow configuration
 
+Invoke `dk-config` when the user's task is to change, inspect or explain configuration. Ordinary PR workflows read effective settings directly through the helpers below; loading or invoking the configuration skill is not a prerequisite. `pr_route.py` already loads effective personal-account settings internally. Call `config.py show` when the current stage needs roles, reviewers, hooks, finalizers or action policies, and `config.py preflight` to check selected-skill availability. Read domain policies directly with [PR configuration](pr/configuration.md) helpers. These reads preserve saved settings and do not authorize configuration changes.
+
+Pass complete effective values and their scope/source evidence to downstream stages. Reuse them only while repository/upstream identity and consumed settings remain current; refresh affected reads and task inputs when those change, on recovery without current evidence, and before actions whose permission depends on saved policy. This boundary removes configuration-skill invocations, not required settings reads, availability checks or live publication checks. Missing or malformed settings and unavailable selected skills remain blockers; report them without silently resetting or deselecting anything.
+
 Run `python3 PLUGIN_ROOT/scripts/config.py --repository HOST/OWNER/REPO show|set|reset|preflight`. `set --file SETTINGS.json --scope repo|user` replaces that scope. `show` merges user settings, optional `--upstream HOST/OWNER/REPO` settings, then repository settings. Skill roles inherit separately. Each ordered reviewer list replaces the lower-scope list. Private files are stored under `${XDG_CONFIG_HOME:-~/.config}/dk-workflows/v2/`.
 
 ```json
@@ -22,7 +26,7 @@ Preflight defaults to `--workflow fix` and includes selected finalizer identitie
 
 Place the global `--upstream HOST/OWNER/REPO` option before `show` or `preflight` when inheriting those settings. Pass the same upstream identity to `scripts/pr_route.py --pr PR_URL --upstream HOST/OWNER/REPO` so routing uses the same personal accounts.
 
-Use `dk-config` for workflow settings and bundled [PR policies](pr/configuration.md). Scoped implementation and review preference requests route to `dk-preferences` under [the preference contract](preferences.md). Preferences have a separate shared personal/repository catalog; saved rules remain separate and are not converted. The settings helpers keep their existing private stores, schemas and precedence. Selected external skills own their settings. Renaming a skill does not update saved selections, clear work or move state. Update explicitly selected old identities through `dk-config`.
+Use `dk-config` for requests to configure workflow settings and bundled [PR policies](pr/configuration.md). Route explicit scoped implementation and review preference requests directly to `dk-preferences` under [the preference contract](preferences.md). Preferences have a separate shared personal/repository catalog; saved rules remain separate and are not converted. The settings helpers keep their existing private stores, schemas and precedence. Selected external skills own their settings. Renaming a skill does not update saved selections, clear work or move state. Update explicitly selected old identities through `dk-config` when requested.
 
 Use `scripts/pr_config.py commit-policy show|set|reset` through `dk-config` to select a private global or repository [commit policy](commit-policy.md). A policy is a saved prompt or a native skill that returns instructions for commit grouping and messages. Repository and upstream settings replace the entire inherited policy. The default retains existing cleanup and message behavior.
 

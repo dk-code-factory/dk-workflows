@@ -1,0 +1,334 @@
+{
+  "exercise": "config-invocation-decisions",
+  "baseline_revision": "cf384cc1cc13295a8d264b56c1ee92f5b97e05c4",
+  "case_fixture_sha256": "ea9c18cc6b1c7e7824dd79292187e61302744fc03ea956748101c593782caf4d",
+  "limitations": [
+    "One independent native decision exercise per arm, all 16 cases evaluated together; no full PR execution or production invocation-rate measurement.",
+    "Eight generalized collected requests and eight synthetic boundary cases; original sessions and operational artifacts remain private.",
+    "Scores cover declared configuration invocation/loading, settings mutation and the required missing-reviewer blocker. Other helper plans and permission checks were inspected separately; these scores do not prove execution.",
+    "Only Codex native judgments were sampled; Claude guidance is byte-identical but Claude execution was not tested."
+  ],
+  "arms": {
+    "before": {
+      "original_result_sha256": "1271c15542ea2c4fe8de34ef3e548f1f3207fc68205d23244323f85d142fb33c",
+      "cases": 16,
+      "passed": 7,
+      "unnecessary_config_invocations": 9,
+      "results": [
+        {
+          "id": "routing-1",
+          "origin": "collected",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": [
+            "configuration invocation",
+            "unnecessary configuration guidance"
+          ]
+        },
+        {
+          "id": "routing-2",
+          "origin": "collected",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": [
+            "configuration invocation",
+            "unnecessary configuration guidance"
+          ]
+        },
+        {
+          "id": "routing-3",
+          "origin": "collected",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": [
+            "configuration invocation",
+            "unnecessary configuration guidance"
+          ]
+        },
+        {
+          "id": "routing-merge",
+          "origin": "collected",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": [
+            "configuration invocation",
+            "unnecessary configuration guidance"
+          ]
+        },
+        {
+          "id": "routing-4",
+          "origin": "collected",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": [
+            "configuration invocation",
+            "unnecessary configuration guidance"
+          ]
+        },
+        {
+          "id": "commit-policy-question",
+          "origin": "collected",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "split-question",
+          "origin": "collected",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "schema-question",
+          "origin": "collected",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "runtime-split",
+          "origin": "boundary",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": [
+            "configuration invocation",
+            "unnecessary configuration guidance"
+          ]
+        },
+        {
+          "id": "runtime-review",
+          "origin": "boundary",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": [
+            "configuration invocation",
+            "unnecessary configuration guidance"
+          ]
+        },
+        {
+          "id": "explicit-inspection",
+          "origin": "boundary",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "explicit-change",
+          "origin": "boundary",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": true,
+          "failures": []
+        },
+        {
+          "id": "preference",
+          "origin": "boundary",
+          "invokes_config": false,
+          "loads_config_guidance": false,
+          "changes_saved_settings": true,
+          "failures": []
+        },
+        {
+          "id": "missing-reviewer",
+          "origin": "boundary",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": [
+            "configuration invocation",
+            "unnecessary configuration guidance"
+          ]
+        },
+        {
+          "id": "changed-policy",
+          "origin": "boundary",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": [
+            "configuration invocation",
+            "unnecessary configuration guidance"
+          ]
+        },
+        {
+          "id": "source-inspection",
+          "origin": "boundary",
+          "invokes_config": false,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": []
+        }
+      ],
+      "guidance_sha256": {
+        "codex/skills/dk-config/SKILL.md": "f6e4e0eba4da4651c1fc55cec8cdb79fe8db057d63740fd37ac4f16c1b0c84da",
+        "codex/skills/dk-pr-review/SKILL.md": "98022cdbc1fa8502fa1a4a8eecefc9b13b959ec2acadd12b7694ab312b8f8b26",
+        "codex/skills/dk-pr-split/SKILL.md": "1b9924c67a6a7a21268bc2e5c2d7dd8d3e4c3e6353a4dc88847991fdc0f0dd25",
+        "docs/configuration.md": "7c53678c3595a24e5bb6e33c9f08a363abc9cd22cd4eeb1df05c9128e9fdc24f",
+        "docs/pr/configuration.md": "7d358908b935c88efd67b3caeee0f9256d8f972349698c06a947dee1ca3c7b4a",
+        "runtime/pr.md": "57e8e859e159da0d8800f5098f02949e04cac9d3eaca2da2efd6242593682655",
+        "runtime/pr-iter.md": "2fee971760c5fb45269cd4eb33ee43587aa4d92fdd4f48a8385ef413e72d2df5",
+        "runtime/pr-review.md": "3b47f417e4ba6d01dea972a31a6d38ac34d76af881d53dcde72d71fba0aef484"
+      }
+    },
+    "after": {
+      "original_result_sha256": "db131803780f46c7769eb14e6bc25d7dd32f3341e6da10e5a7a5a21d218e8df4",
+      "cases": 16,
+      "passed": 16,
+      "unnecessary_config_invocations": 0,
+      "results": [
+        {
+          "id": "routing-1",
+          "origin": "collected",
+          "invokes_config": false,
+          "loads_config_guidance": false,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "routing-2",
+          "origin": "collected",
+          "invokes_config": false,
+          "loads_config_guidance": false,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "routing-3",
+          "origin": "collected",
+          "invokes_config": false,
+          "loads_config_guidance": false,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "routing-merge",
+          "origin": "collected",
+          "invokes_config": false,
+          "loads_config_guidance": false,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "routing-4",
+          "origin": "collected",
+          "invokes_config": false,
+          "loads_config_guidance": false,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "commit-policy-question",
+          "origin": "collected",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "split-question",
+          "origin": "collected",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "schema-question",
+          "origin": "collected",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "runtime-split",
+          "origin": "boundary",
+          "invokes_config": false,
+          "loads_config_guidance": false,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "runtime-review",
+          "origin": "boundary",
+          "invokes_config": false,
+          "loads_config_guidance": false,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "explicit-inspection",
+          "origin": "boundary",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "explicit-change",
+          "origin": "boundary",
+          "invokes_config": true,
+          "loads_config_guidance": true,
+          "changes_saved_settings": true,
+          "failures": []
+        },
+        {
+          "id": "preference",
+          "origin": "boundary",
+          "invokes_config": false,
+          "loads_config_guidance": false,
+          "changes_saved_settings": true,
+          "failures": []
+        },
+        {
+          "id": "missing-reviewer",
+          "origin": "boundary",
+          "invokes_config": false,
+          "loads_config_guidance": false,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "changed-policy",
+          "origin": "boundary",
+          "invokes_config": false,
+          "loads_config_guidance": false,
+          "changes_saved_settings": false,
+          "failures": []
+        },
+        {
+          "id": "source-inspection",
+          "origin": "boundary",
+          "invokes_config": false,
+          "loads_config_guidance": true,
+          "changes_saved_settings": false,
+          "failures": []
+        }
+      ],
+      "guidance_sha256": {
+        "codex/skills/dk-config/SKILL.md": "b916183e040864840c6005a0fd2e1639d3b15c072246cf804236752746e40ea1",
+        "codex/skills/dk-pr-review/SKILL.md": "01a2bc849829809863c6bd814eced37d216184486181f8774005c1402ee6ffd3",
+        "codex/skills/dk-pr-split/SKILL.md": "1e5e16caa104ee203b00a66ffa71c182232561a64318a9f16ec3474ad583aa23",
+        "docs/configuration.md": "b4c20b2b76f23c7860508cb1cb8946409c86d1f9609113a9a8b9169367a714e9",
+        "docs/pr/configuration.md": "058300160f4fb5a7fc959b938cc640119ca05e12f1e1ec062fdd0a9416d06a23",
+        "runtime/pr.md": "d1d7472269730ad508d8aa8cef42ef1f8abd93dd813c963e5f90658bac6be88d",
+        "runtime/pr-iter.md": "13ce00b16aae865964e94e0a8a7e1b3208bf87771ed9ed640c5d30a2f8b1fa68",
+        "runtime/pr-review.md": "7cce49c6b1d65753373d607b960eec523bb58ebddfd72e6ab347c2aa15e54c04"
+      }
+    }
+  },
+  "host": "Codex native collaboration",
+  "model_and_effort": "Not independently recorded"
+}

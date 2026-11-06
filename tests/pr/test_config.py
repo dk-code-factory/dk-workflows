@@ -44,3 +44,39 @@ def test_structured_drafting_selections_preserve_options(monkeypatch):
     original={'pr_description':{'skill':'custom:description','options':{'style':'concise'}}}
     (data/'drafting.json').write_text(json.dumps(original))
     assert config.main(['drafting','show'])['value']==original
+
+
+def test_split_stage_reads_preserve_scoped_policies_and_exact_pr_choices(monkeypatch):
+    chain = ['remote:github.com/fork/repo', 'remote:github.com/upstream/repo']
+    monkeypatch.setattr(config, 'identities', lambda *_: chain)
+    config.pr_size.configure(['user'], 'set', scope='user',
+                             settings={'added_lines_threshold': 700})
+    config.pr_size.configure([chain[1]], 'set', settings={'split_related': 'manual'})
+    config.pr_size.configure(chain, 'set', settings={'evacuate_unrelated': 'disabled'})
+    pr = 'https://github.com/upstream/repo/pull/7'
+    instruction = 'Keep the migration together.\nSplit only independent changes.\n'
+    config.pr_partition_policy.configure(pr, 'instructions', reason='User conditions',
+                                          source='user request', instructions=instruction)
+    config.pr_partition_policy.configure(pr, 'disable', reason='Whole-PR opt-out',
+                                          source='later user request')
+    root = Path(os.environ['XDG_DATA_HOME'])
+
+    def snapshot():
+        return {str(p): (p.read_bytes(), p.stat().st_mtime_ns)
+                for p in root.rglob('*') if p.is_file()}
+
+    original = snapshot()
+    result = config.main(['--cwd', '.', '--pr', pr, 'pr-size', 'list'])
+    assert result['pr_size'] == {'added_lines_threshold': 700, 'split_related': 'manual',
+                                'evacuate_unrelated': 'disabled'}
+    assert result['settings']['added_lines_threshold']['source'] == 'user'
+    assert result['settings']['split_related']['source'] == 'upstream'
+    assert result['settings']['evacuate_unrelated']['source'] == 'repo'
+    policy = config.main(['--cwd', '.', '--pr', pr, 'pr-partition', 'show'])
+    assert policy['enabled'] is False and policy['instructions'] == instruction
+    assert policy['instructions_source']['source'] == 'user request'
+    assert len(policy['history']) == 2
+    assert snapshot() == original
+    other = config.main(['--pr', pr.replace('/7', '/8'), 'pr-partition', 'show'])
+    assert other['enabled'] is True and other['configured'] is False
+    assert snapshot() == original
