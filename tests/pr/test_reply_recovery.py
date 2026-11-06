@@ -448,6 +448,66 @@ def test_complete_inline_list_must_include_distinct_routing_parent(remote, inlin
     assert not publication.load(inline_operation).get('reply_dispositions')
 
 
+@pytest.mark.parametrize('inline_operation', [77], indirect=True)
+@pytest.mark.parametrize('witness', ['list', 'thread'])
+@pytest.mark.parametrize('contradiction', [
+    ('in_reply_to_id', True), ('in_reply_to_id', 77.0), ('in_reply_to_id', 0),
+    ('in_reply_to_id', -1), ('in_reply_to_id', 77), ('in_reply_to_id', 88),
+    ('in_reply_to_id', '77'), ('url', PR+'#discussion_r88'),
+    ('url', 'https://github.com/another/repo/pull/7#discussion_r77'),
+    ('url', PR+'#discussion_r77extra'), ('url', None),
+])
+def test_distinct_routing_root_rejects_contradictory_evidence(
+        remote, monkeypatch, inline_operation, witness, contradiction):
+    operation = inline_operation
+    original = publication.load(operation)
+    remote.comments[:] = [{'id': 77}]
+    monkeypatch.setattr(publisher, 'handler', read_handler)
+    def run(argv, **kwargs):
+        assert argv[:2] == ['gh', 'api'] and 'graphql' in argv
+        return {'data': {'node': {
+            'id': 'T', 'isResolved': False, 'viewerCanResolve': True,
+            'pullRequest': {'url': PR, 'headRefOid': remote.metadata['headRefOid']},
+            'comments': {'nodes': remote.thread_comments(),
+                'pageInfo': {'hasNextPage': False}}}}}
+    monkeypatch.setattr(publisher, 'run', run)
+    remote.disposition(operation)
+    disposition = publication.load(operation)['reply_dispositions'][-1]
+    assert publisher.publish(operation, reconcile=True)['reply_obligation'] == 'no_replacement'
+    field, value = contradiction
+    root = remote.comments[0] if witness == 'list' else remote.thread['comments'][0]
+    root['html_url' if field == 'url' and witness == 'list' else field] = value
+    with pytest.raises(ValueError, match='Routing parent contradicts'):
+        publisher.recovery().inspect(operation)
+    with pytest.raises(ValueError, match='Routing parent contradicts'):
+        publisher.recovery().dispose(operation, {k: disposition[k] for k in ('decision', 'reason', 'observation')})
+    with pytest.raises(Diagnostic) as error:
+        publisher.publish(operation, reconcile=True)
+    assert error.value.code == 'publication_not_ready'
+    saved = publication.load(operation)
+    assert saved['reply_dispositions'] == [disposition]
+    assert all(saved[key] == original[key] for key in ('request', 'response', 'receipt'))
+    assert len(remote.writes) == 1
+
+
+@pytest.mark.parametrize('inline_operation', [77], indirect=True)
+@pytest.mark.parametrize('parent_marker', ['absent', None])
+@pytest.mark.parametrize('include_urls', [False, True])
+def test_distinct_routing_root_accepts_minimal_and_canonical_evidence(
+        remote, inline_operation, parent_marker, include_urls):
+    remote.comments[:] = [{'id': 77}, {'id': 43, 'in_reply_to_id': 99, 'html_url': 'unrelated'}]
+    if parent_marker is None:
+        remote.comments[0]['in_reply_to_id'] = None
+        remote.thread['comments'][0]['in_reply_to_id'] = None
+    if include_urls:
+        canonical = 'https://github.com/Owner/Repo/pull/7#discussion_r77'
+        remote.comments[0]['html_url'] = canonical
+        remote.thread['comments'][0]['url'] = canonical
+    remote.disposition(inline_operation)
+    assert publisher.publish(inline_operation, reconcile=True)['reply_obligation'] == 'no_replacement'
+    assert len(remote.writes) == 1
+
+
 @pytest.mark.parametrize('inline_operation', [10, 77], indirect=True)
 @pytest.mark.parametrize('claimed_parent', ['absent', None, 10, 43, True, 77.0, 0, -1])
 def test_inline_source_parent_must_agree_with_real_thread_root(

@@ -113,6 +113,16 @@ class Recovery:
             required.add(request['parent'])
         if not required.issubset(ids):
             raise ValueError('Reply list omits the accessible original source or routing parent')
+        if request['kind'] == 'reply-inline' and source['id'] != request['parent']:
+            listed_parent = next(item for item in items if item['id'] == request['parent'])
+            thread_parent = thread['comments'][0]
+            parent_url = pr + '#discussion_r' + str(request['parent'])
+            if (listed_parent.get('in_reply_to_id') is not None
+                    or thread_parent.get('in_reply_to_id') is not None
+                    or ('html_url' in listed_parent
+                        and not same_comment_url(listed_parent['html_url'], parent_url))
+                    or ('url' in thread_parent and not same_comment_url(thread_parent['url'], parent_url))):
+                raise ValueError('Routing parent contradicts the original thread root')
         if source['kind'] != 'review':
             listed_source = next(item for item in items if item['id'] == source['id'])
             listed_user = listed_source.get('user')
