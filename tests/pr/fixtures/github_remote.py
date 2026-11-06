@@ -121,7 +121,9 @@ class Remote:
         if suffix == '/issues/7/comments':
             if payload is None:
                 return deepcopy(self.state['issue_comments'])
-            comment_id = 300 + len(self.state['issue_comments'])
+            comment_id = max(self.state.get('next_issue_comment_id', 300),
+                             1 + max((v['id'] for v in self.state['issue_comments']), default=299))
+            self.state['next_issue_comment_id'] = comment_id + 1
             value = {'id': comment_id, 'body': payload['body'],
                      'user': {'login': self.state['actor']},
                      'html_url': PR+'#issuecomment-'+str(comment_id)}
@@ -130,9 +132,15 @@ class Remote:
         if suffix == '/pulls/7/comments':
             return deepcopy(self.state['replies'])
         if suffix == '/pulls/7/comments/41/replies':
-            value={'id':42,'in_reply_to_id':41,'body':payload['body'],'user':{'login':self.state['actor']},'html_url':PR+'#discussion_r42'}
+            comment_id = self.state.get('next_inline_reply_id', 42)
+            while any(v['id'] == comment_id for v in self.state['replies']):
+                comment_id += 1
+            self.state['next_inline_reply_id'] = comment_id + 1
+            value={'id':comment_id,'in_reply_to_id':41,'body':payload['body'],'user':{'login':self.state['actor']},'html_url':PR+'#discussion_r'+str(comment_id)}
             self.state['replies'].append(value)
-            self.state['thread']['comments']=[{'id':'comment-42','databaseId':42,'url':value['html_url'],'body':value['body'],'author':value['user']}]
+            self.state['thread']['comments'] = [v for v in self.state['thread']['comments']
+                                                if v['databaseId'] != comment_id]
+            self.state['thread']['comments'].append({'id':'comment-'+str(comment_id),'databaseId':comment_id,'url':value['html_url'],'body':value['body'],'author':value['user']})
             return self.changed('reply-inline',value)
         raise AssertionError('Unexpected fixture API: '+path)
 

@@ -28,6 +28,28 @@ Reply callers supply a `source` object with `kind` (`inline_comment`, `review` o
 
 Retain source identity, routing parent, head, exact body and operation path through handoffs and resume. Reuse the operation for reconciliation; do not infer a different destination from prose, replace the source URL or regenerate an uncertain reply's attribution. Exact-body observation must preserve the heading as well as the response.
 
+## Recover a previously verified reply
+
+A saved verified receipt establishes a historical publication. If that exact comment later becomes unavailable or its body changes, preserve its original request, response and receipt. Another identical comment cannot substitute for the original receipt. A missing reply with an uncertain initial write remains pending and cannot use this recovery path.
+
+Run `python3 PACKAGE_ROOT/scripts/publish.py inspect-reply --operation FILE`. This reads the current PR, actor, original feedback, complete reply list and original comment by id, and saves a separate private observation. Inline recovery also verifies the retained source and routing parent in the original thread. HTTP 404 with accessible PR/source and no listed original reply records `unavailable`, without inferring deletion or its cause. A matching original object with changed body records `edited`. Other access failures, inconsistent list/individual responses or ambiguous membership cannot settle the obligation. Restore complete evidence before proceeding.
+
+Reassess the original feedback against current code, validation and discussion. Decide whether an answer is still required; a missing historical comment alone is not permission to post again. Save a private disposition file with the inspected `fingerprint` as `observation`:
+
+```json
+{"decision":"no_replacement","reason":"The original question is obsolete because the affected code was removed; current code and discussion were reassessed.","observation":"INSPECTED_FINGERPRINT"}
+```
+
+Run `python3 PACKAGE_ROOT/scripts/publish.py dispose-reply --operation FILE --file DISPOSITION.json`. Use `no_replacement` only when the current answer obligation is settled without another post; use `replacement_required` when a supported answer remains necessary. The reason records the concrete reassessment privately. Neither command writes to GitHub. Dispositions retain prior observations and decisions and bind the live actor, PR/head, exact original source, destination and original reply state. Repeated identical disposition is idempotent. Changed evidence requires fresh inspection and reassessment; an uncertain linked replacement must be reconciled before another disposition.
+
+After `no_replacement`, reconcile the original operation. Successful reconciliation reports `reply_obligation:no_replacement` and allows the reply finalizer to finish with its historical receipt intact. It does not claim that the old reply is currently visible. It does not resolve an inline thread or relax the resolution publisher's live verified-answer requirement.
+
+If the original reply becomes visible again with its exact historical body after a disposition, inspect and reassess it again. Record a fresh `no_replacement` decision when that answer settles the current obligation, then reconcile. Its original request, response and receipt remain intact; a restored original cannot receive a `replacement_required` disposition. Reconcile any uncertain linked replacement before changing the decision.
+
+After `replacement_required`, prepare a fresh reply request with the current head, exact original `source` and destination, a reviewed current body, `replaces` containing the original operation path, and `authorization` recording the separate authorization for this concrete replacement. Existing caller authorization may cover the replacement; obtain it only if absent. Never replay the old operation or add an action id to evade uncertainty. Preparation links one replacement operation to that disposition. Recover that path on resume; repeated preparation reuses it and another replacement for the same disposition is rejected. Publish/reconcile the linked operation normally, then reconcile the original. The original obligation finishes only after the linked answer is verified and currently visible. Source, destination, actor and head checks run again before dispatch. A stale undispatched replacement can be superseded by a fresh disposition without erasing its history; its old dispatch remains blocked.
+
+Keep observations, dispositions, authorization evidence and operation paths private under the reporting contract. For a retained legacy reply without a structured original source, recovery remains blocked until its provenance can be established; do not edit a journal to invent it.
+
 ```json
 {"kind":"push","checkout":"/owned/checkout","remote":"https://github.com/owner/repo.git","branch":"pr-branch","head":"FULL_VERIFIED_HEAD_SHA","expected_head":"FULL_REMOTE_LEASE_SHA"}
 ```
