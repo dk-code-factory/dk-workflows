@@ -134,7 +134,7 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
         routed=command(ROOT/'scripts/pr_route.py','--pr',PR)
         assert routed['ownership']=='mine' and routed['skill']=='dk-workflows:dk-pr-fix'
         settings=command(ROOT/'scripts/config.py','--repository',REPO,'show','--expanded')['settings']
-        assert settings['processes']['pr-review']['actions']['merge']['enabled'] is False
+        assert settings['processes']['pr-review']['permissions']['merge_pr']['enabled'] is False
     def publish(request):
         request_file=save('request.json',request)
         prepared=command(PR_PACKAGE/'scripts/publish.py','prepare','--file',request_file)

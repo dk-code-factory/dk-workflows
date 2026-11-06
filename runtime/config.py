@@ -12,34 +12,52 @@ FINALIZER_DEFAULTS = ['dk-commit-split', 'dk-pr-decisions', 'dk-pr-description',
                       'dk-pr-feedback-reply', 'dk-ci', 'dk-pr-publish']
 LIMITS = {'review_cycles': 5, 'retries_per_task': 1, 'ci_repairs_per_cycle': 5,
           'ci_reruns_per_head': 3}
-ACTIONS = ('push_commits', 'rewrite_commits', 'edit_pr', 'reply_to_feedback',
-           'resolve_threads', 'create_draft_prs', 'request_review', 'post_findings', 'approve_ci', 'approve')
-FIX_OPERATIONS = ['dk-pr-feedback-read', 'dk-pr-decisions', 'dk-pr-feedback-address', 'dk-pr-split',
-              'dk-pr-reviewers-run', 'dk-commit-split', 'dk-commit-message', 'dk-pr-description',
-              'dk-pr-feedback-reply', 'dk-ci', 'dk-ci-flakes', 'dk-pr-publish']
+PERMISSIONS = ('push_commits', 'rewrite_commits', 'edit_pr', 'reply_to_feedback',
+               'resolve_threads', 'create_draft_prs', 'request_review', 'post_review',
+               'approve_fork_ci', 'approve_pr')
+FIX_TASKS = {
+    'read_feedback': 'dk-pr-feedback-read',
+    'collect_decisions': 'dk-pr-decisions',
+    'address_feedback': 'dk-pr-feedback-address',
+    'split_scope': 'dk-pr-split',
+    'review_changes': 'dk-pr-reviewers-run',
+    'organize_commits': 'dk-commit-split',
+    'draft_commit_message': 'dk-commit-message',
+    'update_description': 'dk-pr-description',
+    'reply_to_feedback': 'dk-pr-feedback-reply',
+    'check_ci': 'dk-ci',
+    'classify_ci_failures': 'dk-ci-flakes',
+    'publish_pr_actions': 'dk-pr-publish',
+}
 DEFAULTS = {
     'schema_version': 1,
     'accounts': {'personal': []},
-    'skill_settings': {},
+    'skill_defaults': {},
     'processes': {
-        'pr-iter': {'run': 'dk-pr-iter', 'routes': {'own_pr': 'pr-fix', 'other_pr': 'pr-review'}},
-        'pr-fix': {'run': 'dk-pr-fix', 'operations': FIX_OPERATIONS, 'limits': dict(LIMITS),
+        'pr-iter': {'coordinator': 'dk-pr-iter', 'routes': {'own_pr': 'pr-fix', 'other_pr': 'pr-review'}},
+        'pr-fix': {'coordinator': 'dk-pr-fix', 'tasks': FIX_TASKS, 'limits': dict(LIMITS),
                    'finalizers': list(FINALIZER_DEFAULTS),
-                   'actions': {**{action: action not in {'post_findings', 'approve_ci', 'approve'} for action in ACTIONS},
-                               'merge': {'enabled': False, 'method': 'squash'}},
+                   'permissions': {**{permission: permission not in {'post_review', 'approve_fork_ci', 'approve_pr'} for permission in PERMISSIONS},
+                                   'merge_pr': {'enabled': False, 'method': 'squash'}},
                    'hooks': {phase: [] for phase in CYCLE_PHASES}},
-        'pr-review': {'run': 'dk-pr-review',
-                      'verification': {'skill': 'dk-pr-review',
+        'pr-review': {'coordinator': 'dk-pr-review',
+                      'tasks': {
+                          'read_feedback': 'dk-pr-feedback-read',
+                          'review_changes': 'dk-pr-reviewers-run',
+                          'verify_findings': {'skill': 'dk-pr-review',
                                        'instructions': 'Independently verify candidate findings against pinned source and governing instructions. Return confirmed, rejected or uncertain findings with evidence. Do not edit or publish.'},
-                      'operations': ['dk-pr-feedback-read', 'dk-pr-reviewers-run', 'dk-pr-review-post',
-                                 'dk-ci-approve', 'dk-ci', 'dk-ci-flakes', 'dk-pr-publish'],
+                          'post_review': 'dk-pr-review-post',
+                          'approve_fork_ci': 'dk-ci-approve',
+                          'check_ci': 'dk-ci',
+                          'classify_ci_failures': 'dk-ci-flakes',
+                          'publish_pr_actions': 'dk-pr-publish'},
                       'limits': dict(LIMITS),
-                      'actions': {**{action: action in {'post_findings', 'approve_ci'} for action in ACTIONS},
-                                  'merge': {'enabled': False, 'method': 'squash'}},
+                      'permissions': {**{permission: permission in {'post_review', 'approve_fork_ci'} for permission in PERMISSIONS},
+                                      'merge_pr': {'enabled': False, 'method': 'squash'}},
                       'hooks': {phase: [] for phase in CYCLE_PHASES}},
-        'commit-message': {'run': 'dk-commit-message'},
-        'issue': {'run': 'dk-issue'},
-        'pr-reviewers-run': {'run': 'dk-pr-reviewers-run'},
+        'commit-message': {'coordinator': 'dk-commit-message'},
+        'issue': {'coordinator': 'dk-issue'},
+        'pr-reviewers-run': {'coordinator': 'dk-pr-reviewers-run'},
     },
     'extensions': {},
 }
@@ -91,9 +109,9 @@ def validate(settings):
         if key in seen:
             raise ValueError('Personal accounts must be unique per host/account')
         seen.add(key)
-    defaults = result.get('skill_settings', {})
+    defaults = result.get('skill_defaults', {})
     if not isinstance(defaults, dict):
-        raise ValueError('skill_settings must be a skill-to-settings object')
+        raise ValueError('skill_defaults must be a skill-to-settings object')
     for skill, value in defaults.items():
         invocation.skill_name(skill)
         invocation.validate_settings(value)
@@ -103,27 +121,27 @@ def validate(settings):
     for name, process in processes.items():
         if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', name):
             raise ValueError('Invalid process name')
-        if not isinstance(process, dict) or set(process) - {'run', 'verification', 'operations', 'finalizers', 'limits', 'actions', 'hooks', 'routes'}:
+        if not isinstance(process, dict) or set(process) - {'coordinator', 'tasks', 'finalizers', 'limits', 'permissions', 'hooks', 'routes'}:
             raise ValueError('Unknown process setting')
-        if 'run' in process:
-            invocation.validate(process['run'])
-        if 'verification' in process:
-            invocation.validate(process['verification'])
+        if 'coordinator' in process:
+            invocation.validate(process['coordinator'])
         if 'finalizers' in process:
             finalizer_groups(process['finalizers'])
-        if not isinstance(process.get('operations', []), list):
-            raise ValueError('Process operations must be an invocation list')
-        for call in process.get('operations', []):
+        if not isinstance(process.get('tasks', {}), dict):
+            raise ValueError('Process tasks must map purpose names to invocations')
+        for task, call in process.get('tasks', {}).items():
+            if not isinstance(task, str) or not re.fullmatch(r'[a-z][a-z0-9]*(?:_[a-z0-9]+)*', task):
+                raise ValueError('Task names must describe their purpose in snake_case')
             invocation.validate(call)
         limits = process.get('limits', {})
         if not isinstance(limits, dict) or set(limits) - LIMITS.keys() or any(
                 type(value) is not int or value < 1 or value > LIMITS[key] for key, value in limits.items()):
             raise ValueError('Process limits must be positive integers within the retained runtime ceilings')
-        actions = process.get('actions', {})
-        if (not isinstance(actions, dict) or set(actions) - (set(ACTIONS) | {'merge'})
-                or any(type(value) is not bool for key, value in actions.items() if key != 'merge')):
-            raise ValueError('Process actions must be known boolean permissions')
-        merging = actions.get('merge', {})
+        permissions = process.get('permissions', {})
+        if (not isinstance(permissions, dict) or set(permissions) - (set(PERMISSIONS) | {'merge_pr'})
+                or any(type(value) is not bool for key, value in permissions.items() if key != 'merge_pr')):
+            raise ValueError('Process permissions must be known boolean permissions')
+        merging = permissions.get('merge_pr', {})
         if (not isinstance(merging, dict) or set(merging) - {'enabled', 'method'}
                 or type(merging.get('enabled', False)) is not bool
                 or merging.get('method', 'squash') not in {'squash', 'merge'}):
@@ -163,8 +181,8 @@ def effective(repository, upstream=None, *, expanded=True):
             sources.append(str(source))
     if expanded:
         for name, process in result['processes'].items():
-            if 'run' not in process:
-                raise ValueError('Custom process requires a run invocation: ' + name)
+            if 'coordinator' not in process:
+                raise ValueError('Custom process requires a coordinator invocation: ' + name)
             for route in process.get('routes', {}).values():
                 if route not in result['processes']:
                     raise ValueError('Route selects an unknown process: ' + route)
@@ -177,7 +195,7 @@ def calls(settings, process=None, available=None):
         reference = raw.get('skill')
         candidates = [name for name in (available or []) if reference and invocation.matches(reference, name)]
         identity = candidates[0] if len(candidates) == 1 else None
-        call = invocation.configured(raw, settings['skill_settings'], identity=identity)
+        call = invocation.configured(raw, settings['skill_defaults'], identity=identity)
         yield location, call
         reviewers = call.get('options', {}).get('reviewers', [])
         signature = digest(call)
@@ -189,11 +207,9 @@ def calls(settings, process=None, available=None):
         if process is not None and name != process:
             continue
         prefix = '/processes/' + name
-        yield from visit(entry['run'], prefix + '/run')
-        if 'verification' in entry:
-            yield from visit(entry['verification'], prefix + '/verification')
-        for index, call in enumerate(entry.get('operations', [])):
-            yield from visit(call, prefix + '/operations/' + str(index))
+        yield from visit(entry['coordinator'], prefix + '/coordinator')
+        for task, call in entry.get('tasks', {}).items():
+            yield from visit(call, prefix + '/tasks/' + task)
         for group_index, group in enumerate(finalizer_groups(entry.get('finalizers', []))):
             for index, call in enumerate(group):
                 yield from visit(call, prefix + '/finalizers/' + str(group_index) + '/' + str(index))
@@ -212,28 +228,30 @@ def preflight(settings, available, capabilities=None, *, process=None):
 
 def reviewers(settings, process):
     entry = settings['processes'][process]
-    coordinators = [value for value in [entry['run'], *entry.get('operations', [])]
-                    if (invocation.normalize(value).get('skill', '').rsplit(':', 1)[-1] == 'dk-pr-reviewers-run'
-                        or 'reviewers' in invocation.configured(value, settings['skill_settings']).get('options', {}))]
-    if len(coordinators) != 1:
-        raise ValueError('Reviewer selection requires one configured review coordinator')
-    return invocation.configured(coordinators[0], settings['skill_settings']).get('options', {}).get('reviewers', [])
+    coordinator = entry.get('tasks', {}).get('review_changes', entry['coordinator'])
+    return invocation.configured(coordinator, settings['skill_defaults']).get('options', {}).get('reviewers', [])
 
 
-def select(settings, process, kind='run', index=None, phase=None):
+def select(settings, process, kind='coordinator', index=None, phase=None, task=None):
     if process not in settings['processes']:
         raise ValueError('Unknown process')
     entry = settings['processes'][process]
-    if kind in {'run', 'verification'}:
-        if kind not in entry:
-            raise ValueError('No configured invocation for this selection')
-        value = entry[kind]
+    if kind == 'coordinator':
+        if task is not None or index is not None or phase is not None:
+            raise ValueError('Coordinator selection has no task, index or phase')
+        value = entry['coordinator']
+    elif kind == 'task':
+        if not isinstance(task, str) or task not in entry.get('tasks', {}):
+            raise ValueError('No configured task with this purpose name')
+        if index is not None or phase is not None:
+            raise ValueError('Named task selection has no index or phase')
+        value = entry['tasks'][task]
     else:
+        if task is not None:
+            raise ValueError('Task name is only valid for named task selection')
         if type(index) is not int or index < 0:
             raise ValueError('Invocation selection requires a nonnegative index')
-        if kind == 'operation':
-            values = entry.get('operations', [])
-        elif kind == 'finalizer':
+        if kind == 'finalizer':
             values = [value for group in finalizer_groups(entry.get('finalizers', [])) for value in group]
         elif kind == 'hook' and phase in CYCLE_PHASES:
             values = entry.get('hooks', {}).get(phase, [])
@@ -244,25 +262,27 @@ def select(settings, process, kind='run', index=None, phase=None):
         if index >= len(values):
             raise ValueError('No configured invocation at this index')
         value = values[index]
-    return invocation.configured(value, settings['skill_settings'])
+    return invocation.configured(value, settings['skill_defaults'])
 
 
-def make_invocation_spec(*, repository, pr, process, definition, kind='run', index=None,
-                         phase=None, upstream=None):
+def make_invocation_spec(*, repository, pr, process, definition, kind='coordinator', index=None,
+                         phase=None, task=None, upstream=None):
     """Bind the common invocation to explicit native resources without executing it."""
     loaded = effective(repository, upstream)
-    call = select(loaded['settings'], process, kind, index, phase)
+    call = select(loaded['settings'], process, kind, index, phase, task)
     if not isinstance(definition, dict):
         raise ValueError('Invocation definition must be an object')
     runner = definition.get('skill_identity')
     if call.get('skill') and (not isinstance(runner, str) or not invocation.matches(call['skill'], runner)):
         raise ValueError('Resolve and supply the configured invocation skill identity')
     if not call.get('skill'):
-        owner = invocation.normalize(loaded['settings']['processes'][process]['run']).get('skill')
+        owner = invocation.normalize(loaded['settings']['processes'][process]['coordinator']).get('skill')
         if not isinstance(runner, str) or (owner and not invocation.matches(owner, runner)):
             raise ValueError('Instruction-only invocations use the owning process identity')
-    call = invocation.configured(call, loaded['settings']['skill_settings'], identity=runner)
+    call = invocation.configured(call, loaded['settings']['skill_defaults'], identity=runner)
     execution = deepcopy(definition)
+    if kind == 'task':
+        execution.setdefault('responsibility', 'finding-verification' if task == 'verify_findings' else task)
     instructions = execution.get('instructions', {})
     if not isinstance(instructions, dict):
         raise ValueError('Instructions must be a label-to-resource-path map')
@@ -287,12 +307,14 @@ def make_invocation_spec(*, repository, pr, process, definition, kind='run', ind
                  'execution': execution.get('options', {})})
     if 'instructions' in call:
         execution['assigned_instructions'] = call['instructions']
+    if kind == 'task':
+        execution['options']['configured_task'] = task
     spec = make_spec(repository=repository, pr=pr, **execution)
     spec['configuration'] = {
         'sources': [str(path(repo)) for repo in [None] + ([upstream] if upstream else []) + [repository]],
-        'process': process, 'kind': kind, 'index': index, 'phase': phase}
-    if kind not in {'reviewer', 'verification'}:
-        spec['options']['process_actions'] = loaded['settings']['processes'][process].get('actions', {})
+        'process': process, 'kind': kind, 'task': task, 'index': index, 'phase': phase}
+    if kind != 'reviewer' and not (kind == 'task' and task == 'verify_findings'):
+        spec['options']['process_permissions'] = loaded['settings']['processes'][process].get('permissions', {})
     return spec
 
 
@@ -302,7 +324,7 @@ def check_selection(spec):
     if selection is None:
         return
     if (not isinstance(selection, dict)
-            or set(selection) != {'sources', 'process', 'kind', 'index', 'phase'}
+            or set(selection) != {'sources', 'process', 'kind', 'task', 'index', 'phase'}
             or not isinstance(selection['sources'], list)
             or any(not isinstance(source, str) or not Path(source).is_absolute() for source in selection['sources'])):
         raise ValueError('Malformed explicit configuration selection')
@@ -312,16 +334,16 @@ def check_selection(spec):
             value = validate(read(source))
             settings = invocation.merge(settings, {key: item for key, item in value.items() if key != '$schema'})
     try:
-        call = select(settings, selection['process'], selection['kind'], selection['index'], selection['phase'])
-        call = invocation.configured(call, settings['skill_settings'], identity=spec['skill']['identity'])
+        call = select(settings, selection['process'], selection['kind'], selection['index'], selection['phase'], selection['task'])
+        call = invocation.configured(call, settings['skill_defaults'], identity=spec['skill']['identity'])
         process = settings['processes'][selection['process']]
     except (ValueError, KeyError) as exc:
         raise ValueError('Inputs changed: configured invocation no longer resolves') from exc
     options = spec['options']
     changed = (call != options.get('invocation')
                or process.get('limits', dict(LIMITS)) != options.get('process_limits'))
-    if 'process_actions' in options:
-        changed = changed or process.get('actions', {}) != options['process_actions']
+    if 'process_permissions' in options:
+        changed = changed or process.get('permissions', {}) != options['process_permissions']
     if 'hook_phase' in options:
         occurrence = options['hook_phase']['occurrence']
         changed = changed or hook_phase(settings, selection['process'], occurrence['run'],

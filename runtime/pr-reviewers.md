@@ -2,7 +2,7 @@
 
 Follow [private workflow reporting](../docs/private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 
-Resolve all selected skills through [workflow configuration](../docs/configuration.md) before work. If none are selected, report that reviewers must be configured. Preserve reviewer order and required or optional status.
+Resolve selected reviewers from the owning process's `tasks.review_changes.options.reviewers`, with `skill_defaults` for its selected skill. Standalone `pr-reviewers-run` uses its coordinator's options. Follow [workflow configuration](../docs/configuration.md) before work. If none are selected, report that reviewers must be configured. Preserve reviewer order and required or optional status.
 
 Use the owning process for both preflight and task selection: `pr-review` for incoming review, `pr-fix` for fix callers and `pr-reviewers-run` for standalone coordination. Fix preflight includes its finalizers.
 

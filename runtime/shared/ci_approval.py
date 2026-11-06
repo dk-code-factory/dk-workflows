@@ -77,7 +77,7 @@ class Approval:
         if value.get('repository') != repository:
             raise ValueError('Review evidence belongs to another repository')
         settings = config.effective(repository, value.get('upstream'))
-        if value.get('settings') != settings or not settings['settings']['processes']['pr-review']['actions']['approve_ci']:
+        if value.get('settings') != settings or not settings['settings']['processes']['pr-review']['permissions']['approve_fork_ci']:
             raise ValueError('CI approval policy or governing configuration changed or is disabled')
         instructions = value.get('instructions')
         if not isinstance(instructions, dict) or not instructions:
@@ -138,11 +138,11 @@ class Approval:
         remaining = list(identities)
         for call in selected:
             expected = call.get('skill', config.invocation.normalize(
-                settings['settings']['processes']['pr-review']['run']).get('skill'))
+                settings['settings']['processes']['pr-review']['coordinator']).get('skill'))
             matches = [identity for identity in remaining if config.invocation.matches(expected, identity)]
             if len(matches) != 1:
                 raise ValueError('Current selected reviewer coverage is incomplete or duplicated')
-            selected_call = config.invocation.configured(call, settings['settings']['skill_settings'], identity=matches[0])
+            selected_call = config.invocation.configured(call, settings['settings']['skill_defaults'], identity=matches[0])
             actual = discovery_specs[matches[0]]['options'].get('invocation', {'skill': call.get('skill')})
             if actual != selected_call:
                 raise ValueError('Reviewer evidence must retain the selected invocation controls')
@@ -154,13 +154,13 @@ class Approval:
             raise ValueError('Candidate findings require independent verification and dispositions')
         if verification:
             key, result = completed(verification)
-            verifier = config.select(settings['settings'], 'pr-review', 'verification')
+            verifier = config.select(settings['settings'], 'pr-review', 'task', task='verify_findings')
             expected = verifier.get('skill', config.invocation.normalize(
-                settings['settings']['processes']['pr-review']['run']).get('skill'))
+                settings['settings']['processes']['pr-review']['coordinator']).get('skill'))
             if (not config.invocation.matches(expected, specs[key]['skill']['identity'])
                     or specs[key]['task']['id'] != 'finding-verification'):
                 raise ValueError('Expected the incoming-review finding verification task')
-            verifier = config.invocation.configured(verifier, settings['settings']['skill_settings'],
+            verifier = config.invocation.configured(verifier, settings['settings']['skill_defaults'],
                                                     identity=specs[key]['skill']['identity'])
             if specs[key]['options'].get('invocation') != verifier:
                 raise ValueError('Verification evidence must retain the selected invocation controls')

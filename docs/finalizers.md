@@ -38,7 +38,7 @@ The outer list is sequential. A nested nonempty list is one parallel group. Clai
 
 ## Defaults and scope
 
-Omitting `processes.pr-fix.finalizers` inherits the next lower scope. A supplied list replaces the entire inherited list; `[]` disables finalizers. Scope order is repository, explicitly supplied upstream, user, then defaults. The default sequential plan selects `dk-commit-split`, `dk-pr-decisions`, `dk-pr-description`, `dk-pr-feedback-reply`, `dk-ci` and `dk-pr-publish`. Shared `skill_settings` apply to these calls; local invocation objects override them.
+Omitting `processes.pr-fix.finalizers` inherits the next lower scope. A supplied list replaces the entire inherited list; `[]` disables finalizers. Scope order is repository, explicitly supplied upstream, user, then defaults. The default sequential plan selects `dk-commit-split`, `dk-pr-decisions`, `dk-pr-description`, `dk-pr-feedback-reply`, `dk-ci` and `dk-pr-publish`. Shared `skill_defaults` apply to these calls; local invocation objects override them.
 
 The default cleanup assesses the full series and publishes a tree-preserving rewrite only when needed. Decisions, description and reply finalizers finish outstanding work. CI observes the final published head. The default publisher reconciles outstanding operations and requests re-review from appropriate prior reviewers when authorized; invoke it with concrete prepared requests. Finalizers perform no-op assessments when their work is already satisfied.
 

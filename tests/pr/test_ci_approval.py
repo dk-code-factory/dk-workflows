@@ -108,7 +108,7 @@ def reviewed(tmp_path, monkeypatch):
     instructions.write_text('Review the PR. PR approval and merging are disabled.\n')
     skill = tmp_path/'SKILL.md'
     skill.write_text('Complete source review and return findings.\n')
-    settings = {'skill_settings': {'dk-pr-reviewers-run': {'options': {'reviewers': ['fixture:a', 'fixture:b']}}}}
+    settings = {'skill_defaults': {'dk-pr-reviewers-run': {'options': {'reviewers': ['fixture:a', 'fixture:b']}}}}
     write(config.path(repository), settings)
     store = Store(repository, fixture.PR, checkout=checkout)
     document = {'workflow': 'dk-workflows:dk-pr-review', 'repository': repository, 'pr': fixture.PR,
@@ -121,7 +121,7 @@ def reviewed(tmp_path, monkeypatch):
         from native_review_observations import CONTRACT, observations
         options = dict(options or {})
         if responsibility == 'finding-verification':
-            options['invocation'] = config.select(config.effective(repository)['settings'], 'pr-review', 'verification')
+            options['invocation'] = config.select(config.effective(repository)['settings'], 'pr-review', 'task', task='verify_findings')
         spec = make_spec(repository=repository, pr=fixture.PR, skill_identity=identity,
                          resources={'skill': str(skill)}, responsibility=responsibility,
                          assigned_instructions='Review pinned source and original evidence.',
@@ -163,8 +163,8 @@ def reviewed(tmp_path, monkeypatch):
 
 def test_ready_finalization_approves_every_page_once_without_pr_approval_or_merge(reviewed):
     r = reviewed
-    policy = config.effective('github.com/owner/repo')['settings']['processes']['pr-review']['actions']
-    assert policy['approve_ci'] and not policy['approve'] and not policy['merge']['enabled']
+    policy = config.effective('github.com/owner/repo')['settings']['processes']['pr-review']['permissions']
+    assert policy['approve_fork_ci'] and not policy['approve_pr'] and not policy['merge_pr']['enabled']
     result = r.cli.approve(r.evidence)
     assert result['status'] == 'verified' and len(result['operations']) == 2 and not result['noop']
     assert r.remote.calls == [101, 202] and r.remote.list_reads == 2
@@ -195,7 +195,7 @@ def test_unready_review_cannot_approve(reviewed, failure):
     if failure == 'closed': r.remote.state['pull']['state'] = 'closed'
     if failure == 'analysis-only': r.edit(lambda v: v.update(analysis_only=True))
     if failure == 'policy':
-        write(config.path('github.com/owner/repo'), config.invocation.merge(r.settings, {'processes': {'pr-review': {'actions': {'approve_ci': False}}}}))
+        write(config.path('github.com/owner/repo'), config.invocation.merge(r.settings, {'processes': {'pr-review': {'permissions': {'approve_fork_ci': False}}}}))
     if failure == 'instructions': r.instructions.write_text('Analysis only. Do not mutate GitHub.')
     if failure == 'own-pr': r.remote.state['pr_author']['id'] = r.remote.state['actor_id']
     if failure == 'configured-own-pr':
@@ -345,7 +345,7 @@ def test_publisher_rechecks_review_readiness_immediately_before_dispatch(reviewe
     if change == 'target': r.remote.state['branches']['main'] = 'd'*40
     if change == 'draft': r.remote.state['pull']['draft'] = True
     if change == 'policy':
-        write(config.path('github.com/owner/repo'), config.invocation.merge(r.settings, {'processes': {'pr-review': {'actions': {'approve_ci': False}}}}))
+        write(config.path('github.com/owner/repo'), config.invocation.merge(r.settings, {'processes': {'pr-review': {'permissions': {'approve_fork_ci': False}}}}))
     with pytest.raises(Diagnostic): r.cli.publish.publish(operation)
     assert not r.remote.calls and publication.load(operation)['status'] == 'prepared'
 
@@ -373,7 +373,7 @@ def test_ready_boolean_without_original_task_coverage_is_insufficient(reviewed):
 def test_reviewer_controls_need_matching_captured_evidence(reviewed):
     r = reviewed
     write(config.path('github.com/owner/repo'), config.invocation.merge(r.settings, {
-        'skill_settings': {'fixture:a': {'instructions': 'Review authentication boundaries.',
+        'skill_defaults': {'fixture:a': {'instructions': 'Review authentication boundaries.',
                                        'agent': {'model': 'chosen', 'reasoning_effort': 'high'}}}}))
     r.cli.snapshot(r.evidence)
     with pytest.raises(ValueError, match='selected invocation controls'):

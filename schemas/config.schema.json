@@ -41,7 +41,7 @@
       },
       "additionalProperties": false
     },
-    "skill_settings": {
+    "skill_defaults": {
       "type": "object",
       "propertyNames": {
         "type": "string",
@@ -68,18 +68,22 @@
       "additionalProperties": {
         "type": "object",
         "properties": {
-          "run": {
+          "coordinator": {
             "$ref": "invocation.schema.json"
           },
-          "verification": {
-            "$ref": "invocation.schema.json"
-          },
-          "operations": {
-            "type": "array",
-            "items": {
+          "tasks": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",
+              "not": {
+                "pattern": "\\s"
+              }
+            },
+            "additionalProperties": {
               "$ref": "invocation.schema.json"
             },
-            "description": "Invocations used during process work. The process recipe determines when each operation is called; array order does not schedule execution."
+            "description": "Invocations named by purpose. Tasks merge by name; the process recipe determines when they run."
           },
           "limits": {
             "type": "object",
@@ -111,7 +115,7 @@
             },
             "additionalProperties": false
           },
-          "actions": {
+          "permissions": {
             "type": "object",
             "properties": {
               "push_commits": {
@@ -135,13 +139,13 @@
               "request_review": {
                 "type": "boolean"
               },
-              "post_findings": {
+              "post_review": {
                 "type": "boolean"
               },
-              "approve": {
+              "approve_pr": {
                 "type": "boolean"
               },
-              "merge": {
+              "merge_pr": {
                 "type": "object",
                 "properties": {
                   "enabled": {
@@ -158,7 +162,7 @@
                 },
                 "additionalProperties": false
               },
-              "approve_ci": {
+              "approve_fork_ci": {
                 "type": "boolean"
               }
             },

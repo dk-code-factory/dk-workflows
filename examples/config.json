@@ -1,7 +1,7 @@
 {
   "$schema": "../schemas/config.schema.json",
   "schema_version": 1,
-  "skill_settings": {
+  "skill_defaults": {
     "dk-pr-reviewers-run": {
       "options": {
         "reviewers": [
@@ -28,11 +28,18 @@
             "instructions": "Check invariants affected by this cycle."
           }
         ]
+      },
+      "tasks": {
+        "review_changes": {
+          "skill": "dk-pr-reviewers-run",
+          "instructions": "Run the configured reviewers on the pinned change."
+        }
       }
     },
     "pr-review": {
-      "actions": {
-        "post_findings": false
+      "permissions": {
+        "post_review": false,
+        "approve_fork_ci": false
       }
     }
   }

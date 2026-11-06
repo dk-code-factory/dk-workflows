@@ -46,7 +46,7 @@ def finish(store, task, claim, *, complete=True):
 def test_default_plan_uses_shared_invocations_and_keeps_defaults_immutable():
     original = config.effective(REPOSITORY)['settings']
     assert original['processes']['pr-fix']['finalizers'] == config.FINALIZER_DEFAULTS
-    write(config.path(), {'skill_settings': {'dk-commit-split': {'options': {'format': 'short'}}}})
+    write(config.path(), {'skill_defaults': {'dk-commit-split': {'options': {'format': 'short'}}}})
     selected = config.effective(REPOSITORY)['settings']
     assert config.select(selected, 'pr-fix', 'finalizer', 0)['options'] == {'format': 'short'}
     assert config.DEFAULTS['processes']['pr-fix']['finalizers'] == original['processes']['pr-fix']['finalizers']

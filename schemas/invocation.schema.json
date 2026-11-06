@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/dk-code-factory/dk-workflows/main/schemas/invocation.schema.json",
   "title": "Native invocation",
-  "description": "Shared by process entrypoints, supporting skills, reviewers, hooks and drafting selections.",
+  "description": "Shared by process coordinators, named tasks, reviewers, hooks, finalizers, drafting selections and commit policy providers.",
   "$ref": "#/$defs/invocation",
   "$defs": {
     "skill": {

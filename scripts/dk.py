@@ -43,7 +43,8 @@ def main():
     p = sub.add_parser('invocation-spec', help='Bind a configured invocation to a managed native task')
     p.add_argument('--definition', type=Path, required=True)
     p.add_argument('--process', required=True)
-    p.add_argument('--kind', choices=['run', 'operation', 'reviewer', 'verification'], default='run')
+    p.add_argument('--kind', choices=['coordinator', 'task', 'reviewer'], default='coordinator')
+    p.add_argument('--task', help='Purpose name in the process tasks map; required with --kind task')
     p.add_argument('--index', type=int)
     p.add_argument('--upstream')
     p = sub.add_parser('reconcile-hooks', help='Record reconciled effects before changing a retained hook list')
@@ -119,7 +120,7 @@ def main():
         return
     if args.command == 'invocation-spec':
         result = make_invocation_spec(repository=args.repository, pr=args.pr, process=args.process,
-                                      kind=args.kind, index=args.index, definition=read(args.definition),
+                                      kind=args.kind, task=args.task, index=args.index, definition=read(args.definition),
                                       upstream=args.upstream)
         print(json.dumps(result, sort_keys=True))
         return

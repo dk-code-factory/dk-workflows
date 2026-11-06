@@ -4,31 +4,31 @@
   "accounts": {
     "personal": []
   },
-  "skill_settings": {},
+  "skill_defaults": {},
   "processes": {
     "pr-iter": {
-      "run": "dk-pr-iter",
+      "coordinator": "dk-pr-iter",
       "routes": {
         "own_pr": "pr-fix",
         "other_pr": "pr-review"
       }
     },
     "pr-fix": {
-      "run": "dk-pr-fix",
-      "operations": [
-        "dk-pr-feedback-read",
-        "dk-pr-decisions",
-        "dk-pr-feedback-address",
-        "dk-pr-split",
-        "dk-pr-reviewers-run",
-        "dk-commit-split",
-        "dk-commit-message",
-        "dk-pr-description",
-        "dk-pr-feedback-reply",
-        "dk-ci",
-        "dk-ci-flakes",
-        "dk-pr-publish"
-      ],
+      "coordinator": "dk-pr-fix",
+      "tasks": {
+        "read_feedback": "dk-pr-feedback-read",
+        "collect_decisions": "dk-pr-decisions",
+        "address_feedback": "dk-pr-feedback-address",
+        "split_scope": "dk-pr-split",
+        "review_changes": "dk-pr-reviewers-run",
+        "organize_commits": "dk-commit-split",
+        "draft_commit_message": "dk-commit-message",
+        "update_description": "dk-pr-description",
+        "reply_to_feedback": "dk-pr-feedback-reply",
+        "check_ci": "dk-ci",
+        "classify_ci_failures": "dk-ci-flakes",
+        "publish_pr_actions": "dk-pr-publish"
+      },
       "limits": {
         "review_cycles": 5,
         "retries_per_task": 1,
@@ -43,7 +43,7 @@
         "dk-ci",
         "dk-pr-publish"
       ],
-      "actions": {
+      "permissions": {
         "push_commits": true,
         "rewrite_commits": true,
         "edit_pr": true,
@@ -51,10 +51,10 @@
         "resolve_threads": true,
         "create_draft_prs": true,
         "request_review": true,
-        "post_findings": false,
-        "approve_ci": false,
-        "approve": false,
-        "merge": {
+        "post_review": false,
+        "approve_fork_ci": false,
+        "approve_pr": false,
+        "merge_pr": {
           "enabled": false,
           "method": "squash"
         }
@@ -65,27 +65,27 @@
       }
     },
     "pr-review": {
-      "run": "dk-pr-review",
-      "verification": {
-        "skill": "dk-pr-review",
-        "instructions": "Independently verify candidate findings against pinned source and governing instructions. Return confirmed, rejected or uncertain findings with evidence. Do not edit or publish."
+      "coordinator": "dk-pr-review",
+      "tasks": {
+        "read_feedback": "dk-pr-feedback-read",
+        "review_changes": "dk-pr-reviewers-run",
+        "verify_findings": {
+          "skill": "dk-pr-review",
+          "instructions": "Independently verify candidate findings against pinned source and governing instructions. Return confirmed, rejected or uncertain findings with evidence. Do not edit or publish."
+        },
+        "post_review": "dk-pr-review-post",
+        "approve_fork_ci": "dk-ci-approve",
+        "check_ci": "dk-ci",
+        "classify_ci_failures": "dk-ci-flakes",
+        "publish_pr_actions": "dk-pr-publish"
       },
-      "operations": [
-        "dk-pr-feedback-read",
-        "dk-pr-reviewers-run",
-        "dk-pr-review-post",
-        "dk-ci-approve",
-        "dk-ci",
-        "dk-ci-flakes",
-        "dk-pr-publish"
-      ],
       "limits": {
         "review_cycles": 5,
         "retries_per_task": 1,
         "ci_repairs_per_cycle": 5,
         "ci_reruns_per_head": 3
       },
-      "actions": {
+      "permissions": {
         "push_commits": false,
         "rewrite_commits": false,
         "edit_pr": false,
@@ -93,10 +93,10 @@
         "resolve_threads": false,
         "create_draft_prs": false,
         "request_review": false,
-        "post_findings": true,
-        "approve_ci": true,
-        "approve": false,
-        "merge": {
+        "post_review": true,
+        "approve_fork_ci": true,
+        "approve_pr": false,
+        "merge_pr": {
           "enabled": false,
           "method": "squash"
         }
@@ -107,13 +107,13 @@
       }
     },
     "commit-message": {
-      "run": "dk-commit-message"
+      "coordinator": "dk-commit-message"
     },
     "issue": {
-      "run": "dk-issue"
+      "coordinator": "dk-issue"
     },
     "pr-reviewers-run": {
-      "run": "dk-pr-reviewers-run"
+      "coordinator": "dk-pr-reviewers-run"
     }
   },
   "extensions": {}

@@ -5,7 +5,7 @@ Schemas use [JSON Schema Draft 2020-12](https://json-schema.org/draft/2020-12/js
 | Schema | File or input described |
 | --- | --- |
 | [config.schema.json](config.schema.json) | Workflow configuration, including partial scope overrides. |
-| [invocation.schema.json](invocation.schema.json) | Process entrypoints, finding verification, supporting skills, reviewers, hooks, finalizers, drafting calls and commit policy providers. |
+| [invocation.schema.json](invocation.schema.json) | Process coordinators, named tasks including finding verification, reviewers, hooks, finalizers, drafting calls and commit policy providers. |
 | [drafting.schema.json](drafting.schema.json) | The drafting role-to-invocation object managed by `pr_config.py drafting`. |
 | [commit-policy.schema.json](commit-policy.schema.json) | Literal commit policy or shared provider invocation. |
 | [preferences.schema.json](preferences.schema.json) | Stored versioned preference catalog. |

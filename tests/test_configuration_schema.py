@@ -67,13 +67,13 @@ def test_invalid_invocations_rejected_by_schema_and_runtime(value):
 
 def locations(value):
     return [
-        {'processes': {'pr-fix': {'run': value}}},
-        {'processes': {'pr-review': {'verification': value}}},
-        {'processes': {'pr-fix': {'operations': [value]}}},
+        {'processes': {'pr-fix': {'coordinator': value}}},
+        {'processes': {'pr-review': {'tasks': {'verify_findings': value}}}},
+        {'processes': {'pr-fix': {'tasks': {'analyze_change': value}}}},
         {'processes': {'pr-fix': {'finalizers': [value]}}},
         {'processes': {'pr-fix': {'hooks': {'before_cycle': [value]}}}},
         {'processes': {'pr-review': {'hooks': {'after_cycle': [value]}}}},
-        {'skill_settings': {'dk-pr-reviewers-run': {'options': {'reviewers': [value]}}}},
+        {'skill_defaults': {'dk-pr-reviewers-run': {'options': {'reviewers': [value]}}}},
     ]
 
 
@@ -127,19 +127,19 @@ def test_schema_metadata_roundtrips_without_becoming_a_setting(tmp_path):
 
 def test_preflight_resolves_short_names_and_reports_ambiguity():
     settings = deepcopy(config.DEFAULTS)
-    settings['processes']['pr-fix']['operations'] = ['review']
+    settings['processes']['pr-fix']['tasks'] = {'analyze_change': 'review'}
     installed = [name for name in available(settings) if name != 'review'] + ['one:review', 'two:review']
     result = config.preflight(settings, installed)
     assert not result['ready']
     assert result['ambiguous_selected_skills'] == {'review': ['one:review', 'two:review']}
-    settings['processes']['pr-fix']['operations'] = ['one:review']
+    settings['processes']['pr-fix']['tasks'] = {'analyze_change': 'one:review'}
     result = config.preflight(settings, installed)
     assert result['ready'] and result['resolved_skills']['one:review'] == 'one:review'
 
 
 def test_preflight_checks_nested_optional_reviewers_and_every_agent_setting():
     settings = deepcopy(config.DEFAULTS)
-    settings['skill_settings']['dk-pr-reviewers-run'] = {'options': {'reviewers': [
+    settings['skill_defaults']['dk-pr-reviewers-run'] = {'options': {'reviewers': [
         {'skill': 'team:review', 'required': False, 'agent': {'model': 'chosen', 'reasoning_effort': 'high'}}]}}
     installed = available(settings)
     assert not config.preflight(settings, installed)['ready']
@@ -152,15 +152,14 @@ def test_preflight_checks_nested_optional_reviewers_and_every_agent_setting():
 
 def test_shared_defaults_local_overrides_and_qualified_resolution():
     settings = deepcopy(config.DEFAULTS)
-    settings['skill_settings']['team:review'] = {
+    settings['skill_defaults']['team:review'] = {
         'agent': {'model': 'chosen', 'reasoning_effort': 'high'},
         'options': {'focus': 'security', 'paths': ['src']}}
-    settings['processes']['pr-fix']['operations'] = [
-        {'skill': 'review', 'options': {'paths': ['auth']}, 'instructions': 'Keep exact.\n'}]
+    settings['processes']['pr-fix']['tasks'] = {'analyze_change': {'skill': 'review', 'options': {'paths': ['auth']}, 'instructions': 'Keep exact.\n'}}
     capabilities = {'delegation': True, 'models': {'chosen': ['high']}}
     installed = [name for name in available(settings) if name != 'review'] + ['team:review']
     assert config.preflight(settings, installed, capabilities)['ready']
-    call = config.select(settings, 'pr-fix', 'operation', 0)
+    call = config.select(settings, 'pr-fix', 'task', task='analyze_change')
     assert call['agent']['model'] == 'chosen'
     assert call['options'] == {'focus': 'security', 'paths': ['auth']}
     assert call['instructions'] == 'Keep exact.\n'
@@ -168,16 +167,15 @@ def test_shared_defaults_local_overrides_and_qualified_resolution():
 
 def test_recursive_review_coordinator_does_not_loop_forever():
     settings = deepcopy(config.DEFAULTS)
-    settings['skill_settings']['dk-pr-reviewers-run'] = {'options': {'reviewers': ['dk-pr-reviewers-run']}}
+    settings['skill_defaults']['dk-pr-reviewers-run'] = {'options': {'reviewers': ['dk-pr-reviewers-run']}}
     with pytest.raises(ValueError, match='Recursive reviewer'):
         config.preflight(settings, [])
 
 
 def test_explicit_finite_nested_calls_can_reuse_a_skill():
     settings = deepcopy(config.DEFAULTS)
-    settings['processes']['pr-fix']['operations'] = [
-        {'skill': 'team:review', 'options': {'reviewers': [
-            {'skill': 'team:review', 'options': {'reviewers': ['team:leaf']}}]}}]
+    settings['processes']['pr-fix']['tasks'] = {'analyze_change': {'skill': 'team:review', 'options': {'reviewers': [
+            {'skill': 'team:review', 'options': {'reviewers': ['team:leaf']}}]}}}
     assert config.preflight(settings, available(settings))['ready']
 
 
@@ -194,9 +192,9 @@ def test_model_effort_prompt_and_options_reach_specs_and_invalidate_reuse(defini
     selected = {'skill': 'team:review', 'instructions': '  Review authentication.\n',
                 'options': {'focus': 'security'},
                 'agent': {'model': 'chosen', 'reasoning_effort': 'high'}}
-    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'operations': [selected]}}})
+    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'tasks': {'analyze_change': selected}}}})
     spec = config.make_invocation_spec(repository=REPOSITORY, pr=PR, process='pr-fix',
-                                       kind='operation', index=0, definition=definition)
+                                       kind='task', task='analyze_change', definition=definition)
     assert spec['options']['invocation'] == selected
     assert spec['task']['instructions'] == selected['instructions']
     assert spec['options']['configured'] == selected['options']
@@ -206,9 +204,9 @@ def test_model_effort_prompt_and_options_reach_specs_and_invalidate_reuse(defini
     assert store.start(spec, run='run', cycle='one')['action'] == 'reuse'
     original_fingerprint = capture(spec)['fingerprint']
     selected['agent']['model'] = 'different'
-    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'operations': [selected]}}})
+    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'tasks': {'analyze_change': selected}}}})
     changed = config.make_invocation_spec(repository=REPOSITORY, pr=PR, process='pr-fix',
-                                          kind='operation', index=0, definition=definition)
+                                          kind='task', task='analyze_change', definition=definition)
     assert capture(changed)['fingerprint'] != original_fingerprint
     assert not store.status([changed])['tasks'][0]['reusable']
 
@@ -242,7 +240,7 @@ def test_legacy_configuration_fails_without_rewriting_or_resetting_it():
 def test_preflight_cli_and_verification_definition_preserve_agent_controls(definition, tmp_path):
     selected = {'skill': 'team:review', 'instructions': 'Verify findings independently.',
                 'agent': {'model': 'chosen', 'reasoning_effort': 'high'}}
-    write(config.path(REPOSITORY), {'processes': {'pr-review': {'verification': selected}}})
+    write(config.path(REPOSITORY), {'processes': {'pr-review': {'tasks': {'verify_findings': selected}}}})
     settings = config.effective(REPOSITORY)['settings']
     installed, capabilities = tmp_path/'available.json', tmp_path/'host.json'
     write(installed, available(settings))
@@ -257,26 +255,106 @@ def test_preflight_cli_and_verification_definition_preserve_agent_controls(defin
     write(path, {**definition, 'responsibility': 'finding-verification'})
     spec = json.loads(subprocess.check_output([
         sys.executable, str(ROOT/'scripts/dk.py'), '--repository', REPOSITORY, '--pr', PR,
-        'invocation-spec', '--process', 'pr-review', '--kind', 'verification', '--definition', str(path)], text=True))
+        'invocation-spec', '--process', 'pr-review', '--kind', 'task', '--task', 'verify_findings', '--definition', str(path)], text=True))
     assert spec['task']['id'] == 'finding-verification'
     assert spec['options']['invocation'] == selected
 
 
 def test_short_name_settings_do_not_leak_to_another_qualified_skill():
     settings = deepcopy(config.DEFAULTS)
-    settings['skill_settings'] = {'first:review': {'agent': {'model': 'first-model'}},
+    settings['skill_defaults'] = {'first:review': {'agent': {'model': 'first-model'}},
                                   'second:review': {'agent': {'model': 'second-model'}}}
-    settings['processes']['pr-fix']['operations'] = ['first:review']
+    settings['processes']['pr-fix']['tasks'] = {'analyze_change': 'first:review'}
     installed = available(settings) + ['second:review']
     support = {'delegation': True, 'models': {'first-model': [], 'second-model': []}}
     assert config.preflight(settings, installed, support)['ready']
-    assert config.select(settings, 'pr-fix', 'operation', 0)['agent']['model'] == 'first-model'
+    assert config.select(settings, 'pr-fix', 'task', task='analyze_change')['agent']['model'] == 'first-model'
 
 
 def test_standalone_review_uses_the_same_reviewer_selection():
     settings = deepcopy(config.DEFAULTS)
-    settings['skill_settings']['dk-pr-reviewers-run'] = {'options': {'reviewers': ['team:review']}}
+    settings['skill_defaults']['dk-pr-reviewers-run'] = {'options': {'reviewers': ['team:review']}}
     assert config.select(settings, 'pr-reviewers-run', 'reviewer', 0) == {'skill': 'team:review'}
+
+
+def test_task_overrides_merge_by_purpose_without_replacing_siblings():
+    write(config.path(), {'processes': {'pr-review': {'tasks': {
+        'review_changes': {'skill': 'team:coordinator', 'options': {'reviewers': ['team:first']}}
+    }}}})
+    upstream = 'github.com/upstream/repo'
+    write(config.path(upstream), {'processes': {'pr-review': {'tasks': {
+        'review_changes': {'instructions': 'Check API compatibility.'}
+    }}}})
+    write(config.path(REPOSITORY), {'processes': {'pr-review': {'tasks': {
+        'check_ci': 'team:ci'
+    }}}})
+    settings = config.effective(REPOSITORY, upstream)['settings']
+    tasks = settings['processes']['pr-review']['tasks']
+    assert tasks['read_feedback'] == config.DEFAULTS['processes']['pr-review']['tasks']['read_feedback']
+    assert tasks['verify_findings'] == config.DEFAULTS['processes']['pr-review']['tasks']['verify_findings']
+    assert tasks['review_changes'] == {'skill': 'team:coordinator',
+        'instructions': 'Check API compatibility.', 'options': {'reviewers': ['team:first']}}
+    assert tasks['check_ci'] == 'team:ci'
+    assert config.select(settings, 'pr-review', 'reviewer', 0) == {'skill': 'team:first'}
+
+
+def test_named_task_receipts_survive_reordering_and_unrelated_task_changes(definition):
+    task_definition = {key: value for key, value in definition.items() if key != 'responsibility'}
+    tasks = {'load_context': 'team:review', 'validate_output': 'team:review'}
+    write(config.path(REPOSITORY), {'processes': {'audit': {
+        'coordinator': 'team:review', 'tasks': tasks}}})
+    def selected(name):
+        return config.make_invocation_spec(repository=REPOSITORY, pr=PR, process='audit',
+            kind='task', task=name, definition=task_definition)
+    first, second = selected('load_context'), selected('validate_output')
+    assert first['task']['id'] == 'load_context'
+    assert second['task']['id'] == 'validate_output'
+    assert capture(first)['key'] != capture(second)['key']
+    store = Store(REPOSITORY, PR)
+    claim = store.start(first, run='run')['claim']
+    store.record(first, claim['id'], b'Original task output', {'complete': True}, 'complete')
+    tasks = {'validate_output': {'skill': 'team:review', 'instructions': 'Changed task.'},
+             'load_context': 'team:review'}
+    write(config.path(REPOSITORY), {'processes': {'audit': {'coordinator': 'team:review', 'tasks': tasks}}})
+    refreshed = selected('load_context')
+    assert refreshed['configuration']['task'] == 'load_context'
+    assert store.start(refreshed, run='run')['action'] == 'reuse'
+    tasks['load_context'] = {'skill': 'team:review', 'instructions': 'Refresh all context.'}
+    write(config.path(REPOSITORY), {'processes': {'audit': {'coordinator': 'team:review', 'tasks': tasks}}})
+    with pytest.raises(ValueError, match='Inputs changed'):
+        capture(first)
+    assert not store.status([selected('load_context')])['tasks'][0]['reusable']
+
+
+@pytest.mark.parametrize('settings', [
+    {'skill_settings': {}},
+    *[{'processes': {'pr-fix': {name: value}}} for name, value in (
+        ('run', 'dk-pr-fix'), ('operations', []), ('verification', 'dk-pr-review'),
+        ('actions', {}), ('tasks', []), ('tasks', {'Bad name': 'dk-ci'}),
+        ('tasks', {'check_ci\n': 'dk-ci'}), ('tasks', {'check_ci': None}),
+    )],
+])
+def test_retired_fields_and_malformed_task_maps_are_rejected(settings):
+    assert not validator('config').is_valid(settings)
+    with pytest.raises(ValueError):
+        config.validate(settings)
+
+
+@pytest.mark.parametrize('arguments', [
+    ['--kind', 'task'],
+    ['--kind', 'task', '--task', 'unknown_task'],
+    ['--kind', 'task', '--task', 'check_ci', '--index', '0'],
+    ['--kind', 'coordinator', '--task', 'check_ci'],
+    ['--kind', 'reviewer', '--task', 'check_ci', '--index', '0'],
+])
+def test_cli_rejects_ambiguous_or_missing_named_task_selectors(definition, tmp_path, arguments):
+    path = tmp_path/'definition.json'
+    write(path, definition)
+    result = subprocess.run([sys.executable, str(ROOT/'scripts/dk.py'), '--repository', REPOSITORY,
+        '--pr', PR, 'invocation-spec', '--process', 'pr-review', '--definition', str(path),
+        *arguments], capture_output=True, text=True)
+    assert result.returncode == 2
+    assert json.loads(result.stdout)['status'] == 'blocked'
 
 
 @pytest.mark.parametrize('kind', ['make', 'capture'])
