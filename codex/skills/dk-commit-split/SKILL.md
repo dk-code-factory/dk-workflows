@@ -5,6 +5,8 @@ description: Review and organize all PR commits while preserving the reviewed fi
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
+Persist workflow state only when it reduces total token consumption, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
+
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
 Resolve [the commit policy](../../../docs/commit-policy.md) before cleanup. Reuse a verified current supplied handoff; direct calls resolve their own effective policy. A saved prompt supplies grouping and message instructions directly. Resolve a selected policy skill natively with pinned PR context, history, repository requirements and current user constraints; require successful execution and a complete report with nonempty `policy_prompt`. Policy providers only return instructions. Missing or incomplete providers block cleanup.

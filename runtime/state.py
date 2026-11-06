@@ -12,9 +12,10 @@ import os
 import re
 import stat
 import subprocess
-import tempfile
 import time
 import uuid
+from shared.private_state import write as write_private
+from shared.storage_paths import location
 
 CONTRACT = 2
 REVIEW_CYCLES = 5
@@ -35,24 +36,7 @@ def read(path):
 
 def write(path, value):
     """Durable replace; a failed write never clears an existing claim."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd, temporary = tempfile.mkstemp(dir=path.parent)
-    try:
-        with os.fdopen(fd, 'w') as out:
-            json.dump(value, out, indent=2, sort_keys=True, allow_nan=False)
-            out.write('\n')
-            out.flush()
-            os.fsync(out.fileno())
-        os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    write_private(path, value, ensure_ascii=True)
 
 
 def git(checkout, *args):
@@ -511,10 +495,7 @@ def _component_changes(old, new, parts=()):
 class Store:
     def __init__(self, repository, pr, *, checkout=None):
         self.subject = identity(repository, pr)
-        base = Path(os.environ.get('XDG_STATE_HOME') or Path.home()/'.local/state')
-        if not base.is_absolute():
-            raise ValueError('XDG_STATE_HOME must be absolute')
-        self.root = (base/'dk-workflows/v2'/digest(self.subject)).resolve()
+        self.root = (location('tasks')/digest(self.subject)).resolve()
         from shared.repository_scope import checkout_roots
         roots = [Path(__file__).resolve().parents[1], *checkout_roots(checkout or Path.cwd())]
         # Also reject state nested in any other Git checkout.
@@ -631,9 +612,19 @@ class Store:
             }
         return described
 
-    def status(self, specs, *, compact=False, run=None, explain=False):
+    def status(self, specs, *, compact=False, run=None, explain=False, tolerate_missing=False):
         context = _CaptureContext()
-        captures = [capture(spec, _context=context) for spec in specs]
+        captures, unavailable = [], []
+        for spec in specs:
+            try:
+                captures.append(capture(spec, _context=context))
+            except (ValueError, KeyError, TypeError, OSError, RuntimeError) as exc:
+                if not tolerate_missing:
+                    raise
+                unavailable.append({
+                    'key': digest({**self.subject, 'task': spec['task']['id'], 'skill': spec['skill']['identity']}),
+                    'reusable': False, 'coverage_complete': False,
+                    'reason': 'refresh_required', 'detail': str(exc)})
         if any(c['subject'] != self.subject for c in captures):
             raise ValueError('Specs refer to another PR')
         with self.locked() as manifest:
@@ -656,7 +647,7 @@ class Store:
                     for name, state in runs.items()
                 }
             return {'contract': CONTRACT, 'subject': self.subject, 'manifest': str(self.manifest),
-                    'tasks': [self.describe(c, manifest['entries'].get(c['key'], {}), explain=explain) for c in captures],
+                    'tasks': [self.describe(c, manifest['entries'].get(c['key'], {}), explain=explain) for c in captures] + unavailable,
                     'runs': runs,
                     'unfinished': [e['claim'] for e in manifest['entries'].values() if e.get('claim')]}
 
@@ -824,7 +815,7 @@ class Store:
                     'requirements': captured['components']['native_review']}
 
     def start_batch(self, specs, *, recover=None, run=None, cycle=None, retry=False,
-                    ci_repair=False, ci_rerun=False, head=None):
+                    ci_repair=False, ci_rerun=False, head=None, retained=None):
         """Claim a set of tasks atomically, sharing only command-local Git work.
 
         All captures and checks must succeed before one manifest replacement.
@@ -851,6 +842,11 @@ class Store:
             raise ValueError('Batch recovery requires a task-key-to-claim-id map')
         if recover.keys() - keys:
             raise ValueError('Recovery key is not a task in this batch')
+        retained = {} if retained is None else retained
+        if (not isinstance(retained, dict) or retained.keys() - keys
+                or any(not isinstance(value, dict) for value in retained.values())):
+            raise ValueError('Retained definitions must belong to this batch')
+        digest(retained)
         with self.locked() as manifest:
             # Explicit recovery mistakes reject the whole batch before staging
             # sibling starts. A missing recovery request is a normal outcome.
@@ -859,13 +855,19 @@ class Store:
                 if not active or active['id'] != claim_id:
                     raise ValueError('Recovery id is not the active claim')
             tasks = []
+            retained_changed = False
             for captured in captures:
                 result = self._start_captured(
                     manifest, captured, recover=recover.get(captured['key']), run=run,
                     cycle=cycle, retry=retry, ci_repair=ci_repair, ci_rerun=ci_rerun, head=head)
                 tasks.append({**result, 'key': captured['key'],
                               'task': captured['components']['task']['id']})
-            if any(task['action'] == 'invoke' for task in tasks):
+                if result['action'] in {'invoke', 'reuse'} and captured['key'] in retained:
+                    entry = manifest['entries'][captured['key']]
+                    if entry.get('managed') != retained[captured['key']]:
+                        entry['managed'] = deepcopy(retained[captured['key']])
+                        retained_changed = True
+            if retained_changed or any(task['action'] == 'invoke' for task in tasks):
                 write(self.manifest, manifest)
             return {'tasks': tasks, 'manifest': str(self.manifest),
                     'unfinished': [entry['claim'] for entry in manifest['entries'].values()

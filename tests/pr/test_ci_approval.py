@@ -170,6 +170,32 @@ def test_ready_finalization_approves_every_page_once_without_pr_approval_or_merg
     assert all(publication.load(op['operation'])['receipt']['execution_permitted'] for op in result['operations'])
 
 
+def test_managed_task_keys_supply_current_approval_evidence_without_spec_files(reviewed):
+    from tasks import Tasks
+    r = reviewed
+    value = read(r.evidence)
+    managed = Tasks(value['repository'], value['pr'], checkout=value['checkout'])
+    definitions = []
+    for path in value['discovery']:
+        spec = read(Path(path))
+        definitions.append({'definition': {
+            'skill_identity': spec['skill']['identity'], 'resources': spec['skill']['resources'],
+            'responsibility': spec['task']['id'], 'assigned_instructions': spec['task']['instructions'],
+            **{key: spec[key] for key in ('instructions', 'inputs', 'options', 'git',
+                                         'governing_inputs_complete', 'cacheable', 'native_review')}}})
+    prepared = managed.prepare({'tasks': definitions, 'run': 'review', 'cycle': 'c1'})
+    assert all(task['action'] == 'reuse' for task in prepared['tasks'])
+    for path in value['discovery']:
+        Path(path).unlink()
+    value['discovery'] = [{'key': task['key']} for task in prepared['tasks']]
+    write(r.evidence, value)
+    result = r.cli.approve(r.evidence)
+    assert result['status'] == 'verified' and len(result['operations']) == 2
+    assert r.remote.calls == [101, 202]
+    assert r.cli.approve(r.evidence)['noop']
+    assert r.remote.calls == [101, 202]
+
+
 @pytest.mark.parametrize('failure', ['incomplete', 'stale', 'missing-original', 'head', 'target', 'target-ref',
                                      'draft', 'closed', 'analysis-only', 'policy', 'instructions',
                                      'own-pr', 'configured-own-pr', 'discussion', 'thread-state', 'missing-reviewer', 'hook'])

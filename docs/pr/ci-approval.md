@@ -16,7 +16,7 @@ Keep a private JSON evidence document with the following fields. Preserve origin
   "cycle": "RETAINED_CYCLE_ID",
   "analysis_only": false,
   "instructions": {"user": "/private/original-instructions.txt", "rules": "/private/rules.txt"},
-  "discovery": ["/private/reviewer-spec.json"],
+  "discovery": [{"key": "DISCOVERY_TASK_KEY"}],
   "verification": null,
   "hooks": [],
   "publications": []
@@ -25,7 +25,7 @@ Keep a private JSON evidence document with the following fields. Preserve origin
 
 Include `upstream` when configuration inherits from an upstream repository. During inspection, run `python3 PACKAGE_ROOT/scripts/ci_approve.py snapshot --evidence FILE` to capture effective settings, original instruction fingerprints and live PR context. It saves `settings`, `instruction_fingerprints` and `context` in the document. Snapshotting does not establish readiness or invoke reviewers. Never refresh a changed snapshot merely to pass the gate: reassess affected review inputs, refresh discovery and verification as needed, complete hooks and reconcile publications first. After your own review publication, assess the new discussion and capture the reconciled context before finalization.
 
-Every discovery and verification spec must capture the same original instruction paths under the same labels and pin Git `head` and `target` to the reviewed SHAs. Provide all current selected reviewer specs, including optional reviewers. The helper recaptures them, validates original immutable result artifacts and requires complete current coverage with no unfinished PR claims. Noncacheable results must have complete captured governing inputs and belong to this retained run and cycle; they cannot supply coverage across runs or cycles. Stale tasks block publication. Original results remain subject to the native completion contract.
+Supply managed task references `{"key":"TASK_KEY"}` for discovery, verification and hooks. The helper regenerates their specs from retained definitions; no extra spec artifacts or model reconstruction are needed. Legacy spec-file paths remain supported. Each spec must capture the same original instruction paths under the same labels and pin Git `head` and `target` to the reviewed SHAs. Include all selected reviewers, including optional ones. The helper recaptures current inputs, validates original artifacts and requires current complete coverage with no unfinished claims. Noncacheable results require complete governing inputs and this retained run/cycle. Stale tasks block publication; original results retain the native completion gate.
 
 When discovery has candidates, supply the independent `dk-workflows:dk-pr-review` task with responsibility `finding-verification`. Its `inputs` must include every original current candidate result artifact path returned by task status; this prevents reuse of verification for older candidates. Its normalized result includes `dispositions`, one per original candidate, identifying its task key and zero-based finding index:
 

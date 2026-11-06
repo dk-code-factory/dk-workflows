@@ -5,6 +5,8 @@ description: Draft or update PR titles and descriptions using the diff, template
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
+Persist workflow state only when it reduces total token consumption, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
+
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
 Read the complete diff, PR template, linked issue, maintainer conventions and current Decisions. Describe the resulting behavior and validation. Preserve Decisions and unrelated body sections. Make the description match the agreed scope before review.

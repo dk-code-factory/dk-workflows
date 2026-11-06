@@ -3,7 +3,7 @@ from pathlib import Path
 import subprocess
 
 import config
-from state import Store, capture, digest, read, resource
+from state import capture, digest, read, resource
 from shared import publication
 from shared.pr_ownership import classify
 
@@ -94,11 +94,18 @@ class Approval:
         actor = h.api(request['pr'], 'user')
         if classify(h.host, context['user'], actor, settings['settings']['identities'])['ownership'] != 'others':
             raise ValueError('CI approval requires another author\'s PR')
-        store = Store(repository, request['pr'], checkout=value['checkout'])
+        from tasks import Tasks
+        managed = Tasks(repository, request['pr'], checkout=value['checkout'])
+        store = managed.store
         results, specs = {}, {}
 
-        def completed(path, *, source_required=True, cycle=value['cycle']):
-            spec = read(Path(path))
+        def completed(reference, *, source_required=True, cycle=value['cycle']):
+            if isinstance(reference, dict) and set(reference) == {'key'} and isinstance(reference['key'], str):
+                spec = managed.saved_spec(reference['key'])
+            elif isinstance(reference, str):
+                spec = read(Path(reference))
+            else:
+                raise ValueError('Review evidence requires a managed task key or legacy spec path')
             if any(spec.get('instructions', {}).get(key) != path for key, path in instructions.items()):
                 raise ValueError('Review tasks must capture the original governing instructions')
             current = capture(spec)

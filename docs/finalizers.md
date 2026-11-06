@@ -39,7 +39,7 @@ A custom list determines finalization actions. Do not run removed defaults throu
 
 ## Execution and freshness
 
-The workflow agent reads the plan and invokes skills; Python only captures inputs and retains claims, outputs and counters. Read the normalized groups with:
+The agent reads the plan and invokes skills. Python handles the shared [managed task lifecycle](task-state.md); hooks and finalizers use the same bookkeeping and preserve their existing occurrence identities. Read normalized groups with:
 
 ```sh
 python3 PLUGIN_ROOT/scripts/dk.py --repository HOST/OWNER/REPO --pr PR_URL \
@@ -48,31 +48,25 @@ python3 PLUGIN_ROOT/scripts/dk.py --repository HOST/OWNER/REPO --pr PR_URL \
 
 The result contains `groups`, each an array of references, and configuration `sources`. A single string becomes a group of one. Pass `--upstream HOST/OWNER/REPO` consistently when inheriting that scope.
 
-For each skill, prepare a private definition with its resolved resources, exact assignment, original permissions and completion instructions, immutable starting context and all consumed governing inputs. Use [the task contract](pr/contracts.md), [preference handoffs](preferences.md#workflow-handoffs-and-reuse) and [task state](task-state.md). Include relevant preferences and their conditional decisions before finalizers implement or review code. For example:
+For the current group, call `prepare --file REQUEST.json` with the retained run and one task per skill. Each task uses `kind:"finalizer"`, `finalizer:"/skill/PLUGIN:SKILL"` and an ordinary `definition` with resolved resources, exact assignment, original permissions, immutable starting context and consumed inputs. Omit `responsibility`; the helper derives it and captures live plan/configuration. For example:
 
 ```json
 {
-  "skill_identity": "team-tools:check-links",
-  "resources": {"skill": "/installed/team-tools/check-links/SKILL.md"},
-  "assigned_instructions": "Check links in the pinned PR documentation and return evidence and explicit completion. Do not edit or publish.",
-  "instructions": {"user": "/private/original-instructions.txt"},
-  "inputs": {"context": "/private/finalizer-start-context.json"},
-  "options": {},
-  "governing_inputs_complete": true
+  "run": "RUN_ID",
+  "tasks": [{"kind": "finalizer", "finalizer": "/skill/team-tools:check-links", "definition": {
+    "skill_identity": "team-tools:check-links",
+    "resources": {"skill": "/installed/team-tools/check-links/SKILL.md"},
+    "assigned_instructions": "Check links in the pinned PR documentation. Return evidence and explicit completion.",
+    "instructions": {"user": "/private/original-instructions.txt"},
+    "inputs": {"context": "/private/finalizer-start-context.json"},
+    "options": {}, "governing_inputs_complete": true
+  }}]
 }
 ```
 
-Generate a spec for the reference:
+Include the [task contract](pr/contracts.md) and relevant [preference handoff](preferences.md#workflow-handoffs-and-reuse). An optional `upstream` on each task preserves inherited configuration. The helper verifies membership and runner identity; it does not infer assignments. Supply all consumed sources and permissions.
 
-```sh
-python3 PLUGIN_ROOT/scripts/dk.py --repository HOST/OWNER/REPO --pr PR_URL \
-  finalizer-spec --run RUN_ID --finalizer /skill/team-tools:check-links \
-  --definition /private/finalizer-definition.json
-```
-
-Save stdout privately. The helper verifies membership and the selected skill identity. It captures the effective plan and its source files and derives stable task identity from the run and skill. Supply exact assignments from the original request, applicable completion instructions and the selected skill; the helper does not infer a task from its name. A definition's `options` are execution context, not additional finalizer configuration.
-
-Regenerate specs before claims and completion checks. Claim one group with `start-batch --spec A.json --spec B.json --run RUN_ID`, or `start` for one task. Do not claim later groups before this group completes. Do not pass reviewer `--cycle` or `--retry` flags. Follow `invoke`, `reuse` and `recover_required`, and record each original output and explicit completion. Verify successful terminal execution and the skill's nonempty completion report. Mere launch, progress, or an empty findings list is insufficient. Save native handles separately from governing inputs when delegated. Finalizer claims consume no review-cycle/retry budget; reserve the existing CI repair and rerun budgets before those actions.
+Prepare only the current group. Follow the shared `invoke`, `reuse`, `recover_required` and `finish` protocol; no reviewer cycle/retry flags apply. Wait for all siblings before later groups and finish successful tasks immediately. Terminal execution and explicit skill completion remain required. Reserve CI repair/rerun budgets on their owning actions. On a fresh session use `resume` and retained task keys instead of reconstructing definitions. Refresh changed scope and inputs before accepting coverage. Low-level `finalizer-spec` remains available for existing integrations.
 
 Keep the same run on resume. Reconcile unfinished claims and uncertain side effects before recovery. Stable skill identity keeps unfinished work visible across reorderings. Changes to the plan, assignment, resource or consumed context invalidate affected results. Removing a skill does not erase its unfinished claim; reconcile it explicitly. Preserve completed unchanged siblings. New runs get separate finalizer tasks, while publication journals still prevent duplicate writes across runs.
 

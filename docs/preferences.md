@@ -47,6 +47,8 @@ Run `python3 PLUGIN_ROOT/scripts/preferences.py --checkout REPO COMMAND`. All co
 
 ## Workflow handoffs and reuse
 
+Use `scripts/preferences.py --checkout REPO handoff --file REQUEST.json --output /private/task-preferences.json` to generate the deterministic handoff. The request supplies `mode`, complete `paths`, consumed `condition_context` and any new `decisions`. The helper reads the existing output, refreshes selection and retains decisions only for identical records, matched paths, mode and condition context. It returns only pending conditional records for agent evaluation. Resubmit their decisions; a complete result updates the existing artifact only when its content changes. Incomplete selection never overwrites a complete prior artifact and must block dependent work. No catalog-wide snapshot or separate decision cache is saved. Keep using the same output path on the next session.
+
 Fix, incoming review, standalone review, finding verification and direct feedback implementation all use this procedure before dispatch or local implementation:
 
 1. Identify the task's complete paths, including rename endpoints and planned files, and call `resolve` for `implementation` or `review`. Fix coordinators select implementation preferences for edits and review preferences separately for reviewers. Finding verification uses review preferences for its own scope.

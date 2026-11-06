@@ -34,6 +34,7 @@ def package(root):
             assert re.search(r'(?m)^description: .+',text)
             if manifest['name']=='dk-workflows':
                 assert '[private workflow reporting](../../../docs/private-reporting.md)' in text, 'Missing private reporting contract: '+str(path)
+                assert '[state admission](../../../DESIGN.md#objective-and-state-admission)' in text, 'Missing state admission contract: '+str(path)
     assert entries[0]==entries[1]
     for name in entries[0]:
         source=root/'codex/skills'/name/'SKILL.md'

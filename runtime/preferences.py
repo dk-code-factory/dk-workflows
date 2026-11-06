@@ -14,16 +14,14 @@ import uuid
 
 from shared.private_state import write
 from shared.repository_scope import inside_checkout, repository
+from shared.storage_paths import location
 
 VERSION = 1
 MODES = ('implementation', 'review')
 
 
 def catalog_path(checkout):
-    base = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
-    if not base.is_absolute():
-        raise ValueError('XDG_CONFIG_HOME must be absolute')
-    target = base / 'dk-workflows/v2/preferences.json'
+    target = location('config')/'preferences.json'
     if (target.resolve().is_relative_to(Path(__file__).resolve().parents[1])
             or inside_checkout(target, checkout)):
         raise ValueError('Private preferences must stay outside the plugin and repository')
@@ -287,6 +285,49 @@ def resolve(checkout, mode, paths):
                              'requires_condition': scope['condition'] is not None})
     # Deliberately omit catalog revision: unrelated edits must not invalidate work.
     return {'repository': context['repository'], 'mode': mode, 'paths': paths, 'records': selected}
+
+
+def handoff(checkout, mode, paths, condition_context, *, previous=None, decisions=()):
+    """Build task inputs, asking only for new or changed conditional decisions."""
+    selection = resolve(checkout, mode, paths)
+    previous = previous or {}
+    if not isinstance(previous, dict) or not isinstance(decisions, (list, tuple)):
+        raise ValueError('Handoff requires a previous handoff object and decision list')
+    old_selection = previous.get('selection', {})
+    if not isinstance(old_selection, dict):
+        raise ValueError('Malformed previous preference selection')
+    old_records = {item['record']['id']: item for item in old_selection.get('records', [])}
+    old_decisions = {item['id']: item for item in previous.get('decisions', [])}
+    provided = {item['id']: item for item in decisions}
+    if len(provided) != len(decisions):
+        raise ValueError('Duplicate preference condition decision')
+    conditional = {item['record']['id']: item for item in selection['records'] if item['requires_condition']}
+    if provided.keys() - conditional.keys():
+        raise ValueError('Decision does not identify a current conditional preference')
+    retained, pending = [], []
+    same_context = (old_selection.get('repository') == selection['repository']
+                    and old_selection.get('mode') == selection['mode']
+                    and previous.get('condition_context') == condition_context)
+    for preference_id, item in conditional.items():
+        decision = provided.get(preference_id)
+        if decision is None and same_context and old_records.get(preference_id) == item:
+            decision = old_decisions.get(preference_id)
+        if decision is None:
+            pending.append(item)
+            continue
+        if (not isinstance(decision, dict) or set(decision) != {'id', 'applicable', 'paths', 'reason'}
+                or type(decision['applicable']) is not bool
+                or not isinstance(decision['paths'], list)
+                or any(not isinstance(path, str) for path in decision['paths'])
+                or len(set(decision['paths'])) != len(decision['paths'])
+                or set(decision['paths']) - set(item['paths'])
+                or (not decision['applicable'] and decision['paths'])
+                or (decision['applicable'] and item['paths'] and not decision['paths'])
+                or not isinstance(decision['reason'], str) or not decision['reason'].strip()):
+            raise ValueError('Condition decision requires applicability, scoped paths and a reason')
+        retained.append(deepcopy(decision))
+    value = {'selection': selection, 'condition_context': deepcopy(condition_context), 'decisions': retained}
+    return {'complete': not pending, 'handoff': value, 'pending': pending}
 
 
 def render(value):

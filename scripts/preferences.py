@@ -30,6 +30,9 @@ def main():
     resolve = commands.add_parser('resolve')
     resolve.add_argument('--mode', choices=preferences.MODES, required=True)
     resolve.add_argument('--paths', type=Path, required=True)
+    handoff = commands.add_parser('handoff', help='Build inputs and reuse unchanged condition decisions')
+    handoff.add_argument('--file', type=Path, required=True, help='Mode, paths, condition_context and new decisions')
+    handoff.add_argument('--output', type=Path, required=True, help='Stable private task input; reused on resume')
     args = parser.parse_args()
     if args.action == 'list':
         result = preferences.list_records(args.checkout)
@@ -39,6 +42,28 @@ def main():
         result = preferences.remove(args.checkout, args.id, args.revision)
     elif args.action == 'resolve':
         result = preferences.resolve(args.checkout, args.mode, load(args.paths))
+    elif args.action == 'handoff':
+        from shared.repository_scope import checkout_roots
+        from shared.private_state import write
+        output = args.output.resolve()
+        probe = output.parent
+        while not probe.exists():
+            probe = probe.parent
+        roots = [Path(__file__).resolve().parents[1], *checkout_roots(args.checkout), *checkout_roots(probe)]
+        if any(output.is_relative_to(root) for root in roots):
+            raise ValueError('Preference handoff must remain outside repositories and the plugin')
+        request = load(args.file)
+        if (not isinstance(request, dict) or set(request) - {'mode', 'paths', 'condition_context', 'decisions'}
+                or 'condition_context' not in request):
+            raise ValueError('Handoff requires mode, paths and complete consumed condition_context')
+        previous = load(output) if output.exists() else None
+        built = preferences.handoff(args.checkout, request['mode'], request['paths'], request['condition_context'],
+                                    previous=previous, decisions=request.get('decisions', []))
+        unchanged = previous == built['handoff']
+        if built['complete'] and not unchanged:
+            write(output, built['handoff'])
+        result = {'complete': built['complete'], 'path': str(output) if built['complete'] else None,
+                  'unchanged': built['complete'] and unchanged, 'pending': built['pending']}
     elif args.action == 'render':
         print(preferences.render(load(args.file)), end='')
         return

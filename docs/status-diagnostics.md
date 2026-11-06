@@ -1,10 +1,14 @@
 # Status output details
 
-Use this reference for compact result and progress references or `status --explain`. [Task state](task-state.md) defines routine commands and claim handling.
+Routine coordination uses `resume`, `result` and `progress` under [task state](task-state.md). Resume recaptures retained definitions, replaces finding bodies with `finding_count` and includes saved Git pins for comparison with the current PR. It is read-only and does not establish completeness of the current selected task set. Missing-source/removed-occurrence tasks report `refresh_required`; legacy entries report `definition_required` under `unmanaged`. Supply those current definitions once through prepare to attach replay information without resetting results or budgets. `--key` restricts saved tasks, while unfinished claims remain PR-wide.
+
+`result --key KEY --section findings|normalized|original` validates the saved envelope and reads the requested section. It exposes historical evidence, not a current-coverage verdict. `progress --run RUN_ID --after OFFSET --limit N` returns original progress records, a total and the next offset. Read every page relevant to dispositions, acceptances and recovery. None of these views persists a rendered summary or a second index.
+
+The remaining sections describe compatible low-level status output and `status --explain`.
 
 ## Compact status
 
-Compact status displays saved state; it does not assess readiness. Before assessing dispositions, exact user acceptances or recovery, read `status --run RUN_ID` and original results. Omit `--run` when evidence spans runs.
+Compact status displays saved state; it does not assess readiness. Before assessing dispositions, acceptances or recovery, read necessary original evidence and relevant progress pages. Low-level integrations can still use full `status --run RUN_ID`. Include other runs when evidence spans runs.
 
 `progress_ref` is a JSON Pointer to the same progress array in the manifest. In run names, decode `~1` as `/` and `~0` as `~`. Each validated `result` path points to an immutable JSON envelope:
 

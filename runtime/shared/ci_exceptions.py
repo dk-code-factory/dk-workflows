@@ -2,17 +2,14 @@
 import fcntl
 import hashlib
 import json
-import os
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 
 from shared.private_state import write
+from shared.storage_paths import location
 
 
 def data_root():
-    path = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share')
-    if not path.is_absolute():
-        raise ValueError('XDG_DATA_HOME must be absolute')
-    return path / 'codex-repo-rules'
+    return location('policies')
 
 
 def config_path(identity, scope):

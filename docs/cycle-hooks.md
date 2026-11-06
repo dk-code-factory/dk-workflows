@@ -46,18 +46,12 @@ Only these two positions are configurable today. More precise placement would ad
 
 ## Define, claim and resume a hook
 
-Use the normal [task state contract](task-state.md) to retain hook receipts. `hook-spec` binds a configured hook to one run, cycle, phase and id; it does not execute anything:
-
-```sh
-python3 PLUGIN_ROOT/scripts/dk.py --repository HOST/OWNER/REPO --pr PR_URL \
-  hook-spec --run RUN_ID --cycle CYCLE_ID --phase before_cycle \
-  --hook-id refresh-context --definition /private/hook-definition.json
-```
-
-Pass `--upstream HOST/OWNER/REPO` to `hook-spec` when configuration inherits upstream settings. Save its stdout as a private spec file. A definition supplies the resolved `skill_identity`, `resources`, `instructions`, `inputs`, execution `options`, and task-capture flags. For an instruction-only hook use `dk-workflows:dk-pr-fix` or `dk-workflows:dk-pr-review`, matching the active workflow; a skill hook must match its configured skill. For example:
+Use the shared [managed task lifecycle](task-state.md). Prepare one hook at a time, with the retained run/cycle, phase/id selector and resolved definition. The helper derives responsibility and assigned instructions from current configuration:
 
 ```json
 {
+ "run": "RUN_ID", "cycle": "CYCLE_ID",
+ "tasks": [{"kind": "hook", "phase": "before_cycle", "hook_id": "refresh-context", "definition": {
   "skill_identity": "dk-workflows:dk-pr-fix",
   "resources": {
     "skill": "/installed/dk-workflows/codex/skills/dk-pr-fix/SKILL.md",
@@ -67,11 +61,12 @@ Pass `--upstream HOST/OWNER/REPO` to `hook-spec` when configuration inherits ups
   "inputs": {"context": "/private/cycle-start-context.json"},
   "options": {},
   "governing_inputs_complete": true
+ }}]
 }
 ```
 
-Capture all governing resources and inputs, including indirect guidance. Responsibility and assigned instructions come from the configured hook; omit those fields from the definition. The helper adds the live configuration source files and exact configured options. It preserves caller execution options separately. For a skill hook, pass `options.configured` to the native skill. `options.execution` contains caller execution context; `options.cycle_hook` identifies the occurrence.
+Call `prepare --file REQUEST.json`. Include all governing resources and inputs; omit responsibility/assigned instructions. Instruction-only hooks use the active fix/review skill; selected-skill hooks use their configured identity. An optional `upstream` on the task selects inherited settings. Configured options and caller execution options retain their existing separate fields. The helper records only the replay definition and existing occurrence receipt, avoiding repeated setup in the next session.
 
-Recheck effective configuration and regenerate the spec before each claim or completion check. Claim each hook separately with `start --spec HOOK.json --run RUN_ID`, without `--cycle`, `--retry`, or CI flags. Do not batch an ordered phase. Follow `invoke`, `reuse` and `recover_required` normally and record original output and explicit completion immediately. The hook's occurrence is encoded in its task identity, so its claims do not consume reviewer cycle/retry budgets. Unlike reusable reviewer analysis, hook receipts deliberately include run and cycle identity: completed unchanged hooks reuse within that occurrence, while the next cycle and a new run execute their own hooks. Retain the original run and cycle ids after interruption. Before-phase hook progress may create a run whose review-cycle list is still empty.
+Follow the shared prepare/finish/recovery protocol without retry or CI flags. The helper uses cycle only for occurrence identity, consuming no reviewer cycle/retry budget. Finish each hook immediately, then proceed in order. Resume regenerates current configuration and preserves completed unchanged hooks within that occurrence. A new cycle/run executes its own hooks. Before-phase progress may create a run with an empty review-cycle list. Low-level `hook-spec` remains compatible.
 
 A hook receipt proves that occurrence completed; it does not establish current review or CI coverage. Keep immutable cycle-start context and result artifacts separate from live files the hook intentionally changes. When a hook mutates Git, supply pinned Git inputs from a separate immutable checkout, or describe the pinned starting state in an immutable context artifact. Live captured-input drift rejects recording and requires explicit reconciliation/recovery. Use `cacheable:false` if governing capture is incomplete; such tasks require checking saved completion evidence explicitly before any repeat invocation. Never automatically replay a hook with uncertain effects. Reconcile effects and confirm the prior agent stopped before recovering its claim. Failed hooks remain blockers until their cause is addressed and a deliberate retry is recorded in progress.
