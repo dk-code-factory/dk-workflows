@@ -59,7 +59,7 @@ class Recovery:
         if request['kind'] == 'reply-inline':
             if source['kind'] != 'inline_comment' or not source.get('thread_id'):
                 raise ValueError('Inline recovery requires the original thread identity')
-            thread = self.handler({**request, 'head': live['headRefOid'],
+            thread = self.handler({**request, 'pr': live['url'], 'head': live['headRefOid'],
                                    'thread_id': source['thread_id']}).thread()
             ids = [c['databaseId'] for c in thread['comments']]
             if (ids.count(source['id']) != 1 or ids.count(request['parent']) != 1

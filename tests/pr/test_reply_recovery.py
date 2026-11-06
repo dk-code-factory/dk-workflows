@@ -130,6 +130,63 @@ def test_recovery_preserves_canonical_mixed_case_urls(remote, state, source_kind
     assert len(remote.writes) == 1
 
 
+@pytest.mark.parametrize('state', ['unavailable', 'edited'])
+@pytest.mark.parametrize('thread_change', [None, 'pr', 'head', 'source'])
+def test_inline_recovery_uses_canonical_thread_identity_without_relaxing_checks(remote, monkeypatch, state, thread_change):
+    canonical_pr = PR.replace('/owner/repo/', '/Owner/Repo/')
+    remote.metadata['url'] = canonical_pr
+    remote.source['html_url'] = canonical_pr+'#discussion_r10'
+    request = remote.request(pr=canonical_pr, kind='reply-inline', parent=10,
+                             source={'kind': 'inline_comment', 'id': 10,
+                                     'url': remote.source['html_url'], 'thread_id': 'T'})
+    original_api = remote.api
+    def api(pr, path, *, payload=None):
+        result = original_api(pr, path, payload=payload)
+        if payload is not None:
+            remote.comments[-1].update(in_reply_to_id=10, html_url=canonical_pr+'#discussion_r100')
+            return deepcopy(remote.comments[-1])
+        return result
+    monkeypatch.setattr(publisher, 'api', api)
+    node = {'id': 'T', 'isResolved': False, 'viewerCanResolve': True,
+            'pullRequest': {'url': canonical_pr, 'headRefOid': remote.metadata['headRefOid']},
+            'comments': {'nodes': [{'id': 'source', 'databaseId': 10, 'url': remote.source['html_url'],
+                                   'body': remote.source['body'], 'author': {'login': 'reviewer'}}],
+                         'pageInfo': {'hasNextPage': False}}}
+    def run(argv, **kwargs):
+        assert argv[0:2] == ['gh', 'api'] and 'graphql' in argv
+        assert kwargs['payload']['variables']['id'] == 'T'
+        return {'data': {'node': deepcopy(node)}}
+    monkeypatch.setattr(publisher, 'run', run)
+    operation = publisher.prepare(request)['operation']
+    publisher.publish(operation)
+    original = publication.load(operation)
+    assert original['request']['approved']['pr'] == PR
+    if state == 'unavailable':
+        remote.comments.clear()
+    else:
+        remote.comments[0]['body'] = 'The historical inline answer was edited.'
+    if thread_change == 'pr':
+        node['pullRequest']['url'] = canonical_pr.replace('/pull/7', '/pull/8')
+    elif thread_change == 'head':
+        node['pullRequest']['headRefOid'] = 'b'*40
+    elif thread_change == 'source':
+        node['comments']['nodes'].clear()
+    if thread_change:
+        message = 'exact original thread' if thread_change == 'source' else 'different PR or head'
+        with pytest.raises(ValueError, match=message):
+            remote.disposition(operation)
+        assert not publication.load(operation).get('reply_dispositions')
+    else:
+        remote.disposition(operation)
+        for _ in range(2):
+            assert publisher.publish(operation, reconcile=True)['reply_obligation'] == 'no_replacement'
+    saved = publication.load(operation)
+    assert saved['request'] == original['request']
+    assert saved['response'] == original['response']
+    assert saved['receipt'] == original['receipt']
+    assert len(remote.writes) == 1
+
+
 def test_inspection_rejects_outside_storage_before_creating_a_lock(remote, tmp_path):
     operation = tmp_path/'outside-publication.json'
     with pytest.raises(ValueError, match='private workflow storage'):
