@@ -36,7 +36,7 @@ def save(path, value):
     path.write_bytes(encoded(value))
 
 
-def initialize(root, guidance, runtime=BASE):
+def initialize(root, guidance, runtime=BASE, guidance_revision=BASE):
     if root.exists():
         raise ValueError('Use a new external directory; never reset an exercise arm')
     if root.is_relative_to(ROOT):
@@ -44,24 +44,34 @@ def initialize(root, guidance, runtime=BASE):
     if guidance not in ('before','after'):
         raise ValueError('Guidance must be before or after')
     runtime = run(['git', '-C', ROOT, 'rev-parse', '--verify', runtime+'^{commit}']).decode().strip()
+    guidance_revision = run(['git', '-C', ROOT, 'rev-parse', '--verify',
+                             guidance_revision+'^{commit}']).decode().strip()
+    runtime_paths = run(['git', '-C', ROOT, 'ls-tree', '-r', '--name-only', runtime]).decode().splitlines()
     root.mkdir(parents=True)
     interface = Path(__file__).read_bytes()
     (root/'frozen').mkdir()
     (root/'frozen/interface.py').write_bytes(interface)
-    for name in ('runtime/state.py', 'scripts/dk.py'):
+    # Freeze the runtime's own dependencies, rather than relying on imports from
+    # the launching checkout or a particular historical state's import graph.
+    runtime_hashes = {}
+    for name in runtime_paths:
+        if name != 'scripts/dk.py' and not (name.startswith('runtime/') and name.endswith('.py')
+                                           and 'tests' not in Path(name).parts):
+            continue
         path = root/'frozen'/name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(run(['git', '-C', ROOT, 'show', runtime+':'+name]))
+        runtime_hashes[name] = sha(path.read_bytes())
     markdown = ([str(p.relative_to(ROOT)) for folder in ('runtime', 'docs', 'codex')
                  for p in sorted((ROOT/folder).rglob('*.md'))] if guidance == 'after' else
-                run(['git', '-C', ROOT, 'ls-tree', '-r', '--name-only', BASE]).decode().splitlines())
+                run(['git', '-C', ROOT, 'ls-tree', '-r', '--name-only', guidance_revision]).decode().splitlines())
     for name in markdown:
         if not name.endswith('.md') or not name.startswith(('docs/', 'runtime/', 'codex/')):
             continue
         path = root/'guidance'/name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes((ROOT/name).read_bytes() if guidance == 'after' else
-                         run(['git', '-C', ROOT, 'show', BASE+':'+name]))
+                         run(['git', '-C', ROOT, 'show', guidance_revision+':'+name]))
     checkout = root/'checkout'
     checkout.mkdir()
     def git(*args):
@@ -84,6 +94,12 @@ def initialize(root, guidance, runtime=BASE):
               'instructions':'Keep VALUE public. No remote writes in this exercise.'}
     save(root/'sources.json', source)
     (root/'governing.txt').write_text('Return two. Keep VALUE public. No remote writes.\n')
+    # Explicit selections keep the fixture independent of the operator's private
+    # preference catalog and preserve the handoff even when no records apply.
+    for mode in ('implementation', 'review'):
+        save(root/('preferences-'+mode+'.json'), {
+            'selection': {'repository': REPO, 'mode': mode, 'paths': ['code.py'], 'records': []},
+            'condition_context': {}, 'decisions': []})
     (root/'skills').mkdir()
     for task in TASKS:
         name = 'series' if task in ('scope-partition', 'series-cleanup') else task
@@ -94,7 +110,9 @@ def initialize(root, guidance, runtime=BASE):
                 'skill':{'identity':'fixture:'+name, 'resources':{'skill':str(root/'skills'/(name+'.md'))}},
                 'task':{'id':task, 'instructions':'Assess '+task+' for the pinned fixture scope.'},
                 'instructions':{'user':str(root/'governing.txt')},
-                'inputs':{}, 'options':{}, 'governing_inputs_complete':True,
+                'inputs':{'preferences':str(root/('preferences-'+
+                           ('review' if task in TASKS[:4] else 'implementation')+'.json'))},
+                'options':{}, 'governing_inputs_complete':True,
                 'cacheable':task in TASKS[:4],
                 'git':{'checkout':str(checkout), 'target':base, 'base':base, 'head':old,
                        'history':task == 'history-review', 'head_sensitive':task == 'ci'}}
@@ -124,6 +142,11 @@ def initialize(root, guidance, runtime=BASE):
                                'required_reviewers':list(TASKS[:3]), 'optional_reviewers':['optional-review'],
                                'prior_worker_stopped':True, 'remote_writes_permitted':False,
                                'guidance_arm':guidance,
+                               'guidance_revision':guidance_revision if guidance == 'before' else None,
+                               'runtime':runtime, 'runtime_hashes':runtime_hashes,
+                               'source_sha256':sha((root/'sources.json').read_bytes()),
+                               'preference_files':{'implementation':'preferences-implementation.json',
+                                                   'review':'preferences-review.json'},
                                'interface_sha256':sha(interface),
                                'guidance_hashes':{str(p.relative_to(root/'guidance')):sha(p.read_bytes())
                                                   for p in sorted((root/'guidance').rglob('*.md'))}})
