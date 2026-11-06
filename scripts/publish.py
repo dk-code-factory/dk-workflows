@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'runtime'))
 from shared import publication
 from shared.diagnostics import Diagnostic
 from shared.github_publications import Handler, KINDS
+from shared.reply_recovery import Recovery
 
 
 def run(argv, *, payload=None, cwd=None, json_output=True):
@@ -129,6 +130,10 @@ def handler(request):
     return Handler(request, api=api, metadata=metadata, run=run, endpoint=endpoint)
 
 
+def recovery():
+    return Recovery(api=api, metadata=metadata, endpoint=endpoint, replies=replies, handler=handler)
+
+
 def prepare(request):
     if not isinstance(request,dict):
         raise ValueError('Publication request must be an object')
@@ -162,12 +167,19 @@ def prepare(request):
                     return publication.refresh_prepared(path, 'ci-approve', handler(refreshed).prepare(), refreshed)
                 return {'operation': str(path), **retained, 'reused_intent': True}
             if approved.get('_payload_hash') == payload_hash:
+                if request.get('replaces'):
+                    recovery().link(request['replaces'], str(path))
                 return {'operation':str(path),**retained,'reused_intent':True}
             target = request.get('pr') or (request.get('remote','')+'#'+request.get('branch',''))
             if retained['request']['target'] == target and retained['status']=='pending':
                 raise ValueError('Uncertain publication on this target requires reconciliation: '+str(path))
+        if request.get('replaces'):
+            request['_reply_disposition'] = recovery().replacement(request)
         directory = Path(tempfile.mkdtemp(prefix='operation-',dir=scope))
-        return _prepare({**request, '_payload_hash': payload_hash},directory)
+        prepared = _prepare({**request, '_payload_hash': payload_hash},directory)
+        if request.get('replaces'):
+            recovery().link(request['replaces'], prepared['operation'])
+        return prepared
 
 
 def publish(path, *, reconcile=False):
@@ -190,8 +202,19 @@ def publish(path, *, reconcile=False):
                 raise ValueError('PR head/title/body changed; reconcile before preparing any replacement')
         else:
             live = metadata(request['pr'])
-            if live != {k:v for k,v in expected.items() if k!='reply_ids'}:
+            wanted = {k:v for k,v in expected.items() if k!='reply_ids'}
+            if value.get('reply_dispositions'):
+                wanted = recovery().current(value)['snapshot']['pr']
+            if live != wanted:
                 raise ValueError('PR changed; retained reply receipt does not authorize another publication')
+            if request.get('replaces'):
+                original = recovery().load(request['replaces'])
+                record = recovery().current(original)
+                if (record['decision'] != 'replacement_required'
+                        or request.get('_reply_disposition') != record.get('disposition_id')
+                        or record.get('replacement_operation') != str(Path(path).resolve())
+                        or api(request['pr'], 'user')['login'] != request['actor']):
+                    raise ValueError('Replacement disposition or actor changed')
             if not verified and [i['id'] for i in replies(request)] != expected['reply_ids']:
                 raise ValueError('Reply conversation changed; refresh before publication')
     def send(value):
@@ -230,7 +253,10 @@ def publish(path, *, reconcile=False):
             live = metadata(request['pr'])
             if live!={**expected,**request['fields']}:raise ValueError('Edit not verified')
             return live
-        matches = [item for item in replies(request) if (item['id']==request['existing_reply'] if request.get('existing_reply')
+        if value['status'] == 'verified' and value.get('reply_dispositions'):
+            return recovery().receipt(value)
+        original_id = value.get('receipt', {}).get('id') if value['status'] == 'verified' else request.get('existing_reply')
+        matches = [item for item in replies(request) if (item['id']==original_id if original_id
                        else item['id'] not in expected['reply_ids'])
                    and item.get('body')==request['body'] and item.get('user',{}).get('login')==request['actor']]
         if len(matches)!=1:raise ValueError('Reply absent or ambiguous; do not resend')
@@ -241,8 +267,19 @@ def publish(path, *, reconcile=False):
         for other in scope.glob('*/*.json') if retained['status']=='prepared' and not reconcile else []:
             if other.resolve()!=Path(path).resolve() and publication.load(other)['status']=='pending':
                 raise ValueError('Reconcile the pending publication before another write: '+str(other))
-        return publication.execute(path,kind,check=check,send=send,observe=observe,reconcile=reconcile,
-            reconcile_argv=[sys.executable,str(Path(__file__).resolve()),'reconcile'])
+        try:
+            result = publication.execute(path,kind,check=check,send=send,observe=observe,reconcile=reconcile,
+                reconcile_argv=[sys.executable,str(Path(__file__).resolve()),'reconcile'])
+        except Diagnostic as exc:
+            if kind in {'reply-inline', 'reply-comment'} and publication.load(path)['status'] == 'verified':
+                from shared.diagnostics import command
+                exc.action = command([sys.executable, str(Path(__file__).resolve()), 'inspect-reply', '--operation', str(path)], path)
+            raise
+        settled = publication.load(path).get('reply_dispositions')
+        if settled:
+            result['reply_obligation'] = settled[-1]['decision']
+            result['replacement_operation'] = settled[-1].get('replacement_operation')
+        return result
 
 
 def main():
@@ -251,8 +288,18 @@ def main():
     c=sub.add_parser('prepare');c.add_argument('--file',type=Path,required=True)
     for action in ('publish','reconcile'):
         c=sub.add_parser(action);c.add_argument('--operation',type=Path,required=True)
+    c=sub.add_parser('inspect-reply');c.add_argument('--operation',type=Path,required=True)
+    c=sub.add_parser('dispose-reply');c.add_argument('--operation',type=Path,required=True)
+    c.add_argument('--file',type=Path,required=True)
     a=p.parse_args()
-    result=prepare(json.loads(a.file.read_text())) if a.action=='prepare' else publish(a.operation,reconcile=a.action=='reconcile')
+    if a.action == 'prepare':
+        result = prepare(json.loads(a.file.read_text()))
+    elif a.action == 'inspect-reply':
+        result = recovery().inspect(a.operation)
+    elif a.action == 'dispose-reply':
+        result = recovery().dispose(a.operation, json.loads(a.file.read_text()))
+    else:
+        result = publish(a.operation,reconcile=a.action=='reconcile')
     print(json.dumps(result,sort_keys=True))
 
 if __name__=='__main__':

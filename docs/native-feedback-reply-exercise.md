@@ -49,6 +49,19 @@ body, actor, head and routing parent, and lost-response recovery should leave on
 write per reply. Record the native handle, result, operation paths and inspected
 state privately.
 
+For issue #162, first publish and reconcile one reply, then use `change-reply
+--request FILE` with a fixture-only payload such as `{"id":300,"state":"unavailable"}`
+or `{"id":300,"state":"edited","body":"Revised answer"}`. Give a fresh native
+agent the historical operation path, current guidance and evidence about the
+current answer obligation. Ask it to recover the finalizer through the offline
+interface without supplying the expected decision. The interface accepts
+`inspect-reply --operation FILE` and `dispose-reply --operation FILE --request
+DISPOSITION.json`; the latter uses the production disposition schema. A new
+`submit` accepts separately authorized replacement requests with `replaces`.
+Inspect retained requests, receipts, observations, dispositions, replacement
+links and write counts afterward. Test obsolete and still-required answers in
+separate samples; never use fixture changes against live GitHub.
+
 This sample exercises one native agent on frozen evidence and simulated GitHub
 writes. It does not establish complete-workflow adherence, live GitHub behavior
 or independent Claude host execution. Ordinary regression tests remain offline
