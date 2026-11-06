@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('recovery_publisher', ROOT/'scripts/publish.py')
 publisher = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(publisher)
+read_replies = publisher.replies
 PR = 'https://github.com/owner/repo/pull/7'
 
 
@@ -253,6 +254,66 @@ def test_access_failures_are_not_treated_as_deleted_or_settled(remote, status):
     saved = publication.load(operation)
     assert saved['reply_observations'][-1]['state'] == 'evidence_unavailable'
     assert saved['status'] == 'verified' and 'reply_dispositions' not in saved
+    assert len(remote.writes) == 1
+
+
+@pytest.mark.parametrize('pages', [{}, [{}], [[], {}], [[{'id': 11}], {}], [[None]]])
+def test_malformed_reply_pages_cannot_settle_a_verified_reply(remote, monkeypatch, pages):
+    operation = remote.post()
+    original = publication.load(operation)
+    remote.comments.clear()
+    remote.disposition(operation)
+    disposition = publication.load(operation)['reply_dispositions'][-1]
+    monkeypatch.setattr(publisher, 'replies', read_replies)
+    monkeypatch.setattr(publisher, 'run', lambda *args, **kwargs: deepcopy(pages))
+    with pytest.raises(ValueError, match='Reply pages are unavailable or ambiguous'):
+        publisher.recovery().inspect(operation)
+    with pytest.raises(ValueError, match='Reply pages are unavailable or ambiguous'):
+        publisher.recovery().dispose(operation, {k: disposition[k] for k in ('decision', 'reason', 'observation')})
+    with pytest.raises(Diagnostic) as error:
+        publisher.publish(operation, reconcile=True)
+    assert error.value.code == 'publication_not_ready'
+    saved = publication.load(operation)
+    assert saved['reply_observations'][-1]['state'] == 'evidence_unavailable'
+    assert saved['reply_dispositions'] == [disposition]
+    assert saved['request'] == original['request'] and saved['receipt'] == original['receipt']
+    assert len(remote.writes) == 1
+
+
+@pytest.mark.parametrize('pages', [[], [[]], [[], []]])
+def test_valid_empty_reply_pages_allow_explicit_obsolete_answer_disposition(remote, monkeypatch, pages):
+    operation = remote.post()
+    remote.comments.clear()
+    monkeypatch.setattr(publisher, 'replies', read_replies)
+    monkeypatch.setattr(publisher, 'run', lambda *args, **kwargs: deepcopy(pages))
+    remote.disposition(operation)
+    assert publisher.publish(operation, reconcile=True)['reply_obligation'] == 'no_replacement'
+    assert len(remote.writes) == 1
+
+
+@pytest.mark.parametrize('field,value', [('url', None), ('headRefOid', None), ('headRefOid', ''),
+                                       ('headRefOid', 'not-a-sha'), ('title', {}), ('body', None)])
+def test_incomplete_pr_metadata_cannot_settle_a_verified_reply(remote, field, value):
+    operation = remote.post()
+    original = publication.load(operation)
+    remote.comments.clear()
+    remote.disposition(operation)
+    disposition = publication.load(operation)['reply_dispositions'][-1]
+    if value is None:
+        del remote.metadata[field]
+    else:
+        remote.metadata[field] = value
+    with pytest.raises(ValueError, match='Recovery PR metadata is unavailable or ambiguous'):
+        publisher.recovery().inspect(operation)
+    with pytest.raises(ValueError, match='Recovery PR metadata is unavailable or ambiguous'):
+        publisher.recovery().dispose(operation, {k: disposition[k] for k in ('decision', 'reason', 'observation')})
+    with pytest.raises(Diagnostic) as error:
+        publisher.publish(operation, reconcile=True)
+    assert error.value.code == 'publication_not_ready'
+    saved = publication.load(operation)
+    assert saved['reply_observations'][-1]['state'] == 'evidence_unavailable'
+    assert saved['reply_dispositions'] == [disposition]
+    assert saved['request'] == original['request'] and saved['receipt'] == original['receipt']
     assert len(remote.writes) == 1
 
 

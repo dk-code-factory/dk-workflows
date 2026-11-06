@@ -78,7 +78,8 @@ def test_recovery_exercise_uses_real_journal_and_separate_obligation_disposition
 
 @pytest.mark.parametrize('state', ['unavailable', 'edited'])
 @pytest.mark.parametrize('source_kind', ['review', 'inline_comment'])
-def test_recovery_exercise_required_replacement_survives_lost_response_without_id_reuse(tmp_path, state, source_kind):
+@pytest.mark.parametrize('lose_response', [False, True])
+def test_recovery_exercise_required_replacement_handles_response_outcomes_without_id_reuse(tmp_path, state, source_kind, lose_response):
     root = tmp_path/'exercise'
     exercise.initialize(root)
     pr, head = exercise.fixture.PR, exercise.fixture.HEAD
@@ -96,9 +97,11 @@ def test_recovery_exercise_required_replacement_survives_lost_response_without_i
                                            'observation': observed['fingerprint']}, operation=operation)
     replacement_request = {**request, 'body': request['body']+' Current correction.', 'replaces': operation,
                            'authorization': 'User authorized this concrete current answer.'}
-    result = exercise.operate(root, 'submit', replacement_request, lose_response=True)
+    result = exercise.operate(root, 'submit', replacement_request, lose_response=lose_response)
     replacement = result['operation']
-    assert publication.load(replacement)['status'] == 'pending'
+    if not lose_response:
+        assert result['result']['status'] == 'verified'
+    assert publication.load(replacement)['status'] == ('pending' if lose_response else 'verified')
     assert exercise.operate(root, 'submit', replacement_request)['operation'] == replacement
     assert exercise.operate(root, 'reconcile', operation=replacement)['status'] == 'verified'
     for _ in range(2):

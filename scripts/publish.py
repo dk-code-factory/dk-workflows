@@ -60,6 +60,9 @@ def replies(request):
     host, root, number = endpoint(pr)
     route = f'{root}/pulls/{number}/comments' if request['kind']=='reply-inline' else f'{root}/issues/{number}/comments'
     pages = run(['gh','api','--hostname',host,route,'--paginate','--slurp'])
+    if (not isinstance(pages, list) or any(not isinstance(page, list) for page in pages)
+            or any(not isinstance(item, dict) for page in pages for item in page)):
+        raise ValueError('Reply pages are unavailable or ambiguous')
     items = [item for page in pages for item in page]
     if request['kind']=='reply-inline':
         items = [item for item in items if item.get('in_reply_to_id') == request['parent']]

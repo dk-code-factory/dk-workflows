@@ -138,7 +138,9 @@ class Remote:
             self.state['next_inline_reply_id'] = comment_id + 1
             value={'id':comment_id,'in_reply_to_id':41,'body':payload['body'],'user':{'login':self.state['actor']},'html_url':PR+'#discussion_r'+str(comment_id)}
             self.state['replies'].append(value)
-            self.state['thread']['comments']=[{'id':'comment-'+str(comment_id),'databaseId':comment_id,'url':value['html_url'],'body':value['body'],'author':value['user']}]
+            self.state['thread']['comments'] = [v for v in self.state['thread']['comments']
+                                                if v['databaseId'] != comment_id]
+            self.state['thread']['comments'].append({'id':'comment-'+str(comment_id),'databaseId':comment_id,'url':value['html_url'],'body':value['body'],'author':value['user']})
             return self.changed('reply-inline',value)
         raise AssertionError('Unexpected fixture API: '+path)
 

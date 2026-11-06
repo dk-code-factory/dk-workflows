@@ -34,6 +34,10 @@ class Recovery:
         request = value['request']['approved']
         pr = request['pr']
         live = self.metadata(pr)
+        if (not isinstance(live, dict)
+                or any(not isinstance(live.get(key), str) for key in ('url', 'headRefOid', 'title', 'body'))
+                or not re.fullmatch(r'[0-9a-f]{40}', live['headRefOid'])):
+            raise ValueError('Recovery PR metadata is unavailable or ambiguous')
         if live.get('url', '').lower() != pr.lower():
             raise ValueError('Recovery PR identity changed')
         actor = self.api(pr, 'user')['login']
