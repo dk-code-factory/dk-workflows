@@ -1,6 +1,6 @@
 # Fork workflow approval evidence
 
-`dk-pr-review` calls the configured the `dk-ci-approve` invocation in `processes.pr-review.skills` role (default `dk-workflows:dk-ci-approve`) once review is ready for CI. `processes.pr-review.actions.approve_ci` defaults to true independently of posting PR approvals or merging. Analysis-only instructions and narrower mutation restrictions override it. This boundary does not alter `dk-pr-fix`, completion instructions, branch protection or deployment approvals. CI execution permission does not establish CI success.
+`dk-pr-review` calls the configured `dk-ci-approve` operation in `processes.pr-review.operations` role (default `dk-workflows:dk-ci-approve`) once review is ready for CI. `processes.pr-review.actions.approve_ci` defaults to true independently of posting PR approvals or merging. Analysis-only instructions and narrower mutation restrictions override it. This boundary does not alter `dk-pr-fix`, completion instructions, branch protection or deployment approvals. CI execution permission does not establish CI success.
 
 Keep a private JSON evidence document with the following fields. Preserve original instructions and reports; a boolean readiness assertion is insufficient.
 

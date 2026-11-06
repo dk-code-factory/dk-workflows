@@ -74,11 +74,12 @@
           "verification": {
             "$ref": "invocation.schema.json"
           },
-          "skills": {
+          "operations": {
             "type": "array",
             "items": {
               "$ref": "invocation.schema.json"
-            }
+            },
+            "description": "Invocations used during process work. The process recipe determines when each operation is called; array order does not schedule execution."
           },
           "limits": {
             "type": "object",

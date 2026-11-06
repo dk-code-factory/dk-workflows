@@ -69,7 +69,7 @@ def locations(value):
     return [
         {'processes': {'pr-fix': {'run': value}}},
         {'processes': {'pr-review': {'verification': value}}},
-        {'processes': {'pr-fix': {'skills': [value]}}},
+        {'processes': {'pr-fix': {'operations': [value]}}},
         {'processes': {'pr-fix': {'finalizers': [value]}}},
         {'processes': {'pr-fix': {'hooks': {'before_cycle': [value]}}}},
         {'processes': {'pr-review': {'hooks': {'after_cycle': [value]}}}},
@@ -127,12 +127,12 @@ def test_schema_metadata_roundtrips_without_becoming_a_setting(tmp_path):
 
 def test_preflight_resolves_short_names_and_reports_ambiguity():
     settings = deepcopy(config.DEFAULTS)
-    settings['processes']['pr-fix']['skills'] = ['review']
+    settings['processes']['pr-fix']['operations'] = ['review']
     installed = [name for name in available(settings) if name != 'review'] + ['one:review', 'two:review']
     result = config.preflight(settings, installed)
     assert not result['ready']
     assert result['ambiguous_selected_skills'] == {'review': ['one:review', 'two:review']}
-    settings['processes']['pr-fix']['skills'] = ['one:review']
+    settings['processes']['pr-fix']['operations'] = ['one:review']
     result = config.preflight(settings, installed)
     assert result['ready'] and result['resolved_skills']['one:review'] == 'one:review'
 
@@ -155,12 +155,12 @@ def test_shared_defaults_local_overrides_and_qualified_resolution():
     settings['skill_settings']['team:review'] = {
         'agent': {'model': 'chosen', 'reasoning_effort': 'high'},
         'options': {'focus': 'security', 'paths': ['src']}}
-    settings['processes']['pr-fix']['skills'] = [
+    settings['processes']['pr-fix']['operations'] = [
         {'skill': 'review', 'options': {'paths': ['auth']}, 'instructions': 'Keep exact.\n'}]
     capabilities = {'delegation': True, 'models': {'chosen': ['high']}}
     installed = [name for name in available(settings) if name != 'review'] + ['team:review']
     assert config.preflight(settings, installed, capabilities)['ready']
-    call = config.select(settings, 'pr-fix', 'skill', 0)
+    call = config.select(settings, 'pr-fix', 'operation', 0)
     assert call['agent']['model'] == 'chosen'
     assert call['options'] == {'focus': 'security', 'paths': ['auth']}
     assert call['instructions'] == 'Keep exact.\n'
@@ -175,7 +175,7 @@ def test_recursive_review_coordinator_does_not_loop_forever():
 
 def test_explicit_finite_nested_calls_can_reuse_a_skill():
     settings = deepcopy(config.DEFAULTS)
-    settings['processes']['pr-fix']['skills'] = [
+    settings['processes']['pr-fix']['operations'] = [
         {'skill': 'team:review', 'options': {'reviewers': [
             {'skill': 'team:review', 'options': {'reviewers': ['team:leaf']}}]}}]
     assert config.preflight(settings, available(settings))['ready']
@@ -194,9 +194,9 @@ def test_model_effort_prompt_and_options_reach_specs_and_invalidate_reuse(defini
     selected = {'skill': 'team:review', 'instructions': '  Review authentication.\n',
                 'options': {'focus': 'security'},
                 'agent': {'model': 'chosen', 'reasoning_effort': 'high'}}
-    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'skills': [selected]}}})
+    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'operations': [selected]}}})
     spec = config.make_invocation_spec(repository=REPOSITORY, pr=PR, process='pr-fix',
-                                       kind='skill', index=0, definition=definition)
+                                       kind='operation', index=0, definition=definition)
     assert spec['options']['invocation'] == selected
     assert spec['task']['instructions'] == selected['instructions']
     assert spec['options']['configured'] == selected['options']
@@ -206,9 +206,9 @@ def test_model_effort_prompt_and_options_reach_specs_and_invalidate_reuse(defini
     assert store.start(spec, run='run', cycle='one')['action'] == 'reuse'
     original_fingerprint = capture(spec)['fingerprint']
     selected['agent']['model'] = 'different'
-    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'skills': [selected]}}})
+    write(config.path(REPOSITORY), {'processes': {'pr-fix': {'operations': [selected]}}})
     changed = config.make_invocation_spec(repository=REPOSITORY, pr=PR, process='pr-fix',
-                                          kind='skill', index=0, definition=definition)
+                                          kind='operation', index=0, definition=definition)
     assert capture(changed)['fingerprint'] != original_fingerprint
     assert not store.status([changed])['tasks'][0]['reusable']
 
@@ -266,11 +266,11 @@ def test_short_name_settings_do_not_leak_to_another_qualified_skill():
     settings = deepcopy(config.DEFAULTS)
     settings['skill_settings'] = {'first:review': {'agent': {'model': 'first-model'}},
                                   'second:review': {'agent': {'model': 'second-model'}}}
-    settings['processes']['pr-fix']['skills'] = ['first:review']
+    settings['processes']['pr-fix']['operations'] = ['first:review']
     installed = available(settings) + ['second:review']
     support = {'delegation': True, 'models': {'first-model': [], 'second-model': []}}
     assert config.preflight(settings, installed, support)['ready']
-    assert config.select(settings, 'pr-fix', 'skill', 0)['agent']['model'] == 'first-model'
+    assert config.select(settings, 'pr-fix', 'operation', 0)['agent']['model'] == 'first-model'
 
 
 def test_standalone_review_uses_the_same_reviewer_selection():

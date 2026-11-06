@@ -2,7 +2,7 @@
 
 Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 
-Configure processes and concrete skill names. Every callable location uses the same [invocation contract](invocations.md) and [JSON Schema](../schemas/invocation.schema.json): process `run`, independent `verification`, supporting `skills`, reviewer lists, cycle hooks, finalizers, commit policy providers and saved drafting selections. Names need no `/skills/` prefix. Use a qualified `plugin:name` when a short name is ambiguous.
+Configure processes and concrete skill names. Every callable location uses the same [invocation contract](invocations.md) and [JSON Schema](../schemas/invocation.schema.json): process `run`, independent `verification`, `operations`, reviewer lists, cycle hooks, finalizers, commit policy providers and saved drafting selections. Names need no `/skills/` prefix. Use a qualified `plugin:name` when a short name is ambiguous.
 
 ```json
 {
@@ -51,7 +51,7 @@ Private files remain under `${XDG_CONFIG_HOME:-~/.config}/dk-workflows/v2/`: `us
 
 ## Processes
 
-The bundled defaults provide `pr-iter`, `pr-fix`, `pr-review`, `pr-reviewers-run`, `commit-message` and `issue`. A custom process needs a `run` invocation. The process skill owns ordering, loops, verification and recovery. Supporting `skills` select implementations; the list is not a sequential workflow program. Replacing the list does not remove obligations in the governing process recipe. Missing capabilities block the affected responsibility instead of silently skipping it.
+The bundled defaults provide `pr-iter`, `pr-fix`, `pr-review`, `pr-reviewers-run`, `commit-message` and `issue`. A custom process needs a `run` invocation. The process skill owns ordering, loops, verification and recovery. `operations` lists the calls used during process work. The process recipe decides when to invoke each operation; array order does not schedule execution. Replacing the list does not remove obligations in the governing process recipe. Missing capabilities block the affected responsibility instead of silently skipping it.
 
 `run` is the process's entry invocation. For example, `"run":{"skill":"dk-pr-fix","instructions":"Preserve the published API.","agent":{"model":"gpt-6.1-sol","reasoning_effort":"high"}}` uses exactly the same format as a reviewer or hook. `pr-review.verification` selects the independent finding verifier and assigns verification only; never recursively invoke the full review workflow for that task. Process `limits`, `actions`, `routes` and `hooks` describe policy around those invocations.
 
@@ -83,6 +83,6 @@ Use actual host observations, not this illustrative list. `models` lists availab
 
 ## Updating older settings
 
-This format replaces the former flat configuration. Old records are rejected with an explicit error and are never reset or silently converted. Update the existing private file deliberately: move identities to `accounts.personal`, incoming review policy to `processes.pr-review.actions`, reviewers to the coordinator's `options.reviewers`, and role selections to supporting `skills` or the appropriate process `run`. Cycle hooks move under each owning process; remove user-supplied hook IDs. Move the finalizer list to `processes.pr-fix.finalizers` and replace `/skill/PLUGIN:SKILL` entries with plain `PLUGIN:SKILL` names. Preserve original prompts, options, permissions, opt-outs and source records. In-progress work keeps its existing state and budgets; reconcile pending hook effects before adopting changed lists.
+This format replaces the former flat configuration. Old records are rejected with an explicit error and are never reset or silently converted. Update the existing private file deliberately: move identities to `accounts.personal`, incoming review policy to `processes.pr-review.actions`, reviewers to the coordinator's `options.reviewers`, and role selections to `operations` or the appropriate process `run`. Cycle hooks move under each owning process; remove user-supplied hook IDs. Move the finalizer list to `processes.pr-fix.finalizers` and replace `/skill/PLUGIN:SKILL` entries with plain `PLUGIN:SKILL` names. Preserve original prompts, options, permissions, opt-outs and source records. In-progress work keeps its existing state and budgets; reconcile pending hook effects before adopting changed lists.
 
 External packages own their domain settings, which may be referenced through `extensions`. The separate `dk-architecture` package is not invoked automatically. Renaming or reselecting a skill does not move state or complete unfinished work.

@@ -12,13 +12,13 @@ from state import write
 
 def test_settings_precedence_and_missing_selected_skills():
     write(config.path(),{'skill_settings':{'dk-pr-reviewers-run':{'options':{'reviewers':['review:a']}}},
-                         'processes':{'pr-fix':{'skills':['custom:reply']}}})
+                         'processes':{'pr-fix':{'operations':['custom:reply']}}})
     write(config.path('github.com/upstream/repo'),{'skill_settings':{'dk-pr-reviewers-run':{
         'options':{'reviewers':[{'skill':'review:b','required':False}]}}}})
     write(config.path('github.com/fork/repo'),{'processes':{'issue':{'run':'custom:description'}}})
     effective=config.effective('github.com/fork/repo','github.com/upstream/repo')['settings']
     assert effective['skill_settings']['dk-pr-reviewers-run']['options']['reviewers']==[{'skill':'review:b','required':False}]
-    assert effective['processes']['pr-fix']['skills']==['custom:reply']
+    assert effective['processes']['pr-fix']['operations']==['custom:reply']
     assert effective['processes']['issue']['run']=='custom:description'
     assert config.preflight(effective,[])['missing_selected_skills']
     available=sorted({call['skill'] for _,call in config.calls(effective) if 'skill' in call})
@@ -59,7 +59,7 @@ def test_settings_roundtrip_preserves_native_options_and_references(tmp_path):
     import json
     settings={'skill_settings':{'dk-pr-reviewers-run':{'options':{'reviewers':[
         {'skill':'custom:review','required':False,'options':{'passes':['spec']}}]}}},
-              'processes':{'pr-fix':{'skills':['custom:reply']}}, 'extensions':{'custom':'private/settings'}}
+              'processes':{'pr-fix':{'operations':['custom:reply']}}, 'extensions':{'custom':'private/settings'}}
     source=tmp_path/'settings.json';source.write_text(json.dumps(settings))
     command=[sys.executable,str(ROOT/'scripts/config.py'),'--repository','github.com/owner/repo']
     result=subprocess.run([*command,'set','--file',str(source)],capture_output=True,text=True)
@@ -68,7 +68,7 @@ def test_settings_roundtrip_preserves_native_options_and_references(tmp_path):
     result=subprocess.run([*command,'show','--expanded'],capture_output=True,text=True)
     assert result.returncode==0,result.stderr
     effective=json.loads(result.stdout)['settings']
-    assert effective['processes']['pr-fix']['skills']==['custom:reply']
+    assert effective['processes']['pr-fix']['operations']==['custom:reply']
     assert effective['skill_settings']==settings['skill_settings']
     assert effective['extensions']==settings['extensions']
 

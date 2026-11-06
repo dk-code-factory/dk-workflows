@@ -43,7 +43,7 @@ def main():
     p = sub.add_parser('invocation-spec', help='Bind a configured invocation to a managed native task')
     p.add_argument('--definition', type=Path, required=True)
     p.add_argument('--process', required=True)
-    p.add_argument('--kind', choices=['run', 'skill', 'reviewer', 'verification'], default='run')
+    p.add_argument('--kind', choices=['run', 'operation', 'reviewer', 'verification'], default='run')
     p.add_argument('--index', type=int)
     p.add_argument('--upstream')
     p = sub.add_parser('reconcile-hooks', help='Record reconciled effects before changing a retained hook list')

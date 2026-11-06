@@ -14,7 +14,7 @@ LIMITS = {'review_cycles': 5, 'retries_per_task': 1, 'ci_repairs_per_cycle': 5,
           'ci_reruns_per_head': 3}
 ACTIONS = ('push_commits', 'rewrite_commits', 'edit_pr', 'reply_to_feedback',
            'resolve_threads', 'create_draft_prs', 'request_review', 'post_findings', 'approve_ci', 'approve')
-FIX_SKILLS = ['dk-pr-feedback-read', 'dk-pr-decisions', 'dk-pr-feedback-address', 'dk-pr-split',
+FIX_OPERATIONS = ['dk-pr-feedback-read', 'dk-pr-decisions', 'dk-pr-feedback-address', 'dk-pr-split',
               'dk-pr-reviewers-run', 'dk-commit-split', 'dk-commit-message', 'dk-pr-description',
               'dk-pr-feedback-reply', 'dk-ci', 'dk-ci-flakes', 'dk-pr-publish']
 DEFAULTS = {
@@ -23,7 +23,7 @@ DEFAULTS = {
     'skill_settings': {},
     'processes': {
         'pr-iter': {'run': 'dk-pr-iter', 'routes': {'own_pr': 'pr-fix', 'other_pr': 'pr-review'}},
-        'pr-fix': {'run': 'dk-pr-fix', 'skills': FIX_SKILLS, 'limits': dict(LIMITS),
+        'pr-fix': {'run': 'dk-pr-fix', 'operations': FIX_OPERATIONS, 'limits': dict(LIMITS),
                    'finalizers': list(FINALIZER_DEFAULTS),
                    'actions': {**{action: action not in {'post_findings', 'approve_ci', 'approve'} for action in ACTIONS},
                                'merge': {'enabled': False, 'method': 'squash'}},
@@ -31,7 +31,7 @@ DEFAULTS = {
         'pr-review': {'run': 'dk-pr-review',
                       'verification': {'skill': 'dk-pr-review',
                                        'instructions': 'Independently verify candidate findings against pinned source and governing instructions. Return confirmed, rejected or uncertain findings with evidence. Do not edit or publish.'},
-                      'skills': ['dk-pr-feedback-read', 'dk-pr-reviewers-run', 'dk-pr-review-post',
+                      'operations': ['dk-pr-feedback-read', 'dk-pr-reviewers-run', 'dk-pr-review-post',
                                  'dk-ci-approve', 'dk-ci', 'dk-ci-flakes', 'dk-pr-publish'],
                       'limits': dict(LIMITS),
                       'actions': {**{action: action in {'post_findings', 'approve_ci'} for action in ACTIONS},
@@ -103,7 +103,7 @@ def validate(settings):
     for name, process in processes.items():
         if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', name):
             raise ValueError('Invalid process name')
-        if not isinstance(process, dict) or set(process) - {'run', 'verification', 'skills', 'finalizers', 'limits', 'actions', 'hooks', 'routes'}:
+        if not isinstance(process, dict) or set(process) - {'run', 'verification', 'operations', 'finalizers', 'limits', 'actions', 'hooks', 'routes'}:
             raise ValueError('Unknown process setting')
         if 'run' in process:
             invocation.validate(process['run'])
@@ -111,9 +111,9 @@ def validate(settings):
             invocation.validate(process['verification'])
         if 'finalizers' in process:
             finalizer_groups(process['finalizers'])
-        if not isinstance(process.get('skills', []), list):
-            raise ValueError('Process skills must be an ordered list')
-        for call in process.get('skills', []):
+        if not isinstance(process.get('operations', []), list):
+            raise ValueError('Process operations must be an invocation list')
+        for call in process.get('operations', []):
             invocation.validate(call)
         limits = process.get('limits', {})
         if not isinstance(limits, dict) or set(limits) - LIMITS.keys() or any(
@@ -192,8 +192,8 @@ def calls(settings, process=None, available=None):
         yield from visit(entry['run'], prefix + '/run')
         if 'verification' in entry:
             yield from visit(entry['verification'], prefix + '/verification')
-        for index, call in enumerate(entry.get('skills', [])):
-            yield from visit(call, prefix + '/skills/' + str(index))
+        for index, call in enumerate(entry.get('operations', [])):
+            yield from visit(call, prefix + '/operations/' + str(index))
         for group_index, group in enumerate(finalizer_groups(entry.get('finalizers', []))):
             for index, call in enumerate(group):
                 yield from visit(call, prefix + '/finalizers/' + str(group_index) + '/' + str(index))
@@ -212,7 +212,7 @@ def preflight(settings, available, capabilities=None, *, process=None):
 
 def reviewers(settings, process):
     entry = settings['processes'][process]
-    coordinators = [value for value in [entry['run'], *entry.get('skills', [])]
+    coordinators = [value for value in [entry['run'], *entry.get('operations', [])]
                     if (invocation.normalize(value).get('skill', '').rsplit(':', 1)[-1] == 'dk-pr-reviewers-run'
                         or 'reviewers' in invocation.configured(value, settings['skill_settings']).get('options', {}))]
     if len(coordinators) != 1:
@@ -231,8 +231,8 @@ def select(settings, process, kind='run', index=None, phase=None):
     else:
         if type(index) is not int or index < 0:
             raise ValueError('Invocation selection requires a nonnegative index')
-        if kind == 'skill':
-            values = entry.get('skills', [])
+        if kind == 'operation':
+            values = entry.get('operations', [])
         elif kind == 'finalizer':
             values = [value for group in finalizer_groups(entry.get('finalizers', [])) for value in group]
         elif kind == 'hook' and phase in CYCLE_PHASES:

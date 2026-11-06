@@ -15,7 +15,7 @@
     },
     "pr-fix": {
       "run": "dk-pr-fix",
-      "skills": [
+      "operations": [
         "dk-pr-feedback-read",
         "dk-pr-decisions",
         "dk-pr-feedback-address",
@@ -70,7 +70,7 @@
         "skill": "dk-pr-review",
         "instructions": "Independently verify candidate findings against pinned source and governing instructions. Return confirmed, rejected or uncertain findings with evidence. Do not edit or publish."
       },
-      "skills": [
+      "operations": [
         "dk-pr-feedback-read",
         "dk-pr-reviewers-run",
         "dk-pr-review-post",
