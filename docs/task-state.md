@@ -88,6 +88,11 @@ Reserve counters before dispatch:
 - `ci_repair:true`: five repairs per cycle. Omit cycle for cycle zero before review.
 - `ci_rerun:true` with `head:SHA`: three transient reruns per head.
 
+Those are default ceilings. Resolved retry, repair and rerun limits may be zero,
+which disables the corresponding attempt while permitting initial tasks. Retain
+consumed counters and the tightest run limits on resume; later configuration
+cannot restore an allowance. The initial review-cycle limit stays positive.
+
 Batch options apply to each invocation. Group only tasks eligible for the same options. Otherwise use separate batches or single starts. Never edit manifests, erase claims or replace a run to bypass limits. Concurrent callers serialize per PR. Unfinished claims prevent duplicate launches. Immutable outputs identified by content retain original attempts and progress.
 
 Caching never replaces live CI, publication checks, reconciliation or final completion checks. See [the developer reference](capture-performance.md) for capture implementation and benchmark reproduction.

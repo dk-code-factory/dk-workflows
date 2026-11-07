@@ -135,3 +135,24 @@ local/scoped selections on resume without storing expanded settings or provenanc
 copies. Hook reconciliation retains the current phase snapshot and original task
 results, without an additional unconsumed list-history ledger. Configuration and
 completion reads use the existing centralized storage resolver.
+
+Resolved plan reads expand only the requested list into ordered occurrence
+handoffs with inherited invocation controls and live leaf options and sources.
+They are returned on demand, never persisted. This avoids repeated agent reads
+and reconstruction in both current and fresh sessions; their freshness ends when
+any selected invocation, scope or installed configuration changes. Prepare,
+resume, finish and external-action checks still read their own live inputs.
+
+Publication preparation accepts upstream and invocation-local options, resolves
+an omitted merge method once and retains only that concrete method in the existing
+intent. Recovery reconciles that original intent regardless of later defaults.
+Automatic CI discovery reads the flake skill's live options at the scan boundary.
+Default-limit scans keep their existing fingerprint; nondefault limits join the
+failure fingerprint, so changed limits refresh only affected scans while old
+results and incomplete claims remain retained. This reuses the existing scan
+registry and evidence rather than saving another settings snapshot.
+
+Retry, CI repair and rerun limits accept zero. Existing run counters and minimum
+retained limits still govern recovery; changing settings cannot replenish them.
+Review-cycle allowances remain positive and keep their explicit continuation
+contract. These changes add no durable store or claim of measured token savings.

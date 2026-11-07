@@ -115,8 +115,9 @@ def validate(settings):
             invocation.validate(call)
         limits = process.get('limits', {})
         if not isinstance(limits, dict) or set(limits) - LIMITS.keys() or any(
-                type(value) is not int or value < 1 or value > LIMITS[key] for key, value in limits.items()):
-            raise ValueError('Process limits must be positive integers within the retained runtime ceilings')
+                type(value) is not int or value < (1 if key == 'review_cycles' else 0)
+                or value > LIMITS[key] for key, value in limits.items()):
+            raise ValueError('Process limits must be integers within the retained runtime ceilings; review_cycles must be positive')
         permissions = process.get('permissions', {})
         if (not isinstance(permissions, dict) or set(permissions) - (set(PERMISSIONS) | {'merge_pr'})
                 or any(type(value) is not bool for key, value in permissions.items() if key != 'merge_pr')):

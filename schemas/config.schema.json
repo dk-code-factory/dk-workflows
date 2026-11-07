@@ -278,19 +278,19 @@
               },
               "retries_per_task": {
                 "type": "integer",
-                "minimum": 1,
+                "minimum": 0,
                 "maximum": 1,
                 "default": 1
               },
               "ci_repairs_per_cycle": {
                 "type": "integer",
-                "minimum": 1,
+                "minimum": 0,
                 "maximum": 5,
                 "default": 5
               },
               "ci_reruns_per_head": {
                 "type": "integer",
-                "minimum": 1,
+                "minimum": 0,
                 "maximum": 3,
                 "default": 3
               }

@@ -38,6 +38,7 @@ def main():
             c.add_argument('--file', type=Path, required=True)
         if action == 'skill-plan':
             c.add_argument('--kind', choices=['tasks', 'finalizers', 'reviewers'], required=True)
+            c.add_argument('--resolved', action='store_true', help='Include inherited invocations and effective leaf options')
         if action == 'skill-preflight':
             c.add_argument('--available', type=Path, required=True)
             c.add_argument('--capabilities', type=Path)
@@ -64,10 +65,11 @@ def main():
         if a.action == 'skill-preflight':
             result = invocation.preflight(list(skill_config.calls(a.skill, a.repository, a.upstream, options=local)),
                                           read(a.available), read(a.capabilities) if a.capabilities else None)
+        elif a.action == 'skill-plan':
+            result = skill_config.plan(a.skill, a.kind, a.repository, a.upstream,
+                                       options=local, resolved=a.resolved)
         else:
             result = skill_config.effective(a.skill, a.repository, a.upstream, options=local)
-            if a.action == 'skill-plan':
-                result['groups'] = skill_config.groups(result['options'].get(a.kind, []))
         print(json.dumps(result, sort_keys=True))
         return
     if a.action=='show':

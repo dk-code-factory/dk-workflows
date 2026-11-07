@@ -137,11 +137,15 @@ def recovery():
     return Recovery(api=api, metadata=metadata, endpoint=endpoint, replies=replies, handler=handler)
 
 
-def prepare(request):
+def prepare(request, *, upstream=None, options=None):
+    if options is not None:
+        import skill_config
+        skill_config.validate('dk-workflows:dk-pr-publish', options)
     if isinstance(request, dict) and request.get('kind') == 'merge-pr' and 'merge_method' not in request:
         import skill_config
-        options = skill_config.for_context('dk-workflows:dk-pr-publish', pr=request.get('pr'))['options']
-        request = {**request, 'merge_method': options['default_merge_method']}
+        configured = skill_config.for_context('dk-workflows:dk-pr-publish', pr=request.get('pr'),
+                                              upstream=upstream, options=options)['options']
+        request = {**request, 'merge_method': configured['default_merge_method']}
     if not isinstance(request,dict):
         raise ValueError('Publication request must be an object')
     # Recover even if the previous agent lost the printed operation path. The
@@ -293,6 +297,8 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     sub=p.add_subparsers(dest='action',required=True)
     c=sub.add_parser('prepare');c.add_argument('--file',type=Path,required=True)
+    c.add_argument('--upstream', help='Inherited workflow repository identity')
+    c.add_argument('--options', type=Path, help='Invocation-local publisher options JSON')
     for action in ('publish','reconcile'):
         c=sub.add_parser(action);c.add_argument('--operation',type=Path,required=True)
     c=sub.add_parser('inspect-reply');c.add_argument('--operation',type=Path,required=True)
@@ -300,7 +306,8 @@ def main():
     c.add_argument('--file',type=Path,required=True)
     a=p.parse_args()
     if a.action == 'prepare':
-        result = prepare(json.loads(a.file.read_text()))
+        result = prepare(json.loads(a.file.read_text()), upstream=a.upstream,
+                         options=json.loads(a.options.read_text()) if a.options else None)
     elif a.action == 'inspect-reply':
         result = recovery().inspect(a.operation)
     elif a.action == 'dispose-reply':

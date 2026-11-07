@@ -755,7 +755,8 @@ class Store:
         ceilings = {'review_cycles': 5, 'retries_per_task': 1,
                     'ci_repairs_per_cycle': 5, 'ci_reruns_per_head': 3}
         if limits is not None and (not isinstance(limits, dict) or set(limits) - ceilings.keys()
-                or any(type(value) is not int or not 1 <= value <= ceilings[key] for key, value in limits.items())):
+                or any(type(value) is not int or not (1 if key == 'review_cycles' else 0) <= value <= ceilings[key]
+                       for key, value in limits.items())):
             raise ValueError('Invalid process limits')
         limits = {**ceilings, **(limits or {})}
         if not run:
@@ -785,6 +786,8 @@ class Store:
                 raise ValueError('Same-cycle retry requires its cycle id')
             key = cycle + ':' + task
             if state['retries'].get(key, 0) >= limits['retries_per_task']:
+                if limits['retries_per_task'] == 0:
+                    raise ValueError('Same-cycle retries are disabled')
                 raise ValueError('Same-cycle retry already consumed')
             state['retries'][key] = state['retries'].get(key, 0) + 1
         if ci_repair:

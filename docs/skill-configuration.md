@@ -36,6 +36,8 @@ python3 PLUGIN_ROOT/scripts/config.py --repository HOST/OWNER/REPO \
 
 Read a selected list with `skill-plan --skill PLUGIN:SKILL --kind tasks|finalizers|reviewers`, using the same repository, upstream and local options. `groups` preserves ordering and parallel boundaries. Flatten groups only to address a zero-based occurrence, never to discard execution ordering. Reviewer scheduling additionally honors its owning `execution` (`parallel` or `sequential`) and `max_parallel` (null means no extra configured cap), within actual host capacity. There is no default reviewer; an empty reviewer selection cannot establish review coverage.
 
+Add `--resolved` when constructing handoffs. The additional `resolved_groups` preserves those same boundaries; each entry has a flattened `index`, the inherited `invocation` (including exact instructions and native agent controls), and its leaf `configuration` with effective options, sources, checked paths and provenance. Instruction-only entries have null `configuration`; their options remain in `invocation`. External skills retain their own options contract. This read saves nothing and does not establish availability, execution or freshness at a later task boundary.
+
 Preflight selected skills and native controls with `skill-preflight --skill PLUGIN:SKILL --available SKILLS.json [--capabilities HOST.json]`. It checks nested plans, routes and policy providers, including optional selections, and rejects recursive selections. Require `ready:true`. Use the same `--options` and upstream at preflight and execution.
 
 For managed work, use `scripts/dk.py prepare --file REQUEST.json` with the canonical repository and PR. Each descriptor selects its owning skill, list kind and flattened index, while its ordinary definition supplies resolved resources, original assignment, consumed context and permissions:
@@ -62,8 +64,14 @@ Legacy process commands remain compatibility readers for existing saved settings
 
 CI and flake helpers read their owning options automatically and accept `--options FILE`. Explicit CLI timing/discovery flags override the selected options. CI deadline windows survive interruption; changing configuration does not restart an existing window. There is at most one pending-only extension.
 
+Automatic discovery during CI classification also reads `dk-workflows:dk-ci-flakes` options, using the CI caller's upstream. `ci_wait.py --flake-options FILE` supplies overrides for that skill separately from CI timing options. Unchanged scans reuse their retained identity, including older default-limit scans; changed discovery limits permit a distinct scan without deleting prior evidence. An interrupted unchanged scan is not silently retried.
+
+`limits.retries_per_task`, `limits.ci_repairs_per_cycle` and `limits.ci_reruns_per_head` accept zero to disable those attempts. The initial task and review remain eligible; `review_cycles` stays between one and five. Retained counters and tighter saved limits survive resume and cannot be replenished by changing configuration.
+
 Commit grouping policies and PR size settings also consume their skill-owned options while retaining older scoped records. Repository requirements and exact user instructions govern drafting; configured fallback sections and message lengths apply where those leave a choice. Metadata such as labels, assignees and templates must exist in the target repository before use. A null template selects repository discovery.
 
 Additional validation commands are argument arrays, supplement relevant checks, and must never launch Codex or Claude Code. Feedback replies honor `resolve_answered_threads` only within caller authorization. Partial review publication always uses `COMMENT`; configurable review events never authorize approval. Publisher merge defaults only fill an omitted method in an already authorized concrete request; all live merge guards still apply.
+
+Pass `--upstream HOST/OWNER/REPO` and `--options FILE` to `publish.py prepare` when supplied by the publisher invocation. An explicit request method takes precedence; the existing journal retains only the resolved concrete method. Publish and reconcile use that retained intent without rereading default methods.
 
 Preference default modes apply when admitting new records. Changing the default does not reinterpret persisted records or silently change an existing record's modes. Completion prompts, instructions and options cannot weaken evidence requirements, expand permission or restore omitted finalizers.

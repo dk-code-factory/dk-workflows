@@ -6,6 +6,8 @@ Confirm that the caller authorized the concrete action. Inspect every exact publ
 
 Run `python3 PACKAGE_ROOT/scripts/publish.py prepare --file REQUEST.json` to save intent and get an operation path. `publish --operation FILE` checks current state and sends at most once. `reconcile --operation FILE` only reads. Repeating publish for pending or verified operations also only reads. Return the operation path and reuse it on resume. Other publishers may reuse `runtime/shared/publication.py` with their own check, send and observe callbacks.
 
+For preparation, pass the caller's `--upstream HOST/OWNER/REPO` and publisher `--options FILE` when provided. If a merge request omits its method, resolve `default_merge_method` with those scopes and local options; an explicit method wins. Retain the resulting method in the original intent. Reconciliation uses that intent even if configuration changes, without creating a replacement action or refreshing an uncertain payload.
+
 Requests:
 
 ```json

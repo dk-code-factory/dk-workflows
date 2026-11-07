@@ -316,6 +316,29 @@ def test_ci_cli_consumes_saved_local_and_explicit_timing_options(tmp_path, monke
     assert observed['wait'][3:6] == (12, 5, 60)
 
 
+def test_ci_cli_forwards_flake_options_and_upstream_to_classification(tmp_path, monkeypatch):
+    ci = load_script('configured_ci_discovery', 'runtime/dk-ci/scripts/ci_wait.py')
+    local = tmp_path/'flake-options.json'
+    write(local, {'max_runs': 4})
+    upstream = 'github.com/upstream/repo'
+    monkeypatch.setattr(ci, 'for_pr', lambda *args, **kwargs: nullcontext(object()))
+    monkeypatch.setattr(ci, 'wait', lambda *args, **kwargs: {'result': 'failure', 'head': 'a'*40, 'checks': []})
+    observed = {}
+    def classify(*args, **kwargs):
+        observed.update(kwargs)
+        return {'result': 'failure'}
+    monkeypatch.setattr(ci, 'decide', classify)
+    monkeypatch.setattr(ci, 'GitHub', lambda *args: object())
+    monkeypatch.setattr(ci, 'Registry', lambda *args: object())
+    monkeypatch.setattr(sys, 'argv', ['ci_wait.py', '--pr', PR, '--head', 'a'*40,
+                                     '--upstream', upstream, '--flake-options', str(local)])
+    with pytest.raises(SystemExit) as result:
+        ci.main()
+    assert result.value.code == 1
+    assert observed['upstream'] == upstream
+    assert observed['flake_options'] == {'max_runs': 4}
+
+
 def test_flake_cli_consumes_saved_local_and_explicit_discovery_limits(tmp_path, monkeypatch):
     flakes = load_script('configured_flakes', 'runtime/dk-ci/scripts/flaky_tests.py')
     write(config.path(REPOSITORY), {'skill_defaults': {'dk-workflows:dk-ci-flakes': {'options': {'lookback_days': 7, 'max_runs': 8}}}})
@@ -367,6 +390,86 @@ def test_publisher_only_fills_an_omitted_merge_method(tmp_path, monkeypatch):
     assert prepared['merge_method'] == 'merge'
     explicit = publisher.prepare({'kind': 'merge-pr', 'pr': PR, 'head': 'a'*40, 'merge_method': 'squash'})
     assert explicit['merge_method'] == 'squash'
+
+
+def test_publisher_accepts_upstream_and_local_options_in_api_and_cli(tmp_path, monkeypatch, capsys):
+    publisher = load_script('publisher_scoped_options', 'scripts/publish.py')
+    skill = 'dk-workflows:dk-pr-publish'
+    upstream = 'github.com/upstream/repo'
+    write(config.path(upstream), {'skill_defaults': {skill: {'options': {'default_merge_method': 'merge'}}}})
+    monkeypatch.setattr(publisher, '_prepare', lambda request, directory: request)
+    request = {'kind': 'merge-pr', 'pr': PR, 'head': 'a'*40}
+    assert publisher.prepare(request, upstream=upstream)['merge_method'] == 'merge'
+    assert publisher.prepare(request, upstream=upstream,
+                             options={'default_merge_method': 'squash'})['merge_method'] == 'squash'
+    assert publisher.prepare({**request, 'merge_method': 'merge'},
+                             options={'default_merge_method': 'squash'})['merge_method'] == 'merge'
+    with pytest.raises(ValueError):
+        publisher.prepare({**request, 'merge_method': 'merge'}, options={'default_merge_method': 'rebase'})
+    source, local = tmp_path/'request.json', tmp_path/'options.json'
+    write(source, request)
+    write(local, {'default_merge_method': 'squash'})
+    monkeypatch.setattr(sys, 'argv', ['publish.py', 'prepare', '--file', str(source),
+                                    '--upstream', upstream, '--options', str(local)])
+    publisher.main()
+    assert json.loads(capsys.readouterr().out)['merge_method'] == 'squash'
+
+
+def test_resolved_plan_preserves_groups_and_reads_live_leaf_configuration(tmp_path):
+    upstream = 'github.com/upstream/repo'
+    write(config.path(), {'skill_defaults': {CI: {'instructions': 'Exact inherited prompt.\n',
+                                                'agent': {'reasoning_effort': 'high'}}}})
+    write(config.path(upstream), {'skill_defaults': {CI: {'options': {'timeout_seconds': 90}}}})
+    write(config.path(REPOSITORY), {'skill_defaults': {CI: {'options': {'poll_interval_seconds': 4}}}})
+    inline = {'instructions': 'Read the original scope.', 'options': {'opaque': True}}
+    selected = [CI, {'parallel': [{'skill': CI, 'options': {'timeout_seconds': 12}}, inline, 'team:check']}]
+    local = tmp_path/'local.json'
+    write(local, {'tasks': selected})
+    paths = [config.path(), config.path(upstream), config.path(REPOSITORY), local]
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths}
+    command = ['--upstream', upstream, 'skill-plan', '--skill', FIX, '--kind', 'tasks', '--options', str(local)]
+    raw = json.loads(cli(*command).stdout)
+    assert 'resolved_groups' not in raw
+    # Separate CLI processes resolve the same current inputs without saving a plan.
+    first = json.loads(cli(*command, '--resolved').stdout)
+    assert first == json.loads(cli(*command, '--resolved').stdout)
+    assert first['groups'] == raw['groups']
+    groups = first['resolved_groups']
+    assert [len(group) for group in groups] == [1, 3]
+    assert [entry['index'] for group in groups for entry in group] == [0, 1, 2, 3]
+    assert groups[0][0]['invocation']['instructions'] == 'Exact inherited prompt.\n'
+    assert groups[0][0]['invocation']['agent'] == {'reasoning_effort': 'high'}
+    assert groups[0][0]['configuration']['options']['timeout_seconds'] == 90
+    assert groups[0][0]['configuration']['provenance']['timeout_seconds'] == str(config.path(upstream))
+    assert groups[1][0]['configuration']['options']['timeout_seconds'] == 12
+    assert groups[1][0]['configuration']['options']['poll_interval_seconds'] == 4
+    assert groups[1][1] == {'index': 2, 'invocation': inline, 'configuration': None}
+    assert groups[1][2]['configuration']['options'] == {}
+    assert before == {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in paths}
+    write(config.path(upstream), {'skill_defaults': {CI: {'options': {'timeout_seconds': 33}}}})
+    refreshed = json.loads(cli(*command, '--resolved').stdout)['resolved_groups']
+    assert refreshed[0][0]['configuration']['options']['timeout_seconds'] == 33
+    assert refreshed[1] == groups[1]  # Local overrides and unrelated siblings stay the same.
+
+
+@pytest.mark.parametrize('owner', [FIX, 'dk-workflows:dk-pr-review'])
+def test_zero_attempt_limits_agree_with_schemas_and_legacy_reader(owner):
+    limits = {'retries_per_task': 0, 'ci_repairs_per_cycle': 0, 'ci_reruns_per_head': 0}
+    schema = json.loads((skill_config.directory(owner)/'config.schema.json').read_text())
+    Draft202012Validator(schema, registry=REGISTRY).validate({'limits': limits})
+    assert skill_config.validate(owner, {'limits': limits}) == {'limits': limits}
+    settings = {'processes': {owner.removeprefix('dk-workflows:dk-'): {'limits': limits}}}
+    workflow_schema = json.loads((ROOT/'schemas/config.schema.json').read_text())
+    Draft202012Validator(workflow_schema, registry=REGISTRY).validate(settings)
+    assert config.validate(settings) == settings
+    for key, value in [('review_cycles', 0), ('retries_per_task', -1),
+                       ('ci_repairs_per_cycle', True), ('ci_reruns_per_head', 4)]:
+        invalid = {'limits': {key: value}}
+        assert not Draft202012Validator(schema, registry=REGISTRY).is_valid(invalid)
+        with pytest.raises(ValueError):
+            skill_config.validate(owner, invalid)
+        with pytest.raises(ValueError):
+            config.validate({'processes': {'pr-fix': invalid}})
 
 
 def test_skill_spec_cli_resolves_builtin_options_and_retained_finalizer_run(tmp_path):

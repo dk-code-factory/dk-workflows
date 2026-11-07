@@ -338,6 +338,31 @@ def select(skill, kind, index, repository=None, upstream=None, *, options=None):
     return configured_call(values[index], repository, upstream), loaded
 
 
+def plan(skill, kind, repository=None, upstream=None, *, options=None, resolved=False):
+    """Read a live plan, optionally resolving each occurrence without saving it."""
+    import invocation
+    if kind not in {'tasks', 'finalizers', 'reviewers'}:
+        raise ValueError('Selection must be tasks, finalizers or reviewers')
+    loaded = effective(skill, repository, upstream, options=options)
+    loaded['groups'] = groups(loaded['options'].get(kind, []))
+    if resolved:
+        index = 0
+        loaded['resolved_groups'] = []
+        for group in loaded['groups']:
+            occurrences = []
+            for value in group:
+                call = configured_call(value, repository, upstream)
+                # Reapply only occurrence-local options: configured_call already
+                # includes scoped values, which must retain their actual sources.
+                configuration = (effective(call['skill'], repository, upstream,
+                                           options=invocation.normalize(value).get('options', {}))
+                                 if 'skill' in call else None)
+                occurrences.append({'index': index, 'invocation': call, 'configuration': configuration})
+                index += 1
+            loaded['resolved_groups'].append(occurrences)
+    return loaded
+
+
 def calls(skill, repository=None, upstream=None, *, options=None):
     """Enumerate selected native calls for availability checks, without launching."""
     import invocation

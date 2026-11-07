@@ -5,6 +5,7 @@ from shared.ci_deadline import Budget, BoundedAPI, ClassificationTimeout, check_
 from shared.flaky_tests import digest, identity, now, require_head
 from shared.flaky_actions import collect_snapshot, discover, evidence_file
 from shared import ci_exceptions
+import skill_config
 
 
 def evaluate(snapshot, evidence, verification, repo, exceptions=None):
@@ -169,7 +170,7 @@ def finish_scan(registry, key, status, partial, **fields):
         partial['discovery']['registry_status'] = 'recorded'
 
 
-def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, partial):
+def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, partial, upstream, flake_options):
     """One-shot decision after the sole waiter settles checks; never poll/rerun."""
     try:
         exceptions = ci_exceptions.load('remote:' + registry.repo)
@@ -194,6 +195,14 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, pa
     eligible = (auto_discover and snapshot['result'] == 'failure' and unknown
                 and all(b.get('code') == 'unverified_named_test' for b in unknown))
     key = failure_fingerprint(snapshot, evidence) if eligible else None
+    discovery_options = None
+    if eligible:
+        discovery_options = skill_config.for_context('dk-workflows:dk-ci-flakes', repository=registry.repo,
+                                                     upstream=upstream, options=flake_options)['options']
+        # Preserve legacy scan identities for the original default limits. Only
+        # changed discovery inputs admit a distinct scan, retaining prior evidence.
+        if discovery_options != {'lookback_days': 30, 'max_runs': 100, 'max_issues': 500}:
+            key = digest({'failure': key, 'discovery_options': discovery_options})
     targets = (discovery_targets(evidence, unknown, budget) if eligible
                and key not in registry.load().get('scans', {}) else [])
     if targets:
@@ -211,7 +220,8 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, pa
                                     'target_count': len(targets), 'status': 'running'}
             try:
                 budget.progress('discover_unknown', target_count=len(targets))
-                discovery = discover(api, registry, targets=targets)
+                discovery = discover(api, registry, discovery_options['lookback_days'],
+                                     discovery_options['max_runs'], discovery_options['max_issues'], targets=targets)
             except ClassificationTimeout as exc:
                 if exc.evidence_file:
                     partial['discovery']['evidence_file'] = exc.evidence_file
@@ -257,7 +267,8 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, pa
 
 
 def decide(api, registry, snapshot, refresh_snapshot, auto_discover=True, *,
-           classification_timeout=60, clock=time.monotonic, on_progress=None):
+           classification_timeout=60, clock=time.monotonic, on_progress=None,
+           upstream=None, flake_options=None):
     """Bound live classification; timeout always leaves terminal CI unaccepted."""
     budget = Budget(classification_timeout, clock, on_progress)
     partial = {}
@@ -265,7 +276,7 @@ def decide(api, registry, snapshot, refresh_snapshot, auto_discover=True, *,
         budget.progress('classification', raw_result=snapshot['result'], head=snapshot['head'])
         with budget.activate():
             decision = _decide(BoundedAPI(api, budget), registry, snapshot, refresh_snapshot,
-                               auto_discover, budget, partial)
+                               auto_discover, budget, partial, upstream, flake_options)
         budget.remaining()
         timed_out = False
     except (ClassificationTimeout, subprocess.TimeoutExpired) as exc:
