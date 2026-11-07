@@ -135,6 +135,9 @@ def test_current_runtime_and_explicit_baseline_are_frozen_independently(tmp_path
         manifest = json.loads((arm/'exercise.json').read_text())
         manifests.append(manifest)
         assert manifest['runtime'] == revision
+        if (ROOT/'runtime/skill_config.py').exists():
+            assert 'codex/skills/dk-pr-fix/config.json' in manifest['runtime_hashes']
+            assert 'codex/skills/dk-pr-fix/config.schema.json' in manifest['runtime_hashes']
         assert manifest['guidance_revision'] == (baseline if guidance == 'before' else None)
         assert manifest['source_sha256'] == hashlib.sha256((arm/'sources.json').read_bytes()).hexdigest()
         for name, digest in manifest['runtime_hashes'].items():

@@ -9,8 +9,9 @@ from shared.ci_exceptions import data_root, fingerprint
 from shared.private_state import write
 from shared.repository_scope import identities
 
-DEFAULTS = {'added_lines_threshold': 1000, 'evacuate_unrelated': 'automatic',
-            'split_related': 'automatic'}
+from skill_config import defaults as skill_defaults
+
+DEFAULTS = skill_defaults('dk-workflows:dk-pr-split')
 MODES = ('automatic', 'manual', 'disabled')
 
 
@@ -53,6 +54,23 @@ def load(chain, scope='effective'):
             raise ValueError('malformed PR size configuration: ' + str(target))
         for key, item in validate(value['pr_size']).items():
             result[key] = {'value': item, 'source': level, 'file': str(target)}
+    if scope == 'effective':
+        import skill_config
+        key = chain[0].removeprefix('remote:') if chain else None
+        upstream = chain[1].removeprefix('remote:') if len(chain) > 1 else None
+        owned = skill_config.effective('dk-workflows:dk-pr-split', key, upstream)
+        for key, value in owned['options'].items():
+            origin = owned['provenance'][key]
+            if origin not in owned['sources'][:2] and origin != result[key]['file']:
+                result[key] = {'value': value, 'source': 'skill-configuration', 'file': origin}
+            else:
+                result[key]['value'] = value
+        existing = {item['file'] for item in sources}
+        for filename in owned['checked_paths']:
+            if filename not in existing:
+                target = Path(filename)
+                sources.append({'source': 'skill-configuration', 'file': filename,
+                                'sha256': hashlib.sha256(target.read_bytes()).hexdigest() if target.exists() else None})
     return {'pr_size': {key: item['value'] for key, item in result.items()},
             'settings': result, 'sources': sources, 'fingerprint': fingerprint(sources)}
 

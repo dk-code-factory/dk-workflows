@@ -55,8 +55,10 @@ def initialize(root, guidance, runtime=BASE, guidance_revision=BASE):
     # the launching checkout or a particular historical state's import graph.
     runtime_hashes = {}
     for name in runtime_paths:
-        if name != 'scripts/dk.py' and not (name.startswith('runtime/') and name.endswith('.py')
-                                           and 'tests' not in Path(name).parts):
+        runtime_code = name.startswith('runtime/') and name.endswith('.py') and 'tests' not in Path(name).parts
+        skill_resource = name.startswith('codex/skills/') and Path(name).name in {'SKILL.md', 'config.json', 'config.schema.json'}
+        shared_schema = name.startswith('schemas/') and name.endswith('.schema.json')
+        if name != 'scripts/dk.py' and not (runtime_code or skill_resource or shared_schema):
             continue
         path = root/'frozen'/name
         path.parent.mkdir(parents=True, exist_ok=True)

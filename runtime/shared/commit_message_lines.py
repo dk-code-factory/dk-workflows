@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Check every line of a draft or branch commit message against an 80-character limit."""
+"""Check draft or branch message lines using the owning skill's fallback limit."""
 
 import argparse
+import json
 from pathlib import Path
 import subprocess
 import sys
 
-MAX_LENGTH = 80
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import skill_config
+
+MAX_LENGTH = skill_config.defaults('dk-workflows:dk-commit-message')['max_line_length']
 
 
 def git(cwd, *args):
@@ -16,16 +20,16 @@ def git(cwd, *args):
     return result.stdout
 
 
-def overlong_lines(message, label):
-    return [f'{label}: line {number} has {len(line)} characters (maximum {MAX_LENGTH})'
-            for number, line in enumerate(message.splitlines(), 1) if len(line) > MAX_LENGTH]
+def overlong_lines(message, label, max_length=MAX_LENGTH):
+    return [f'{label}: line {number} has {len(line)} characters (maximum {max_length})'
+            for number, line in enumerate(message.splitlines(), 1) if len(line) > max_length]
 
 
-def validate_commits(commits, cwd):
+def validate_commits(commits, cwd, max_length=MAX_LENGTH):
     errors = []
     for commit in commits:
         message = git(cwd, 'show', '-s', '--format=%B', commit)
-        errors.extend(overlong_lines(message, commit[:12]))
+        errors.extend(overlong_lines(message, commit[:12], max_length))
     return errors
 
 
@@ -47,18 +51,28 @@ def main():
     source.add_argument('--file', type=Path, help='Draft commit message file')
     source.add_argument('--base', help='Check every commit from BASE (exclusive) through HEAD')
     parser.add_argument('--cwd', type=Path, default=Path('.'))
+    parser.add_argument('--pr')
+    parser.add_argument('--options', type=Path, help='Invocation-local message options JSON')
+    parser.add_argument('--upstream')
+    parser.add_argument('--max-length', type=int, help='Explicit policy or repository limit')
     args = parser.parse_args()
+    local = json.loads(args.options.read_text()) if args.options else {}
+    if args.max_length is not None:
+        local['max_line_length'] = args.max_length
+    settings = skill_config.for_context('dk-workflows:dk-commit-message', cwd=args.cwd, pr=args.pr,
+                                         upstream=args.upstream, options=local)['options']
+    max_length = settings['max_line_length']
     if args.file:
-        errors = overlong_lines(args.file.read_text(encoding='utf-8'), str(args.file))
+        errors = overlong_lines(args.file.read_text(encoding='utf-8'), str(args.file), max_length)
         count = 1
     else:
         commits = commits_since(args.base, args.cwd)
-        errors = validate_commits(commits, args.cwd)
+        errors = validate_commits(commits, args.cwd, max_length)
         count = len(commits)
     if errors:
         print('\n'.join(errors), file=sys.stderr)
         return 1
-    print(f'validated {count} commit message{"s" if count != 1 else ""}; all lines are at most {MAX_LENGTH} characters')
+    print(f'validated {count} commit message{"s" if count != 1 else ""}; all lines are at most {max_length} characters')
     return 0
 
 

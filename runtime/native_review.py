@@ -8,6 +8,7 @@ def required(components):
     task = components['task']['id']
     skill = components['skill']['identity'].split('@')[0].split(':')[-1]
     return ('native_review' in components or task == 'finding-verification'
+            or task.startswith('finding-verification:')
             or re.search(r'(^|[-_:])review($|[-_:])', task) is not None
             or skill.startswith('code-review'))
 

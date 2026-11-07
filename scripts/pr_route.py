@@ -10,11 +10,13 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'runtime'))
 import config
+import invocation
+import skill_config
 from shared.github_reads import run
 from shared.pr_ownership import classify
 
 
-def route(pr, *, upstream=None, api=None):
+def route(pr, *, upstream=None, api=None, options=None):
     parsed = urlsplit(pr)
     parts = parsed.path.strip('/').split('/')
     if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password
@@ -40,16 +42,29 @@ def route(pr, *, upstream=None, api=None):
             or not re.fullmatch('[0-9a-f]{40}', pull['head']['sha'])):
         raise ValueError('PR identity is unavailable or inconsistent')
     settings = config.effective(repository, upstream)['settings']
+    owned = skill_config.effective('dk-workflows:dk-pr-iter', repository, upstream, options=options)
+    ownership = classify(host, pull.get('user'), api('user'), owned['options']['personal_accounts'])
+    route = 'own_pr' if ownership['ownership'] == 'mine' else 'other_pr'
+    process = settings['processes']['pr-iter']['routes'][route]
+    call = config.select(settings, process)
+    if options and 'routes' in options or owned['provenance']['routes'] not in owned['sources'][:2]:
+        call = skill_config.configured_call(owned['options']['routes'][route], repository, upstream)
+        matches = [name for name, entry in settings['processes'].items()
+                   if invocation.normalize(entry['coordinator']).get('skill') == call.get('skill')]
+        process = matches[0] if len(matches) == 1 else call.get('skill', process)
+    skill = call.get('skill')
     return {'pr': canonical, 'repository': repository, 'head': pull['head']['sha'],
-            **classify(host, pull.get('user'), api('user'), settings['identities'])}
+            **ownership, 'process': process, 'skill': skill, 'invocation': call}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--pr', required=True)
     parser.add_argument('--upstream', help='HOST/OWNER/REPO used for inherited workflow settings')
+    parser.add_argument('--options', type=Path, help='Invocation-local routing options')
     args = parser.parse_args()
-    print(json.dumps(route(args.pr, upstream=args.upstream), sort_keys=True))
+    print(json.dumps(route(args.pr, upstream=args.upstream,
+                           options=json.loads(args.options.read_text()) if args.options else None), sort_keys=True))
 
 
 if __name__ == '__main__':

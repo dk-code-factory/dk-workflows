@@ -109,3 +109,29 @@ does not substitute for reading the evidence needed for a decision.
   They do not establish exact native token or dollar savings. Native measurements
   must count preparation, resume, downstream work and result consumption in both
   existing and fresh sessions; preserve regressions and unavailable telemetry.
+
+## Skill-owned configuration
+
+Bundled options and schemas live beside each skill. Private scope overrides keep
+their existing stores. Reads merge defaults, scopes and invocation-local options
+without persisting an effective-settings cache. No model executable is launched.
+Ordered invocation lists express task/finalizer selection and explicit parallel
+groups; skill instructions own applicability, iteration and completion.
+
+Managed descriptors may select a skill-owned list occurrence by owner, list kind
+and index. Retain that compact selector with the existing replay definition so
+fresh sessions can regenerate the exact assignment without reconstructing lists.
+Live selection, resolved options, relevant policies and resource bytes are checked
+on prepare, resume and finish; changed selections stale affected results. Repeated
+reviewers have distinct occurrence claims; standalone and iterative review share
+stable reviewer identities. Finalizers additionally bind the retained run. Existing
+claims, original results and budgets remain available for deliberate reconciliation.
+Legacy low-level selectors remain compatibility adapters; they do not create a
+second task registry or execution engine.
+
+Skill-owned CI approval adds only hashes of effective option values to the
+existing evidence document. Recomputing those small fingerprints detects changed
+local/scoped selections on resume without storing expanded settings or provenance
+copies. Hook reconciliation retains the current phase snapshot and original task
+results, without an additional unconsumed list-history ledger. Configuration and
+completion reads use the existing centralized storage resolver.

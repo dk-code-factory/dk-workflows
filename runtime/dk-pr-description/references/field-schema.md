@@ -9,7 +9,7 @@ Use the repository's headings and section order when available. Keep these meani
 | Issue | What problem led to this change? |
 | Fix | How does this change solve that problem? |
 
-Usually include `Issue` and `Fix`. Leave out sections with nothing to explain.
+Use the owning skill's configured `fallback_sections` when no repository template or convention governs (defaults `Issue` and `Fix`). Leave out sections with nothing to explain.
 
 ## Other sections
 
@@ -26,7 +26,7 @@ Bold issue and PR numbers central to the change, plus names whose exact identity
 ## Fallback
 
 - Title: start with a verb and keep it short. If commit titles consistently start with commands such as `Fix` or `Add`, use that form.
-- Body sections: `Issue` and `Fix`.
+- Body sections: the configured `fallback_sections` (defaults `Issue` and `Fix`).
 - Add `Decisions`, `Results`, or `Scope` only when the PR has facts for them.
 - Mention known risks or breaking changes if they affect users or maintainers.
 - Link a real issue with a phrase the repository uses to close issues, such as `Fixes #123`. If you cannot confirm the phrase, leave out the link.

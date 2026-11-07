@@ -39,7 +39,7 @@ def test_unknown_or_malformed_identity_blocks_routing(identity):
 
 
 def test_route_reads_canonical_pr_and_effective_personal_identity():
-    write(config.path(), {'identities': [{'host': 'github.com', 'id': 2}]})
+    write(config.path(), {'accounts': {'personal': [{'host': 'github.com', 'id': 2}]}})
     pr = 'https://github.com/owner/repo/pull/7'
     sources = {'user': {'id': 1, 'login': 'current'},
                'repos/owner/repo/pulls/7': {'number': 7, 'html_url': pr,
@@ -64,9 +64,9 @@ def test_route_reads_canonical_pr_and_effective_personal_identity():
 def test_route_inherits_upstream_identities_with_repository_precedence(repository_identities, expected):
     repository = 'github.com/fork/repo'
     upstream = 'github.com/upstream/repo'
-    write(config.path(upstream), {'identities': [{'host': 'github.com', 'id': 2}]})
+    write(config.path(upstream), {'accounts': {'personal': [{'host': 'github.com', 'id': 2}]}})
     if repository_identities is not None:
-        write(config.path(repository), {'identities': repository_identities})
+        write(config.path(repository), {'accounts': {'personal': repository_identities}})
     pr = 'https://' + repository + '/pull/7'
     sources = {'user': {'id': 1, 'login': 'current'},
                'repos/fork/repo/pulls/7': {'number': 7, 'html_url': pr,
@@ -79,7 +79,7 @@ def test_route_inherits_upstream_identities_with_repository_precedence(repositor
 
 def test_route_cli_applies_explicit_upstream(monkeypatch, capsys):
     upstream = 'github.com/upstream/repo'
-    write(config.path(upstream), {'identities': [{'host': 'github.com', 'id': 2}]})
+    write(config.path(upstream), {'accounts': {'personal': [{'host': 'github.com', 'id': 2}]}})
     pr = 'https://github.com/fork/repo/pull/7'
     sources = {'user': {'id': 1, 'login': 'current'},
                'repos/fork/repo/pulls/7': {'number': 7, 'html_url': pr,
@@ -104,36 +104,39 @@ def test_invalid_route_target_does_not_read_github(pr):
 
 
 def test_review_policy_inherits_each_action_without_enabling_others():
-    write(config.path(), {'incoming_review': {'approve': True}})
-    write(config.path('github.com/upstream/repo'), {'incoming_review': {'merge': True}})
-    write(config.path('github.com/fork/repo'), {'incoming_review': {'post': False, 'approve': False}})
-    policy = config.effective('github.com/fork/repo', 'github.com/upstream/repo')['settings']['incoming_review']
-    assert policy == {'post': False, 'approve_ci': True, 'approve': False, 'merge': True, 'merge_method': 'squash'}
-    assert config.effective('github.com/other/repo')['settings']['incoming_review']['merge'] is False
+    write(config.path(), {'processes': {'pr-review': {'permissions': {'approve_pr': True}}}})
+    write(config.path('github.com/upstream/repo'), {'processes': {'pr-review': {'permissions': {'merge_pr': {'enabled': True}}}}})
+    write(config.path('github.com/fork/repo'), {'processes': {'pr-review': {'permissions': {'post_review': False, 'approve_pr': False}}}})
+    policy = config.effective('github.com/fork/repo', 'github.com/upstream/repo')['settings']['processes']['pr-review']['permissions']
+    assert policy['post_review'] is False and policy['approve_pr'] is False
+    assert policy['merge_pr'] == {'enabled': True, 'method': 'squash'}
+    assert config.effective('github.com/other/repo')['settings']['processes']['pr-review']['permissions']['merge_pr']['enabled'] is False
 
 
 @pytest.mark.parametrize('settings', [
-    {'incoming_review': {'merge': 'yes'}}, {'incoming_review': {'unknown': True}},
-    {'incoming_review': {'merge_method': 'rebase'}},
-    {'identities': [{'host': 'github.com', 'id': True}]},
-    {'identities': [{'host': 'github.com', 'login': 'alternate'}]},
-    {'identities': [{'host': 'github.com', 'id': 2}, {'host': 'GITHUB.COM', 'id': 2}]},
+    {'processes': {'pr-review': {'permissions': {'merge_pr': 'yes'}}}},
+    {'processes': {'pr-review': {'permissions': {'unknown': True}}}},
+    {'processes': {'pr-review': {'permissions': {'merge_pr': {'method': 'rebase'}}}}},
+    {'accounts': {'personal': [{'host': 'github.com', 'id': True}]}},
+    {'accounts': {'personal': [{'host': 'github.com', 'login': 'alternate'}]}},
+    {'accounts': {'personal': [{'host': 'github.com', 'id': 2}, {'host': 'GITHUB.COM', 'id': 2}]}},
 ])
 def test_malformed_action_policy_and_personal_identity_are_rejected(settings):
     with pytest.raises(ValueError):
         config.validate(settings)
 
 
-def test_ci_approval_policy_and_role_inherit_independently():
+def test_ci_approval_policy_and_skill_defaults_inherit_independently():
     repository, upstream = 'github.com/fork/repo', 'github.com/upstream/repo'
-    assert config.DEFAULTS['incoming_review']['approve_ci'] is True
-    write(config.path(), {'incoming_review': {'approve_ci': False},
-                          'skills': {'ci_approve': 'custom:ci-approve'}})
-    write(config.path(upstream), {'incoming_review': {'approve_ci': True}})
-    write(config.path(repository), {'incoming_review': {'approve': False, 'merge': False}})
+    assert config.DEFAULTS['processes']['pr-review']['permissions']['approve_fork_ci'] is True
+    write(config.path(), {'processes': {'pr-review': {'permissions': {'approve_fork_ci': False}}},
+                          'skill_defaults': {'dk-workflows:dk-ci-approve': {'instructions': 'Check fork workflow safety.'}}})
+    write(config.path(upstream), {'processes': {'pr-review': {'permissions': {'approve_fork_ci': True}}}})
+    write(config.path(repository), {'processes': {'pr-review': {'permissions': {'approve_pr': False, 'merge_pr': {'enabled': False}}}}})
     settings = config.effective(repository, upstream)['settings']
-    assert settings['incoming_review']['approve_ci'] is True
-    assert settings['skills']['ci_approve'] == 'custom:ci-approve'
-    assert not settings['incoming_review']['approve'] and not settings['incoming_review']['merge']
-    write(config.path(repository), {'incoming_review': {'approve_ci': False}})
-    assert config.effective(repository, upstream)['settings']['incoming_review']['approve_ci'] is False
+    actions = settings['processes']['pr-review']['permissions']
+    assert actions['approve_fork_ci'] is True
+    assert settings['skill_defaults']['dk-workflows:dk-ci-approve']['instructions'] == 'Check fork workflow safety.'
+    assert not actions['approve_pr'] and not actions['merge_pr']['enabled']
+    write(config.path(repository), {'processes': {'pr-review': {'permissions': {'approve_fork_ci': False}}}})
+    assert config.effective(repository, upstream)['settings']['processes']['pr-review']['permissions']['approve_fork_ci'] is False

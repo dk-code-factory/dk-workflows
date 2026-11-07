@@ -3,6 +3,7 @@ from pathlib import Path
 import subprocess
 
 import config
+import skill_config
 from state import capture, digest, read, resource
 from shared import publication
 from shared.pr_ownership import classify
@@ -77,7 +78,20 @@ class Approval:
         if value.get('repository') != repository:
             raise ValueError('Review evidence belongs to another repository')
         settings = config.effective(repository, value.get('upstream'))
-        if value.get('settings') != settings or not settings['settings']['incoming_review']['approve_ci']:
+        if value.get('configuration', 'legacy') not in {'legacy', 'skill-owned'}:
+            raise ValueError('Unknown review configuration mode')
+        owned = value.get('configuration') == 'skill-owned'
+        permissions = settings['settings']['processes']['pr-review']['permissions']
+        if owned:
+            selected_settings = {
+                name: skill_config.effective('dk-workflows:' + name, repository, value.get('upstream'),
+                                             options=value.get(field, {}))
+                for name, field in [('dk-pr-review', 'options'), ('dk-pr-reviewers-run', 'reviewer_options')]}
+            fingerprints = {name: digest(selected['options']) for name, selected in selected_settings.items()}
+            if fingerprints != value.get('skill_settings_fingerprints'):
+                raise ValueError('Skill-owned review configuration changed')
+            permissions = selected_settings['dk-pr-review']['options']['permissions']
+        if value.get('settings') != settings or not permissions['approve_fork_ci']:
             raise ValueError('CI approval policy or governing configuration changed or is disabled')
         instructions = value.get('instructions')
         if not isinstance(instructions, dict) or not instructions:
@@ -92,12 +106,30 @@ class Approval:
                 or context['state'] != 'open' or context['draft'] is not False):
             raise ValueError('CI approval requires an open non-draft PR at the reviewed head and target')
         actor = h.api(request['pr'], 'user')
-        if classify(h.host, context['user'], actor, settings['settings']['identities'])['ownership'] != 'others':
+        if classify(h.host, context['user'], actor, settings['settings']['accounts']['personal'])['ownership'] != 'others':
             raise ValueError('CI approval requires another author\'s PR')
         from tasks import Tasks
         managed = Tasks(repository, request['pr'], checkout=value['checkout'])
         store = managed.store
         results, specs = {}, {}
+        approval_key, approval_claim, approval_fingerprint = None, None, None
+        if 'approval_task' in value:
+            active = value['approval_task']
+            if (not isinstance(active, dict) or set(active) not in ({'spec', 'claim'}, {'key', 'claim'})
+                    or not isinstance(active['claim'], str)):
+                raise ValueError('Malformed current approval task binding')
+            current = managed.saved_spec(active['key']) if 'key' in active else read(Path(active['spec']))
+            selection = current.get('skill_configuration', {})
+            if (not owned or current['skill']['identity'] != 'dk-workflows:dk-ci-approve'
+                    or selection.get('skill') != 'dk-workflows:dk-pr-review'
+                    or selection.get('kind') != 'finalizers' or selection.get('options') != value.get('options', {})
+                    or selection.get('upstream') != value.get('upstream')):
+                raise ValueError('Current approval task must be the selected incoming-review finalizer')
+            captured = capture(current)
+            if captured['subject'] != store.subject:
+                raise ValueError('Current approval task belongs to another PR')
+            approval_key, approval_claim = captured['key'], active['claim']
+            approval_fingerprint = captured['fingerprint']
 
         def completed(reference, *, source_required=True, cycle=value['cycle']):
             if isinstance(reference, dict) and set(reference) == {'key'} and isinstance(reference['key'], str):
@@ -116,7 +148,10 @@ class Approval:
                 raise ValueError('Review task source pins changed')
             with store.locked() as manifest:
                 entry = manifest['entries'].get(current['key'], {})
-                if any(e.get('claim') for e in manifest['entries'].values()):
+                if any(e.get('claim') and not (
+                        key == approval_key and e['claim']['id'] == approval_claim
+                        and e['claim']['fingerprint'] == approval_fingerprint
+                        and e['claim'].get('run') == value['run']) for key, e in manifest['entries'].items()):
                     raise ValueError('Unfinished review tasks block CI approval')
                 status = store.describe(current, entry)
                 saved = store.saved(entry)
@@ -132,24 +167,71 @@ class Approval:
             return current['key'], saved['normalized']
 
         discovery = value.get('discovery', [])
-        selected = settings['settings']['reviewers']
+        if owned:
+            selected = [skill_config.configured_call(call, repository, value.get('upstream'))
+                        for group in skill_config.groups(selected_settings['dk-pr-reviewers-run']['options']['reviewers'])
+                        for call in group]
+        else:
+            selected = [config.select(settings['settings'], 'pr-review', 'reviewer', index)
+                        for index, _ in enumerate(config.reviewers(settings['settings'], 'pr-review'))]
         if not discovery or not selected:
             raise ValueError('Complete selected discovery coverage is required')
-        candidates, identities = [], []
+        candidates, discovery_specs = [], []
         for path in discovery:
             key, result = completed(path)
-            identities.append(specs[key]['skill']['identity'])
+            if key in [item[0] for item in discovery_specs]:
+                raise ValueError('Current selected reviewer coverage is incomplete or duplicated')
+            discovery_specs.append((key, specs[key]))
             candidates.extend((key, index) for index, _ in enumerate(result.get('findings', [])))
-        if sorted(identities) != sorted(r['skill'] for r in selected):
+        remaining = list(discovery_specs)
+        for index, call in enumerate(selected):
+            expected = call.get('skill', 'dk-workflows:dk-pr-reviewers-run' if owned else config.invocation.normalize(
+                settings['settings']['processes']['pr-review']['coordinator']).get('skill'))
+            matches = [(key, spec) for key, spec in remaining if config.invocation.matches(expected, spec['skill']['identity'])
+                       and (not owned or spec.get('skill_configuration', {}).get('index') == index)]
+            if len(matches) != 1:
+                raise ValueError('Current selected reviewer coverage is incomplete or duplicated')
+            key, spec = matches[0]
+            if owned:
+                selection = spec.get('skill_configuration', {})
+                if (selection.get('skill') != 'dk-workflows:dk-pr-reviewers-run' or selection.get('kind') != 'reviewers'
+                        or selection.get('options') != value.get('reviewer_options', {})
+                        or selection.get('upstream') != value.get('upstream')):
+                    raise ValueError('Reviewer evidence must retain the selected skill-owned configuration')
+            selected_call = (call if owned else config.invocation.configured(
+                call, settings['settings']['skill_defaults'], identity=spec['skill']['identity']))
+            actual = spec['options'].get('invocation', {'skill': call.get('skill')})
+            if actual != selected_call:
+                raise ValueError('Reviewer evidence must retain the selected invocation controls')
+            remaining.remove(matches[0])
+        if remaining:
             raise ValueError('Current selected reviewer coverage is incomplete or duplicated')
         verification = value.get('verification')
         if candidates and not verification:
             raise ValueError('Candidate findings require independent verification and dispositions')
         if verification:
             key, result = completed(verification)
-            if (specs[key]['skill']['identity'] != 'dk-workflows:dk-pr-review'
-                    or specs[key]['task']['id'] != 'finding-verification'):
+            if owned:
+                selection = specs[key].get('skill_configuration', {})
+                if (selection.get('skill') != 'dk-workflows:dk-pr-review' or selection.get('kind') != 'tasks'
+                        or selection.get('options') != value.get('options', {})
+                        or selection.get('upstream') != value.get('upstream')):
+                    raise ValueError('Verification must retain its selected skill-owned occurrence')
+                verifier, _ = skill_config.select('dk-workflows:dk-pr-review', 'tasks', selection['index'],
+                                                  repository, value.get('upstream'), options=value.get('options', {}))
+            else:
+                verifier = config.select(settings['settings'], 'pr-review', 'task', task='verify_findings')
+            expected = verifier.get('skill', 'dk-workflows:dk-pr-review' if owned else config.invocation.normalize(
+                settings['settings']['processes']['pr-review']['coordinator']).get('skill'))
+            if (not config.invocation.matches(expected, specs[key]['skill']['identity'])
+                    or not (specs[key]['task']['id'] == 'finding-verification'
+                            or owned and specs[key]['task']['id'].startswith('finding-verification:'))):
                 raise ValueError('Expected the incoming-review finding verification task')
+            if not owned:
+                verifier = config.invocation.configured(verifier, settings['settings']['skill_defaults'],
+                                                        identity=specs[key]['skill']['identity'])
+            if specs[key]['options'].get('invocation') != verifier:
+                raise ValueError('Verification evidence must retain the selected invocation controls')
             original_inputs = set(specs[key].get('inputs', {}).values())
             if any(results[task]['path'] not in original_inputs for task, _ in candidates):
                 raise ValueError('Verification must capture the original current candidate reports')
@@ -172,9 +254,9 @@ class Approval:
             if (occurrence.get('run') != value.get('run') or occurrence.get('cycle') != value.get('cycle')
                     or result.get('findings')):
                 raise ValueError('Hook evidence does not cover the current review cycle')
-            occurrences.append((occurrence.get('phase'), occurrence.get('id')))
-        required_hooks = [(phase, hook['id']) for phase, hooks in settings['settings']['cycle_hooks'].items()
-                          for hook in hooks]
+            occurrences.append((occurrence.get('phase'), occurrence.get('index')))
+        required_hooks = [] if owned else [(phase, index) for phase, hooks in settings['settings']['processes']['pr-review']['hooks'].items()
+                          for index, _ in enumerate(hooks)]
         if sorted(occurrences) != sorted(required_hooks):
             raise ValueError('Current review cycle hooks are incomplete')
         for path in value.get('publications', []):

@@ -25,9 +25,9 @@ Include only when supported:
 
 Without repository style evidence:
 
-- Use an imperative, sentence-case subject without a period, preferably within 72 characters.
+- Use an imperative, sentence-case subject without a period, using the configured `subject_target_length` (72 by default).
 - Add a short body only for motivation or an important consequence.
-- Wrap prose near 72 characters.
+- Wrap prose using the configured `body_wrap_length` (72 by default), within `max_line_length` (80 by default).
 - End with a real issue reference; omit it when unknown.
 - Use plain text without Markdown headings.
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from config import make_finalizer_spec, make_hook_spec
 from native_review import binding, required
 from state import Store, digest, make_spec
+import skill_config
 
 
 class Tasks:
@@ -14,7 +15,8 @@ class Tasks:
 
     def spec(self, descriptor):
         if (not isinstance(descriptor, dict) or set(descriptor) - {
-                'kind', 'definition', 'run', 'cycle', 'phase', 'hook_id', 'finalizer', 'upstream'}):
+                'kind', 'definition', 'run', 'cycle', 'phase', 'index', 'process', 'finalizer', 'upstream',
+                'skill', 'selection', 'options'}):
             raise ValueError('Task requires a definition and optional occurrence selector')
         kind = descriptor.get('kind', 'task')
         common = {**self.store.subject, 'definition': descriptor['definition']}
@@ -22,13 +24,18 @@ class Tasks:
             if set(descriptor) - {'kind', 'definition'}:
                 raise ValueError('Ordinary task identity excludes run and occurrence selectors')
             return make_spec(**self.store.subject, **descriptor['definition'])
+        if kind == 'skill':
+            return skill_config.make_spec(**common, skill=descriptor['skill'], kind=descriptor['selection'],
+                                          index=descriptor['index'], options=descriptor.get('options'),
+                                          upstream=descriptor.get('upstream'), run=descriptor.get('run'))
         common.update(run=descriptor['run'], upstream=descriptor.get('upstream'))
         if kind == 'hook':
             return make_hook_spec(**common, cycle=descriptor['cycle'], phase=descriptor['phase'],
-                                  hook_id=descriptor['hook_id'])
+                                  index=descriptor['index'], process=descriptor.get('process', 'pr-fix'))
         if kind == 'finalizer':
-            return make_finalizer_spec(**common, finalizer=descriptor['finalizer'])
-        raise ValueError('Task kind must be task, hook or finalizer')
+            return make_finalizer_spec(**common, finalizer=descriptor.get('finalizer'),
+                                       index=descriptor.get('index'), process=descriptor.get('process', 'pr-fix'))
+        raise ValueError('Task kind must be task, skill, hook or finalizer')
 
     @staticmethod
     def compact(task):
@@ -76,7 +83,8 @@ class Tasks:
                                          for label, path in definition[field].items()}
             if isinstance(definition.get('git'), dict) and 'checkout' in definition['git']:
                 definition['git']['checkout'] = str(Path(definition['git']['checkout']).absolute())
-            if item.get('kind', 'task') != 'task':
+            if item.get('kind', 'task') in {'hook', 'finalizer'} or (
+                    item.get('kind') == 'skill' and item.get('selection') == 'finalizers'):
                 item.setdefault('run', request.get('run'))
                 if item['kind'] == 'hook':
                     item.setdefault('cycle', request.get('cycle'))
@@ -87,7 +95,11 @@ class Tasks:
         kinds = {item.get('kind', 'task') for item in descriptors}
         if len(kinds) != 1 or ('hook' in kinds and len(descriptors) != 1):
             raise ValueError('Prepare one task kind at a time; ordered hooks run individually')
-        if kinds != {'task'} and any(request.get(key) for key in ('retry', 'ci_repair', 'ci_rerun')):
+        selections = {item.get('selection') for item in descriptors} if kinds == {'skill'} else set()
+        if len(selections) > 1:
+            raise ValueError('Prepare one skill-owned list kind at a time')
+        occurrence = bool(kinds - {'task', 'skill'} or selections == {'finalizers'})
+        if occurrence and any(request.get(key) for key in ('retry', 'ci_repair', 'ci_rerun')):
             raise ValueError('Occurrence tasks do not reserve reviewer or CI retry budgets')
         specs = [self.spec(item) for item in descriptors]
         for spec in specs:
@@ -98,7 +110,7 @@ class Tasks:
                             'skill': spec['skill']['identity']}): item
                     for spec, item in zip(specs, descriptors)}
         options = {key: value for key, value in request.items() if key != 'tasks'}
-        if kinds != {'task'}:
+        if occurrence:
             options.pop('cycle', None)
         result = self.store.start_batch(specs, retained=retained, **options)
         # Read committed bindings, including after a lost-response recovery. They

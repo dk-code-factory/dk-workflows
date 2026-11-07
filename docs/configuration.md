@@ -1,45 +1,51 @@
 # Workflow configuration
 
-Routine reads can use one facade: `scripts/config.py --repository HOST/OWNER/REPO --checkout REPO --pr PR_URL show --section workflow --section rules --section drafting --section completion --section commit-policy`. Request only sections consumed by the current stage; the helper resolves the PR settings identity chain once and returns current values and sources without persisting an effective-settings snapshot. Additional sections are `pr-size`, `pr-partition`, `ci-exceptions` and `preferences`. Existing domain commands and per-domain inheritance semantics remain compatible. Missing or malformed sources remain errors. The common [storage resolver](../runtime/shared/storage_paths.py) preserves existing directories and locks; state is not relocated or reset.
+Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts remain private.
 
-Invoke `dk-config` when the user's task is to change, inspect or explain configuration. Ordinary PR workflows read effective settings directly through the helpers below; loading or invoking the configuration skill is not a prerequisite. `pr_route.py` already loads effective personal-account settings internally. Call `config.py show` when the current stage needs roles, reviewers, hooks, finalizers or action policies, and `config.py preflight` to check selected-skill availability. Read domain policies directly with [PR configuration](pr/configuration.md) helpers. These reads preserve saved settings and do not authorize configuration changes.
-
-Pass complete effective values and their scope/source evidence to downstream stages. Reuse them only while repository/upstream identity and consumed settings remain current; refresh affected reads and task inputs when those change, on recovery without current evidence, and before actions whose permission depends on saved policy. This boundary removes configuration-skill invocations, not required settings reads, availability checks or live publication checks. Missing or malformed settings and unavailable selected skills remain blockers; report them without silently resetting or deselecting anything.
-
-Run `python3 PLUGIN_ROOT/scripts/config.py --repository HOST/OWNER/REPO show|set|reset|preflight`. `set --file SETTINGS.json --scope repo|user` replaces that scope. `show` merges user settings, optional `--upstream HOST/OWNER/REPO` settings, then repository settings. Skill roles inherit separately. Each ordered reviewer list replaces the lower-scope list. Private files are stored under `${XDG_CONFIG_HOME:-~/.config}/dk-workflows/v2/`.
+Each bundled skill owns `config.json` and `config.schema.json` beside `SKILL.md`. Use [skill-owned configuration](skill-configuration.md) for resolution, scoped edits, invocation-local overrides, plans and managed specs. These files are synchronized between the Codex and Claude distributions. All skill identities must be fully qualified as `plugin:skill`.
 
 ```json
 {
-  "reviewers": [{"skill":"code-review-ad:code-review-ad", "required":true, "options":{}}],
-  "skills": {"feedback":"dk-workflows:dk-pr-feedback-address"},
-  "domain_settings": {"dk-workflows":"private domain settings"}
+  "$schema": "../schemas/config.schema.json",
+  "schema_version": 1,
+  "skill_defaults": {
+    "dk-workflows:dk-pr-reviewers-run": {
+      "options": {
+        "reviewers": [
+          {"skill": "code-review-ad:code-review-ad", "options": {}, "required": true}
+        ],
+        "execution": "parallel",
+        "max_parallel": null
+      }
+    },
+    "dk-workflows:dk-ci": {
+      "options": {
+        "timeout_seconds": 1800,
+        "poll_interval_seconds": 30,
+        "classification_timeout_seconds": 60,
+        "no_checks_grace_seconds": 60,
+        "pending_extension_seconds": 1800,
+        "max_pending_extensions": 1
+      }
+    }
+  }
 }
 ```
 
-There is no default reviewer. PR roles default to bundled skills; users may select other installed skills. `ci_approve` selects fork workflow approval (default `dk-workflows:dk-ci-approve`). `run_reviewers`, `read_feedback` and `post_review` select the coordinator, feedback collector and review publisher. Partition and cleanup use separate `dk-pr-split` and `dk-commit-split` skills.
+`skill_defaults` values can also contain exact additional `instructions`, native `agent` settings and `required`. Skill-specific fields belong in `options`, validated by the selected skill's schema. Bundled files show every default explicitly. An external skill owns its own options contract. There is no default reviewer.
 
-`cycle_hooks` defines ordered `before_cycle` and `after_cycle` lists for `dk-pr-fix` and `dk-pr-review`. Entries require a stable `id` and original `instructions`, with optional `skill` and object `options`. Without a skill, the workflow agent carries out the instructions. Each phase inherits separately across user, upstream and repository scopes; a supplied list replaces that phase, and `[]` disables it. Defaults are empty. Selected hook skills also participate in availability preflight. See [cycle hooks](cycle-hooks.md) for examples, exact boundaries and retained task receipts. Hooks remain within the invoking workflow's permissions.
+Private overrides retain `${XDG_CONFIG_HOME:-~/.config}/dk-workflows/v2/user.json` and repository digest files. Existing domain policy records remain in their original stores. Scope precedence is defaults, user, optional upstream, repository, then invocation-local options. Objects merge by key, lists replace and commit policies replace as a whole. Empty lists disable inherited selections. New skill-specific settings are never added to a central responsibility map.
 
-`finalizers` configures the ending of `dk-pr-fix`: qualified `/skill/PLUGIN:SKILL` strings run in order, and nested nonempty lists run concurrently with a barrier before the next group. Each skill appears once. External installed skills are supported. An explicit scoped list replaces inherited finalizers; `[]` disables them. Without an explicit list, effective cleanup, Decisions, description, reply, CI and publisher roles select the default sequential plan. See [PR fix finalizers](finalizers.md) for task receipts, dependencies, resume and reporting skipped readiness checks. Completion prompts cannot silently restore removed actions.
+Read effective options with `scripts/config.py --repository HOST/OWNER/REPO skill-show --skill PLUGIN:SKILL`. Save or reset one skill's options with `skill-set --scope repo|user --file FILE` or `skill-reset --scope repo|user`. These preserve unrelated settings and invocation controls. Put `--upstream HOST/OWNER/REPO` before the subcommand and pass the same upstream throughout the workflow. Invocation-local options use `--options FILE` and are never persisted by reads.
 
-Before work, resolve every selected installation through native tools, including optional reviewers. Pass a JSON array of resolved skill identity strings to `preflight --available FILE.json`. Require `ready:true` in the returned JSON. Missing selections return `ready:false` and `missing_selected_skills` with exit 0; command success alone does not establish availability. Resolve ambiguous installations before supplying the list. Missing or ambiguous installations block work until installed or explicitly deselected. Save resolved resource paths and options. Read each skill's guidance when invoking it. Preflight proves availability only. Each skill owns its options, internal passes and completion report.
+`tasks`, `finalizers` and `reviewers` are invocation lists. Tasks/finalizers run sequentially except explicit `{"parallel":[...]}` groups; reviewers also honor their scheduling settings. Repeated skills and instruction-only calls are supported. The owning skill's instructions govern iteration, applicability, dependencies and completion. Read with `skill-plan`, preflight with `skill-preflight`, and generate managed leaf specs with `scripts/dk.py skill-spec`. Helpers never launch Codex or Claude Code.
 
-Preflight defaults to `--workflow fix` and includes selected finalizer identities after removing the `/skill/` prefix. Use `--workflow review` for incoming or standalone review; it does not require fix-only finalizers. Both modes still validate the other configured skill selections.
+Workflow-owned permissions are passed downstream; a selected invocation grants no additional permission. Saved policy does not override narrower current user instructions. Independent review, source completeness, freshness, exact leases, retained budgets and reconciliation remain governing requirements. Custom finalizers cannot claim omitted cleanup or CI was verified.
 
-Place the global `--upstream HOST/OWNER/REPO` option before `show` or `preflight` when inheriting those settings. Pass the same upstream identity to `scripts/pr_route.py --pr PR_URL --upstream HOST/OWNER/REPO` so routing uses the same personal accounts.
+Use `dk-workflows:dk-config` only when changing, inspecting or explaining saved settings is the user's task. Ordinary skills read their configuration directly. Scoped implementation/review preferences remain owned by `dk-workflows:dk-preferences`; existing PR policies and records are described in [PR configuration](pr/configuration.md).
 
-Use `dk-config` for requests to configure workflow settings and bundled [PR policies](pr/configuration.md). Route explicit scoped implementation and review preference requests directly to `dk-preferences` under [the preference contract](preferences.md). Preferences have a separate shared personal/repository catalog; saved rules remain separate and are not converted. The settings helpers keep their existing private stores, schemas and precedence. Selected external skills own their settings. Renaming a skill does not update saved selections, clear work or move state. Update explicitly selected old identities through `dk-config` when requested.
+## Compatibility and migration
 
-Use `scripts/pr_config.py commit-policy show|set|reset` through `dk-config` to select a private global or repository [commit policy](commit-policy.md). A policy is a saved prompt or a native skill that returns instructions for commit grouping and messages. Repository and upstream settings replace the entire inherited policy. The default retains existing cleanup and message behavior.
+The existing `show`, `set`, `reset`, process preflight, named task selectors and cycle hook helpers remain available for older process records. Their compatibility views derive defaults from the owning skills. See [legacy process compatibility](legacy-configuration.md). New configurations use skill-owned invocation lists and do not need a configured coordinator, responsibility registry or declarative control-flow language.
 
-`identities` lists additional personal accounts as `{"host":"github.com","id":123}`. Verify each account on its host before saving its immutable numeric id. Each scope replaces the list from lower scopes. The authenticated account needs no saved entry. Never compare numeric account ids across hosts.
-
-`incoming_review` merges each setting across user, upstream and repository scopes. Defaults are `{"post":true,"approve_ci":true,"approve":false,"merge":false,"merge_method":"squash"}`. Invoking `dk-pr-review` permits posting verified findings under effective policy. Approval and merging each require their own enabled setting or exact user instruction. Narrower instructions, including analysis-only review, override saved permission.
-
-Supported merge methods are `squash` and `merge`. Automatic merges require current successful checks and satisfied repository review and merge requirements. Configure only requested actions. Enabling merges does not enable posting an approval. The fixed iteration limits also apply to incoming review refreshes and retries.
-
-A direct request to merge a specific PR supplies permission without changing saved defaults. `incoming_review.merge:false` disables automatic merging and does not veto that request. The publisher supports separately authorized merges of your own PR and requires GitHub approval only where repository review requirements demand it; current clean review, verification, successful CI and merge readiness remain required. See [merge publication](pr/publication.md).
-
-The separate `dk-architecture` package owns architecture settings. Workflows do not invoke it automatically or require unrelated documentation conflicts to be resolved. Applicable repository guidance and explicit architecture rules still govern tasks and reuse. Record dispositions for relevant findings. Incomplete selected-skill results remain incomplete.
-
-`approve_ci` permits execution of blocked fork CI only after incoming review is ready, before any CI wait. It remains enabled when PR approval and merge policies are false. It requires original review evidence and current task coverage, an open non-draft PR by another author, unchanged inputs, completed hooks and reconciled publication. It does not require successful CI or human approval. See [CI approval evidence](pr/ci-approval.md). Analysis-only instructions override saved mutation policies. `dk-pr-fix` behavior and completion instructions remain unchanged.
+Reads never reset, move or silently rewrite saved records. Resolve and update any unqualified skill identities explicitly before saving; installation ambiguity is never guessed. Preserve original prompts, options, opt-outs, policies, scope files and retained execution state. A renamed skill does not complete its unfinished work. Reconcile outstanding claims and uncertain effects before changing active plans.

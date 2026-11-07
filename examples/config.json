@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/config.schema.json",
+  "schema_version": 1,
+  "skill_defaults": {
+    "dk-workflows:dk-pr-reviewers-run": {
+      "options": {
+        "reviewers": [
+          {
+            "skill": "code-review-ad:code-review-ad",
+            "options": {},
+            "required": true
+          }
+        ],
+        "execution": "parallel",
+        "max_parallel": null
+      }
+    },
+    "dk-workflows:dk-ci": {
+      "options": {
+        "timeout_seconds": 1800,
+        "poll_interval_seconds": 30,
+        "classification_timeout_seconds": 60,
+        "no_checks_grace_seconds": 60,
+        "pending_extension_seconds": 1800,
+        "max_pending_extensions": 1
+      }
+    }
+  }
+}

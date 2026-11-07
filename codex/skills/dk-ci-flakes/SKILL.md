@@ -9,7 +9,9 @@ Persist workflow state only when it reduces total token consumption, including t
 
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
-Run `python3 PACKAGE_ROOT/runtime/dk-ci/scripts/flaky_tests.py --repo HOST/OWNER/REPO --cwd REPO discover`, using the PR's base repository. Discovery defaults to 30 days, 100 runs and 500 issues; narrow these with `--days`, `--max-runs` and `--max-issues`. Replace `discover` with `list` or `sync` to refresh saved issue evidence; `list --history` also includes observations.
+Resolve configuration for `dk-workflows:dk-ci-flakes` through [skill-owned configuration](../../../docs/skill-configuration.md) before work, including scoped and invocation-local options. This skill owns its [explicit defaults](config.json) and [option schema](config.schema.json). Preserve original additional instructions alongside the governing assignment.
+
+Run `python3 PACKAGE_ROOT/runtime/dk-ci/scripts/flaky_tests.py --repo HOST/OWNER/REPO --cwd REPO discover`, using the PR's base repository. Discovery uses resolved `lookback_days`, `max_runs` and `max_issues`. Pass invocation-local options with `--options FILE` before the command, or override them deliberately with `--days`, `--max-runs` and `--max-issues`. Replace `discover` with `list` or `sync` to refresh saved issue evidence; `list --history` also includes observations.
 
 Read JSON on stdout. `list` and `sync` return `entries`, `checked_at`, `unavailable_issues` and `issue_errors`; discovery nests these under `verification` and also reports `missing`, `limits_reached` and `evidence_file`. All commands include `unlinked_candidates` and `registry_file`. Exit 0 does not establish that every failure is covered. Helper errors exit 2 with text on stderr.
 

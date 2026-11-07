@@ -8,10 +8,11 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'runtime'))
 import config
+import skill_config
 import publish
 from shared.ci_approval import Approval
 from shared.diagnostics import Diagnostic
-from state import read, resource, write
+from state import digest, read, resource, write
 
 
 def request(path):
@@ -24,6 +25,12 @@ def snapshot(path):
     value = read(Path(path))
     approval = Approval(publish.handler(request(path)))
     value['settings'] = config.effective(value['repository'], value.get('upstream'))
+    if value.get('configuration') == 'skill-owned':
+        value['skill_settings_fingerprints'] = {
+            name: digest(skill_config.effective('dk-workflows:' + name, value['repository'], value.get('upstream'),
+                                                options=value.get(field, {}))['options'])
+            for name, field in [('dk-pr-review', 'options'), ('dk-pr-reviewers-run', 'reviewer_options')]}
+        value.pop('skill_settings', None)
     value['instruction_fingerprints'] = {key: resource(source) for key, source in value['instructions'].items()}
     value['context'] = approval.context()
     write(Path(path), value)

@@ -40,6 +40,12 @@ def package(root):
         source=root/'codex/skills'/name/'SKILL.md'
         target=root/'claude/skills'/name/'SKILL.md'
         assert source.read_bytes()==target.read_bytes(),'Run scripts/sync_skills.py: '+name
+        for filename in ('config.json', 'config.schema.json'):
+            source = root/'codex/skills'/name/filename
+            target = root/'claude/skills'/name/filename
+            assert source.is_file() and target.is_file(), 'Missing skill configuration: '+name
+            assert source.read_bytes() == target.read_bytes(), 'Run scripts/sync_skills.py: '+name+'/'+filename
+            json.loads(source.read_text())
     if manifests[0]['name']=='dk-workflows':
         assert entries[0]==['dk-ci', 'dk-ci-approve', 'dk-ci-flakes', 'dk-commit-message', 'dk-commit-split',
                             'dk-config', 'dk-issue', 'dk-pr-decisions',
@@ -67,6 +73,9 @@ def check(base=None):
                 text=path.read_text()
                 assert ('/'+'home/') not in text and ('/'+'extra/') not in text,'Machine path: '+str(path)
             if path.suffix=='.md':
+                if path.is_relative_to(root/'codex/skills') or path.is_relative_to(root/'claude/skills') or path.is_relative_to(root/'runtime'):
+                    for block in re.findall(r'```[^\n]*\n([\s\S]*?)```', text):
+                        assert not re.search(r'(?m)^\s*(?:\$\s*)?(?:[^\s]*/)?(?:codex|claude)(?:\s|$)', block), 'Forbidden model CLI instructions: '+str(path)
                 for link in re.findall(r'\]\(([^)]+)\)',text):
                     if '://' in link or link.startswith('#'):continue
                     target=(path.parent/link.split('#')[0]).resolve()
@@ -77,6 +86,17 @@ def check(base=None):
             if 'tests' in relative.parts or '__pycache__' in relative.parts:continue
             if relative.as_posix() in {'scripts/check.py','scripts/version.py','scripts/test.py'}:continue
             text=path.read_text()
+            for node in ast.walk(ast.parse(text)):
+                if not isinstance(node, ast.Call) or not node.args:
+                    continue
+                function = node.func.attr if isinstance(node.func, ast.Attribute) else node.func.id if isinstance(node.func, ast.Name) else ''
+                if function not in {'run', 'Popen', 'check_call', 'check_output', 'call', 'system', 'execv', 'execvp', 'execve'}:
+                    continue
+                argument = node.args[0]
+                command = argument.elts[0] if isinstance(argument, (ast.List, ast.Tuple)) and argument.elts else argument
+                if isinstance(command, ast.Constant) and isinstance(command.value, str):
+                    executable = command.value.strip().split()[0] if command.value.strip() else ''
+                    assert Path(executable).name not in {'codex', 'claude'}, 'Forbidden model CLI launch: '+str(relative)
             for forbidden in ('codex exec','claude -p','--ephemeral','shared.executors','preparation_graph','architecture_packet'):
                 assert forbidden not in text,'Unexpected core execution/domain integration: '+str(relative)+': '+forbidden
     if base:

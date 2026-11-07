@@ -181,7 +181,13 @@ def prepare(checkout, changes):
     catalog = _read(checkout)
     changes = deepcopy(changes)
     if isinstance(changes, dict) and isinstance(changes.get('upsert', []), list):
+        import skill_config
+        modes = skill_config.for_context('dk-workflows:dk-preferences', cwd=checkout)['options']['default_applies_to']
+        current = {item['id']: item for item in catalog['records']}
         for item in changes.get('upsert', []):
+            if isinstance(item, dict) and 'applies_to' not in item:
+                # Defaults affect admission, never interpretation of saved records.
+                item['applies_to'] = deepcopy(current.get(item.get('id'), {}).get('applies_to', modes))
             if isinstance(item, dict) and 'id' not in item:
                 item['id'] = 'pref-' + uuid.uuid4().hex
     proposed, reused = _apply(catalog, changes, identity)

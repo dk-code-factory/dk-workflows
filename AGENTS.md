@@ -28,3 +28,16 @@ Read [DESIGN.md](DESIGN.md) before changing workflow coordination or persistence
 - Maintain prompts in `codex/skills/`, then run `scripts/sync_skills.py`. Run
   `scripts/check.py` and the relevant offline tests; use `scripts/test.py` for
   complete validation. Tests must not make authenticated model or GitHub calls.
+
+
+## Codex and Claude execution boundary
+
+It is strictly forbidden for production code to launch Codex or Claude Code. This applies to runtime helpers, production scripts and integrations, whether execution is direct or indirect through subprocesses, shell commands, wrappers, background jobs or other launchers. Do not add a separate model-session or agent runner.
+
+Skills and their referenced runtime guidance must never instruct, recommend or provide executable examples for launching Codex or Claude Code. This includes fallback, retry, recovery and workarounds for unavailable native tools or execution evidence.
+
+The already-running Codex or Claude Code session owns skill execution and any supported native delegation. Python helpers validate configuration and evidence, manage task claims, retain state and budgets, and perform their documented Git and GitHub operations. They do not start Codex or Claude Code sessions.
+
+If required native execution, delegation or evidence is unavailable, report the affected work as blocked or incomplete. Never launch Codex or Claude Code as a substitute.
+
+Preserve this boundary when changing the [invocation contract](docs/invocations.md), [native execution evidence](docs/native-review.md), production code or either skill distribution.

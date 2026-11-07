@@ -1,14 +1,16 @@
 # Commit grouping and message policies
 
-`dk-commit-split` owns assessment, Git organization, validation and authorized publication. A commit policy supplies instructions for grouping and messages. With no configured policy, existing cleanup and message defaults apply. Explicit policies replace built-in stylistic defaults, including optional body and line-length preferences. Required repository conventions and current user constraints still govern. Settle material conflicts before rewriting.
+Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 
-Configure a policy through `dk-config`, for example:
+`dk-workflows:dk-commit-split` owns assessment, Git organization, validation and authorized publication. A commit policy supplies instructions for grouping and messages. With no configured policy, existing cleanup and message defaults apply. Explicit policies replace built-in stylistic defaults, including optional body and line-length preferences. Required repository conventions and current user constraints still govern. Settle material conflicts before rewriting.
+
+Configure a policy through `dk-workflows:dk-config`, for example:
 
 > Use dk-config to set my global commit policy to this prompt: squash each PR into one commit and use a short subject-only message.
 
 > Use dk-config to select my-plugin:commit-policy as this repository's commit policy.
 
-Save exactly one source in a private JSON file:
+Save a literal policy or a provider invocation in a private JSON file:
 
 ```json
 {"prompt":"Squash all PR changes into one commit. Use a short, descriptive subject without a body."}
@@ -17,8 +19,10 @@ Save exactly one source in a private JSON file:
 or:
 
 ```json
-{"skill":"my-plugin:commit-policy"}
+{"skill":"my-plugin:commit-policy","instructions":"Return grouping and message instructions only.","agent":{"model":"chosen","reasoning_effort":"high"}}
 ```
+
+Providers use the shared [invocation contract](invocations.md), requiring fully qualified skill identities, custom instructions, options and optional native model/effort controls. Instruction-only providers use the cleanup identity. Preflight provider installation and agent capabilities with the same shared invocation validator; unsupported requests block cleanup. Literal `prompt` policies are text and do not invoke an agent.
 
 Then use the existing configuration conventions:
 
@@ -28,7 +32,7 @@ python3 PLUGIN_ROOT/scripts/pr_config.py --cwd REPO commit-policy show
 python3 PLUGIN_ROOT/scripts/pr_config.py --cwd REPO commit-policy reset --scope repo
 ```
 
-Use `--scope repo` to override the global policy. The entire policy resolves repository → upstream → global → built-in, using the existing PR repository identity resolver (`--pr PR_URL` supports fork/head and base identities). Reset restores inheritance. Show reports the effective value and its source. Malformed saved configuration blocks resolution; repair or reset it. Policies remain separate from rules, preferences, drafting selections and workflow finalizers.
+Use `--scope repo` to override the global policy. The entire policy resolves repository → upstream → global → built-in, using the existing PR repository identity resolver (`--pr PR_URL` supports fork/head and base identities). Reset restores inheritance. Show reports the effective value and its source. Malformed saved configuration blocks resolution; repair or reset it. Policies remain separate from rules, preferences, drafting selections and workflow finalizers. The owning cleanup skill also exposes `policy` in its options: null explicitly selects built-in behavior. Effective resolution combines old records and scoped options without moving either; within a scope the new option wins, and invocation-local options have highest precedence.
 
 ## Resolve and hand off
 
@@ -52,7 +56,7 @@ python3 PLUGIN_ROOT/scripts/commit_policy.py --cwd REPO --repository HOST/OWNER/
   handoff --spec /private/policy-spec.json --report /private/provider-report.json > /private/policy-handoff.json
 ```
 
-For a prompt or built-in policy, omit `--report` and do not invoke a provider task. `policy_prompt:null` denotes built-in behavior. The helper rejects changed configuration or resources during execution and incomplete provider reports. It checks deterministic artifacts; the coordinator remains responsible for checking actual native execution and truthful consumed context.
+Pass `--options /private/cleanup-options.json` before the command for invocation-local cleanup options, including prompt, provider or explicit null policy overrides. Preserve it on `spec`, `handoff` and `verify`. The spec retains those exact local values; changed local options block acceptance. For a prompt or built-in policy, omit `--report` and do not invoke a provider task. `policy_prompt:null` denotes built-in behavior. The helper rejects changed configuration or resources during execution and incomplete provider reports. It checks deterministic artifacts; the coordinator remains responsible for checking actual native execution and truthful consumed context.
 
 Refresh the definition against live governing inputs before cleanup, then verify a supplied handoff:
 
@@ -61,11 +65,11 @@ python3 PLUGIN_ROOT/scripts/commit_policy.py --cwd REPO --repository HOST/OWNER/
   verify --definition /private/current-policy-definition.json --handoff /private/policy-handoff.json
 ```
 
-Verification returns the current handoff or blocks on changes. Include the verified handoff in cleanup's `inputs.commit_policy`. Also copy all consumed provider resource, instruction and input maps into cleanup's corresponding maps with distinct labels, including the configuration source. Nested paths inside the handoff alone do not capture their live bytes. Include the returned instructions verbatim in cleanup's assignment or inputs and pass message instructions to `dk-commit-message`. Regenerate and verify at claims, recording and final coverage boundaries. Resource, configuration, relevant context, requirements or constraint changes invalidate affected policy and cleanup evidence. Unchanged inputs preserve reuse; unrelated settings and eligible content reviews remain reusable.
+Verification returns the current handoff or blocks on changes. Include the verified handoff in cleanup's `inputs.commit_policy`. Also copy all consumed provider resource, instruction and input maps into cleanup's corresponding maps with distinct labels, including the configuration source. Nested paths inside the handoff alone do not capture their live bytes. Include the returned instructions verbatim in cleanup's assignment or inputs and pass message instructions to `dk-workflows:dk-commit-message`. Regenerate and verify at claims, recording and final coverage boundaries. Resource, configuration, relevant context, requirements or constraint changes invalidate affected policy and cleanup evidence. Unchanged inputs preserve reuse; unrelated settings and eligible content reviews remain reusable.
 
 ## Apply and validate
 
-Apply grouping instructions to the complete PR series and message instructions to every resulting commit. `dk-commit-message` uses explicit message instructions ahead of its stylistic fallback. Required repository formatting, authorship, source integrity and current user constraints remain in force. A subject-only policy does not acquire a mandatory body from the built-in field conventions.
+Apply grouping instructions to the complete PR series and message instructions to every resulting commit. `dk-workflows:dk-commit-message` uses explicit message instructions ahead of its stylistic fallback. Required repository formatting, authorship, source integrity and current user constraints remain in force. A subject-only policy does not acquire a mandatory body from the built-in field conventions.
 
 Follow [cleanup safeguards](pr/commit-cleanup.md): clean worktree, safe ownership, recovery refs, exact leases, reviewed-tree equality, relevant validation and authorized publication. The policy grants no rewrite or publication permission. It does not squash intermediate pushes. Custom finalizers continue to determine whether cleanup runs; omitting cleanup does not invoke its provider.
 

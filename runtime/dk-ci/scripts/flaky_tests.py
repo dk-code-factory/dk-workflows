@@ -12,6 +12,7 @@ import sys
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 from shared.flaky_tests import Registry
 from shared.flaky_actions import GitHub, discover
+import skill_config
 
 
 def main():
@@ -19,20 +20,28 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', required=True, help='HOST/OWNER/REPO (PR base repository)')
     parser.add_argument('--cwd', default='.', help='repository path; private data must be outside it')
+    parser.add_argument('--options', type=Path, help='Invocation-local skill options JSON')
+    parser.add_argument('--upstream')
     sub = parser.add_subparsers(dest='command', required=True)
     listing = sub.add_parser('list', help='refresh linked issues and list active/candidate/inactive entries')
     listing.add_argument('--history', action='store_true', help='include named-test observations')
     sub.add_parser('sync', help='refresh every linked issue directly and reverify entries')
     scan = sub.add_parser('discover', help='scan bounded Actions history and recently updated open issues')
-    scan.add_argument('--days', type=int, default=30)
-    scan.add_argument('--max-runs', type=int, default=100)
-    scan.add_argument('--max-issues', type=int, default=500)
+    scan.add_argument('--days', type=int)
+    scan.add_argument('--max-runs', type=int)
+    scan.add_argument('--max-issues', type=int)
     args = parser.parse_args()
     try:
         registry = Registry(args.repo, args.cwd)
         api = GitHub(registry.repo)
         if args.command == 'discover':
-            output = discover(api, registry, args.days, args.max_runs, args.max_issues)
+            local = json.loads(args.options.read_text()) if args.options else {}
+            for argument, key in [('days', 'lookback_days'), ('max_runs', 'max_runs'), ('max_issues', 'max_issues')]:
+                if getattr(args, argument) is not None:
+                    local[key] = getattr(args, argument)
+            options = skill_config.for_context('dk-workflows:dk-ci-flakes', repository=args.repo,
+                                                upstream=args.upstream, options=local)['options']
+            output = discover(api, registry, options['lookback_days'], options['max_runs'], options['max_issues'])
         else:
             output = registry.synchronize([], api.issue)
             if args.command == 'list' and args.history:

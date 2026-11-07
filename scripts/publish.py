@@ -138,6 +138,10 @@ def recovery():
 
 
 def prepare(request):
+    if isinstance(request, dict) and request.get('kind') == 'merge-pr' and 'merge_method' not in request:
+        import skill_config
+        options = skill_config.for_context('dk-workflows:dk-pr-publish', pr=request.get('pr'))['options']
+        request = {**request, 'merge_method': options['default_merge_method']}
     if not isinstance(request,dict):
         raise ValueError('Publication request must be an object')
     # Recover even if the previous agent lost the printed operation path. The

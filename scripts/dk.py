@@ -7,7 +7,9 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'runtime'))
 from state import Store, make_spec, read
-from config import CYCLE_PHASES, effective, finalizer_groups, make_finalizer_spec, make_hook_spec
+import skill_config
+from config import (CYCLE_PHASES, effective, finalizer_groups, make_finalizer_spec,
+                    make_hook_spec, make_invocation_spec, hook_phase)
 
 
 def main():
@@ -40,21 +42,49 @@ def main():
     p = sub.add_parser('spec')
     p.add_argument('--definition', type=Path, required=True,
                    help='Explicit make_spec fields, excluding repository and pr')
+    p = sub.add_parser('skill-spec', help='Bind an item in a skill-owned list; never launch it')
+    p.add_argument('--skill', required=True, help='Fully qualified owning plugin:skill')
+    p.add_argument('--kind', choices=['tasks', 'finalizers', 'reviewers'], required=True)
+    p.add_argument('--index', type=int, required=True)
+    p.add_argument('--definition', type=Path, required=True)
+    p.add_argument('--options', type=Path, help='Owning invocation-local options')
+    p.add_argument('--upstream')
+    p.add_argument('--run', help='Retained run id; required for finalizers')
     p = sub.add_parser('hook-spec', help='Define one configured cycle hook; agents execute it')
     p.add_argument('--definition', type=Path, required=True,
                    help='Resolved skill identity, resources, governing inputs and execution options')
     p.add_argument('--phase', choices=CYCLE_PHASES, required=True)
-    p.add_argument('--hook-id', required=True)
+    p.add_argument('--index', type=int, required=True, help='Zero-based hook position')
+    p.add_argument('--process', default='pr-fix')
     p.add_argument('--run', required=True)
     p.add_argument('--cycle', required=True)
     p.add_argument('--upstream')
     p = sub.add_parser('finalizer-plan', help='Read ordered finalizer groups; agents execute them')
+    p.add_argument('--process', default='pr-fix')
     p.add_argument('--upstream')
     p = sub.add_parser('finalizer-spec', help='Define one configured finalizer in the retained run')
     p.add_argument('--definition', type=Path, required=True)
-    p.add_argument('--finalizer', required=True, help='/skill/PLUGIN:SKILL reference')
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument('--index', type=int, help='Zero-based flattened finalizer position')
+    group.add_argument('--finalizer', help='Unique skill name, without a path prefix')
+    p.add_argument('--process', default='pr-fix')
     p.add_argument('--run', required=True)
     p.add_argument('--upstream')
+    p = sub.add_parser('invocation-spec', help='Bind a configured invocation to a managed native task')
+    p.add_argument('--definition', type=Path, required=True)
+    p.add_argument('--process', required=True)
+    p.add_argument('--kind', choices=['coordinator', 'task', 'reviewer'], default='coordinator')
+    p.add_argument('--task', help='Purpose name in the process tasks map; required with --kind task')
+    p.add_argument('--index', type=int)
+    p.add_argument('--upstream')
+    p = sub.add_parser('reconcile-hooks', help='Record reconciled effects before changing a retained hook list')
+    p.add_argument('--process', default='pr-fix')
+    p.add_argument('--phase', choices=CYCLE_PHASES, required=True)
+    p.add_argument('--run', required=True)
+    p.add_argument('--cycle', required=True)
+    p.add_argument('--upstream')
+    p.add_argument('--expected', required=True, help='Observed phase snapshot hash from status')
+    p.add_argument('--reason', required=True)
     p = sub.add_parser('status')
     p.add_argument('--spec', type=Path, action='append', default=[])
     p.add_argument('--compact', action='store_true', help='Replace run progress with counts and references')
@@ -121,24 +151,40 @@ def main():
         return
     if args.command == 'hook-spec':
         result = make_hook_spec(repository=args.repository, pr=args.pr, run=args.run,
-                                cycle=args.cycle, phase=args.phase, hook_id=args.hook_id,
+                                cycle=args.cycle, phase=args.phase, index=args.index, process=args.process,
                                 definition=read(args.definition), upstream=args.upstream)
         print(json.dumps(result, sort_keys=True))
         return
     if args.command == 'finalizer-plan':
         loaded = effective(args.repository, args.upstream)
-        print(json.dumps({'groups': finalizer_groups(loaded['settings']['finalizers'],
-                                                   role_skills=loaded['settings']['skills'].values()),
+        print(json.dumps({'groups': finalizer_groups(loaded['settings']['processes'][args.process].get('finalizers', [])),
                           'sources': loaded['sources']}, sort_keys=True))
         return
     if args.command == 'finalizer-spec':
         result = make_finalizer_spec(repository=args.repository, pr=args.pr, run=args.run,
-                                     finalizer=args.finalizer, definition=read(args.definition),
+                                     finalizer=args.finalizer, index=args.index, process=args.process, definition=read(args.definition),
                                      upstream=args.upstream)
         print(json.dumps(result, sort_keys=True))
         return
+    if args.command == 'invocation-spec':
+        result = make_invocation_spec(repository=args.repository, pr=args.pr, process=args.process,
+                                      kind=args.kind, task=args.task, index=args.index, definition=read(args.definition),
+                                      upstream=args.upstream)
+        print(json.dumps(result, sort_keys=True))
+        return
+    if args.command == 'skill-spec':
+        result = skill_config.make_spec(repository=args.repository, pr=args.pr, skill=args.skill,
+                                        kind=args.kind, index=args.index, definition=read(args.definition),
+                                        upstream=args.upstream, run=args.run,
+                                        options=read(args.options) if args.options else None)
+        print(json.dumps(result, sort_keys=True))
+        return
     store = Store(args.repository, args.pr, checkout=args.checkout)
-    if args.command == 'status':
+    if args.command == 'reconcile-hooks':
+        loaded = effective(args.repository, args.upstream)
+        snapshot = hook_phase(loaded['settings'], args.process, args.run, args.cycle, args.phase)
+        result = store.reconcile_hooks(snapshot, args.expected, args.reason)
+    elif args.command == 'status':
         result = store.status([read(p) for p in args.spec], compact=args.compact, run=args.run, explain=args.explain)
     elif args.command == 'continue-run':
         result = store.continue_run(run=args.run, request_id=args.request_id,

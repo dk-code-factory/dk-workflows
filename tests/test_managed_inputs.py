@@ -82,8 +82,8 @@ def test_handoff_rejects_unscoped_or_ambiguous_decisions(workflow, change):
 def test_settings_facade_preserves_domain_precedence_and_reads_identity_once(monkeypatch):
     calls = []
     monkeypatch.setattr(settings, 'identities', lambda *args: calls.append(args) or CHAIN)
-    write(config.path(), {'skills': {'cleanup': 'team:cleanup'}})
-    write(config.path(REPO), {'incoming_review': {'post': False}})
+    write(config.path(), {'processes': {'pr-fix': {'tasks': {'organize_commits': 'team:cleanup'}}}})
+    write(config.path(REPO), {'processes': {'pr-review': {'permissions': {'post_review': False}}}})
     write(settings.domain_path('rules', 'user'), {'rules': [{'text': 'Global rule'}]})
     write(settings.domain_path('rules', CHAIN[1]), {'rules': [{'text': 'Upstream rule'}]})
     write(settings.domain_path('drafting', 'user'), {'commit_message': 'team:commit', 'issue': 'team:issue'})
