@@ -1,251 +1,413 @@
-"""Workflow settings managed alongside PR policies by the dk-config skill."""
+"""Process configuration and shared native invocation definitions."""
+from copy import deepcopy
+from pathlib import Path
+import os
 import re
+
+import invocation
 from state import digest, make_spec, read
 from shared.storage_paths import location
 
+# Compatibility process views are derived from the owning skill defaults.
+# New callers use skill_config.effective/select and ordered invocation plans.
+import skill_config
+
 CYCLE_PHASES = ('before_cycle', 'after_cycle')
-FINALIZER_ROLES = ('cleanup', 'decisions', 'description', 'reply', 'ci', 'publish')
+_FIX = skill_config.defaults('dk-workflows:dk-pr-fix')
+_REVIEW = skill_config.defaults('dk-workflows:dk-pr-review')
+LIMITS = _FIX['limits']
+PERMISSIONS = tuple(key for key in _FIX['permissions'] if key != 'merge_pr')
+FINALIZER_DEFAULTS = _FIX['finalizers']
+_LEGACY_TASK_NAMES = ('read_feedback', 'collect_decisions', 'address_feedback', 'split_scope',
+                      'review_changes', 'organize_commits', 'draft_commit_message',
+                      'update_description', 'reply_to_feedback', 'check_ci',
+                      'classify_ci_failures', 'publish_pr_actions')
+_LEGACY_SKILLS = ('dk-pr-feedback-read', 'dk-pr-decisions', 'dk-pr-feedback-address', 'dk-pr-split',
+                  'dk-pr-reviewers-run', 'dk-commit-split', 'dk-commit-message', 'dk-pr-description',
+                  'dk-pr-feedback-reply', 'dk-ci', 'dk-ci-flakes', 'dk-pr-publish')
+FIX_TASKS = {task: {'skill': 'dk-workflows:' + name, 'options': {}, 'required': True}
+             for task, name in zip(_LEGACY_TASK_NAMES, _LEGACY_SKILLS)}
+
+_REVIEW_TASKS = dict(zip(('read_feedback', 'review_changes', 'verify_findings', 'post_review'), _REVIEW['tasks']))
+_REVIEW_TASKS.update(dict(zip(('approve_fork_ci', 'check_ci', 'publish_pr_actions'), _REVIEW['finalizers'])))
+_REVIEW_TASKS['classify_ci_failures'] = {'skill': 'dk-workflows:dk-ci-flakes', 'options': {}, 'required': True}
+DEFAULTS = {
+    'schema_version': 1, 'accounts': {'personal': []}, 'skill_defaults': {},
+    'processes': {
+        'pr-iter': {'coordinator': 'dk-workflows:dk-pr-iter', 'routes': {'own_pr': 'pr-fix', 'other_pr': 'pr-review'}},
+        'pr-fix': {'coordinator': 'dk-workflows:dk-pr-fix', 'tasks': FIX_TASKS,
+                   'limits': deepcopy(LIMITS), 'permissions': _FIX['permissions'],
+                   'finalizers': FINALIZER_DEFAULTS, 'hooks': {phase: [] for phase in CYCLE_PHASES}},
+        'pr-review': {'coordinator': 'dk-workflows:dk-pr-review', 'tasks': _REVIEW_TASKS,
+                      'limits': {**LIMITS, **_REVIEW['limits']}, 'permissions': _REVIEW['permissions'],
+                      'hooks': {phase: [] for phase in CYCLE_PHASES}},
+        'commit-message': {'coordinator': 'dk-workflows:dk-commit-message'},
+        'issue': {'coordinator': 'dk-workflows:dk-issue'},
+        'pr-reviewers-run': {'coordinator': 'dk-workflows:dk-pr-reviewers-run'},
+    }, 'extensions': {},
+}
 
 
-def finalizer_groups(finalizers, *, role_skills=()):
-    """Validate groups, preserving supplied role identities in derived defaults."""
+def finalizer_groups(finalizers):
     if not isinstance(finalizers, list):
-        raise ValueError('Finalizers must be an ordered list')
-    role_references = {'/skill/' + skill for skill in role_skills}
-    groups, seen = [], set()
+        raise ValueError('Finalizers must be an ordered invocation list')
+    groups = []
     for entry in finalizers:
-        group = entry if isinstance(entry, list) else [entry]
+        group = entry['parallel'] if isinstance(entry, dict) and set(entry) == {'parallel'} else entry if isinstance(entry, list) else [entry]
         if not group:
             raise ValueError('Parallel finalizer groups must not be empty')
-        for reference in group:
-            if (not isinstance(reference, str) or (reference not in role_references and not re.fullmatch(
-                    r'/skill/[A-Za-z0-9][A-Za-z0-9_.-]*:[A-Za-z0-9][A-Za-z0-9_.-]*', reference))):
-                raise ValueError('Finalizers require /skill/PLUGIN:SKILL strings; groups cannot nest')
-            if reference in seen:
-                raise ValueError('Finalizer skills must be unique across the entire list')
-            seen.add(reference)
-        groups.append(list(group))
+        for value in group:
+            call = invocation.normalize(value)
+        groups.append(deepcopy(group))
     return groups
-
-DEFAULTS = {
-    'reviewers': [],
-    'skills': {
-        'feedback': 'dk-workflows:dk-pr-feedback-address',
-        'decisions': 'dk-workflows:dk-pr-decisions',
-        'description': 'dk-workflows:dk-pr-description',
-        'reply': 'dk-workflows:dk-pr-feedback-reply',
-        'partition': 'dk-workflows:dk-pr-split',
-        'cleanup': 'dk-workflows:dk-commit-split',
-        'ci': 'dk-workflows:dk-ci',
-        'ci_approve': 'dk-workflows:dk-ci-approve',
-        'flaky_tests': 'dk-workflows:dk-ci-flakes',
-        'publish': 'dk-workflows:dk-pr-publish',
-        'read_feedback': 'dk-workflows:dk-pr-feedback-read',
-        'run_reviewers': 'dk-workflows:dk-pr-reviewers-run',
-        'post_review': 'dk-workflows:dk-pr-review-post',
-    },
-    'iteration': {'max_cycles': 5, 'same_cycle_retries': 1, 'ci_repairs_per_cycle': 5,
-                  'ci_reruns_per_head': 3},
-    'domain_settings': {},
-    'cycle_hooks': {phase: [] for phase in CYCLE_PHASES},
-    'identities': [],
-    'incoming_review': {'post': True, 'approve_ci': True, 'approve': False, 'merge': False,
-                        'merge_method': 'squash'},
-}
-DEFAULTS['finalizers'] = ['/skill/' + DEFAULTS['skills'][role] for role in FINALIZER_ROLES]
 
 
 def validate(settings):
-    if not isinstance(settings, dict) or set(settings) - DEFAULTS.keys():
-        raise ValueError('Unknown workflow setting')
-    if not isinstance(settings.get('reviewers', []), list):
-        raise ValueError('Reviewers must be a list')
-    for key in ('skills', 'domain_settings'):
-        if not isinstance(settings.get(key, {}), dict):
-            raise ValueError(key + ' must be an object')
-    import copy
-    settings = copy.deepcopy(settings)
-    if 'finalizers' in settings:
-        finalizer_groups(settings['finalizers'])
-    for reviewer in settings.get('reviewers', []):
-        if (not isinstance(reviewer, dict) or set(reviewer) - {'skill', 'required', 'options'}
-                or not isinstance(reviewer.get('skill'), str) or not reviewer['skill']
-                or type(reviewer.get('required', True)) is not bool
-                or not isinstance(reviewer.get('options', {}), dict)):
-            raise ValueError('Reviewer requires skill, optional required boolean and execution options')
-    reviewers = settings.get('reviewers', [])
-    if not isinstance(reviewers, list) or len({x['skill'] for x in reviewers}) != len(reviewers):
-        raise ValueError('Reviewers must be a list of unique skills')
-    for role, skill in settings.get('skills', {}).items():
-        if role not in DEFAULTS['skills'] or not isinstance(skill, str) or not skill:
-            raise ValueError('Unknown role or empty selected skill')
-    if 'iteration' in settings and settings['iteration'] != DEFAULTS['iteration']:
-        raise ValueError('Iteration limits are fixed')
-    for owner, reference in settings.get('domain_settings', {}).items():
-        if not isinstance(owner, str) or not isinstance(reference, str) or not reference:
-            raise ValueError('Domain settings must be owner-to-reference strings')
-    hooks = settings.get('cycle_hooks', {})
-    if not isinstance(hooks, dict) or set(hooks) - set(CYCLE_PHASES):
-        raise ValueError('Cycle hooks require before_cycle or after_cycle lists')
-    for phase, entries in hooks.items():
-        if not isinstance(entries, list):
-            raise ValueError(phase + ' must be an ordered list')
-        ids = set()
-        for hook in entries:
-            if (not isinstance(hook, dict)
-                    or set(hook) - {'id', 'instructions', 'skill', 'options'}
-                    or not isinstance(hook.get('id'), str)
-                    or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', hook['id'])
-                    or hook['id'] in ids
-                    or not isinstance(hook.get('instructions'), str)
-                    or not hook['instructions'].strip() or '\x00' in hook['instructions']
-                    or ('skill' in hook and (not isinstance(hook['skill'], str)
-                                            or not hook['skill'].strip()))
-                    or not isinstance(hook.get('options', {}), dict)):
-                raise ValueError('Cycle hooks require unique ids, original instructions, '
-                                 'an optional skill and object options')
-            ids.add(hook['id'])
-    identities = settings.get('identities', [])
-    if (not isinstance(identities, list) or any(
-            not isinstance(identity, dict) or set(identity) != {'host', 'id'}
-            or not isinstance(identity['host'], str)
-            or not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?', identity['host'])
-            or type(identity['id']) is not int or identity['id'] <= 0
-            for identity in identities)):
-        raise ValueError('Personal identities require a GitHub host and positive numeric account id')
-    for identity in identities:
-        identity['host'] = identity['host'].lower()
-    if len({(v['host'], v['id']) for v in identities}) != len(identities):
-        raise ValueError('Personal identities must be unique per host/account')
-    policy = settings.get('incoming_review', {})
-    if (not isinstance(policy, dict) or set(policy) - DEFAULTS['incoming_review'].keys()
-            or any(type(value) is not bool for key, value in policy.items() if key != 'merge_method')
-            or policy.get('merge_method', 'squash') not in {'squash', 'merge'}):
-        raise ValueError('Incoming-review policy requires boolean actions and squash or merge method')
-    return settings
+    if not isinstance(settings, dict) or set(settings) - (DEFAULTS.keys() | {'$schema'}):
+        raise ValueError('Unknown workflow setting; use the process configuration format')
+    result = deepcopy(settings)
+    if '$schema' in result and not invocation.text(result['$schema']):
+        raise ValueError('$schema must be a nonempty schema reference')
+    if 'schema_version' in result and (type(result['schema_version']) is not int or result['schema_version'] != 1):
+        raise ValueError('Unsupported configuration schema_version')
+    accounts = result.get('accounts', {})
+    if not isinstance(accounts, dict) or set(accounts) - {'personal'}:
+        raise ValueError('Accounts accept a personal account list')
+    personal = accounts.get('personal', [])
+    if not isinstance(personal, list):
+        raise ValueError('Personal accounts must be a list')
+    seen = set()
+    for account in personal:
+        if (not isinstance(account, dict) or set(account) != {'host', 'id'}
+                or not isinstance(account['host'], str)
+                or not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?', account['host'])
+                or type(account['id']) is not int or account['id'] <= 0):
+            raise ValueError('Personal accounts require host and positive numeric id')
+        account['host'] = account['host'].lower()
+        key = (account['host'], account['id'])
+        if key in seen:
+            raise ValueError('Personal accounts must be unique per host/account')
+        seen.add(key)
+    defaults = result.get('skill_defaults', {})
+    if not isinstance(defaults, dict):
+        raise ValueError('skill_defaults must be a skill-to-settings object')
+    for skill, value in defaults.items():
+        invocation.skill_name(skill)
+        invocation.validate_settings(value)
+        skill_config.validate(skill, value.get('options', {}))
+    processes = result.get('processes', {})
+    if not isinstance(processes, dict):
+        raise ValueError('Processes must be an object')
+    for name, process in processes.items():
+        if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', name):
+            raise ValueError('Invalid process name')
+        if not isinstance(process, dict) or set(process) - {'coordinator', 'tasks', 'finalizers', 'limits', 'permissions', 'hooks', 'routes'}:
+            raise ValueError('Unknown process setting')
+        if 'coordinator' in process:
+            invocation.validate(process['coordinator'])
+        if 'finalizers' in process:
+            finalizer_groups(process['finalizers'])
+        if not isinstance(process.get('tasks', {}), dict):
+            raise ValueError('Process tasks must map purpose names to invocations')
+        for task, call in process.get('tasks', {}).items():
+            if not isinstance(task, str) or not re.fullmatch(r'[a-z][a-z0-9]*(?:_[a-z0-9]+)*', task):
+                raise ValueError('Task names must describe their purpose in snake_case')
+            invocation.validate(call)
+        limits = process.get('limits', {})
+        if not isinstance(limits, dict) or set(limits) - LIMITS.keys() or any(
+                type(value) is not int or value < (1 if key == 'review_cycles' else 0)
+                or value > LIMITS[key] for key, value in limits.items()):
+            raise ValueError('Process limits must be integers within the retained runtime ceilings; review_cycles must be positive')
+        permissions = process.get('permissions', {})
+        if (not isinstance(permissions, dict) or set(permissions) - (set(PERMISSIONS) | {'merge_pr'})
+                or any(type(value) is not bool for key, value in permissions.items() if key != 'merge_pr')):
+            raise ValueError('Process permissions must be known boolean permissions')
+        merging = permissions.get('merge_pr', {})
+        if (not isinstance(merging, dict) or set(merging) - {'enabled', 'method'}
+                or type(merging.get('enabled', False)) is not bool
+                or merging.get('method', 'squash') not in {'squash', 'merge'}):
+            raise ValueError('Merge policy accepts enabled and squash or merge method')
+        hooks = process.get('hooks', {})
+        if not isinstance(hooks, dict) or set(hooks) - set(CYCLE_PHASES):
+            raise ValueError('Hooks accept before_cycle and after_cycle lists')
+        for entries in hooks.values():
+            if not isinstance(entries, list):
+                raise ValueError('Hooks must be ordered invocation lists')
+            for call in entries:
+                invocation.validate(call)
+        routes = process.get('routes', {})
+        if not isinstance(routes, dict) or set(routes) - {'own_pr', 'other_pr'} or any(
+                not isinstance(route, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', route)
+                for route in routes.values()):
+            raise ValueError('Routes must name configured processes')
+    if not isinstance(result.get('extensions', {}), dict):
+        raise ValueError('Extensions must be an object')
+    return result
 
 
 def path(repository=None):
     return location('config')/((digest(repository.lower()) if repository else 'user') + '.json')
 
 
-def effective(repository, upstream=None):
-    import copy
-    result = copy.deepcopy(DEFAULTS)
-    sources = []
-    explicit_finalizers = False
-    chain = [None] + ([upstream] if upstream else []) + [repository]
-    for repo in chain:
+def _merge_settings(base, layer):
+    result = invocation.merge(base, layer)
+    for skill, settings in layer.get('skill_defaults', {}).items():
+        if 'policy' in settings.get('options', {}):
+            result['skill_defaults'][skill]['options']['policy'] = deepcopy(settings['options']['policy'])
+    return result
+
+
+def effective(repository, upstream=None, *, expanded=True):
+    result, sources = deepcopy(DEFAULTS) if expanded else {}, []
+    for repo in [None] + ([upstream] if upstream else []) + [repository]:
         source = path(repo)
-        if not source.exists():
-            continue
-        settings = validate(read(source))
-        explicit_finalizers |= 'finalizers' in settings
-        for key, value in settings.items():
-            if key in {'skills', 'domain_settings', 'incoming_review', 'cycle_hooks'}:
-                result[key].update(value)
-            else:
-                result[key] = value
-        sources.append(str(source))
-    if not explicit_finalizers:
-        # Existing role overrides continue to select the default ending. A
-        # shared implementation runs once with all of its assigned duties.
-        result['finalizers'] = list(dict.fromkeys(
-            '/skill/' + result['skills'][role] for role in FINALIZER_ROLES))
-    finalizer_groups(result['finalizers'], role_skills=result['skills'].values())
+        if source.exists():
+            settings = validate(read(source))
+            result = _merge_settings(result, {key: value for key, value in settings.items() if key != '$schema'})
+            sources.append(str(source))
+    if expanded:
+        # Preserve the existing process API while new settings live with skills.
+        for process in ('pr-fix', 'pr-review'):
+            owned = skill_config.effective('dk-workflows:dk-' + process, repository, upstream, domain=False)['options']
+            for key in ('permissions', 'limits', 'finalizers'):
+                if key in owned and (key != 'finalizers' or process == 'pr-fix'):
+                    result['processes'][process][key] = deepcopy(owned[key])
+        result['accounts']['personal'] = skill_config.effective('dk-workflows:dk-pr-iter', repository, upstream, domain=False)['options']['personal_accounts']
+        for name, process in result['processes'].items():
+            if 'coordinator' not in process:
+                raise ValueError('Custom process requires a coordinator invocation: ' + name)
+            for route in process.get('routes', {}).values():
+                if route not in result['processes']:
+                    raise ValueError('Route selects an unknown process: ' + route)
     return {'settings': result, 'sources': sources}
 
 
-def preflight(settings, available, *, workflow='fix'):
-    """The agent supplies native resolved identities; no host registry inspection."""
-    if not isinstance(available, list) or any(not isinstance(x, str) for x in available):
+def calls(settings, process=None, available=None):
+    def visit(value, location, ancestors=()):
+        raw = invocation.normalize(value)
+        reference = raw.get('skill')
+        candidates = [name for name in (available or []) if reference and invocation.matches(reference, name)]
+        identity = candidates[0] if len(candidates) == 1 else None
+        call = invocation.configured(raw, settings['skill_defaults'], identity=identity)
+        yield location, call
+        reviewers = call.get('options', {}).get('reviewers', [])
+        signature = digest(call)
+        if reviewers and signature in ancestors:
+            raise ValueError('Recursive reviewer selection: ' + str(reference))
+        for index, reviewer in enumerate(reviewers):
+            yield from visit(reviewer, location + '/options/reviewers/' + str(index), (*ancestors, signature))
+    for name, entry in settings['processes'].items():
+        if process is not None and name != process:
+            continue
+        prefix = '/processes/' + name
+        yield from visit(entry['coordinator'], prefix + '/coordinator')
+        for task, call in entry.get('tasks', {}).items():
+            yield from visit(call, prefix + '/tasks/' + task)
+        for group_index, group in enumerate(finalizer_groups(entry.get('finalizers', []))):
+            for index, call in enumerate(group):
+                yield from visit(call, prefix + '/finalizers/' + str(group_index) + '/' + str(index))
+        for phase, hooks in entry.get('hooks', {}).items():
+            for index, call in enumerate(hooks):
+                yield from visit(call, prefix + '/hooks/' + phase + '/' + str(index))
+
+
+def preflight(settings, available, capabilities=None, *, process=None):
+    if process is not None and process not in settings['processes']:
+        raise ValueError('Unknown process')
+    if not isinstance(available, list) or any(not isinstance(item, str) for item in available):
         raise ValueError('Available skill identities must be a list of strings')
-    if workflow not in {'fix', 'review'}:
-        raise ValueError('Preflight workflow must be fix or review')
-    selected = set(settings['skills'].values()) | {r['skill'] for r in settings['reviewers']}
-    selected.update(hook['skill'] for entries in settings.get('cycle_hooks', {}).values()
-                    for hook in entries if 'skill' in hook)
-    if workflow == 'fix':
-        selected.update(reference.removeprefix('/skill/')
-                        for group in finalizer_groups(settings.get('finalizers', DEFAULTS['finalizers']),
-                                                      role_skills=settings['skills'].values())
-                        for reference in group)
-    missing = sorted(selected - set(available))
-    return {'ready': not missing, 'missing_selected_skills': missing}
+    return invocation.preflight(list(calls(settings, process, available)), available, capabilities)
 
 
-def _occurrence_spec(repository, pr, loaded, definition, occurrence, *, responsibility,
-                     prefix, options, assigned_instructions=None):
-    """Shared capture for hooks and finalizers; preserve their v2 fingerprints."""
-    allowed = {'skill_identity', 'resources', 'instructions', 'inputs', 'options',
-               'git', 'governing_inputs_complete', 'cacheable', 'native_review'}
-    if assigned_instructions is None:
-        allowed.add('assigned_instructions')
-    if not isinstance(definition, dict) or set(definition) - allowed:
-        raise ValueError(prefix + ' definitions supply execution resources, assignment and inputs')
-    if not isinstance(definition.get('options', {}), dict):
-        raise ValueError(prefix + ' execution options must be an object')
-    instructions = definition.get('instructions', {})
-    if not isinstance(instructions, dict):
-        raise ValueError(prefix + ' instructions must be a label-to-resource-path map')
-    instructions = dict(instructions)
-    for index, source in enumerate(loaded['sources']):
-        label = prefix + '_configuration_' + str(index)
-        if label in instructions:
-            raise ValueError('Reserved ' + prefix + ' configuration input label')
-        instructions[label] = source
-    execution = dict(definition)
-    execution.update(responsibility=responsibility + ':' + digest(occurrence),
-                     instructions=instructions, options=options)
-    if assigned_instructions is not None:
-        execution['assigned_instructions'] = assigned_instructions
-    return make_spec(repository=repository, pr=pr, **execution)
+def reviewers(settings, process):
+    entry = settings['processes'][process]
+    coordinator = entry.get('tasks', {}).get('review_changes', entry['coordinator'])
+    call = invocation.configured(coordinator, settings['skill_defaults'])
+    return call.get('options', {}).get('reviewers', skill_config.defaults('dk-workflows:dk-pr-reviewers-run')['reviewers'])
 
 
-def make_finalizer_spec(*, repository, pr, run, finalizer, definition, upstream=None):
-    """Capture one configured finalizer; native agents execute the plan."""
-    if not isinstance(run, str) or not run.strip():
-        raise ValueError('Finalizer specs require the retained run id')
+def select(settings, process, kind='coordinator', index=None, phase=None, task=None):
+    if process not in settings['processes']:
+        raise ValueError('Unknown process')
+    entry = settings['processes'][process]
+    if kind == 'coordinator':
+        if task is not None or index is not None or phase is not None:
+            raise ValueError('Coordinator selection has no task, index or phase')
+        value = entry['coordinator']
+    elif kind == 'task':
+        if not isinstance(task, str) or task not in entry.get('tasks', {}):
+            raise ValueError('No configured task with this purpose name')
+        if index is not None or phase is not None:
+            raise ValueError('Named task selection has no index or phase')
+        value = entry['tasks'][task]
+    else:
+        if task is not None:
+            raise ValueError('Task name is only valid for named task selection')
+        if type(index) is not int or index < 0:
+            raise ValueError('Invocation selection requires a nonnegative index')
+        if kind == 'finalizer':
+            values = [value for group in finalizer_groups(entry.get('finalizers', [])) for value in group]
+        elif kind == 'hook' and phase in CYCLE_PHASES:
+            values = entry.get('hooks', {}).get(phase, [])
+        elif kind == 'reviewer':
+            values = reviewers(settings, process)
+        else:
+            raise ValueError('Unknown invocation selection')
+        if index >= len(values):
+            raise ValueError('No configured invocation at this index')
+        value = values[index]
+    return invocation.configured(value, settings['skill_defaults'])
+
+
+def make_invocation_spec(*, repository, pr, process, definition, kind='coordinator', index=None,
+                         phase=None, task=None, upstream=None):
+    """Bind the common invocation to explicit native resources without executing it."""
     loaded = effective(repository, upstream)
-    groups = finalizer_groups(loaded['settings']['finalizers'],
-                             role_skills=loaded['settings']['skills'].values())
-    if not any(finalizer in group for group in groups):
-        raise ValueError('No configured finalizer with this reference')
-    skill = finalizer.removeprefix('/skill/')
+    call = select(loaded['settings'], process, kind, index, phase, task)
     if not isinstance(definition, dict):
-        raise ValueError('Finalizer definitions supply resolved resources, assignment and execution inputs')
-    if definition.get('skill_identity') != skill:
-        raise ValueError('Resolve and supply the configured finalizer skill identity')
-    # Identity follows the skill across reorderings. Plan/context changes stale
-    # its evidence without hiding an unfinished claim behind a new task id.
-    occurrence = {'run': run, 'skill': skill}
-    return _occurrence_spec(repository, pr, loaded, definition, occurrence,
-        responsibility='finalizer', prefix='finalizer',
-        options={'finalization': {**occurrence, 'plan': loaded['settings']['finalizers']},
-                 'execution': definition.get('options', {})})
-
-
-def make_hook_spec(*, repository, pr, run, cycle, phase, hook_id, definition, upstream=None):
-    """Define one native hook occurrence; the caller claims and invokes it normally."""
-    if (phase not in CYCLE_PHASES or not isinstance(run, str) or not run.strip()
-            or not isinstance(cycle, str) or not cycle.strip()):
-        raise ValueError('Hook specs require a phase and retained run and cycle ids')
-    loaded = effective(repository, upstream)
-    hook = next((entry for entry in loaded['settings']['cycle_hooks'][phase]
-                 if entry['id'] == hook_id), None)
-    if hook is None:
-        raise ValueError('No configured hook for this phase and id')
-    if not isinstance(definition, dict):
-        raise ValueError('Hook definitions supply execution resources and inputs; '
-                         'identity and instructions come from the configured occurrence')
+        raise ValueError('Invocation definition must be an object')
     runner = definition.get('skill_identity')
-    if hook.get('skill'):
-        if runner != hook['skill']:
-            raise ValueError('Resolve and supply the configured hook skill identity')
-    elif runner not in {'dk-workflows:dk-pr-fix', 'dk-workflows:dk-pr-review'}:
-        raise ValueError('Instruction hooks run in the owning PR workflow agent')
-    occurrence = {'run': run, 'cycle': cycle, 'phase': phase, 'id': hook_id}
-    return _occurrence_spec(repository, pr, loaded, definition, occurrence,
-        responsibility='cycle-hook', prefix='cycle_hook', assigned_instructions=hook['instructions'],
-        options={'cycle_hook': occurrence, 'configured': hook.get('options', {}),
-                 'execution': definition.get('options', {})})
+    if call.get('skill') and (not isinstance(runner, str) or not invocation.matches(call['skill'], runner)):
+        raise ValueError('Resolve and supply the configured invocation skill identity')
+    if not call.get('skill'):
+        owner = invocation.normalize(loaded['settings']['processes'][process]['coordinator']).get('skill')
+        if not isinstance(runner, str) or (owner and not invocation.matches(owner, runner)):
+            raise ValueError('Instruction-only invocations use the owning process identity')
+    call = invocation.configured(call, loaded['settings']['skill_defaults'], identity=runner)
+    execution = deepcopy(definition)
+    if kind == 'task':
+        execution.setdefault('responsibility', 'finding-verification' if task == 'verify_findings' else task)
+    instructions = execution.get('instructions', {})
+    if not isinstance(instructions, dict):
+        raise ValueError('Instructions must be a label-to-resource-path map')
+    instructions = dict(instructions)
+    resources = execution.get('resources', {})
+    if not isinstance(resources, dict):
+        raise ValueError('Resources must be a label-to-resource-path map')
+    resources = dict(resources)
+    for label, resource in {
+            'invocation_contract': Path(__file__).with_name('invocation.py'),
+            'invocation_schema': Path(__file__).parents[1]/'schemas/invocation.schema.json',
+            'configuration_contract': Path(__file__),
+            'configuration_schema': Path(__file__).parents[1]/'schemas/config.schema.json'}.items():
+        if label in resources:
+            raise ValueError('Reserved invocation resource label')
+        resources[label] = str(resource)
+    if not isinstance(execution.get('options', {}), dict):
+        raise ValueError('Invocation execution options must be an object')
+    execution.update(instructions=instructions, resources=resources,
+        options={'invocation': call, 'configured': call.get('options', {}),
+                 'process_limits': loaded['settings']['processes'][process].get('limits', dict(LIMITS)),
+                 'execution': execution.get('options', {})})
+    if 'instructions' in call:
+        execution['assigned_instructions'] = invocation.additional_instructions(
+            execution.get('assigned_instructions', ''), call['instructions'])
+    if kind == 'task':
+        execution['options']['configured_task'] = task
+    spec = make_spec(repository=repository, pr=pr, **execution)
+    skill_config.bind_options(spec, call, repository, upstream)
+    spec['configuration'] = {
+        'sources': [str(path(repo)) for repo in [None] + ([upstream] if upstream else []) + [repository]],
+        'process': process, 'kind': kind, 'task': task, 'index': index, 'phase': phase,
+        'upstream': upstream}
+    if kind != 'reviewer' and not (kind == 'task' and task == 'verify_findings'):
+        spec['options']['process_permissions'] = loaded['settings']['processes'][process].get('permissions', {})
+    return spec
+
+
+def check_selection(spec):
+    """Check only explicit live configuration inputs, preserving unrelated reuse."""
+    selection = spec.get('configuration')
+    if selection is None:
+        return
+    if (not isinstance(selection, dict)
+            or set(selection) not in ({'sources', 'process', 'kind', 'task', 'index', 'phase'},
+                                       {'sources', 'process', 'kind', 'task', 'index', 'phase', 'upstream'})
+            or not isinstance(selection['sources'], list)
+            or any(not isinstance(source, str) or not Path(source).is_absolute() for source in selection['sources'])):
+        raise ValueError('Malformed explicit configuration selection')
+    settings = deepcopy(DEFAULTS)
+    for source in selection['sources']:
+        if Path(source).exists():
+            value = validate(read(source))
+            settings = _merge_settings(settings, {key: item for key, item in value.items() if key != '$schema'})
+    if 'upstream' in selection:
+        settings = effective(spec['repository'], selection['upstream'])['settings']
+    try:
+        call = select(settings, selection['process'], selection['kind'], selection['index'], selection['phase'], selection['task'])
+        call = invocation.configured(call, settings['skill_defaults'], identity=spec['skill']['identity'])
+        process = settings['processes'][selection['process']]
+    except (ValueError, KeyError) as exc:
+        raise ValueError('Inputs changed: configured invocation no longer resolves') from exc
+    options = spec['options']
+    changed = (call != options.get('invocation')
+               or process.get('limits', dict(LIMITS)) != options.get('process_limits'))
+    if 'process_permissions' in options:
+        changed = changed or process.get('permissions', {}) != options['process_permissions']
+    if 'hook_phase' in options:
+        occurrence = options['hook_phase']['occurrence']
+        changed = changed or hook_phase(settings, selection['process'], occurrence['run'],
+                                       occurrence['cycle'], selection['phase']) != options['hook_phase']
+    if 'finalization' in options:
+        changed = changed or process.get('finalizers', []) != options['finalization']['plan']
+    if changed:
+        raise ValueError('Inputs changed: configured invocation, policy or hook list changed')
+
+
+def make_finalizer_spec(*, repository, pr, run, definition, finalizer=None, index=None,
+                        process='pr-fix', upstream=None):
+    if not invocation.text(run):
+        raise ValueError('Finalizer specs require the retained run id')
+    if not isinstance(definition, dict):
+        raise ValueError('Invocation definition must be an object')
+    loaded = effective(repository, upstream)
+    plan = loaded['settings']['processes'][process].get('finalizers', [])
+    flat = [value for group in finalizer_groups(plan) for value in group]
+    if finalizer is not None:
+        matches = [position for position, value in enumerate(flat)
+                   if invocation.normalize(value).get('skill') == finalizer]
+        if len(matches) != 1:
+            raise ValueError('No configured finalizer with this reference')
+        index = matches[0]
+    call = select(loaded['settings'], process, 'finalizer', index)
+    runner = definition.get('skill_identity') if isinstance(definition, dict) else None
+    occurrence = {'run': run, 'skill': runner or call.get('skill') or digest(call)}
+    references = [invocation.normalize(item).get('skill') for item in flat]
+    if call.get('skill') and references.count(call['skill']) > 1:
+        occurrence['ordinal'] = references[:index].count(call['skill'])
+    if not call.get('skill'):
+        occurrence['index'] = index
+    spec = make_invocation_spec(repository=repository, pr=pr, process=process, kind='finalizer',
+        index=index, upstream=upstream, definition={**definition, 'responsibility': 'finalizer:' + digest(occurrence)})
+    spec['options']['finalization'] = {**occurrence, 'plan': deepcopy(plan)}
+    return spec
+
+
+def hook_phase(settings, process, run, cycle, phase):
+    if phase not in CYCLE_PHASES or not invocation.text(run) or not invocation.text(cycle):
+        raise ValueError('Hook phase requires retained run and cycle ids')
+    if process not in settings['processes']:
+        raise ValueError('Unknown process')
+    entries = settings['processes'][process].get('hooks', {}).get(phase, [])
+    return {'occurrence': {'process': process, 'run': run, 'cycle': cycle, 'phase': phase},
+            'hooks': [select(settings, process, 'hook', position, phase) for position in range(len(entries))]}
+
+
+def make_hook_spec(*, repository, pr, run, cycle, phase, index, definition,
+                   process='pr-fix', upstream=None):
+    if phase not in CYCLE_PHASES or not invocation.text(run) or not invocation.text(cycle):
+        raise ValueError('Hook specs require a phase and retained run and cycle ids')
+    if not isinstance(definition, dict) or set(definition) - {
+            'skill_identity', 'resources', 'instructions', 'inputs', 'options', 'git',
+            'governing_inputs_complete', 'cacheable', 'native_review'}:
+        raise ValueError('Hook definitions supply execution resources and inputs')
+    loaded = effective(repository, upstream)
+    call = select(loaded['settings'], process, 'hook', index, phase)
+    occurrence = {'process': process, 'run': run, 'cycle': cycle, 'phase': phase, 'index': index}
+    spec = make_invocation_spec(
+        repository=repository, pr=pr, process=process, kind='hook', index=index, phase=phase,
+        upstream=upstream, definition={**definition, 'responsibility': 'cycle-hook:' + digest(occurrence),
+                                     'assigned_instructions': call.get('instructions', 'Execute the configured hook skill and return original evidence and explicit completion.')})
+    spec['options']['cycle_hook'] = occurrence
+    spec['options']['hook_phase'] = hook_phase(loaded['settings'], process, run, cycle, phase)
+    return spec

@@ -27,7 +27,7 @@ Include only when the template or consistent issues of the same type request the
 Without a template or style evidence:
 
 - Title: name the affected behavior and failure or desired outcome.
-- Body: `Problem`, `Expected behavior` and supported context or evidence.
+- Body: the configured `fallback_sections` (defaults `Problem` and `Expected behavior`) and supported context or evidence.
 - Include reproduction steps for bugs only when known.
 - For features, describe the missing capability before proposing implementation.
 

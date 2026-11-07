@@ -30,13 +30,15 @@ def settings(monkeypatch):
     return pr_config.main
 
 
-@pytest.mark.parametrize('value', [{'prompt': PROMPT}, {'skill': 'my-plugin:commit-policy'}, {'skill': 'local-policy'}])
+@pytest.mark.parametrize('value', [{'prompt': PROMPT}, 'local:policy', {'skill': 'my-plugin:commit-policy'},
+    {'skill': 'local:policy', 'instructions': 'Return instructions only.',
+     'options': {'style': 'short'}, 'agent': {'model': 'chosen', 'reasoning_effort': 'high'}}])
 def test_policy_round_trip_reset_and_other_settings_unchanged(settings, tmp_path, value):
     rules = tmp_path/'rules.json'
     write(rules, {'rules': [{'text': 'Keep the original rule.'}]})
     settings(['rules', 'set', '--scope', 'user', '--file', str(rules)])
     write(policy.path('user').parent/'drafting.json', {'commit_message': 'team:message'})
-    write(config.path(), {'reviewers': [{'skill': 'team:review'}]})
+    write(config.path(), {'skill_defaults': {'dk-workflows:dk-pr-reviewers-run': {'options': {'reviewers': [{'skill': 'team:review'}]}}}})
     preserved = {p: p.read_bytes() for p in (
         policy.path('user').parent/'user/rules.json',
         policy.path('user').parent/'drafting.json', config.path())}
@@ -143,6 +145,25 @@ def report():
     return {'complete': True, 'findings': [], 'policy_prompt': PROMPT, 'blockers': []}
 
 
+@pytest.mark.parametrize('value', [{'prompt': 'Keep every logical commit.\n'}, {'skill': 'team:local-policy'}, None])
+def test_invocation_local_policy_reaches_spec_handoff_and_verification(context, value):
+    write(policy.path('user'), {'skill': 'team:saved-policy'})
+    original = policy.path('user').read_bytes()
+    local = {'policy': value}
+    context['skill_identity'] = value['skill'] if isinstance(value, dict) and 'skill' in value else 'dk-workflows:dk-commit-split'
+    spec = policy.policy_spec(chain=CHAIN, repository=REPO, pr=PR, definition=context, options=local)
+    supplied = policy.handoff(chain=CHAIN, spec=spec, report=report() if policy.provider(value) else None)
+    assert supplied['configuration'] == {'source': 'invocation', 'value': value}
+    expected = PROMPT if policy.provider(value) else (value or {}).get('prompt')
+    assert supplied['policy_prompt'] == expected
+    assert policy.verify(chain=CHAIN, repository=REPO, pr=PR, definition=context,
+                         supplied=supplied, options=local) == supplied
+    assert policy.path('user').read_bytes() == original
+    with pytest.raises(ValueError):
+        policy.verify(chain=CHAIN, repository=REPO, pr=PR, definition=context,
+                      supplied=supplied, options={'policy': {'prompt': 'Changed local assignment.'}})
+
+
 def finish(store, task, result=None):
     from native_review_observations import observations
     claim = store.start(task, run='run')['claim']
@@ -177,6 +198,30 @@ def test_selected_provider_handoff_and_unchanged_managed_reuse(context, tmp_path
     write(policy.path('user').parent/'drafting.json', {'issue_description': 'other:issue'})
     assert store.start(prepare(context), run='run')['action'] == 'reuse'
     assert store.start(cleanup, run='run')['action'] == 'reuse'
+
+
+@pytest.mark.parametrize('value', [
+    'team:policy',
+    {'skill': 'team:policy', 'instructions': 'Return policy instructions only.',
+     'options': {'style': 'short'}, 'agent': {'model': 'chosen', 'reasoning_effort': 'high'}},
+    {'instructions': 'Choose logical commit groups.', 'agent': {}},
+])
+def test_provider_uses_shared_invocation_and_preserves_controls(context, value):
+    import invocation
+    from state import capture
+    write(policy.path('user'), value)
+    call = invocation.normalize(value)
+    context['skill_identity'] = 'team:policy' if 'skill' in call else 'dk-workflows:dk-commit-split'
+    task = prepare(context)
+    assert task['options']['invocation'] == call
+    assert task['options']['configured'] == call.get('options', {})
+    assert context['assigned_instructions'] in task['task']['instructions']
+    if 'instructions' in call:
+        assert task['task']['instructions'].endswith(call['instructions'])
+    assert policy.handoff(chain=CHAIN, spec=task, report=report())['policy_prompt'] == PROMPT
+    fingerprint = capture(task)['fingerprint']
+    write(policy.path('user'), {**call, 'agent': {'model': 'different'}})
+    assert capture(prepare(context))['fingerprint'] != fingerprint
 
 
 @pytest.mark.parametrize('changed', ['configuration', 'provider', 'requirements', 'constraints', 'context', 'history'])
@@ -306,6 +351,24 @@ def test_public_commands_support_direct_provider_and_prompt_handoffs(context, tm
         write(source, {'prompt': 'Keep independent logical commits.'})
         command([*settings_cli, 'commit-policy', 'set', '--scope', 'user', '--file', str(source)])
         assert command([*prefix, 'verify', '--definition', str(definition), '--handoff', str(handoff_file)], False)['status'] == 'blocked'
+    command([*settings_cli, 'commit-policy', 'reset', '--scope', 'user'])
+    write(policy.path('user'), {'prompt': 'Saved policy A.'})
+    local_file = tmp_path/'local-options.json'
+    for value in ({'prompt': 'Local policy B.'}, {'skill': 'team:local-policy'}, None):
+        write(local_file, {'$schema': './config.schema.json', 'policy': value})
+        local_cli = [*prefix, '--options', str(local_file)]
+        context['skill_identity'] = value['skill'] if isinstance(value, dict) and 'skill' in value else 'dk-workflows:dk-commit-split'
+        write(definition, context)
+        write(spec_file, command([*local_cli, 'spec', '--definition', str(definition)]))
+        args = ['--report', str(result_file)] if policy.provider(value) else []
+        supplied = command([*local_cli, 'handoff', '--spec', str(spec_file), *args])
+        write(handoff_file, supplied)
+        expected = PROMPT if policy.provider(value) else (value or {}).get('prompt')
+        assert supplied['policy_prompt'] == expected
+        assert supplied['configuration']['source'] == 'invocation'
+        assert command([*local_cli, 'verify', '--definition', str(definition), '--handoff', str(handoff_file)]) == supplied
+        write(local_file, {'policy': {'prompt': 'Changed local policy.'}})
+        assert command([*local_cli, 'handoff', '--spec', str(spec_file), *args], False)['status'] == 'blocked'
     command([*settings_cli, 'commit-policy', 'reset', '--scope', 'user'])
     assert command([*settings_cli, 'commit-policy', 'show'])['source'] == 'default'
 

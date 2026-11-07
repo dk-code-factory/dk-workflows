@@ -1,57 +1,64 @@
-# Cycle hooks
+# Legacy cycle hooks
 
 Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 
-Use `dk-config` to save ordered agent instructions or selected native skills before and after each new PR review cycle. Hooks apply to `dk-pr-fix` and `dk-pr-review`, including calls routed through `dk-pr-iter`. Standalone supporting skills do not invoke them.
+New skill-owned configuration places custom work directly in ordered task lists; see [skill-owned configuration](skill-configuration.md). This page documents the retained process-hook compatibility API. It does not add hidden hooks to skill-owned plans.
 
-For example, include this in the workflow settings JSON passed to `scripts/config.py --repository HOST/OWNER/REPO set --scope repo --file SETTINGS.json`:
+Hooks are ordered [invocations](invocations.md) before or after a new review cycle in `pr-fix` and `pr-review`, including routed calls. Standalone supporting skills do not run these hooks. Each list inherits independently; a supplied list replaces that phase and `[]` clears it.
 
 ```json
 {
-  "cycle_hooks": {
-    "before_cycle": [
-      {
-        "id": "refresh-context",
-        "instructions": "Read the current Decisions and list the constraints that apply to this review pass."
+  "processes": {
+    "pr-fix": {
+      "hooks": {
+        "before_cycle": [
+          {"instructions": "Read current Decisions and identify constraints for this pass."}
+        ],
+        "after_cycle": [
+          {
+            "skill": "team:check-invariants",
+            "instructions": "Check affected invariants and return evidence and completion.",
+            "options": {"focus": "changed-code"},
+            "agent": {"model": "gpt-6.1-sol", "reasoning_effort": "high"}
+          }
+        ]
       }
-    ],
-    "after_cycle": [
-      {
-        "id": "check-invariants",
-        "skill": "team:check-invariants",
-        "instructions": "Check the affected invariants and return evidence, findings and explicit completion.",
-        "options": {"focus": "changed-code"}
-      }
-    ]
+    }
   }
 }
 ```
 
-`set` replaces the entire selected scope: read its existing source file and preserve unrelated settings. IDs use letters, digits, dots, underscores or hyphens, starting with a letter or digit, and must be unique within a phase. Instructions are preserved verbatim. Each phase list replaces that phase from lower scopes; omitting a phase inherits it, and an empty list disables it. Missing selected skills block preflight just like missing reviewers. An instruction-only hook runs in the current workflow agent; a skill hook uses native skill tools with its exact instructions and configured options. Resolve and read the selected skill and its governing references before invoking it. Assign only the hook responsibility; never recursively launch the owning PR workflow.
+There are no user-supplied hook IDs. A string always selects a skill, such as `"team:check-invariants"`. Put a prompt in an `instructions` object. Presence of `agent` requests a separate native agent; otherwise instruction-only hooks run in the current process agent and skill hooks use normal native skill execution. Resolve every selected skill and verify requested agent controls in preflight before work.
 
 ## Boundaries
 
-| Phase | `dk-pr-fix` | `dk-pr-review` |
+| Phase | `pr-fix` | `pr-review` |
 | --- | --- | --- |
-| `before_cycle` | After inspection, initial feedback fixes and scope assessment, immediately before the review pass. | After inspection and pinning, immediately before discovery. |
-| `after_cycle` | After reviewer outputs, finding dispositions, justified fixes, their publication and scope refresh; before another review cycle or commit cleanup. | After discovery, independent verification and finding dispositions; before review publication, approval or merging. |
+| `before_cycle` | After inspection, initial feedback fixes and scope assessment, immediately before review. | After inspection and pinning, immediately before discovery. |
+| `after_cycle` | After successful review, finding dispositions, justified fixes, publication and scope refresh; before another cycle or cleanup. | After successful discovery, independent verification and finding dispositions; before review publication, approval or merging. |
 
-A cycle is one pass of review and its associated assessment/fixes or verification. Before opening a new cycle, inspect current reviewer coverage. If unchanged results cover the work, reuse them without starting a cycle or running hooks. Check the remaining retained review allowance, including any explicitly authorized [continuation grants](task-state.md#retained-budgets), before running any before hooks. Save the chosen cycle id before its first hook; an interrupted before phase resumes that same occurrence even if no reviewer has started yet. Reviewer claims still reserve the review cycle at their first actual invocation. A pending after phase from an already started pass must finish on resume, even if its reviewers are now reusable. A reviewer retry stays within the cycle and does not repeat completed hooks.
+Run each phase sequentially. Hooks are required by default. Failed, incomplete or interrupted required hooks block the next boundary. Report incomplete optional hooks separately; optional status never permits uncertain effects, stale coverage or incomplete mandatory checks to be ignored. `after_cycle` is a successful-cycle step, not a failure/finally handler. Save failed-cycle evidence without running its after phase.
 
-Run each phase list sequentially in configured order. A failed, incomplete or interrupted hook blocks the remaining hooks and the next boundary. Record its original outcome, stop and report the blocker; these are required steps, not best-effort notifications. `after_cycle` is a successful-cycle step, not a failure/finally handler. Save a failed cycle's evidence without running its after phase. New or changed instructions require reconciling pending work and its effects before continuing; removing a hook does not erase an unfinished claim.
+Reuse current reviewer results without opening a new cycle or running hooks. Before a new cycle, check its retained budget and save its cycle ID before the first hook. An interrupted before phase resumes that occurrence even when review has not started. A pending after phase must finish even when reviewers are now reusable. Same-cycle reviewer retries do not repeat completed hooks. Later cycles and new runs have their own occurrences.
 
-Hooks cannot expand publication, edit, approval or merge permission. Pass the invoking workflow's current constraints to each hook. Instruction hooks may call skills only after resolving them through the normal native process. After any hook changes source, instructions, discussion or scope, refresh affected inspection, scope and reviewer inputs. Invalidate stale review/verification coverage and use the remaining cycle budget. After hooks that change reviewed code require another review pass before cleanup or publication. Hooks never bypass final cleanup, CI or live completion checks.
+Hooks inherit the process's current constraints and cannot expand edit or publication permission. Pass those constraints and complete pinned inputs to the hook. Skill hooks receive their exact custom instructions and options alongside the selected skill guidance. After effects change source, scope, discussion or instructions, refresh affected inspection, scope, review, verification and CI inputs. An after hook that changes reviewed code requires another review pass within the remaining budget. Hooks never bypass cleanup or live completion checks.
 
-Only these two positions are configurable today. More precise placement would add named boundaries such as before/after inspection, scope assessment, cleanup and final CI. Those boundaries would also need occurrence identities and freshness rules for stages that repeat after changes. Arbitrary insertion between dependent actions requires an explicit ordering model and recovery rules.
+## Define and resume
 
-## Define, claim and resume a hook
+Define a hook by its zero-based list position:
 
-Use the shared [managed task lifecycle](task-state.md). Prepare one hook at a time, with the retained run/cycle, phase/id selector and resolved definition. The helper derives responsibility and assigned instructions from current configuration:
+```sh
+python3 PLUGIN_ROOT/scripts/dk.py --repository HOST/OWNER/REPO --pr PR_URL \
+  hook-spec --process pr-fix --run RUN_ID --cycle CYCLE_ID \
+  --phase before_cycle --index 0 --definition /private/hook-definition.json
+```
+
+Supply the native resolved `skill_identity`, `resources`, `instructions`, `inputs`, execution `options`, and task-capture flags. For an instruction-only hook, use the owning process's resolved skill identity. For a selected skill, use its exact native identity. The helper supplies responsibility and custom assignment, records explicit live configuration source paths, and captures the invocation and configuration schemas and runtimes as governing resources. Claims and recording recheck the effective invocation, policy and phase list without making unrelated config edits repeat completed hooks. Pass `--upstream HOST/OWNER/REPO` when configuration inherits it. The command only defines a task; it never launches an agent or changes retained run state.
 
 ```json
 {
  "run": "RUN_ID", "cycle": "CYCLE_ID",
- "tasks": [{"kind": "hook", "phase": "before_cycle", "hook_id": "refresh-context", "definition": {
+ "tasks": [{"kind": "hook", "phase": "before_cycle", "index": 0, "definition": {
   "skill_identity": "dk-workflows:dk-pr-fix",
   "resources": {
     "skill": "/installed/dk-workflows/codex/skills/dk-pr-fix/SKILL.md",
@@ -65,8 +72,21 @@ Use the shared [managed task lifecycle](task-state.md). Prepare one hook at a ti
 }
 ```
 
-Call `prepare --file REQUEST.json`. Include all governing resources and inputs; omit responsibility/assigned instructions. Instruction-only hooks use the active fix/review skill; selected-skill hooks use their configured identity. An optional `upstream` on the task selects inherited settings. Configured options and caller execution options retain their existing separate fields. The helper records only the replay definition and existing occurrence receipt, avoiding repeated setup in the next session.
+Capture all governing resources, including indirect guidance. Keep immutable cycle-start context separate from live files the hook changes. For Git-mutating hooks, use pinned Git inputs from an immutable checkout or describe the pinned starting state in an immutable context artifact. Use `cacheable:false` if governing capture is incomplete. Live captured-input drift rejects recording and requires explicit reconciliation.
 
-Follow the shared prepare/finish/recovery protocol without retry or CI flags. The helper uses cycle only for occurrence identity, consuming no reviewer cycle/retry budget. Finish each hook immediately, then proceed in order. Resume regenerates current configuration and preserves completed unchanged hooks within that occurrence. A new cycle/run executes its own hooks. Before-phase progress may create a run with an empty review-cycle list. Low-level `hook-spec` remains compatible.
+Regenerate the spec before each claim and completion check. Claim separately with `start --spec HOOK.json --run RUN_ID`, without reviewer cycle, retry or CI budget flags. The runtime generates an occurrence identity from process, run, cycle, phase and list position. Identical hooks at different positions are separate occurrences. The task fingerprint includes exact instructions, options, model and reasoning settings. Follow `invoke`, `reuse` and `recover_required`; retain the original handle and output and record explicit completion. Check saved completion evidence before repeating noncacheable work.
 
-A hook receipt proves that occurrence completed; it does not establish current review or CI coverage. Keep immutable cycle-start context and result artifacts separate from live files the hook intentionally changes. When a hook mutates Git, supply pinned Git inputs from a separate immutable checkout, or describe the pinned starting state in an immutable context artifact. Live captured-input drift rejects recording and requires explicit reconciliation/recovery. Use `cacheable:false` if governing capture is incomplete; such tasks require checking saved completion evidence explicitly before any repeat invocation. Never automatically replay a hook with uncertain effects. Reconcile effects and confirm the prior agent stopped before recovering its claim. Failed hooks remain blockers until their cause is addressed and a deliberate retry is recorded in progress.
+## Changes to a retained list
+
+The first claim stores the effective phase list. An unchanged list resumes from its saved task receipts. Inserting, removing, reordering or changing a hook in that occurrence blocks new claims until its prior effects are reconciled. Keeping the same position never makes changed instructions count as completed.
+
+Inspect `status --run RUN_ID`, the original results and native handles. Confirm interrupted agents stopped and reconcile their writes. Record their actual outcomes or explicitly recover/invalidate their claims. Then acknowledge the new list with the observed snapshot hash from `status.hook_phases`:
+
+```sh
+python3 PLUGIN_ROOT/scripts/dk.py --repository HOST/OWNER/REPO --pr PR_URL \
+  reconcile-hooks --process pr-fix --run RUN_ID --cycle CYCLE_ID \
+  --phase before_cycle --expected SNAPSHOT_HASH \
+  --reason "Stopped the earlier agent, inspected its effects and reconciled the changed list."
+```
+
+This replaces the current phase snapshot after an explicit reasoned acknowledgment, without appending duplicate lists, deleting original results, resetting budgets or claiming any hook completed. A stale snapshot or active hook claim blocks reconciliation. Removing every hook can be reconciled with the same command. Completed hooks that remain unchanged at the same position retain eligible receipts; changing a later hook does not repeat them. Changed or moved tasks may run again only after deliberate reconciliation. Restoring the original unchanged list also permits normal recovery. Never automatically replay a hook with uncertain effects.

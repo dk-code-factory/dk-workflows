@@ -1,0 +1,221 @@
+{
+  "$schema": "../schemas/config.schema.json",
+  "schema_version": 1,
+  "accounts": {
+    "personal": []
+  },
+  "skill_defaults": {},
+  "processes": {
+    "pr-iter": {
+      "coordinator": "dk-workflows:dk-pr-iter",
+      "routes": {
+        "own_pr": "pr-fix",
+        "other_pr": "pr-review"
+      }
+    },
+    "pr-fix": {
+      "coordinator": "dk-workflows:dk-pr-fix",
+      "tasks": {
+        "read_feedback": {
+          "skill": "dk-workflows:dk-pr-feedback-read",
+          "options": {},
+          "required": true
+        },
+        "collect_decisions": {
+          "skill": "dk-workflows:dk-pr-decisions",
+          "options": {},
+          "required": true
+        },
+        "address_feedback": {
+          "skill": "dk-workflows:dk-pr-feedback-address",
+          "options": {},
+          "required": true
+        },
+        "split_scope": {
+          "skill": "dk-workflows:dk-pr-split",
+          "options": {},
+          "required": true
+        },
+        "review_changes": {
+          "skill": "dk-workflows:dk-pr-reviewers-run",
+          "options": {},
+          "required": true
+        },
+        "organize_commits": {
+          "skill": "dk-workflows:dk-commit-split",
+          "options": {},
+          "required": true
+        },
+        "draft_commit_message": {
+          "skill": "dk-workflows:dk-commit-message",
+          "options": {},
+          "required": true
+        },
+        "update_description": {
+          "skill": "dk-workflows:dk-pr-description",
+          "options": {},
+          "required": true
+        },
+        "reply_to_feedback": {
+          "skill": "dk-workflows:dk-pr-feedback-reply",
+          "options": {},
+          "required": true
+        },
+        "check_ci": {
+          "skill": "dk-workflows:dk-ci",
+          "options": {},
+          "required": true
+        },
+        "classify_ci_failures": {
+          "skill": "dk-workflows:dk-ci-flakes",
+          "options": {},
+          "required": true
+        },
+        "publish_pr_actions": {
+          "skill": "dk-workflows:dk-pr-publish",
+          "options": {},
+          "required": true
+        }
+      },
+      "limits": {
+        "review_cycles": 5,
+        "retries_per_task": 1,
+        "ci_repairs_per_cycle": 5,
+        "ci_reruns_per_head": 3
+      },
+      "permissions": {
+        "push_commits": true,
+        "rewrite_commits": true,
+        "edit_pr": true,
+        "reply_to_feedback": true,
+        "resolve_threads": true,
+        "create_draft_prs": true,
+        "request_review": true,
+        "post_review": false,
+        "approve_fork_ci": false,
+        "approve_pr": false,
+        "merge_pr": {
+          "enabled": false,
+          "method": "squash"
+        }
+      },
+      "finalizers": [
+        {
+          "skill": "dk-workflows:dk-commit-split",
+          "options": {},
+          "required": true
+        },
+        {
+          "skill": "dk-workflows:dk-pr-decisions",
+          "options": {},
+          "required": true
+        },
+        {
+          "skill": "dk-workflows:dk-pr-description",
+          "options": {},
+          "required": true
+        },
+        {
+          "skill": "dk-workflows:dk-pr-feedback-reply",
+          "options": {},
+          "required": true
+        },
+        {
+          "skill": "dk-workflows:dk-ci",
+          "options": {},
+          "required": true
+        },
+        {
+          "skill": "dk-workflows:dk-pr-publish",
+          "options": {},
+          "required": true
+        }
+      ],
+      "hooks": {
+        "before_cycle": [],
+        "after_cycle": []
+      }
+    },
+    "pr-review": {
+      "coordinator": "dk-workflows:dk-pr-review",
+      "tasks": {
+        "read_feedback": {
+          "skill": "dk-workflows:dk-pr-feedback-read",
+          "options": {},
+          "required": true
+        },
+        "review_changes": {
+          "skill": "dk-workflows:dk-pr-reviewers-run",
+          "options": {},
+          "required": true
+        },
+        "verify_findings": {
+          "instructions": "Independently verify candidate findings against pinned source and governing instructions. Return confirmed, rejected or uncertain findings with evidence. Do not edit, publish or recursively invoke the review workflow.",
+          "options": {},
+          "required": true
+        },
+        "post_review": {
+          "skill": "dk-workflows:dk-pr-review-post",
+          "options": {},
+          "required": true
+        },
+        "approve_fork_ci": {
+          "skill": "dk-workflows:dk-ci-approve",
+          "options": {},
+          "required": true
+        },
+        "check_ci": {
+          "skill": "dk-workflows:dk-ci",
+          "options": {},
+          "required": true
+        },
+        "publish_pr_actions": {
+          "skill": "dk-workflows:dk-pr-publish",
+          "options": {},
+          "required": true
+        },
+        "classify_ci_failures": {
+          "skill": "dk-workflows:dk-ci-flakes",
+          "options": {},
+          "required": true
+        }
+      },
+      "limits": {
+        "review_cycles": 5,
+        "retries_per_task": 1,
+        "ci_repairs_per_cycle": 5,
+        "ci_reruns_per_head": 3
+      },
+      "permissions": {
+        "push_commits": false,
+        "rewrite_commits": false,
+        "edit_pr": false,
+        "reply_to_feedback": false,
+        "resolve_threads": false,
+        "create_draft_prs": false,
+        "request_review": false,
+        "post_review": true,
+        "approve_fork_ci": true,
+        "approve_pr": false,
+        "merge_pr": {
+          "enabled": false,
+          "method": "squash"
+        }
+      },
+      "hooks": {
+        "before_cycle": [],
+        "after_cycle": []
+      }
+    },
+    "commit-message": {
+      "coordinator": "dk-workflows:dk-commit-message"
+    },
+    "issue": {
+      "coordinator": "dk-workflows:dk-issue"
+    },
+    "pr-reviewers-run": {
+      "coordinator": "dk-workflows:dk-pr-reviewers-run"
+    }
+  },
+  "extensions": {}
+}

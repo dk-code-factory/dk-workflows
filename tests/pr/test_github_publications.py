@@ -115,6 +115,31 @@ def test_merge_binds_reviewed_head_and_reconciles_exact_commit(remote, method):
     assert remote.state['writes'] == {'merge-pr': 1}
 
 
+def test_merge_recovery_preserves_resolved_method_after_config_changes(remote):
+    import config
+    from state import write
+    upstream = 'github.com/upstream/project'
+    skill = 'dk-workflows:dk-pr-publish'
+    write(config.path(upstream), {'skill_defaults': {skill: {'options': {'default_merge_method': 'squash'}}}})
+    request = fixture.request('merge-pr')
+    request.pop('merge_method')
+    operation = publisher.prepare(request, upstream=upstream, options={'default_merge_method': 'merge'})['operation']
+    assert publication.load(operation)['request']['approved']['merge_method'] == 'merge'
+    remote.state['lose_response'] = ['merge-pr']
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    retained = publication.load(operation)
+    write(config.path(), {'skill_defaults': {skill: {'options': {'default_merge_method': 'squash'}}}})
+    reloaded = module('fresh_publisher', ROOT/'scripts/publish.py')
+    for key in ('metadata', 'api', 'run'):
+        setattr(reloaded, key, getattr(remote, key))
+    result = reloaded.publish(operation, reconcile=True)
+    assert result['status'] == 'verified'
+    assert result['receipt']['merge_method'] == 'merge'
+    assert publication.load(operation)['request'] == retained['request']
+    assert remote.state['writes'] == {'merge-pr': 1}
+
+
 @pytest.mark.parametrize('decision', ['APPROVED', '', None])
 @pytest.mark.parametrize('own_pr', [False, True])
 def test_authorized_merge_accepts_own_pr_and_no_required_approval(remote, decision, own_pr):

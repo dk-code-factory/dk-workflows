@@ -367,6 +367,50 @@ def test_disabled_or_claimed_discovery_skips_target_mapping(registry, monkeypatc
     assert decide(api, registry, auto_discover=auto)['result'] == 'failure'
 
 
+def test_automatic_discovery_reads_scopes_and_preserves_scan_reuse(registry):
+    import config
+    from state import write
+    skill = 'dk-workflows:dk-ci-flakes'
+    upstream = 'github.com/upstream/project'
+    write(config.path(), {'skill_defaults': {skill: {'options': {'lookback_days': 7}}}})
+    write(config.path(upstream), {'skill_defaults': {skill: {'options': {'max_runs': 8}}}})
+    write(config.path(REPO), {'skill_defaults': {skill: {'options': {'max_issues': 9}}}})
+    original_config = {path: path.read_bytes() for path in [config.path(), config.path(upstream), config.path(REPO)]}
+    first = decide(FakeAPI(body='unrelated'), registry, upstream=upstream, flake_options={'max_runs': 3})
+    assert first['result'] == 'failure'  # Discovery settings cannot accept an unverified test.
+    assert {key: first['discovery']['limits'][key] for key in ('days', 'runs', 'open_issues')} == {
+        'days': 7, 'runs': 3, 'open_issues': 9}
+    scans = copy.deepcopy(registry.load()['scans'])
+    # A new registry/session reads the original scan claim instead of launching it again.
+    fresh = Registry(REPO)
+    api = FakeAPI(body='unrelated')
+    assert 'discovery' not in decide(api, fresh, upstream=upstream, flake_options={'max_runs': 3})
+    assert not any(call[0] == 'issues' for call in api.calls)
+    assert fresh.load()['scans'] == scans
+    # Timing settings do not invalidate flake discovery.
+    write(config.path(REPO), {'skill_defaults': {skill: {'options': {'max_issues': 9}},
+                                                'dk-workflows:dk-ci': {'options': {'timeout_seconds': 40}}}})
+    assert 'discovery' not in decide(FakeAPI(body='unrelated'), fresh, upstream=upstream, flake_options={'max_runs': 3})
+    changed = decide(FakeAPI(body='unrelated'), fresh, upstream=upstream, flake_options={'max_runs': 2})
+    assert changed['discovery']['limits']['runs'] == 2
+    assert len(fresh.load()['scans']) == len(scans) + 1
+    assert all(fresh.load()['scans'][key] == value for key, value in scans.items())
+    assert config.path().read_bytes() == original_config[config.path()]
+    assert config.path(upstream).read_bytes() == original_config[config.path(upstream)]
+
+
+def test_default_limit_discovery_reuses_legacy_and_interrupted_scan_keys(registry):
+    api = FakeAPI(body='unrelated')
+    first = decide(api, registry)
+    evidence = actions.collect_snapshot(api, registry, snapshot())
+    assert first['discovery']['fingerprint'] == policy.failure_fingerprint(snapshot(), evidence)
+    key = first['discovery']['fingerprint']
+    registry.update(lambda data: data['scans'][key].update(status='running'))
+    retained = copy.deepcopy(registry.load()['scans'])
+    assert 'discovery' not in decide(FakeAPI(body='unrelated'), Registry(REPO))
+    assert registry.load()['scans'] == retained
+
+
 def test_contended_registry_lock_obeys_active_classification_deadline(registry):
     import fcntl
     lock_path = registry.path.parent / (registry.path.name + '.lock')

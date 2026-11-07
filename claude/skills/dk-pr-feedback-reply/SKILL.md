@@ -9,6 +9,8 @@ Persist workflow state only when it reduces total token consumption, including t
 
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
+Resolve configuration for `dk-workflows:dk-pr-feedback-reply` through [skill-owned configuration](../../../docs/skill-configuration.md) before work, including scoped and invocation-local options. This skill owns its [explicit defaults](config.json) and [option schema](config.schema.json). Preserve original additional instructions alongside the governing assignment.
+
 Read the original thread, comment or review, plus current code and validation. Reply only with a supported repository answer. If internal failures prevent that answer, withhold the affected reply and report the reason privately; never substitute a diagnostic reply. Select the destination from the structured original source in the complete PR evidence, following [publication and recovery](../../../docs/pr/publication.md):
 
 - For an actual inline review comment, use `reply-inline` inside its originating thread. Set `parent` to that thread's root comment database id, even when answering a later reply. Preserve the answered comment's own id and exact URL separately from this routing parent.
@@ -18,4 +20,4 @@ Use `scripts/publish.py` for both reply kinds. Include the structured `source` r
 
 If a previously verified reply is now unavailable or edited, follow the publication contract's `inspect-reply` and `dispose-reply` recovery procedure. Preserve its original receipt and reassess the original feedback against current code, validation and discussion. Record `no_replacement` with a concrete private reason only when no further answer is needed; successful reconciliation then settles this reply finalizer. If an answer remains required, record `replacement_required` and prepare a separately authorized current answer linked through `replaces`. Recover the linked operation on resume and finish only after its current verification. Never silently replay the old write, infer deletion from a 404, dispose an uncertain initial submission, or clear unrelated pending operations. Missing or ambiguous read access remains a blocker.
 
-Resolve only fully answered inline threads. Use the `resolve-thread` publisher with the thread node id and the database id of your verified posted reply. Top-level comments cannot be resolved. Return the original source, reply URL and resolution evidence.
+Honor `resolve_answered_threads`: false leaves threads unresolved after replying. When true and authorized, resolve only fully answered inline threads. Use the `resolve-thread` publisher with the thread node id and the database id of your verified posted reply. Top-level comments cannot be resolved. Return the original source, reply URL and resolution evidence.

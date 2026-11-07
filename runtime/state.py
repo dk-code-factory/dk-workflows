@@ -14,6 +14,7 @@ import stat
 import subprocess
 import time
 import uuid
+import invocation
 from shared.private_state import write as write_private
 from shared.storage_paths import location
 
@@ -66,6 +67,7 @@ def make_spec(*, repository, pr, skill_identity, resources, responsibility,
     The normal command boundaries still capture and validate live resources.
     """
     subject = identity(repository, pr)
+    invocation.skill_name(skill_identity)
     for name, value in (('skill identity', skill_identity), ('responsibility', responsibility),
                         ('assigned instructions', assigned_instructions)):
         if not isinstance(value, str) or not value:
@@ -93,6 +95,8 @@ def make_spec(*, repository, pr, skill_identity, resources, responsibility,
         raise ValueError('Cache requires captured resources and complete governing inputs; use cacheable:false otherwise')
     if not isinstance(options, dict):
         raise ValueError('options must be an object')
+    if 'invocation' in options:
+        invocation.validate(options['invocation'])
     spec = {**subject, 'skill': {'identity': skill_identity, 'resources': resources},
             'task': {'id': responsibility, 'instructions': assigned_instructions},
             'instructions': instructions, 'inputs': inputs, 'options': deepcopy(options),
@@ -424,8 +428,20 @@ class _CaptureContext:
 
 
 def capture(spec, *, _context=None):
+    if 'skill_options_configuration' in spec:
+        from skill_config import check_options
+        check_options(spec)
+    if 'skill_configuration' in spec:
+        from skill_config import check_selection as check_skill_selection
+        check_skill_selection(spec)
+    if 'configuration' in spec:
+        from config import check_selection
+        check_selection(spec)
+    if 'invocation' in spec.get('options', {}):
+        invocation.validate(spec['options']['invocation'])
     subject = identity(spec['repository'], spec['pr'])
     task, skill = spec['task'], spec['skill']
+    invocation.skill_name(skill.get('identity') if isinstance(skill, dict) else None)
     if (not isinstance(task, dict) or not isinstance(task.get('id'), str) or not task['id']
             or not isinstance(task.get('instructions'), str) or not task['instructions']
             or not isinstance(skill, dict) or not isinstance(skill.get('identity'), str) or not skill['identity']):
@@ -452,13 +468,15 @@ def capture(spec, *, _context=None):
         inputs['git'] = git_inputs
     fingerprint_inputs = {'contract': CONTRACT, **subject, 'task': task, 'skill': {
         'identity': skill['identity'], 'resources': resources}, 'instructions': governing,
-        'inputs': inputs, 'options': spec.get('options', {})}
+        'inputs': inputs, 'options': {key: value for key, value in spec.get('options', {}).items()
+                                      if key != 'hook_phase'}}
     if 'native_review' in spec:
         from native_review import contract
         fingerprint_inputs['native_review'] = deepcopy(contract(spec['native_review']))
     key = digest({**subject, 'task': task['id'], 'skill': skill['identity']})
     return {'key': key, 'fingerprint': digest(fingerprint_inputs), 'components': fingerprint_inputs,
-            'provenance': provenance, 'cacheable': cacheable, 'subject': subject}
+            'provenance': provenance, 'cacheable': cacheable, 'subject': subject,
+            'hook_phase': deepcopy(spec.get('options', {}).get('hook_phase'))}
 
 
 def _pointer(parts):
@@ -649,12 +667,36 @@ class Store:
             return {'contract': CONTRACT, 'subject': self.subject, 'manifest': str(self.manifest),
                     'tasks': [self.describe(c, manifest['entries'].get(c['key'], {}), explain=explain) for c in captures] + unavailable,
                     'runs': runs,
+                    'hook_phases': [{'key': key, 'snapshot': digest(value),
+                                     'occurrence': value['occurrence']}
+                                    for key, value in manifest.get('hook_phases', {}).items()
+                                    if run is None or value['occurrence']['run'] == run],
                     'unfinished': [e['claim'] for e in manifest['entries'].values() if e.get('claim')]}
+
+    def reconcile_hooks(self, phase, expected, reason):
+        """Record a deliberate phase-list change after prior effects are reconciled."""
+        if (not isinstance(phase, dict) or set(phase) != {'occurrence', 'hooks'}
+                or not isinstance(phase['occurrence'], dict) or not isinstance(phase['hooks'], list)
+                or not isinstance(reason, str) or not reason.strip()):
+            raise ValueError('Hook reconciliation requires a phase snapshot and original reason')
+        key = digest(phase['occurrence'])
+        with self.locked() as manifest:
+            previous = manifest.get('hook_phases', {}).get(key)
+            if previous is None or digest(previous) != expected:
+                raise ValueError('Hook phase snapshot changed; inspect current progress')
+            for entry in manifest['entries'].values():
+                active = entry.get('claim')
+                occurrence = entry.get('components', {}).get('options', {}).get('cycle_hook', {})
+                if active and all(occurrence.get(field) == value for field, value in phase['occurrence'].items()):
+                    raise ValueError('Reconcile and close active hook claims before changing the list')
+            manifest['hook_phases'][key] = deepcopy(phase)
+            write(self.manifest, manifest)
+        return {'reconciled': True, 'snapshot': digest(phase)}
 
     @staticmethod
     def review_budget(state):
         """Legacy runs have five cycles; only retained authorizations add more."""
-        limit, requests = REVIEW_CYCLES, set()
+        limit, requests = state.get('limits', {}).get('review_cycles', REVIEW_CYCLES), set()
         allowances = state.get('review_allowances', [])
         if not isinstance(allowances, list):
             raise ValueError('Damaged review allowance history; do not reset retained budgets')
@@ -709,13 +751,25 @@ class Store:
                     'review_budget': self.review_budget(state), 'manifest': str(self.manifest)}
 
     @staticmethod
-    def budget(manifest, *, run, cycle, retry, ci_repair, ci_rerun, head, task):
+    def budget(manifest, *, run, cycle, retry, ci_repair, ci_rerun, head, task, limits=None):
+        ceilings = {'review_cycles': 5, 'retries_per_task': 1,
+                    'ci_repairs_per_cycle': 5, 'ci_reruns_per_head': 3}
+        if limits is not None and (not isinstance(limits, dict) or set(limits) - ceilings.keys()
+                or any(type(value) is not int or not (1 if key == 'review_cycles' else 0) <= value <= ceilings[key]
+                       for key, value in limits.items())):
+            raise ValueError('Invalid process limits')
+        limits = {**ceilings, **(limits or {})}
         if not run:
             if any((cycle, retry, ci_repair, ci_rerun)):
                 raise ValueError('Budgeted execution requires a retained run id')
             return None
         state = manifest['runs'].setdefault(run, {'cycles': [], 'retries': {}, 'ci_repairs': {},
                                                  'ci_reruns': {}, 'review_tasks': {}, 'progress': []})
+        # A later spec cannot restore a more generous limit or reset consumed work.
+        limits = {key: min(value, state.get('limits', {}).get(key, value)) for key, value in limits.items()}
+        if state.get('review_allowances') and limits['review_cycles'] != state.get('limits', {}).get('review_cycles', REVIEW_CYCLES):
+            raise ValueError('Retain the initial review limit after explicit continuation allowances')
+        state['limits'] = limits
         if cycle and cycle not in state['cycles']:
             if ci_repair or ci_rerun:
                 raise ValueError('CI work must retain an existing cycle or use cycle zero')
@@ -731,25 +785,43 @@ class Store:
             if not cycle:
                 raise ValueError('Same-cycle retry requires its cycle id')
             key = cycle + ':' + task
-            if state['retries'].get(key, 0) >= 1:
+            if state['retries'].get(key, 0) >= limits['retries_per_task']:
+                if limits['retries_per_task'] == 0:
+                    raise ValueError('Same-cycle retries are disabled')
                 raise ValueError('Same-cycle retry already consumed')
             state['retries'][key] = state['retries'].get(key, 0) + 1
         if ci_repair:
             key = cycle or '0'
-            if state['ci_repairs'].get(key, 0) >= 5:
-                raise ValueError('Five CI repair attempts per cycle reached')
+            if state['ci_repairs'].get(key, 0) >= limits['ci_repairs_per_cycle']:
+                count = 'Five' if limits['ci_repairs_per_cycle'] == 5 else str(limits['ci_repairs_per_cycle'])
+                raise ValueError(count + ' CI repair attempts per cycle reached')
             state['ci_repairs'][key] = state['ci_repairs'].get(key, 0) + 1
         if ci_rerun:
             if not head:
                 raise ValueError('CI rerun requires exact head')
-            if state['ci_reruns'].get(head, 0) >= 3:
-                raise ValueError('Three CI reruns per head reached')
+            if state['ci_reruns'].get(head, 0) >= limits['ci_reruns_per_head']:
+                count = 'Three' if limits['ci_reruns_per_head'] == 3 else str(limits['ci_reruns_per_head'])
+                raise ValueError(count + ' CI reruns per head reached')
             state['ci_reruns'][head] = state['ci_reruns'].get(head, 0) + 1
         return state
 
     def _start_captured(self, manifest, captured, *, recover=None, run=None, cycle=None,
                         retry=False, ci_repair=False, ci_rerun=False, head=None):
         """Stage one start in the caller's locked manifest; never persist here."""
+        options = captured['components'].get('options', {})
+        phase = captured.get('hook_phase')
+        if phase is not None:
+            if cycle or retry or ci_repair or ci_rerun:
+                raise ValueError('Hook claims do not use reviewer or CI budget flags')
+            if (not isinstance(phase, dict) or set(phase) != {'occurrence', 'hooks'}
+                    or not isinstance(phase['occurrence'], dict) or not isinstance(phase['hooks'], list)
+                    or phase['occurrence'].get('run') != run):
+                raise ValueError('Hook phase requires its original run and list snapshot')
+            phase_key = digest(phase['occurrence'])
+            snapshots = manifest.setdefault('hook_phases', {})
+            if phase_key in snapshots and snapshots[phase_key] != phase:
+                raise ValueError('Hook list changed; reconcile the original phase before continuing')
+            snapshots[phase_key] = phase
         entry = manifest['entries'].setdefault(captured['key'], {'key': captured['key'], 'attempts': []})
         previous = self.describe(captured, entry)
         if entry.get('claim'):
@@ -767,7 +839,8 @@ class Store:
         if previous['reusable']:
             return {'action': 'reuse', **previous}
         state = self.budget(manifest, run=run, cycle=cycle, retry=retry, ci_repair=ci_repair,
-                            ci_rerun=ci_rerun, head=head, task=captured['key'])
+                            ci_rerun=ci_rerun, head=head, task=captured['key'],
+                            limits=options.get('process_limits'))
         if cycle and not (ci_repair or ci_rerun):
             tasks = state['review_tasks'].setdefault(cycle, {})
             previous_fingerprint = tasks.get(captured['key'])

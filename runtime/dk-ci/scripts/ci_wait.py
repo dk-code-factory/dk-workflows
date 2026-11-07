@@ -17,6 +17,7 @@ from shared.flaky_actions import GitHub, pr_repository
 from shared.ci_policy import decide
 from shared.ci_observation import PermissionDenied, for_pr, bind_url
 from shared.github_reads import run as github_run
+import skill_config
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
@@ -116,17 +117,39 @@ def main():
     parser.add_argument("--pr", required=True)
     parser.add_argument("--head", required=True)
     parser.add_argument("--repo")
-    parser.add_argument("--timeout", type=int, default=1800)
-    parser.add_argument("--interval", type=int, default=30)
-    parser.add_argument("--classification-timeout", type=int, default=60)
-    parser.add_argument("--no-checks-grace", type=int, default=60)
+    parser.add_argument("--timeout", type=int)
+    parser.add_argument("--interval", type=int)
+    parser.add_argument("--classification-timeout", type=int)
+    parser.add_argument("--no-checks-grace", type=int)
+    parser.add_argument('--pending-extension', type=int)
+    parser.add_argument('--max-pending-extensions', type=int, choices=[0, 1])
+    parser.add_argument('--options', type=Path, help='Invocation-local skill options JSON')
+    parser.add_argument('--flake-options', type=Path, help='Invocation-local dk-ci-flakes options for automatic discovery')
+    parser.add_argument('--upstream', help='Inherited workflow repository identity')
     parser.add_argument('--rerun-operation', help='Verified ci-rerun publication operation authorizing one new attempt window')
     parser.add_argument('--retry-denied', action='store_true', help='Explicitly retry observation after repairing denied read access')
     args = parser.parse_args()
-    if args.classification_timeout <= 0:
-        parser.error("classification timeout must be positive")
     try:
+        local = json.loads(args.options.read_text()) if args.options else {}
+        flake_options = json.loads(args.flake_options.read_text()) if args.flake_options else None
+        if flake_options is not None:
+            skill_config.validate('dk-workflows:dk-ci-flakes', flake_options)
+        for argument, key in [('timeout', 'timeout_seconds'), ('interval', 'poll_interval_seconds'),
+                              ('classification_timeout', 'classification_timeout_seconds'),
+                              ('no_checks_grace', 'no_checks_grace_seconds'),
+                              ('pending_extension', 'pending_extension_seconds'),
+                              ('max_pending_extensions', 'max_pending_extensions')]:
+            if getattr(args, argument) is not None:
+                local[key] = getattr(args, argument)
+        settings = skill_config.for_context('dk-workflows:dk-ci', pr=args.pr, repository=args.repo,
+                                             upstream=args.upstream, options=local)['options']
+        args.timeout = settings['timeout_seconds']
+        args.interval = settings['poll_interval_seconds']
+        args.classification_timeout = settings['classification_timeout_seconds']
+        args.no_checks_grace = settings['no_checks_grace_seconds']
+        extension = settings['pending_extension_seconds'] if settings['max_pending_extensions'] else 0
         with for_pr(args.pr, args.head, args.repo, timeout=args.timeout,
+                    extension=extension,
                     rerun=args.rerun_operation, retry_denied=args.retry_denied) as observation:
             result = wait(args.pr, args.head, args.repo, args.timeout, args.interval,
                           args.no_checks_grace, observation=observation,
@@ -141,6 +164,7 @@ def main():
             result = decide(GitHub(repo), Registry(repo, Path.cwd()), result,
                             lambda: observe(args.pr, args.head, args.repo),
                             classification_timeout=args.classification_timeout,
+                            upstream=args.upstream, flake_options=flake_options,
                             on_progress=lambda update: print(json.dumps(update, sort_keys=True),
                                                              file=sys.stderr, flush=True))
     except (RuntimeError, ValueError, OSError, KeyError, subprocess.TimeoutExpired) as exc:

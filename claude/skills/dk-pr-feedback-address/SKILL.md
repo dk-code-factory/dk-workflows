@@ -9,9 +9,11 @@ Persist workflow state only when it reduces total token consumption, including t
 
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
+Resolve configuration for `dk-workflows:dk-pr-feedback-address` through [skill-owned configuration](../../../docs/skill-configuration.md) before work, including scoped and invocation-local options. This skill owns its [explicit defaults](config.json) and [option schema](config.schema.json). Preserve original additional instructions alongside the governing assignment.
+
 Use [shared PR evidence](../../../docs/pr/supplied-evidence.md) for analysis and live verification.
 
-Read complete, stable feedback from the supplied handoff. Without a handoff, collect it with the feedback read helpers. Read the governing instructions, Decisions and code for each item. Check its validity and scope. Preserve settled decisions and deferred work. Make focused fixes and run relevant checks.
+Read complete, stable feedback from the supplied handoff. Without a handoff, collect it with the feedback read helpers. Read the governing instructions, Decisions and code for each item. Check its validity and scope. Preserve settled decisions and deferred work. Make focused fixes and run relevant checks. Run configured `additional_validation_commands` as argument arrays in the affected checkout in addition to relevant checks. Never use them to launch Codex or Claude Code.
 
 Before implementation, follow [preference retrieval and handoffs](../../../docs/preferences.md#workflow-handoffs-and-reuse) in `implementation` mode. Use a current complete caller handoff or resolve preferences and evaluate conditions directly. Preserve records and applicable paths. Refresh when paths, relevant records or condition context change, including before edits expand to new paths. Include the selection and condition decisions in managed task inputs.
 

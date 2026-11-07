@@ -38,7 +38,9 @@ def initialize(root, source, experiment, bundle=None):
     if root.exists():
         raise ValueError('Never reset a trial directory')
     root.mkdir(parents=True)
-    for folder in ('runtime', 'scripts', 'docs', 'codex'):
+    for folder in ('runtime', 'scripts', 'docs', 'codex', 'schemas'):
+        if not (source/folder).exists():
+            continue
         shutil.copytree(source/folder, root/'frozen'/folder,
                         ignore=shutil.ignore_patterns('__pycache__', 'tests', 'evidence'))
     shutil.copy2(Path(__file__), root/'interface.py')
@@ -164,7 +166,7 @@ def initialize_bundle(root, source, bundle):
         assignment.append('Use the bin/gh transport to observe exact-head pending CI, interrupt, resume with the original observer deadline and consume terminal evidence. No negative CI outcome counts as success.')
     if 5 in bundle:
         initialize_config(root,json.loads((root/'inputs/definition.json').read_text()))
-        assignment.append('Discover the bookkeeping interface and perform an additional ordinary lifecycle from inputs/definition.json in run discovery, generate/claim/record configured hook fixture-hook in before_cycle/c1 and /skill/fixture:finalizer using the provided hook/finalizer definitions. Hook/finalizer claims use no reviewer-cycle budget flags. Demonstrate unchanged ordinary reuse.')
+        assignment.append('Discover the bookkeeping interface and perform an additional ordinary lifecycle from inputs/definition.json in run discovery, generate/claim/record configured hook index 0 in before_cycle/c1 and fixture:finalizer using the provided hook/finalizer definitions. Hook/finalizer claims use no reviewer-cycle budget flags. Demonstrate unchanged ordinary reuse.')
     scenario.update(experiment=6,accepted_proposals=bundle,assignment=' '.join(assignment))
     save(root/'inputs/scenario.json',scenario)
     freeze(root)
@@ -182,9 +184,16 @@ def initialize_config(root, definition):
         else:
             selected['assigned_instructions'] = 'Retain fixture finalizer evidence. No remote writes.'
         save(root/'inputs'/(kind+'-definition.json'), selected)
-    save(root/'config/dk-workflows/v2/user.json', {
-        'cycle_hooks': {'before_cycle': [{'id': 'fixture-hook', 'instructions': 'Retain fixture hook receipt.'}]},
-        'finalizers': ['/skill/fixture:finalizer']})
+    settings = {
+        'processes': {'pr-fix': {
+            'hooks': {'before_cycle': [{'instructions': 'Retain fixture hook receipt.'}]},
+            'finalizers': ['fixture:finalizer']}}}
+    if 'processes' not in config.DEFAULTS:
+        # Frozen comparisons can deliberately target a pre-4.0 baseline.
+        settings = {'cycle_hooks': {'before_cycle': [
+            {'id': 'fixture-hook', 'instructions': 'Retain fixture hook receipt.'}]},
+            'finalizers': ['/skill/fixture:finalizer']}
+    save(root/'config/dk-workflows/v2/user.json', settings)
 
 
 def initialize_ci(root, head):

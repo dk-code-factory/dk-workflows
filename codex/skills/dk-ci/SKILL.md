@@ -9,9 +9,13 @@ Persist workflow state only when it reduces total token consumption, including t
 
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
-Run `python3 PACKAGE_ROOT/runtime/dk-ci/scripts/ci_wait.py --pr PR_URL --head SHA`, using the full lowercase head SHA. Keep one observer per PR and head across interruptions. The default wait is 30 minutes, with one 30-minute extension while checks are pending. Resume the same process when a tool yields. Read the current head and check attempts from GitHub.
+Resolve configuration for `dk-workflows:dk-ci` through [skill-owned configuration](../../../docs/skill-configuration.md) before work, including scoped and invocation-local options. This skill owns its [explicit defaults](config.json) and [option schema](config.schema.json). Preserve original additional instructions alongside the governing assignment.
 
-The helper returns `success`, `known_flakes`, `accepted_exceptions`, `failure`, `timeout`, `no_checks` or `head_changed`. Only the first three satisfy CI, with current evidence. Restore access before using `--retry-denied`. Diagnose failures with `dk-ci-flakes` and code inspection. Preserve the caller's repair and rerun budgets.
+Run `python3 PACKAGE_ROOT/runtime/dk-ci/scripts/ci_wait.py --pr PR_URL --head SHA`, using the full lowercase head SHA. Keep one observer per PR and head across interruptions. Use the resolved timeout, poll interval, classification timeout, absent-check grace and pending-extension settings. Pass invocation-local options with `--options FILE`; explicit CLI flags are deliberate overrides. Resume the same process when a tool yields. Read the current head and check attempts from GitHub.
+
+The helper returns `success`, `known_flakes`, `accepted_exceptions`, `failure`, `timeout`, `no_checks` or `head_changed`. Only the first three satisfy CI, with current evidence. Restore access before using `--retry-denied`. Diagnose failures with `dk-workflows:dk-ci-flakes` and code inspection. Preserve the caller's repair and rerun budgets.
+
+Automatic flaky-test discovery uses `dk-workflows:dk-ci-flakes` scoped settings. Preserve supplied `--upstream` for both timing and discovery; pass supplied discovery-local overrides separately with `--flake-options FILE`. Zero repair or rerun budgets disable those attempts without weakening CI acceptance.
 
 Read the final JSON object's `result` on stdout: accepted outcomes exit 0; other terminal outcomes exit 1. Progress JSON goes to stderr. Helper exceptions exit 2 with `{"result":"error","message":"..."}` on stderr and no final stdout result. Preserve the error and treat CI as blocked.
 

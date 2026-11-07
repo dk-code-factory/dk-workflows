@@ -1,6 +1,6 @@
 # Configuration invocation decision exercise
 
-Ordinary PR tasks previously directed agents to read settings through `dk-config`.
+Ordinary PR tasks previously directed agents to read settings through `dk-workflows:dk-config`.
 The revised guidance uses existing read-only helpers during execution and retains
 the skill for requests to change, inspect or explain configuration. This exercise
 checks that decision boundary separately from the offline helper tests.

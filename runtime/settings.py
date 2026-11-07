@@ -37,6 +37,10 @@ def domain_load(domain, chain, scope='effective'):
             target = domain_path(domain, key)
             if target.exists():
                 for role, value in read(target, {}).items():
+                    if role == '$schema':
+                        continue
+                    import invocation
+                    invocation.validate(value)
                     merged[role] = value
                     sources[role] = {'source': key, 'file': str(target)}
         return {'value': merged, 'sources': sources}

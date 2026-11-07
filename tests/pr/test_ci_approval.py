@@ -108,7 +108,7 @@ def reviewed(tmp_path, monkeypatch):
     instructions.write_text('Review the PR. PR approval and merging are disabled.\n')
     skill = tmp_path/'SKILL.md'
     skill.write_text('Complete source review and return findings.\n')
-    settings = {'reviewers': [{'skill': 'fixture:a'}, {'skill': 'fixture:b'}]}
+    settings = {'skill_defaults': {'dk-workflows:dk-pr-reviewers-run': {'options': {'reviewers': ['fixture:a', 'fixture:b']}}}}
     write(config.path(repository), settings)
     store = Store(repository, fixture.PR, checkout=checkout)
     document = {'workflow': 'dk-workflows:dk-pr-review', 'repository': repository, 'pr': fixture.PR,
@@ -119,10 +119,13 @@ def reviewed(tmp_path, monkeypatch):
     def task(identity, responsibility='content-review', normalized=None, options=None, inputs=None, cacheable=True,
              native_review=None, capture_native_review=True):
         from native_review_observations import CONTRACT, observations
+        options = dict(options or {})
+        if responsibility == 'finding-verification':
+            options['invocation'] = config.select(config.effective(repository)['settings'], 'pr-review', 'task', task='verify_findings')
         spec = make_spec(repository=repository, pr=fixture.PR, skill_identity=identity,
                          resources={'skill': str(skill)}, responsibility=responsibility,
                          assigned_instructions='Review pinned source and original evidence.',
-                         instructions=document['instructions'], inputs=inputs or {}, options=options or {},
+                         instructions=document['instructions'], inputs=inputs or {}, options=options,
                          git={'checkout': str(checkout), 'head': head, 'target': base, 'base': base},
                          governing_inputs_complete=True, cacheable=cacheable,
                          **({'native_review': native_review if native_review is not None else CONTRACT}
@@ -160,14 +163,84 @@ def reviewed(tmp_path, monkeypatch):
 
 def test_ready_finalization_approves_every_page_once_without_pr_approval_or_merge(reviewed):
     r = reviewed
-    policy = config.effective('github.com/owner/repo')['settings']['incoming_review']
-    assert policy['approve_ci'] and not policy['approve'] and not policy['merge']
+    policy = config.effective('github.com/owner/repo')['settings']['processes']['pr-review']['permissions']
+    assert policy['approve_fork_ci'] and not policy['approve_pr'] and not policy['merge_pr']['enabled']
     result = r.cli.approve(r.evidence)
     assert result['status'] == 'verified' and len(result['operations']) == 2 and not result['noop']
     assert r.remote.calls == [101, 202] and r.remote.list_reads == 2
     assert r.cli.approve(r.evidence)['noop']
     assert r.remote.calls == [101, 202]
     assert all(publication.load(op['operation'])['receipt']['execution_permitted'] for op in result['operations'])
+
+
+@pytest.mark.parametrize('reviewer_identity,failure', [
+    ('fixture:a', failure) for failure in [None, 'duplicate', 'missing', 'missing-verifier', 'wrong-claim', 'options']
+] + [(None, None)])
+def test_skill_owned_review_occurrences_verification_and_active_approval_claim(reviewed, tmp_path, reviewer_identity, failure):
+    from tasks import Tasks
+    from native_review_observations import observations
+    r = reviewed
+    evidence = read(r.evidence)
+    old = read(Path(evidence['discovery'][0]))
+    definition = {'skill_identity': reviewer_identity or 'dk-workflows:dk-pr-reviewers-run', 'resources': old['skill']['resources'],
+                  'assigned_instructions': old['task']['instructions'], 'instructions': old['instructions'],
+                  'inputs': {}, 'options': {}, 'git': old['git'], 'governing_inputs_complete': True,
+                  'native_review': old['native_review']}
+    call = {'skill': reviewer_identity} if reviewer_identity else {'instructions': 'Inspect the change.'}
+    reviewer_options = {'reviewers': [call, call]}
+
+    def managed(owner, kind, index, definition, options, result=None):
+        coordinator = Tasks(evidence['repository'], fixture.PR, checkout=evidence['checkout'])
+        request = {'run': evidence['run'], 'tasks': [{'kind': 'skill', 'skill': owner, 'selection': kind,
+                                                    'index': index, 'definition': definition, 'options': options}]}
+        if kind != 'finalizers':
+            request['cycle'] = evidence['cycle']
+        started = coordinator.prepare(request)['tasks'][0]
+        spec = coordinator.saved_spec(started['key'])
+        path = tmp_path/(kind + str(index) + '.json')
+        write(path, spec)
+        if result is not None:
+            original = b'Original native result for the configured occurrence'
+            r.store.record(spec, started['claim']['id'], original, result, 'complete',
+                           native_evidence=observations(spec, started['claim'], original))
+        return str(path), spec, started
+
+    first, first_spec, _ = managed('dk-workflows:dk-pr-reviewers-run', 'reviewers', 0, definition,
+                                   reviewer_options, {'complete': True, 'findings': [{'body': 'Candidate'}]})
+    second, _, _ = managed('dk-workflows:dk-pr-reviewers-run', 'reviewers', 1, definition,
+                           reviewer_options, {'complete': True, 'findings': []})
+    original = r.store.status([first_spec])['tasks'][0]['result']
+    verifier = {**definition, 'skill_identity': 'dk-workflows:dk-pr-review',
+                'responsibility': 'finding-verification', 'inputs': {'candidate': original}}
+    verification, _, _ = managed('dk-workflows:dk-pr-review', 'tasks', 2, verifier, {}, {
+        'complete': True, 'findings': [], 'dispositions': [
+            {'task': capture(first_spec)['key'], 'index': 0, 'status': 'rejected', 'evidence': 'Verified source behavior'}]})
+    r.edit(lambda value: value.update(configuration='skill-owned', options={}, reviewer_options=reviewer_options,
+                                       discovery=[first, second], verification=verification), snapshot=True)
+    snapshotted = read(r.evidence)
+    assert 'skill_settings' not in snapshotted
+    assert all(isinstance(value, str) and len(value) == 64
+               for value in snapshotted['skill_settings_fingerprints'].values())
+    approval_definition = {**definition, 'skill_identity': 'dk-workflows:dk-ci-approve'}
+    approval_definition.pop('native_review')
+    approval_path, _, started = managed('dk-workflows:dk-pr-review', 'finalizers', 0, approval_definition, {})
+    with pytest.raises(ValueError, match='Unfinished review tasks'):
+        r.cli.approve(r.evidence)
+    r.edit(lambda value: value.update(approval_task={'key': started['key'], 'claim': started['claim']['id']}))
+    if failure:
+        def change(value):
+            if failure == 'duplicate': value['discovery'] = [first, first]
+            elif failure == 'missing': value['discovery'] = [first]
+            elif failure == 'missing-verifier': value['verification'] = None
+            elif failure == 'wrong-claim': value['approval_task']['claim'] = 'another-claim'
+            elif failure == 'options': value['reviewer_options']['max_parallel'] = 1
+        r.edit(change)
+        with pytest.raises(ValueError):
+            r.cli.approve(r.evidence)
+        assert r.remote.calls == []
+        return
+    result = r.cli.approve(r.evidence)
+    assert result['status'] == 'verified' and r.remote.calls == [101, 202]
 
 
 def test_managed_task_keys_supply_current_approval_evidence_without_spec_files(reviewed):
@@ -218,18 +291,18 @@ def test_unready_review_cannot_approve(reviewed, failure):
     if failure == 'closed': r.remote.state['pull']['state'] = 'closed'
     if failure == 'analysis-only': r.edit(lambda v: v.update(analysis_only=True))
     if failure == 'policy':
-        write(config.path('github.com/owner/repo'), {**r.settings, 'incoming_review': {'approve_ci': False}})
+        write(config.path('github.com/owner/repo'), config.invocation.merge(r.settings, {'processes': {'pr-review': {'permissions': {'approve_fork_ci': False}}}}))
     if failure == 'instructions': r.instructions.write_text('Analysis only. Do not mutate GitHub.')
     if failure == 'own-pr': r.remote.state['pr_author']['id'] = r.remote.state['actor_id']
     if failure == 'configured-own-pr':
-        write(config.path('github.com/owner/repo'), {**r.settings, 'identities': [{'host': 'github.com', 'id': 2}]})
+        write(config.path('github.com/owner/repo'), {**r.settings, 'accounts': {'personal': [{'host': 'github.com', 'id': 2}]}})
         r.cli.snapshot(r.evidence)
     if failure == 'discussion': r.remote.state['discussion'] = [{'id': 5, 'body': 'New review scope'}]
     if failure == 'thread-state': r.remote.state['thread_states'] = [{'id': 'thread', 'isResolved': False, 'isOutdated': False}]
     if failure == 'missing-reviewer': r.edit(lambda v: v['discovery'].pop())
     if failure == 'hook':
-        write(config.path('github.com/owner/repo'), {**r.settings, 'cycle_hooks': {
-            'after_cycle': [{'id': 'final', 'instructions': 'Check the final review'}]}})
+        write(config.path('github.com/owner/repo'), config.invocation.merge(r.settings, {'processes': {'pr-review': {'hooks': {
+            'after_cycle': [{'instructions': 'Check the final review'}]}}}}))
         r.cli.snapshot(r.evidence)
     with pytest.raises((ValueError, KeyError)):
         r.cli.approve(r.evidence)
@@ -368,20 +441,20 @@ def test_publisher_rechecks_review_readiness_immediately_before_dispatch(reviewe
     if change == 'target': r.remote.state['branches']['main'] = 'd'*40
     if change == 'draft': r.remote.state['pull']['draft'] = True
     if change == 'policy':
-        write(config.path('github.com/owner/repo'), {**r.settings, 'incoming_review': {'approve_ci': False}})
+        write(config.path('github.com/owner/repo'), config.invocation.merge(r.settings, {'processes': {'pr-review': {'permissions': {'approve_fork_ci': False}}}}))
     with pytest.raises(Diagnostic): r.cli.publish.publish(operation)
     assert not r.remote.calls and publication.load(operation)['status'] == 'prepared'
 
 
 def test_current_cycle_hooks_must_be_complete_before_approval(reviewed):
     r = reviewed
-    hooks = {phase: [{'id': phase, 'instructions': 'Verify current scope'}]
+    hooks = {phase: [{'instructions': 'Verify current scope'}]
              for phase in ('before_cycle', 'after_cycle')}
-    write(config.path('github.com/owner/repo'), {**r.settings, 'cycle_hooks': hooks})
+    write(config.path('github.com/owner/repo'), config.invocation.merge(r.settings, {'processes': {'pr-review': {'hooks': hooks}}}))
     paths = []
     for phase in hooks:
         paths.append(r.task('dk-workflows:dk-pr-review', 'cycle-hook-' + phase,
-                            options={'cycle_hook': {'run': 'review', 'cycle': 'c1', 'phase': phase, 'id': phase}}))
+                            options={'cycle_hook': {'run': 'review', 'cycle': 'c1', 'phase': phase, 'index': 0}}))
     r.edit(lambda value: value.update(hooks=paths), snapshot=True)
     assert r.cli.approve(r.evidence)['status'] == 'verified'
 
@@ -390,6 +463,17 @@ def test_ready_boolean_without_original_task_coverage_is_insufficient(reviewed):
     r = reviewed
     r.edit(lambda value: value.update(ready=True, discovery=[]))
     with pytest.raises(ValueError, match='discovery coverage'): r.cli.approve(r.evidence)
+    assert not r.remote.calls
+
+
+def test_reviewer_controls_need_matching_captured_evidence(reviewed):
+    r = reviewed
+    write(config.path('github.com/owner/repo'), config.invocation.merge(r.settings, {
+        'skill_defaults': {'fixture:a': {'instructions': 'Review authentication boundaries.',
+                                       'agent': {'model': 'chosen', 'reasoning_effort': 'high'}}}}))
+    r.cli.snapshot(r.evidence)
+    with pytest.raises(ValueError, match='selected invocation controls'):
+        r.cli.approve(r.evidence)
     assert not r.remote.calls
 
 
@@ -500,11 +584,11 @@ def test_undispatched_approval_can_refresh_after_valid_reassessment(reviewed):
 
 def test_noncacheable_hook_claims_without_reviewer_cycle_are_complete(reviewed, tmp_path):
     r = reviewed
-    write(config.path('github.com/owner/repo'), {**r.settings, 'cycle_hooks': {
-        'after_cycle': [{'id': 'check', 'instructions': 'Check final scope'}]}})
+    write(config.path('github.com/owner/repo'), config.invocation.merge(r.settings, {'processes': {'pr-review': {'hooks': {
+        'after_cycle': [{'instructions': 'Check final scope'}]}}}}))
     definition = read(Path(read(r.evidence)['discovery'][0]))
     spec = config.make_hook_spec(repository='github.com/owner/repo', pr=fixture.PR,
-        run='review', cycle='c1', phase='after_cycle', hook_id='check', definition={
+        run='review', cycle='c1', phase='after_cycle', index=0, process='pr-review', definition={
             'skill_identity': 'dk-workflows:dk-pr-review', 'resources': definition['skill']['resources'],
             'instructions': definition['instructions'], 'inputs': {},
             'git': definition['git'], 'cacheable': False, 'governing_inputs_complete': True})

@@ -157,12 +157,12 @@ def test_occurrences_share_lifecycle_and_preserve_completion_across_sessions(cas
         fields.pop('responsibility')
         fields.pop('assigned_instructions')
         fields['skill_identity'] = 'dk-workflows:dk-pr-fix'
-        write(config.path(REPO), {'cycle_hooks': {'before_cycle': [{'id': 'check', 'instructions': 'Check scope.'}]}})
-        selector = {'kind': kind, 'phase': 'before_cycle', 'hook_id': 'check'}
+        write(config.path(REPO), {'processes': {'pr-fix': {'hooks': {'before_cycle': [{'instructions': 'Check scope.'}]}}}})
+        selector = {'kind': kind, 'phase': 'before_cycle', 'index': 0}
     else:
         fields.pop('responsibility')
-        write(config.path(REPO), {'finalizers': ['/skill/reviewer:a']})
-        selector = {'kind': kind, 'finalizer': '/skill/reviewer:a'}
+        write(config.path(REPO), {'processes': {'pr-fix': {'finalizers': ['reviewer:a']}}})
+        selector = {'kind': kind, 'finalizer': 'reviewer:a'}
     body = {'run': 'run', 'cycle': 'c1', 'tasks': [{**selector, 'definition': fields}]}
     tasks = Tasks(REPO, PR)
     started = tasks.prepare(body)['tasks'][0]
@@ -170,7 +170,7 @@ def test_occurrences_share_lifecycle_and_preserve_completion_across_sessions(cas
     assert Tasks(REPO, PR).prepare(body)['tasks'][0]['action'] == 'reuse'
     assert store.status([])['runs']['run']['cycles'] == []
     assert tasks.resume(run='run')['tasks'][0]['reusable']
-    write(config.path(REPO), {'finalizers': [], 'cycle_hooks': {'before_cycle': []}})
+    write(config.path(REPO), {'processes': {'pr-fix': {'finalizers': [], 'hooks': {'before_cycle': []}}}})
     assert tasks.resume(run='run')['tasks'][0]['reason'] == 'refresh_required'
 
 

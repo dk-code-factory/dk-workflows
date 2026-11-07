@@ -95,6 +95,36 @@ def test_complete_findings_are_reused_without_claiming_clean(case):
     assert 'ready' not in status
 
 
+@pytest.mark.parametrize('flag,limit,diagnostic', [
+    ('retry', 'retries_per_task', 'retries are disabled'),
+    ('ci_repair', 'ci_repairs_per_cycle', '0 CI repair attempts'),
+    ('ci_rerun', 'ci_reruns_per_head', '0 CI reruns'),
+])
+def test_zero_attempt_budgets_survive_fresh_process_and_preserve_results(case, flag, limit, diagnostic):
+    spec, store = case
+    spec['options']['process_limits'] = {limit: 0}
+    started = store.start(spec, run='retained', cycle='initial')
+    store.record(spec, started['claim']['id'], b'Original incomplete result', {'complete': False}, 'incomplete')
+    original = store.manifest.read_bytes()
+    source = store.root/'zero-limit-spec.json'
+    source.write_text(json.dumps(spec))
+    command = [sys.executable, str(ROOT/'scripts/dk.py'), '--repository', REPO, '--pr', PR,
+               'start', '--spec', str(source), '--run', 'retained', '--cycle', 'initial',
+               '--' + flag.replace('_', '-')]
+    if flag == 'ci_rerun':
+        command += ['--head', spec['git']['head']]
+    result = subprocess.run(command, capture_output=True, text=True)
+    assert result.returncode == 2
+    assert diagnostic in result.stdout
+    assert store.manifest.read_bytes() == original
+    # A later permissive spec cannot replenish the zero retained allowance.
+    spec['options']['process_limits'] = {limit: 1}
+    source.write_text(json.dumps(spec))
+    result = subprocess.run(command, capture_output=True, text=True)
+    assert result.returncode == 2 and diagnostic in result.stdout
+    assert store.manifest.read_bytes() == original
+
+
 def test_reviewer_resource_change_and_added_reviewer_preserve_siblings(case,tmp_path):
     a,store=case
     b=deepcopy(a);b['skill']={'identity':'reviewer:b','resources':{'entry':str(tmp_path/'b.md')}}

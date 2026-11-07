@@ -1,6 +1,9 @@
 """Commit policy settings and captured native-provider handoffs; no execution."""
 import hashlib
 import re
+from pathlib import Path
+
+import invocation
 
 from shared.ci_exceptions import data_root
 from shared.private_state import read
@@ -9,16 +12,22 @@ from state import capture, make_spec
 
 
 def validate(value):
-    if not isinstance(value, dict) or set(value) not in ({'prompt'}, {'skill'}):
-        raise ValueError('Commit policy requires exactly one prompt or skill')
-    if 'prompt' in value:
+    if isinstance(value, dict) and 'prompt' in value:
+        if set(value) != {'prompt'}:
+            raise ValueError('A literal commit policy accepts only prompt')
         if (not isinstance(value['prompt'], str) or not value['prompt'].strip()
                 or '\x00' in value['prompt']):
             raise ValueError('Commit policy prompt must be nonempty text without NUL bytes')
-    elif (not isinstance(value['skill'], str) or not re.fullmatch(
-            r'[A-Za-z0-9][A-Za-z0-9_.-]*(?::[A-Za-z0-9][A-Za-z0-9_.-]*)?', value['skill'])):
-        raise ValueError('Commit policy skill must be a native SKILL or PLUGIN:SKILL identity')
-    return dict(value)
+        return dict(value)
+    return invocation.validate(value)
+
+
+def provider(value):
+    return value is not None and not (isinstance(value, dict) and 'prompt' in value)
+
+
+def selected_call(value):
+    return invocation.normalize(value) if provider(value) else {'skill': 'dk-workflows:dk-commit-split'}
 
 
 def path(key):
@@ -26,24 +35,44 @@ def path(key):
     return folder/'commit-policy.json'
 
 
-def load(chain, scope='effective'):
+def load(chain, scope='effective', *, options=None):
+    if scope not in {'effective', 'repo', 'user'}:
+        raise ValueError('Commit policy scope must be effective, repo or user')
+    selected = {'value': None, 'source': 'default'}
     for key in scope_keys(chain, scope):
         source = path(key)
         if source.exists():
-            return {'value': validate(read(source, None)), 'source': key, 'file': str(source)}
-    return {'value': None, 'source': 'default'}
+            selected = {'value': validate(read(source, None)), 'source': key, 'file': str(source)}
+            break
+    if scope == 'effective':
+        import skill_config
+        repository = chain[0].removeprefix('remote:') if chain else None
+        upstream = chain[1].removeprefix('remote:') if len(chain) > 1 else None
+        owned = skill_config.effective('dk-workflows:dk-commit-split', repository, upstream, options=options)
+        origin = owned['provenance']['policy']
+        if origin == 'invocation':
+            return {'value': owned['options']['policy'], 'source': 'invocation'}
+        if origin != selected.get('file') and origin not in owned['sources'][:2]:
+            return {'value': owned['options']['policy'], 'source': 'skill-configuration', 'file': origin}
+    return selected
 
 
-def policy_spec(*, chain, repository, pr, definition):
+def policy_spec(*, chain, repository, pr, definition, options=None):
     """Capture complete caller-supplied context; the host resolves native skills."""
-    selected = load(chain)
+    local_options = options
+    selected = load(chain, options=local_options)
     if not isinstance(definition, dict) or set(definition) - {
             'skill_identity', 'resources', 'assigned_instructions', 'instructions',
-            'inputs', 'options', 'git', 'governing_inputs_complete', 'cacheable'}:
+            'inputs', 'options', 'git', 'governing_inputs_complete', 'cacheable', 'native_review'}:
         raise ValueError('Policy definitions require resolved resources and consumed context')
-    policy = selected['value'] or {}
-    expected = policy.get('skill', 'dk-workflows:dk-commit-split')
-    if definition.get('skill_identity') != expected:
+    import skill_config
+    upstream = chain[1].removeprefix('remote:') if len(chain) > 1 else None
+    raw_call = selected_call(selected['value'])
+    if not provider(selected['value']) and local_options is not None:
+        raw_call['options'] = skill_config.validate('dk-workflows:dk-commit-split', local_options)
+    call = skill_config.configured_call(raw_call, repository, upstream)
+    expected = call.get('skill', 'dk-workflows:dk-commit-split')
+    if not invocation.matches(expected, definition.get('skill_identity', '')):
         raise ValueError('Resolve and supply the selected policy skill identity')
     if not definition.get('resources') or definition.get('governing_inputs_complete') is not True:
         raise ValueError('Policy handoffs require resolved resources and complete governing inputs')
@@ -63,9 +92,24 @@ def policy_spec(*, chain, repository, pr, definition):
     if 'file' in selected:
         instructions['commit_policy_configuration'] = selected['file']
     execution = dict(definition)
+    resources = dict(definition['resources'])
+    for label, resource in {
+            'invocation_contract': Path(__file__).with_name('invocation.py'),
+            'invocation_schema': Path(__file__).parents[1]/'schemas/invocation.schema.json'}.items():
+        if label in resources:
+            raise ValueError('Reserved invocation resource label')
+        resources[label] = str(resource)
+    if 'instructions' in call:
+        execution['assigned_instructions'] = invocation.additional_instructions(
+            execution.get('assigned_instructions', ''), call['instructions'])
     execution.update(responsibility='commit-policy', instructions=instructions,
-                     options={'commit_policy': selected, 'execution': options})
+                     resources=resources,
+                     options={'commit_policy': selected, 'execution': options,
+                              'invocation': call, 'configured': call.get('options', {})})
+    if local_options is not None:
+        execution['options']['commit_policy_options'] = skill_config.validate('dk-workflows:dk-commit-split', local_options)
     spec = make_spec(repository=repository, pr=pr, **execution)
+    skill_config.bind_options(spec, call, repository, upstream, raw_call=raw_call)
     spec['policy_fingerprint'] = capture(spec)['fingerprint']
     return spec
 
@@ -75,15 +119,15 @@ def handoff(*, chain, spec, report=None):
     if not isinstance(spec, dict) or any(not isinstance(spec.get(key), dict)
                                         for key in ('task', 'options', 'skill')):
         raise ValueError('Malformed commit policy spec')
-    selected = load(chain)
+    selected = load(chain, options=spec['options'].get('commit_policy_options'))
     if (spec.get('task', {}).get('id') != 'commit-policy'
             or spec.get('options', {}).get('commit_policy') != selected):
         raise ValueError('Commit policy configuration changed; refresh the policy spec')
-    policy = selected['value'] or {}
-    expected = policy.get('skill', 'dk-workflows:dk-commit-split')
-    if spec.get('skill', {}).get('identity') != expected:
+    policy = selected['value']
+    expected = selected_call(policy).get('skill', 'dk-workflows:dk-commit-split')
+    if not invocation.matches(expected, spec.get('skill', {}).get('identity', '')):
         raise ValueError('Policy spec does not identify the selected provider')
-    if 'skill' in policy:
+    if provider(policy):
         if (not isinstance(report, dict) or report.get('complete') is not True
                 or not isinstance(report.get('findings'), list)
                 or not isinstance(report.get('blockers', []), list) or report.get('blockers')
@@ -94,7 +138,7 @@ def handoff(*, chain, spec, report=None):
     else:
         if report is not None:
             raise ValueError('Prompt and default policies do not consume provider reports')
-        prompt = policy.get('prompt')
+        prompt = (policy or {}).get('prompt')
     captured = capture(spec)
     if captured['fingerprint'] != spec.get('policy_fingerprint'):
         raise ValueError('Policy inputs changed during execution; refresh the policy spec')
@@ -102,12 +146,12 @@ def handoff(*, chain, spec, report=None):
             'fingerprint': captured['fingerprint'], 'policy_prompt': prompt, 'report': report}
 
 
-def verify(*, chain, repository, pr, definition, supplied):
+def verify(*, chain, repository, pr, definition, supplied, options=None):
     """Compare a supplied handoff with freshly resolved policy and consumed inputs."""
     if (not isinstance(supplied, dict) or type(supplied.get('schema_version')) is not int
             or supplied['schema_version'] != 1):
         raise ValueError('Malformed commit policy handoff')
-    spec = policy_spec(chain=chain, repository=repository, pr=pr, definition=definition)
+    spec = policy_spec(chain=chain, repository=repository, pr=pr, definition=definition, options=options)
     current = handoff(chain=chain, spec=spec, report=supplied.get('report'))
     if current != supplied:
         raise ValueError('Commit policy handoff is stale; refresh affected policy and cleanup evidence')

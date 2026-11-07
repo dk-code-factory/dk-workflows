@@ -1,6 +1,6 @@
 # Scoped preferences
 
-Use `dk-preferences` to add, update, list, inspect or remove personal and repository preferences. `dk-config` routes these requests to it. Preferences are concrete instructions admitted against existing records and repository instructions. Conflicts are settled with the user before saving. Clear requests need no additional approval.
+Use `dk-workflows:dk-preferences` to add, update, list, inspect or remove personal and repository preferences. `dk-workflows:dk-config` routes these requests to it. Preferences are concrete instructions admitted against existing records and repository instructions. Conflicts are settled with the user before saving. Clear requests need no additional approval.
 
 One versioned catalog lives privately at `${XDG_CONFIG_HOME:-~/.config}/dk-workflows/v2/preferences.json`. It is separate from workflow settings and saved PR rules. Personal and repository records share a lock and atomic replacement, so a single transaction can replace both. Revision checks prevent concurrent admissions from silently overwriting each other. Storage inside the checkout or plugin is rejected. No upstream records are inherited. Repository identity comes from the existing checkout identity helper, including its local-path fallback.
 

@@ -42,9 +42,9 @@ def test_frozen_workload_has_real_state_and_explicit_boundaries(tmp_path, experi
                 '--pr', exercise.PR, '--checkout', str(root/'checkout')]
         hook = json.loads(subprocess.check_output([*base, 'hook-spec', '--definition',
             str(root/'inputs/hook-definition.json'), '--phase', 'before_cycle',
-            '--hook-id', 'fixture-hook', '--run', 'discovery', '--cycle', 'c1'], env=env))
+            '--index', '0', '--run', 'discovery', '--cycle', 'c1'], env=env))
         finalizer = json.loads(subprocess.check_output([*base, 'finalizer-spec', '--definition',
-            str(root/'inputs/finalizer-definition.json'), '--finalizer', '/skill/fixture:finalizer',
+            str(root/'inputs/finalizer-definition.json'), '--finalizer', 'fixture:finalizer',
             '--run', 'discovery'], env=env))
         assert hook['task']['id'].startswith('cycle-hook:')
         assert finalizer['task']['id'].startswith('finalizer:')

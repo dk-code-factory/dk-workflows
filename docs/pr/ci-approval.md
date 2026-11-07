@@ -1,12 +1,15 @@
 # Fork workflow approval evidence
 
-`dk-pr-review` calls the configured `skills.ci_approve` role (default `dk-workflows:dk-ci-approve`) once review is ready for CI. `incoming_review.approve_ci` defaults to true independently of posting PR approvals or merging. Analysis-only instructions and narrower mutation restrictions override it. This boundary does not alter `dk-pr-fix`, completion instructions, branch protection or deployment approvals. CI execution permission does not establish CI success.
+`dk-workflows:dk-pr-review` calls `dk-workflows:dk-ci-approve` when selected in its finalizer list and review is ready for CI. Its `permissions.approve_fork_ci` defaults to true independently of posting PR approvals or merging. Analysis-only instructions and narrower mutation restrictions override it. This boundary does not alter `dk-workflows:dk-pr-fix`, completion instructions, branch protection or deployment approvals. CI execution permission does not establish CI success.
 
 Keep a private JSON evidence document with the following fields. Preserve original instructions and reports; a boolean readiness assertion is insufficient.
 
 ```json
 {
   "workflow": "dk-workflows:dk-pr-review",
+  "configuration": "skill-owned",
+  "options": {},
+  "reviewer_options": {},
   "repository": "github.com/owner/repo",
   "pr": "https://github.com/owner/repo/pull/7",
   "checkout": "/owned/checkout",
@@ -23,11 +26,15 @@ Keep a private JSON evidence document with the following fields. Preserve origin
 }
 ```
 
-Include `upstream` when configuration inherits from an upstream repository. During inspection, run `python3 PACKAGE_ROOT/scripts/ci_approve.py snapshot --evidence FILE` to capture effective settings, original instruction fingerprints and live PR context. It saves `settings`, `instruction_fingerprints` and `context` in the document. Snapshotting does not establish readiness or invoke reviewers. Never refresh a changed snapshot merely to pass the gate: reassess affected review inputs, refresh discovery and verification as needed, complete hooks and reconcile publications first. After your own review publication, assess the new discussion and capture the reconciled context before finalization.
+Include `upstream` when configuration inherits from an upstream repository. Preserve incoming-review invocation-local `options` and the selected reviewer-run invocation's local `reviewer_options`; both are explicit empty objects when no overrides apply. During inspection, run `python3 PACKAGE_ROOT/scripts/ci_approve.py snapshot --evidence FILE` to capture effective settings, original instruction fingerprints and live PR context. It saves `settings`, `skill_settings_fingerprints`, `instruction_fingerprints` and `context` in the document. Snapshotting does not establish readiness or invoke reviewers. Never refresh a changed snapshot merely to pass the gate: reassess affected review inputs, refresh discovery and verification as needed, complete selected tasks and reconcile publications first. After your own review publication, assess the new discussion and capture the reconciled context before finalization.
 
-Supply managed task references `{"key":"TASK_KEY"}` for discovery, verification and hooks. The helper regenerates their specs from retained definitions; no extra spec artifacts or model reconstruction are needed. Legacy spec-file paths remain supported. Each spec must capture the same original instruction paths under the same labels and pin Git `head` and `target` to the reviewed SHAs. Include all selected reviewers, including optional ones. The helper recaptures current inputs, validates original artifacts and requires current complete coverage with no unfinished claims. Noncacheable results require complete governing inputs and this retained run/cycle. Stale tasks block publication; original results retain the native completion gate.
+Every discovery and verification spec must capture the same original instruction paths under the same labels and pin Git `head` and `target` to the reviewed SHAs. Provide all current selected reviewer specs, including optional reviewers and repeated occurrences, generated with `skill-spec --kind reviewers`. The helper recaptures them, validates original immutable result artifacts and requires complete current coverage with no unfinished PR claims. Noncacheable results must have complete captured governing inputs and belong to this retained run and cycle; they cannot supply coverage across runs or cycles. Stale tasks block publication. Original results remain subject to the native completion contract.
 
-When discovery has candidates, supply the independent `dk-workflows:dk-pr-review` task with responsibility `finding-verification`. Its `inputs` must include every original current candidate result artifact path returned by task status; this prevents reuse of verification for older candidates. Its normalized result includes `dispositions`, one per original candidate, identifying its task key and zero-based finding index:
+Managed task references `{"key":"TASK_KEY"}` are also accepted; replay uses the retained definition instead of rebuilding specs.
+
+When the approval finalizer itself has an active managed claim, add `"approval_task":{"key":"TASK_KEY","claim":"CLAIM_ID"}` (or a legacy `spec` path). Capture an immutable starting evidence snapshot in the spec; keep this generated claim binding in the working evidence document outside governing inputs, so adding progress cannot change the active task's fingerprint. The helper permits only that exact current incoming-review finalizer claim, with matching scope, run and fingerprint; every other unfinished claim still blocks. Retain this binding for read-only reconciliation.
+
+When discovery has candidates, supply the independent verification occurrence generated from the incoming-review task list, using a definition with responsibility `finding-verification`. The helper adds the occurrence identity; the instruction-only bundled verifier uses `dk-workflows:dk-pr-review` as its skill identity. Its `inputs` must include every original current candidate result artifact path returned by task status; this prevents reuse of verification for older candidates. Its normalized result includes `dispositions`, one per original candidate, identifying its task key and zero-based finding index:
 
 ```json
 {"complete":true,"findings":[],"dispositions":[{"task":"DISCOVERY_TASK_KEY","index":0,"status":"rejected","evidence":"Original source or reproduction establishing the rejection"}]}
@@ -35,9 +42,9 @@ When discovery has candidates, supply the independent `dk-workflows:dk-pr-review
 
 Only evidenced `rejected` or `resolved` candidates satisfy readiness. `confirmed`, `uncertain`, missing or duplicate dispositions block approval. Record actual unresolved verification findings in `findings`; they also block approval. A resolution must establish why the issue no longer requires action at the current reviewed inputs. Save original verification output unchanged.
 
-Include every configured before/after hook spec for the current `run` and `cycle` in `hooks`. They must have completed current results and their generated `cycle_hook` occurrence options. Hook specs need not consume Git when the hook does not use it. List the journal paths of all review publications in `publications`; they must have verified receipts at this head. Pending publications anywhere in this PR journal block new writes until reconciled.
+Skill-owned lists place custom work directly before and after review; they do not inherit hidden process hooks. Keep `hooks:[]` for this mode. Complete required selected tasks before finalization. List the journal paths of all review publications in `publications`; they must have verified receipts at this head. Pending publications anywhere in this PR journal block new writes until reconciled.
 
-Noncacheable hook results use the retained run and their generated occurrence; hook claims omit the reviewer cycle flag. Discovery and verification attempts still require the current review cycle.
+Evidence without `configuration` retains the legacy process API: its selected reviewer and named verifier settings and complete configured hook occurrences remain required. Legacy noncacheable hook results use the retained run and their generated occurrence; hook claims omit the reviewer cycle flag. Discovery and verification attempts require the current review cycle in both modes.
 
 Run `python3 PACKAGE_ROOT/scripts/ci_approve.py approve --evidence FILE` at the finalization boundary. Readiness requires another author's open, non-draft PR and unchanged head, target tip, configuration, instructions, complete discussion and task coverage. It requires neither successful CI nor GitHub human approvals. Configuration changes, including newly configured reviewers or hooks, invalidate the snapshot.
 
