@@ -8,6 +8,77 @@ The coordinator is the trusted collector of native tool observations. The store 
 
 Reviewers and independent finding verifiers use the same [invocation contract](invocations.md) as process agents, supporting skills, hooks and drafting. Preserve the custom prompt and skill options, and honor configured `agent.model` and `agent.reasoning_effort` through native launch controls. Verify host support before claiming work. A fixed native role or unavailable model that prevents honoring a request is a blocker; do not silently inherit different settings. Save the requested invocation and observable actual execution settings with the handle. Follow host restrictions on context inheritance when selecting another model.
 
+## Evidence capability preflight
+
+Before substantive reviewer dispatch, claims or review-cycle consumption, resolve
+requirements from the installed selected skill and all governing procedures.
+Include conditional passes applicable to the pinned change; use the same contract
+in the eventual task definition. Do not infer transport support from delegation
+alone, a skill report, or an offline fixture. The native coordinator must verify
+that the current host exposes the required observations.
+
+Both `scripts/config.py preflight` and `skill-preflight` accept
+`--native-reviews REVIEWS.json` alongside `--capabilities HOST.json` and
+`--available SKILLS.json`. `REVIEWS.json` maps each selected occurrence's exact
+location to its schema-1 `native_review` contract (resolved version and applicable
+passes/driver commands). Missing-contract diagnostics return occurrence locations;
+Python integrations can enumerate them with `config.calls` or `skill_config.calls`.
+For example, a standalone reviewer occurrence can be keyed as:
+
+```json
+{
+  "dk-workflows:dk-pr-reviewers-run/reviewers/0/0": {
+    "schema": 1,
+    "skill_version": "1.0.7",
+    "passes": [{"role": "toolkit", "drivers": [["python3", "/installed/aspect-driver.py", "--pass", "toolkit"]]}]
+  }
+}
+```
+
+This illustrates the shape, not a complete requirement set for a particular
+installation. Supply every required pass and the exact commands with pinned
+arguments. Repeated occurrences need separate entries because their options and
+conditional requirements can differ. Include independent finding-verification
+occurrences explicitly even when they use instruction-only assignments or skills
+without a reviewer name. Ordinary tasks do not need evidence contracts.
+
+A host capability document can include:
+
+```json
+{
+  "delegation": true,
+  "native_evidence": {
+    "availability": "available",
+    "inventory_complete": true,
+    "invocation_results": true,
+    "child_results": true,
+    "tool_observations": true
+  }
+}
+```
+
+These are coordinator-verified current capabilities, not execution receipts.
+`inventory_complete` means the host exposes the complete child/tool inventory,
+including child identities and parent relationships. `invocation_results` covers
+root terminal status and original output; `child_results` covers each required
+child's spawn, terminal outcome and separate original output. `tool_observations`
+covers exact command/tool-call identity, session, outcome and original output.
+All reviews require verified delegation, available transport, complete inventory
+and root results. Child results are required when the contract has passes; tool
+observations are required when any pass has drivers. Unknown or false required
+capabilities produce `ready:false` and `unsupported_native_reviews` diagnostics,
+including missing capabilities and a conditional supported path. Optional selected
+reviewers receive the same check. Require `ready:true` before claiming new work.
+
+Capabilities and requirements are transient reads: refresh them when the host,
+selected invocation, installed resources or pinned applicability inputs change.
+Do not persist a readiness cache or reset retained work on failure. Preserve
+original findings, reports, completed siblings, unresolved handles and consumed
+budgets, and reconcile them under the normal resume rules. If no supported host
+transport is available, report blocked/incomplete before new review work; do not
+launch a model process as a workaround. Preflight cannot establish that future
+execution happened; the existing claim-bound completion guard remains mandatory.
+
 ## Launch and wait
 
 1. Resolve the skill and pin task inputs before launch. Use responsibility `content-review` for configured reviewers, and `finding-verification` for independent verification. Prepare immutable context and output paths outside the source checkout. Supply the exact task, pinned source, original guidance, resolved resources, permitted actions and required completion report. Keep source inspection read-only. The skill manages its private state and lifecycle.

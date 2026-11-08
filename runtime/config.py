@@ -211,12 +211,13 @@ def calls(settings, process=None, available=None):
                 yield from visit(call, prefix + '/hooks/' + phase + '/' + str(index))
 
 
-def preflight(settings, available, capabilities=None, *, process=None):
+def preflight(settings, available, capabilities=None, *, process=None, native_reviews=None):
     if process is not None and process not in settings['processes']:
         raise ValueError('Unknown process')
     if not isinstance(available, list) or any(not isinstance(item, str) for item in available):
         raise ValueError('Available skill identities must be a list of strings')
-    return invocation.preflight(list(calls(settings, process, available)), available, capabilities)
+    return invocation.preflight(list(calls(settings, process, available)), available, capabilities,
+                                native_reviews=native_reviews)
 
 
 def reviewers(settings, process):

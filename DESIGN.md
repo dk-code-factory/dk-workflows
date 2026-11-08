@@ -153,6 +153,16 @@ Reuse ends when governing instructions, discussion or relevant code/validation
 change. This adds no registry, status cache or publication receipt; pending writes
 still reconcile through the existing journal. Token savings are not measured.
 
+Evidence preflight resolves each selected reviewer occurrence's installed contract
+and checks current host observation capabilities before claims or cycle consumption.
+The requirements map and capability document are transient inputs to a read-only
+helper, not a readiness cache. Their freshness ends when the host, installed
+resources, selected invocation or pinned applicability inputs change. Early refusal
+avoids spending a model review on transport that cannot satisfy completion; no
+measured token savings are claimed. Failed preflight preserves existing results,
+claims, completed siblings and budgets. Completion still requires actual claim-bound
+host observations; capability assertions never replace execution evidence.
+
 ## Acceptance
 
 - An unchanged task prepared from a new process reuses its original result and

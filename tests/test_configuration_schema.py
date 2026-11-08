@@ -145,8 +145,10 @@ def test_preflight_checks_nested_optional_reviewers_and_every_agent_setting():
     installed = available(settings)
     assert not config.preflight(settings, installed)['ready']
     assert config.preflight(settings, [name for name in installed if name != 'team:review'])['missing_selected_skills'] == ['team:review']
-    capabilities = {'delegation': True, 'models': {'chosen': ['high']}}
-    assert config.preflight(settings, installed, capabilities)['ready']
+    from native_review_observations import PREFLIGHT_CAPABILITIES, preflight_requirements
+    capabilities = {**PREFLIGHT_CAPABILITIES, 'models': {'chosen': ['high']}}
+    assert config.preflight(settings, installed, capabilities,
+        native_reviews=preflight_requirements(config.calls(settings)))['ready']
     capabilities['models']['chosen'] = ['low']
     assert config.preflight(settings, installed, capabilities)['unsupported_agents']
 
@@ -177,7 +179,9 @@ def test_explicit_finite_nested_calls_can_reuse_a_skill():
     settings = deepcopy(config.DEFAULTS)
     settings['processes']['pr-fix']['tasks'] = {'analyze_change': {'skill': 'team:review', 'options': {'reviewers': [
             {'skill': 'team:review', 'options': {'reviewers': ['team:leaf']}}]}}}
-    assert config.preflight(settings, available(settings))['ready']
+    from native_review_observations import PREFLIGHT_CAPABILITIES, preflight_requirements
+    assert config.preflight(settings, available(settings), PREFLIGHT_CAPABILITIES,
+        native_reviews=preflight_requirements(config.calls(settings)))['ready']
 
 
 @pytest.fixture
