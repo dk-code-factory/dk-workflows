@@ -1,6 +1,6 @@
 # PR fix finalizers
 
-Keep `finalizers` in the owning skill's options and use [skill-owned configuration](skill-configuration.md), `skill-plan` and `skill-spec --kind finalizers --run RUN_ID`. Skills can repeat and each occurrence has its own claim. Legacy process APIs remain available for existing saved plans.
+Keep `finalizers` in the owning skill's options and use [skill-owned configuration](skill-configuration.md), `skill-plan` and managed `prepare`/`finish` under the retained run. Skills can repeat and each occurrence has its own claim. Legacy process APIs remain available for existing saved plans.
 
 Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 
@@ -79,17 +79,18 @@ For the current group, call `prepare --file REQUEST.json` with the retained run 
 }
 ```
 
-Generate a spec for a zero-based flattened plan index (the example link checker is index 4):
+Save the request privately and prepare the current group:
 
 ```sh
 python3 PLUGIN_ROOT/scripts/dk.py --repository HOST/OWNER/REPO --pr PR_URL \
-  skill-spec --skill dk-workflows:dk-pr-fix --kind finalizers --run RUN_ID --index 4 \
-  --definition /private/finalizer-definition.json
+  prepare --file /private/finalizer-request.json
 ```
 
-Save stdout privately. The helper verifies membership and the selected skill identity. It captures the selected invocation and resolved options, checks live selection drift and derives task identity from the retained run and list occurrence. Supply exact assignments from the original request, applicable completion instructions and the selected skill; the helper does not infer a task from its name. Invocation options, prompts and model/effort requests follow the common contract. A definition's `options` supply additional execution context. The legacy `finalizer-spec` adapter additionally supports `--finalizer NAME` for unique named selections.
+The helper verifies membership and the selected skill identity, captures the selected invocation and resolved options, checks live selection drift and derives task identity from the retained run and list occurrence. It returns each assignment, claim and checklist without requiring separate spec files or claims. Supply exact assignments from the original request, applicable completion instructions and the selected skill; the helper does not infer a task from its name. Invocation options, prompts and model/effort requests follow the common contract. A definition's `options` supply additional execution context.
 
-Regenerate specs before claims and completion checks. Claim one group with `start-batch --spec A.json --spec B.json --run RUN_ID`, or `start` for one task. Do not claim later groups before this group completes. Do not pass reviewer `--cycle` or `--retry` flags. Follow `invoke`, `reuse` and `recover_required`, and record each original output and explicit completion. Verify successful terminal execution and the skill's nonempty completion report. Mere launch, progress, or an empty findings list is insufficient. Save native handles separately from governing inputs when delegated. Finalizer claims consume no review-cycle/retry budget; reserve the existing CI repair and rerun budgets before those actions.
+Prepare only the current group; do not claim later groups before it completes. Omit reviewer cycle, retry and CI budget flags from finalizer requests. Follow the returned lifecycle actions and submit each original output and explicit completion with `finish`, then satisfy its `recheck` gate before accepting completion. Verify successful terminal execution and the skill's nonempty completion report. Mere launch, progress, or an empty findings list is insufficient. Save native handles separately from governing inputs when delegated. Finalizer claims consume no review-cycle/retry budget; reserve the existing CI repair and rerun budgets before those actions.
+
+The low-level `skill-spec`, legacy `finalizer-spec` and `start`/`record` commands remain [compatibility APIs](task-state-low-level.md) for integrations. They do not attach a managed checklist on their own. Workflow agents use `prepare`/`finish`, including for legacy saved plans through `kind:"finalizer"` descriptors.
 
 Keep the same run on resume. Reconcile unfinished claims and uncertain side effects before recovery. Reordering can change occurrence identity; reconcile unfinished work before adopting a changed plan. Changes to the plan, assignment, resource or consumed context invalidate affected results. Removing a skill does not erase its unfinished claim; reconcile it explicitly. Preserve completed unchanged siblings. New runs get separate finalizer tasks, while publication journals still prevent duplicate writes across runs.
 
