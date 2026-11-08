@@ -126,6 +126,22 @@ unrelated catalog changes must not invalidate it.
 
 ## Settings and storage
 
+Uncertain review requests retain their original pending intent and first failure.
+Small creation/dispatch timestamps, available native run/session references and
+safe transport diagnostics live in that existing operation. They avoid repeated
+attempts to reconstruct which invocation failed and prevent later read failures
+from replacing dispatch evidence. Legacy missing provenance remains unknown.
+Inspection and a single current `no_resend` disposition retain only reviewer
+sets, historical event/review references and a PR/head binding, avoiding repeated
+agent reconstruction in a fresh session. Unchanged inspection/disposition is
+idempotent. Freshness ends when this evidence changes; live reads revalidate it
+before reuse. No receipt or proof of non-delivery is manufactured from absence.
+The original pending request remains a duplicate barrier for every new review
+request, including changed action IDs. Independent replies may proceed under
+their own live checks; other actions require current disposition or reconciliation.
+No new store, workflow fingerprint or analysis cache is introduced. These are
+recovery savings by design, without measured native token evidence.
+
 Use one read facade for workflow and selected PR-domain settings. Load only the
 requested sections, preserve each domain's documented precedence and return
 source references. No persisted effective-settings cache is necessary. A common

@@ -15,6 +15,8 @@ Follow [publication and recovery](../../../docs/pr/publication.md). Use `scripts
 
 For a previously verified reply that is now unavailable or edited, use `inspect-reply` and an explicitly reassessed `dispose-reply` decision from the publication contract. Preserve historical evidence separately from the current answer obligation. A replacement requires a fresh separately authorized request linked by `replaces`; uncertain initial writes and unavailable or ambiguous read access remain protected. A settled reply disposition does not authorize thread resolution.
 
+For an uncertain review request, use `inspect-review-request` and, when reassessment supports it, `dispose-review-request` with `no_resend`. Keep historical failure/provenance separate from current observations; absent reviewers do not prove non-delivery. Independent authorized replies may proceed under their own live checks while the original review intent remains pending. Never replay it or change action IDs to bypass uncertainty; follow the publication contract's freshness and duplicate guards.
+
 For a concrete merge request without a method, use `default_merge_method`; an explicit authorized method takes precedence. Merging requires separate explicit or saved policy authorization, completed clean review and verification, and current CI. Iteration alone does not authorize merging. Save the exact target, payload and returned operation path. After an uncertain outcome, use that operation for read-only reconciliation. Cached analysis never authorizes an action.
 
 Pass supplied upstream scope and invocation-local publisher options to `scripts/publish.py prepare` with `--upstream` and `--options FILE`. Recovery uses the retained concrete intent, even after default settings change.

@@ -137,6 +137,24 @@ def recovery():
     return Recovery(api=api, metadata=metadata, endpoint=endpoint, replies=replies, handler=handler)
 
 
+def review_recovery():
+    from shared.review_request_recovery import Recovery
+    return Recovery(handler)
+
+
+def blocks(retained, request):
+    if retained['status'] != 'pending':
+        return False
+    if retained['request']['kind'] == 'request-review':
+        # A reply cannot request another review or conceal its uncertain outcome.
+        if request.get('kind') in {'reply-inline', 'reply-comment'}:
+            return False
+        if request.get('kind') != 'request-review' and retained.get('review_request_disposition'):
+            review_recovery().current(retained)
+            return False
+    return True
+
+
 def prepare(request, *, upstream=None, options=None):
     if options is not None:
         import skill_config
@@ -182,7 +200,7 @@ def prepare(request, *, upstream=None, options=None):
                     recovery().link(request['replaces'], str(path))
                 return {'operation':str(path),**retained,'reused_intent':True}
             target = request.get('pr') or (request.get('remote','')+'#'+request.get('branch',''))
-            if retained['request']['target'] == target and retained['status']=='pending':
+            if retained['request']['target'] == target and blocks(retained, request):
                 raise ValueError('Uncertain publication on this target requires reconciliation: '+str(path))
         if request.get('replaces'):
             request['_reply_disposition'] = recovery().replacement(request)
@@ -276,12 +294,17 @@ def publish(path, *, reconcile=False):
     with (scope/'.dispatch.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
         for other in scope.glob('*/*.json') if retained['status']=='prepared' and not reconcile else []:
-            if other.resolve()!=Path(path).resolve() and publication.load(other)['status']=='pending':
+            if other.resolve()!=Path(path).resolve() and blocks(publication.load(other), retained['request']['approved']):
                 raise ValueError('Reconcile the pending publication before another write: '+str(other))
+        if kind == 'request-review' and retained.get('review_request_disposition'):
+            return review_recovery().reconcile(path, retained)
         try:
             result = publication.execute(path,kind,check=check,send=send,observe=observe,reconcile=reconcile,
                 reconcile_argv=[sys.executable,str(Path(__file__).resolve()),'reconcile'])
         except Diagnostic as exc:
+            if kind == 'request-review' and publication.load(path)['status'] == 'pending':
+                from shared.diagnostics import command
+                exc.action = command([sys.executable, str(Path(__file__).resolve()), 'inspect-review-request', '--operation', str(path)], path)
             if kind in {'reply-inline', 'reply-comment'} and publication.load(path)['status'] == 'verified':
                 from shared.diagnostics import command
                 exc.action = command([sys.executable, str(Path(__file__).resolve()), 'inspect-reply', '--operation', str(path)], path)
@@ -304,6 +327,9 @@ def main():
     c=sub.add_parser('inspect-reply');c.add_argument('--operation',type=Path,required=True)
     c=sub.add_parser('dispose-reply');c.add_argument('--operation',type=Path,required=True)
     c.add_argument('--file',type=Path,required=True)
+    c=sub.add_parser('inspect-review-request');c.add_argument('--operation',type=Path,required=True)
+    c=sub.add_parser('dispose-review-request');c.add_argument('--operation',type=Path,required=True)
+    c.add_argument('--file',type=Path,required=True)
     a=p.parse_args()
     if a.action == 'prepare':
         result = prepare(json.loads(a.file.read_text()), upstream=a.upstream,
@@ -312,6 +338,10 @@ def main():
         result = recovery().inspect(a.operation)
     elif a.action == 'dispose-reply':
         result = recovery().dispose(a.operation, json.loads(a.file.read_text()))
+    elif a.action == 'inspect-review-request':
+        result = review_recovery().inspect(a.operation)
+    elif a.action == 'dispose-review-request':
+        result = review_recovery().dispose(a.operation, json.loads(a.file.read_text()))
     else:
         result = publish(a.operation,reconcile=a.action=='reconcile')
     print(json.dumps(result,sort_keys=True))
