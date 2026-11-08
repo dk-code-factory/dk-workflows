@@ -25,7 +25,7 @@ Give every managed stage its prepared assignment and checklist, including feedba
    - Repeat when consumed instructions, discussion, Decisions, scope or head change. An unchanged head does not prove discussion is current.
 2. **Fix and publish feedback.**
    - Inputs: inspection results, original feedback, current code and constraints, and verified remote branch lease.
-   - Invoke feedback skills for focused fixes and relevant checks. Use selected publication and reply skills for authorized remote actions.
+   - Invoke feedback skills for focused fixes and relevant checks. Apply [feedback response obligations](../docs/pr/feedback-responses.md): preserve sourced no-reply assessments for questions to other participants and optional discussion, while handling concrete author requests and explicit reply instructions. Use selected publication and reply skills for authorized remote actions.
    - Return tested fixes, dispositions with sources, blockers and verified publication, reply and resolution receipts. Resolve only fully answered inline threads. Reconcile uncertain writes before retrying.
    - After publication, refresh scope and affected reviews. Reassess when code or governing evidence changes. A new head invalidates earlier CI evidence; check CI at the final gate.
 3. **Apply scope settings.**
