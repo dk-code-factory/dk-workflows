@@ -92,6 +92,42 @@ def test_repeated_reviewers_require_each_occurrence_contract_including_optional(
                                native_reviews={location: CONTRACT for location, _ in calls})['ready']
 
 
+@pytest.mark.parametrize('location', [
+    '/processes/reviewers/coordinator', '/processes/example/tasks/reviewers',
+    '/processes/reviewers/tasks/reviewers', '/processes/reviewers/finalizers/0/0',
+    'owner/reviewers/0/0/tasks/0/0'])
+def test_ordinary_occurrences_with_reviewer_named_ancestors_are_not_reviews(location):
+    result = invocation.preflight([(location, {'skill': 'team:analysis'})], ['team:analysis'])
+    assert result['ready']
+    assert result['unsupported_native_reviews'] == []
+
+
+@pytest.mark.parametrize('location', [
+    '/processes/reviewers/coordinator/options/reviewers/0',
+    '/processes/example/tasks/reviewers/options/reviewers/0',
+    'owner/reviewers/0/0', 'owner/tasks/1/0/reviewers/0/0'])
+def test_structural_reviewer_occurrences_still_require_contracts(location):
+    result = invocation.preflight([(location, {'skill': 'team:check'})], ['team:check'])
+    assert not result['ready']
+    assert result['unsupported_native_reviews'][0]['location'] == location
+    assert invocation.preflight([(location, {'skill': 'team:check'})], ['team:check'],
+                                CAPABILITIES, native_reviews={location: CONTRACT})['ready']
+
+
+@pytest.mark.parametrize('process', ['reviewers', 'example'])
+def test_legacy_cli_allows_ordinary_process_and_task_names_reviewers(tmp_path, process):
+    repository = 'github.com/owner/repo'
+    write(config.path(repository), {'processes': {process: {
+        'coordinator': 'team:analysis', 'tasks': {'reviewers': 'team:analysis'}}}})
+    installed = tmp_path/'available.json'
+    write(installed, ['team:analysis'])
+    result = json.loads(subprocess.check_output([
+        sys.executable, str(ROOT/'scripts/config.py'), '--repository', repository,
+        'preflight', '--process', process, '--available', str(installed)], text=True))
+    assert result['ready']
+    assert result['unsupported_native_reviews'] == []
+
+
 def test_explicit_contract_covers_independent_verification_with_unrelated_skill():
     calls = [('workflow/tasks/2/0', {'instructions': 'Verify findings.'})]
     result = invocation.preflight(calls, [], {'delegation': True},

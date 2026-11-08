@@ -144,8 +144,8 @@ def preflight(calls, available, capabilities=None, *, native_reviews=None):
                 ambiguous[reference] = candidates
             else:
                 resolved[reference] = candidates[0]
-        parts = location.split('/')
-        reviewer = ('reviewers' in parts or location == 'reviewer'
+        reviewer = (re.search(r'/(?:options/reviewers/[0-9]+|reviewers/[0-9]+/[0-9]+)$', location)
+                    is not None or location == 'reviewer'
                     or (reference or '').split(':')[-1].startswith('code-review'))
         if reviewer or location in native_reviews:
             requirements = native_reviews.get(location)
