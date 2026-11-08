@@ -60,7 +60,7 @@ Use `selection:"finalizers"` for finalizers; the retained run is required. Use `
 
 Claim, execute, record and recover under [task state](task-state.md). Specs capture skill-owned defaults/schemas and resolved options, preserve additional prompts and check live selection and policy before claims and recording. Each occurrence has its own identity; finalizers additionally bind the retained run. List edits can change occurrence selection: reconcile unfinished work before adopting a changed plan. Cached results never replace live CI or publication checks. The skill must collect actual host observations; configuration and self-reported JSON do not prove execution or semantic correctness.
 
-Legacy process commands remain compatibility readers for existing saved settings. New skill prompts use skill-owned plans and `skill-spec`; they do not introduce coordinators, named task maps, cycle nodes or a second agent runner.
+Legacy process commands remain compatibility readers for existing saved settings. New skill prompts use skill-owned plans and managed `prepare`/`finish`; they do not introduce coordinators, named task maps, cycle nodes or a second agent runner. Low-level spec/start/record commands do not attach managed checklists on their own and are reserved for integrations.
 
 ## Domain settings
 

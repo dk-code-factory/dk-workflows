@@ -45,15 +45,14 @@ Hooks inherit the process's current constraints and cannot expand edit or public
 
 ## Define and resume
 
-Define a hook by its zero-based list position:
+Prepare one hook at its zero-based list position through the shared [managed task lifecycle](task-state.md):
 
 ```sh
 python3 PLUGIN_ROOT/scripts/dk.py --repository HOST/OWNER/REPO --pr PR_URL \
-  hook-spec --process pr-fix --run RUN_ID --cycle CYCLE_ID \
-  --phase before_cycle --index 0 --definition /private/hook-definition.json
+  prepare --file /private/hook-request.json
 ```
 
-Supply the native resolved `skill_identity`, `resources`, `instructions`, `inputs`, execution `options`, and task-capture flags. For an instruction-only hook, use the owning process's resolved skill identity. For a selected skill, use its exact native identity. The helper supplies responsibility and custom assignment, records explicit live configuration source paths, and captures the invocation and configuration schemas and runtimes as governing resources. Claims and recording recheck the effective invocation, policy and phase list without making unrelated config edits repeat completed hooks. Pass `--upstream HOST/OWNER/REPO` when configuration inherits it. The command only defines a task; it never launches an agent or changes retained run state.
+Supply the native resolved `skill_identity`, `resources`, `instructions`, `inputs`, execution `options`, and task-capture flags. For an instruction-only hook, use the owning process's resolved skill identity. For a selected skill, use its exact native identity. The helper supplies responsibility and custom assignment, records explicit live configuration source paths, and captures the invocation and configuration schemas and runtimes as governing resources. Preparation and finish recheck the effective invocation, policy and phase list without making unrelated config edits repeat completed hooks. Set the descriptor's `process` for `pr-review` (the default is `pr-fix`) and `upstream` when configuration inherits it. Save this request as `/private/hook-request.json`:
 
 ```json
 {
@@ -74,7 +73,9 @@ Supply the native resolved `skill_identity`, `resources`, `instructions`, `input
 
 Capture all governing resources, including indirect guidance. Keep immutable cycle-start context separate from live files the hook changes. For Git-mutating hooks, use pinned Git inputs from an immutable checkout or describe the pinned starting state in an immutable context artifact. Use `cacheable:false` if governing capture is incomplete. Live captured-input drift rejects recording and requires explicit reconciliation.
 
-Regenerate the spec before each claim and completion check. Claim separately with `start --spec HOOK.json --run RUN_ID`, without reviewer cycle, retry or CI budget flags. The runtime generates an occurrence identity from process, run, cycle, phase and list position. Identical hooks at different positions are separate occurrences. The task fingerprint includes exact instructions, options, model and reasoning settings. Follow `invoke`, `reuse` and `recover_required`; retain the original handle and output and record explicit completion. Check saved completion evidence before repeating noncacheable work.
+Prepare hooks individually with the retained run and cycle in the request, without retry or CI budget flags. The helper uses the cycle for hook identity without consuming reviewer-cycle budget. The runtime generates an occurrence identity from process, run, cycle, phase and list position. Identical hooks at different positions are separate occurrences. The task fingerprint includes exact instructions, options, model and reasoning settings. Follow the returned lifecycle action; retain the original handle and output and submit explicit completion with `finish`. Follow its `recheck` gate before advancing. Check saved completion evidence before repeating noncacheable work.
+
+The low-level `hook-spec` and `start`/`record` commands remain [compatibility APIs](task-state-low-level.md) for integrations. They do not attach a managed checklist on their own. Workflow agents use `prepare`/`finish`, including for legacy configured hooks.
 
 ## Changes to a retained list
 
