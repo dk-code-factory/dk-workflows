@@ -250,8 +250,10 @@ def test_managed_skill_occurrences_replay_and_detect_live_selection_drift(tmp_pa
                                            'index': 0, 'definition': definition}]}
     tasks = Tasks(REPOSITORY, PR)
     first = tasks.prepare(request)['tasks'][0]
-    tasks.finish(first['key'], first['claim']['id'], b'All selected invariants checked.',
-                 {'complete': True, 'findings': []})
+    from checklist_reports import accept
+    check = tasks.finish(first['key'], first['claim']['id'], b'All selected invariants checked.',
+                         {'complete': True, 'findings': []})
+    accept(tasks, check)
     resumed = Tasks(REPOSITORY, PR)
     assert resumed.resume()['tasks'][0]['reusable']
     assert resumed.prepare({'run': 'retained', 'tasks': [{'key': first['key']}]})['tasks'][0]['action'] == 'reuse'

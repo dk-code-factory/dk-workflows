@@ -90,3 +90,5 @@ python3 PLUGIN_ROOT/scripts/dk.py --repository HOST/OWNER/REPO --pr PR_URL \
 ```
 
 This replaces the current phase snapshot after an explicit reasoned acknowledgment, without appending duplicate lists, deleting original results, resetting budgets or claiming any hook completed. A stale snapshot or active hook claim blocks reconciliation. Removing every hook can be reconciled with the same command. Completed hooks that remain unchanged at the same position retain eligible receipts; changing a later hook does not repeat them. Changed or moved tasks may run again only after deliberate reconciliation. Restoring the original unchanged list also permits normal recovery. Never automatically replay a hook with uncertain effects.
+
+Use managed preparation and finish with each hook’s prepared checklist. After its initial completed report, handle `recheck` through the shared [completion checks](task-state.md#completion-checks) with the same agent (the coordinator for instruction hooks). Advance in order only after acceptance. Mandatory checklist exhaustion blocks dependent stages; best-effort omissions never excuse hook execution failure.

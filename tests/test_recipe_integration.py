@@ -180,6 +180,8 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
                    if entry['requires_condition']]
         return save('preferences-'+mode+'.json',{'selection':selection,'condition_context':{'scope':'Return two.'},
                                                'decisions':decisions})
+    managed_descriptors={}
+    checklist_checks=[]
     def spec(skill,task='content-review',current=None,cacheable=True):
         from native_review_observations import CONTRACT
         definition={'skill_identity':'fixture:'+skill,'resources':{'skill':str(installed/(skill+'.md'))},
@@ -193,11 +195,14 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
             definition['resources']['implementation']=str(FIXTURE/'reviewer.py')
             definition['native_review'] = CONTRACT
         value=cache('spec','--definition',save('definition.json',definition))
-        return save(skill+'-'+task+'.json',value)
+        path=save(skill+'-'+task+'.json',value)
+        managed_descriptors[str(path)]={'definition':definition}
+        return path
     def record(task,claim,value,progress=None):
         from native_review_observations import observations
+        from checklist_reports import report as checklist_report
         output=save('output-'+claim['id']+'.json',value)
-        args=['--spec',task,'--claim',claim['id'],'--original',output,'--normalized',output,
+        args=['--key',claim['key'],'--claim',claim['id'],'--original',output,'--report',output,
               '--status','complete' if value['complete'] else 'incomplete']
         if progress:args+=['--progress',save('progress.json',progress)]
         source = json.loads(task.read_text())
@@ -205,7 +210,19 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
             evidence = tmp_path/('native-'+claim['id']+'.json')
             evidence.write_bytes(observations(source, claim, output.read_bytes()))
             args += ['--native-evidence', evidence]
-        return cache('record',*args)
+        result=cache('finish',*args)
+        if value['complete']:
+            assert result['action']=='recheck' and result['check_number']==1
+            # Offline stand-in for follow-up to the same native agent. Primary
+            # execution is never repeated to check completion.
+            checklist_checks.append(source.get('options',{}).get('finalization',{}).get('skill',source['task']['id']))
+            followup=save('check-'+claim['id']+'.json',checklist_report(result['checklist'],result['result']))
+            result=cache('finish','--key',claim['key'],'--claim',claim['id'],
+                         '--round',result['round'],'--report',followup)
+            assert result['checklist_complete'] and result['status']=='complete'
+        else:
+            assert result['status']=='incomplete'
+        return result
     finalizer_groups=cache('finalizer-plan')['groups']
     assert finalizer_groups==[[{'skill': reference, 'options': {}, 'required': True}] for reference in [
         'dk-workflows:dk-commit-split','dk-workflows:dk-pr-decisions',
@@ -223,15 +240,21 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
                           resources=source['skill']['resources'],assigned_instructions=source['task']['instructions'],options={})
         generated=cache('finalizer-spec','--run','iteration','--finalizer',finalizer_references[role],
                         '--definition',save('finalizer-definition.json',definition))
-        return save('finalizer-'+role+'.json',generated)
+        path=save('finalizer-'+role+'.json',generated)
+        managed_descriptors[str(path)]={'kind':'finalizer','finalizer':finalizer_references[role],
+                                        'definition':definition}
+        return path
     def domain(task,perform,*,complete=True,finalizer_role=None,**budget):
         task_spec=finalizer_spec(finalizer_role,task) if finalizer_role else spec('domain',task,cacheable=False)
         if finalizer_role:finalizer_calls.append(finalizer_role)
-        args=['--spec',task_spec,'--run','iteration']
-        for key,value in budget.items():
-            args+=['--'+key.replace('_','-')]
-            if value is not True:args+=[value]
-        claim=cache('start',*args)['claim'];result=perform()
+        descriptor=managed_descriptors[str(task_spec)]
+        if task=='complete':
+            definition=dict(descriptor['definition'])
+            definition.pop('responsibility')
+            definition['skill_identity']='dk-workflows:dk-pr-fix'
+            descriptor={'kind':'completion','definition':definition}
+        request={'run':'iteration','tasks':[descriptor],**budget}
+        claim=cache('prepare','--file',save('domain-request.json',request))['tasks'][0]['claim'];result=perform()
         record(task_spec,claim,{'complete':complete,'result':result},progress={'stage':task,'complete':complete})
         return result
     # Inspect instructions/Decisions and complete feedback before changing code.
@@ -249,11 +272,10 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
     reviewer_log=tmp_path/'reviewer-launches.jsonl'
     def start_reviews(skills,cycle,*,recover=None,retry=False,run='iteration'):
         tasks={skill:spec(skill) for skill in skills}
-        args=['--run',run,'--cycle',cycle]
-        for task in tasks.values():args+=['--spec',task]
-        for key,claim in (recover or {}).items():args+=['--recover',key+'='+claim]
-        if retry:args+=['--retry']
-        batch=cache('start-batch',*args)
+        request={'run':run,'cycle':cycle,'tasks':[managed_descriptors[str(task)] for task in tasks.values()]}
+        if recover:request['recover']=recover
+        if retry:request['retry']=True
+        batch=cache('prepare','--file',save('review-request.json',request))
         assert len(batch['tasks'])==len(tasks)
         return {skill:(task,started) for (skill,task),started in zip(tasks.items(),batch['tasks'])}
     def review(skill,cycle,*,claimed=None,retry=False,fail=False,run='iteration'):
@@ -363,6 +385,7 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
     status=cache('status','--compact','--run','iteration','--spec',spec('a'),'--spec',spec('b'))
     assert all(t['reusable'] and not t['findings'] for t in status['tasks'])
     run=status['runs']['iteration']
+    assert {'content-review','fix-findings','dk-workflows:dk-ci','complete'} <= set(checklist_checks)
     assert run['cycles']==(['c1','c2','c3'] if final_ci_outcome=='repair' else ['c1','c2'])
     assert list(run['retries'].values())==[1]
     assert run['ci_reruns']==({head:1} if rerun else {}) and not status['unfinished']

@@ -162,9 +162,10 @@ class Approval:
                     and attempt.get('run') == value.get('run') and attempt.get('cycle') == cycle)
                 if not status['reusable'] and not current_completion:
                     raise ValueError('Incomplete or stale review evidence: ' + status['reason'])
-            results[current['key']] = saved
+            normalized, sources = store.findings_evidence(entry, saved)
+            results[current['key']] = {**saved, 'candidate_paths': sources}
             specs[current['key']] = spec
-            return current['key'], saved['normalized']
+            return current['key'], normalized
 
         discovery = value.get('discovery', [])
         if owned:
@@ -233,7 +234,7 @@ class Approval:
             if specs[key]['options'].get('invocation') != verifier:
                 raise ValueError('Verification evidence must retain the selected invocation controls')
             original_inputs = set(specs[key].get('inputs', {}).values())
-            if any(results[task]['path'] not in original_inputs for task, _ in candidates):
+            if any(path not in original_inputs for task, _ in candidates for path in results[task]['candidate_paths']):
                 raise ValueError('Verification must capture the original current candidate reports')
             dispositions = result.get('dispositions', [])
             covered = []

@@ -20,3 +20,5 @@ Automatic flaky-test discovery uses `dk-workflows:dk-ci-flakes` scoped settings.
 Read the final JSON object's `result` on stdout: accepted outcomes exit 0; other terminal outcomes exit 1. Progress JSON goes to stderr. Helper exceptions exit 2 with `{"result":"error","message":"..."}` on stderr and no final stdout result. Preserve the error and treat CI as blocked.
 
 Before rerunning a transient failure, reserve the caller's budget for that head. Use `scripts/publish.py` to prepare and publish a `ci-rerun` request with current failed-attempt evidence. Pass the verified operation to `ci_wait.py --rerun-operation FILE` to preserve the next attempt's wait window on resume. Do not rerun whole workflows as a fallback.
+
+For managed CI and repair tasks, follow the prepared checklist and same-agent completion checks. Checklist acceptance never replaces current exact-head CI evidence, repair validation or authorized publication checks. Follow [completion checks](../../../docs/task-state.md#completion-checks).

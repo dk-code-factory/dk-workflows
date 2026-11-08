@@ -97,8 +97,10 @@ Run commit changes and governing-content synchronization before CI covering the 
 
 ## Completion
 
-After the selected list finishes, `dk-workflows:dk-pr-fix` performs a final live check of scope, instructions, discussion, Decisions, head, target, review coverage, finalizer results and publication receipts. Follow effective completion instructions within the selected plan and permissions. These checks and the report are coordinator duties, including for `[]`.
+After the selected list finishes, prepare the coordinator’s managed `kind:"completion"` occurrence under the same run and satisfy [completion checks](task-state.md#completion-checks) before declaring success. Its helper captures the live selected plan, including an empty list. `dk-workflows:dk-pr-fix` performs a final live check of scope, instructions, discussion, Decisions, head, target, review coverage, finalizer results and publication receipts. Follow effective completion instructions within the selected plan and permissions. These checks and the report are coordinator duties, including for `[]`.
 
 Report selected-plan completion separately from PR readiness. Identify skipped default duties and missing evidence. A plan without CI may finish its selected actions, but cannot claim CI was verified; omitted cleanup cannot be reported as assessed. External finalizers may supply equivalent current evidence. Failed selected work remains blocked. Report optional incomplete reviews, accepted findings and CI exceptions. A completion prompt cannot silently restore disabled finalizers or expand permission.
 
 All finalizers inherit the exact caller permissions. `dk-workflows:dk-pr-fix` alone does not authorize merging, creating issues or unrelated writes. Preserve a separate explicit merge request and fulfill it through `dk-workflows:dk-pr-publish` after current review, verification, CI and repository requirements pass, including when a custom finalizer list omits CI. Reordering or adding a skill grants no additional permission.
+
+Give every finalizer its prepared checklist and follow the shared `recheck` gate with the same agent before accepting completion. Mandatory exhaustion blocks later groups; report every best-effort omission.

@@ -26,7 +26,7 @@ Read current CI and publication readiness at their existing boundaries.
 
 `scripts/dk.py prepare --file REQUEST.json` accepts explicit task definitions.
 One helper call builds specs, captures current inputs, claims eligible work and
-returns `invoke`, `reuse` or `recover_required`. It includes expected native
+returns `invoke`, `reuse`, `recheck`, `failed` or `recover_required`. It includes expected native
 observation bindings for invocations that require them; it never invents host
 evidence or invokes a model. `finish` uses the retained task key and claim to
 validate current inputs and record original output and explicit completion.
@@ -48,6 +48,59 @@ of saved work; the coordinator must still select the current required task set.
 The low-level spec/start/record API remains compatible. Preparing a task through
 the managed interface can attach a definition to an existing reusable entry
 without invoking its reviewer, resetting budgets or changing its fingerprint.
+
+## Task completion checklists
+
+Every managed assignment includes a deterministically generated checklist, plus
+custom stable-ID items. The definition's `checklist` sets `items`, `max_checks`
+(default three additional checks) and `required`. Selected reviewers pass their
+required/optional status as definition `required`; other tasks default mandatory.
+Explicit checklist overrides affect checklist acceptance only. Low-level tasks
+without managed definitions retain their existing behavior and fingerprints.
+
+A complete primary report and valid native observations are saved unchanged
+before reserving the first follow-up, in the same manifest transaction. The
+initial report never consumes a check. Each follow-up verifies every item against
+the original assignment, finishes omissions and supplies evidence references or
+an unfinished reason. Success stops early; exactly N unfinished follow-ups fail
+mandatory work or accept best-effort work with every omission reported. This
+never accepts failed execution, an incomplete primary report, missing native
+evidence, stale CI or missing publication checks.
+
+The existing task entry holds only the checklist contract, governing fingerprint,
+original-result reference, bounded reserved rounds, response references and final
+outcome. A digest recognizes replayed initial submissions; per-round response
+hashes reject conflicting replays. Immutable responses share the existing result
+artifact directory. This state avoids repeating completed analysis, rechecking
+completed rounds, reconstructing pending checks or accidentally extending their
+allowance in a fresh session. No conversation, settings snapshot, secondary
+manifest or rendered status is saved. Compact resume supplies the pending round,
+consumed count and targeted response references; full reports are explicit reads.
+
+Acceptance is fresh only for the same governing fingerprint, checklist contents
+and intact original result and final checklist evidence. Checklist changes reset
+acceptance alone, preserving native output, attempts, review budgets and unchanged
+siblings. Relevant task-input changes still require refreshed primary work.
+Findings from follow-ups are derived from immutable response artifacts and
+appended to primary findings for retrieval, status and CI approval. Verification
+captures every contributing artifact. On checklist-only refresh, retain references
+only to earlier responses containing findings; this avoids losing completed
+analysis or repeating its discovery. These references remain fresh only for the
+same primary result and governing fingerprint. Missing response evidence blocks
+acceptance. No additional findings copy or merged report is persisted.
+Preparing a retained result lacking a checklist reserves completion-only checking
+instead of launching its reviewer. The same agent receives follow-ups; after an
+interruption the coordinator reconciles retained evidence without repeating the
+original analysis. Pending rounds remain reserved until their response is saved;
+claims and uncertain external writes still require their existing reconciliation.
+
+The fix coordinator uses a managed `completion` occurrence under its retained run.
+Its helper captures the live selected finalizer plan and configuration sources,
+building only that plan's items, including an empty plan. This avoids reconstructing
+final duties after interruption and prevents checklist instructions from restoring
+disabled finalizers. Plan/source changes refresh affected completion evidence;
+completion tasks are noncacheable, and current PR, CI and publication checks
+remain independent live boundaries.
 
 ## Reuse and extension points
 
@@ -103,6 +156,8 @@ does not substitute for reading the evidence needed for a decision.
 - Relevant instructions, resources, preference decisions and Git changes stale
   affected work. Unrelated preferences and history-only cleanup preserve eligible
   reuse. Missing or damaged evidence remains incomplete.
+- Checklist follow-ups enforce at least one check, early success, exact exhaustion,
+  replay safety and fresh-session recovery without replacing original evidence.
 - Existing manifests, fingerprints, settings, publication journals and low-level
   commands remain usable. No cache reset or new default reviewer is introduced.
 - Offline checks establish behavior, helper-call reductions and bounded output.
