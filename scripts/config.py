@@ -28,6 +28,7 @@ def main():
         if action=='set':c.add_argument('--file',type=Path,required=True)
     c=sub.add_parser('preflight');c.add_argument('--available',type=Path,required=True)
     c.add_argument('--capabilities',type=Path)
+    c.add_argument('--native-reviews', type=Path, help='Resolved review contracts keyed by occurrence location')
     c.add_argument('--process')
     for action in ('skill-show', 'skill-set', 'skill-reset', 'skill-plan', 'skill-preflight'):
         c = sub.add_parser(action)
@@ -44,6 +45,7 @@ def main():
         if action == 'skill-preflight':
             c.add_argument('--available', type=Path, required=True)
             c.add_argument('--capabilities', type=Path)
+            c.add_argument('--native-reviews', type=Path, help='Resolved review contracts keyed by occurrence location')
     a=p.parse_args()
     if a.action.startswith('skill-'):
         invocation.skill_name(a.skill)
@@ -58,7 +60,8 @@ def main():
                                                   **({'pr': a.pr} if a.pr else {})})
         if a.action == 'skill-preflight':
             result = invocation.preflight(list(skill_config.calls(a.skill, a.repository, a.upstream, options=local)),
-                                          read(a.available), read(a.capabilities) if a.capabilities else None)
+                                          read(a.available), read(a.capabilities) if a.capabilities else None,
+                                          native_reviews=read(a.native_reviews) if a.native_reviews else None)
         elif a.action == 'skill-plan':
             result = skill_config.plan(a.skill, a.kind, a.repository, a.upstream,
                                        options=local, resolved=a.resolved)
@@ -72,7 +75,8 @@ def main():
                   config.effective(a.repository,a.upstream,expanded=a.expanded))
     elif a.action=='preflight':result=config.preflight(
         config.effective(a.repository,a.upstream)['settings'],read(a.available),
-        read(a.capabilities) if a.capabilities else None,process=a.process)
+        read(a.capabilities) if a.capabilities else None,process=a.process,
+        native_reviews=read(a.native_reviews) if a.native_reviews else None)
     else:
         operation = {'domain': 'workflow', 'action': a.action, 'scope': a.scope}
         if a.action == 'set':

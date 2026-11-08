@@ -1,6 +1,6 @@
 # dk-workflows
 
-Version 5.1.1. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
+Version 5.1.3. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
 
 Use `dk-workflows:dk-pr-iter` as the universal entry point: it recognizes your accounts and routes your PRs to `dk-workflows:dk-pr-fix` and other authors' PRs to `dk-workflows:dk-pr-review`. Invoke either workflow directly when the intended responsibility is explicit. Fixing runs review/fix cycles followed by [configured finalizers](docs/finalizers.md); the default ending preserves commit cleanup and final CI. Incoming review verifies candidate findings independently before posting; automatic approval and merging each require separate authorization or enabled policy.
 

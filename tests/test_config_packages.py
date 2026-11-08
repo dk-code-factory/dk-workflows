@@ -22,7 +22,9 @@ def test_settings_precedence_and_missing_selected_skills():
     assert effective['processes']['issue']['coordinator']=='custom:description'
     assert config.preflight(effective,[])['missing_selected_skills']
     available=sorted({call['skill'] for _,call in config.calls(effective) if 'skill' in call})
-    assert config.preflight(effective,available)['ready']
+    from native_review_observations import PREFLIGHT_CAPABILITIES, preflight_requirements
+    assert config.preflight(effective,available,PREFLIGHT_CAPABILITIES,
+        native_reviews=preflight_requirements(config.calls(effective)))['ready']
 
 
 @pytest.mark.parametrize('settings',[{'architecture':{}},{'reviewers':[{'command':['x']}]},

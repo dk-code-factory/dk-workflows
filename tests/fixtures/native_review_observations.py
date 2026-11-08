@@ -30,3 +30,13 @@ def observations(spec, claim, original):
                          'receipt': 'offline tool fixture'}
                         for index, argv in enumerate(requirement['drivers'])]})
     return json.dumps(value).encode()
+
+
+PREFLIGHT_CAPABILITIES = {'delegation': True, 'native_evidence': {
+    'availability': 'available', 'inventory_complete': True, 'invocation_results': True,
+    'child_results': True, 'tool_observations': True}}
+
+
+def preflight_requirements(calls):
+    """Resolved no-child review contracts for availability-focused offline tests."""
+    return {location: CONTRACT for location, _ in calls if 'reviewers' in location.split('/')}
