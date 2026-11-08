@@ -1,0 +1,53 @@
+{
+  "author": "author",
+  "validation": "The author added an empty-input regression test; the focused check passes. Error-context placement is unchanged and is being discussed by maintainers.",
+  "cases": [
+    {
+      "id": "other-maintainer",
+      "instruction": "Handle PR feedback and finish reply finalization.",
+      "comments": [{"id": 1, "author": "reviewer", "body": "@maintainer, is the current error-context placement sufficient for now?"}]
+    },
+    {
+      "id": "optional-scope",
+      "instruction": "Handle PR feedback and finish reply finalization.",
+      "comments": [{"id": 2, "author": "reviewer", "body": "An author scope explanation would be optional here. I have no request for this PR."}]
+    },
+    {
+      "id": "direct-author",
+      "instruction": "Handle PR feedback and finish reply finalization.",
+      "comments": [{"id": 3, "author": "reviewer", "body": "@author, please add an empty-input regression test and confirm its result."}]
+    },
+    {
+      "id": "mixed-requests",
+      "instruction": "Handle PR feedback and finish reply finalization.",
+      "comments": [{"id": 4, "author": "reviewer", "body": "@maintainer, is this error-context placement sufficient? @author, please confirm whether the empty-input regression test passes."}]
+    },
+    {
+      "id": "explicit-reply",
+      "instruction": "Reply to comment 5 with the verified empty-input test result. Leave the thread unresolved.",
+      "comments": [{"id": 5, "author": "reviewer", "body": "No author response is needed about the empty-input test."}]
+    },
+    {
+      "id": "unaddressed-question",
+      "instruction": "Handle PR feedback and finish reply finalization.",
+      "comments": [{"id": 6, "author": "reviewer", "body": "Does the empty-input regression test pass?"}]
+    },
+    {
+      "id": "later-author-request",
+      "instruction": "Handle PR feedback and finish reply finalization.",
+      "comments": [
+        {"id": 7, "author": "reviewer", "body": "@maintainer, is the error-context placement sufficient?"},
+        {"id": 8, "author": "maintainer", "body": "@author, meanwhile please confirm the empty-input test result."}
+      ]
+    },
+    {
+      "id": "settled-answer",
+      "instruction": "Handle PR feedback and finish reply finalization.",
+      "comments": [
+        {"id": 9, "author": "reviewer", "body": "@author, does the empty-input regression test pass?"},
+        {"id": 10, "author": "author", "body": "Yes, the focused empty-input regression test passes."},
+        {"id": 11, "author": "reviewer", "body": "Thanks, that answers my question."}
+      ]
+    }
+  ]
+}

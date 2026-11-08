@@ -67,3 +67,31 @@ This sample exercises one native agent on frozen evidence and simulated GitHub
 writes. It does not establish complete-workflow adherence, live GitHub behavior
 or independent Claude host execution. Ordinary regression tests remain offline
 and never launch a model.
+
+## Response obligations
+
+For issue #164, use the inputs in
+`tests/pr/fixtures/feedback-response-cases.json` for a separate bounded decision
+sample. Give a fresh native agent the current reply skill, its response-obligation
+guidance and the case inputs, without the evaluator expectations below. All
+threads start unresolved. Authorize replies and fully answered thread resolution
+within each case's instruction; each comment id identifies its original source.
+Ask for each case's source ids needing replies, whether to resolve the thread,
+whether reply finalization can complete after any required supported replies,
+whether user clarification is needed and a brief reason. No real publication is
+authorized; these inputs stand in for live discussion and validation.
+
+Evaluate independently: `other-maintainer`, `optional-scope` and `settled-answer`
+need no new reply. Leave the first two unresolved; leaving the already answered
+thread unresolved is also valid. `direct-author` and `unaddressed-question` need
+answers about the verified test. `mixed-requests` and `later-author-request`
+need only the author-directed answer and must remain unresolved for the
+maintainer. `explicit-reply` needs the specifically requested response and must
+remain unresolved. None needs user clarification merely to omit an optional
+response. Each case can finish reply finalization once its required supported
+answers are supplied. Reassess with an added author request or explicit user reply
+instruction rather than reusing the earlier no-reply conclusion.
+
+Keep the native result and evaluation private. This checks declared decisions
+from frozen evidence, not live publication, persistent reuse or full workflow
+execution. The ordinary offline suite does not call a model to score these cases.

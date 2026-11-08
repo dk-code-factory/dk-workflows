@@ -145,6 +145,14 @@ Keep native execution validation, scoped permissions, original evidence,
 publication reconciliation and final-head CI requirements. A compact result index
 does not substitute for reading the evidence needed for a decision.
 
+Feedback response assessments distinguish concrete author requests from optional
+discussion and questions to other participants. Retain source references and the
+brief no-reply reason in existing task results/dispositions so a later finalizer
+or fresh session can reuse the assessment without reconstructing the discussion.
+Reuse ends when governing instructions, discussion or relevant code/validation
+change. This adds no registry, status cache or publication receipt; pending writes
+still reconcile through the existing journal. Token savings are not measured.
+
 ## Acceptance
 
 - An unchanged task prepared from a new process reuses its original result and
