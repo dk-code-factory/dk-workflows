@@ -3,11 +3,11 @@
 import argparse
 import json
 import os
-import fcntl
 from pathlib import Path
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'runtime'))
-from state import read, write
+from state import read
+from config_requests import apply_bound
 import config
 import invocation
 import skill_config
@@ -24,6 +24,7 @@ def main():
     c.add_argument('--section', action='append', choices=settings.SECTIONS)
     for action in ('set','reset'):
         c=sub.add_parser(action);c.add_argument('--scope',choices=['repo','user'],default='repo')
+        c.add_argument('--request-id')
         if action=='set':c.add_argument('--file',type=Path,required=True)
     c=sub.add_parser('preflight');c.add_argument('--available',type=Path,required=True)
     c.add_argument('--capabilities',type=Path)
@@ -34,6 +35,7 @@ def main():
         c.add_argument('--options', type=Path, help='Invocation-local options; never saved by a read')
         if action in {'skill-set', 'skill-reset'}:
             c.add_argument('--scope', choices=['repo', 'user'], default='repo')
+            c.add_argument('--request-id')
         if action == 'skill-set':
             c.add_argument('--file', type=Path, required=True)
         if action == 'skill-plan':
@@ -47,21 +49,13 @@ def main():
         invocation.skill_name(a.skill)
         local = read(a.options) if a.options else None
         if a.action in {'skill-set', 'skill-reset'}:
-            target = config.path(a.repository if a.scope == 'repo' else None)
-            value = skill_config.validate(a.skill, read(a.file)) if a.action == 'skill-set' else None
-            target.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-            with target.with_suffix('.lock').open('a') as lock:
-                fcntl.flock(lock, fcntl.LOCK_EX)
-                current = config.validate(read(target)) if target.exists() else {}
-                if a.action == 'skill-set':
-                    current.setdefault('skill_defaults', {}).setdefault(a.skill, {})['options'] = value
-                else:
-                    entry = current.get('skill_defaults', {}).get(a.skill, {})
-                    entry.pop('options', None)
-                    if not entry:
-                        current.get('skill_defaults', {}).pop(a.skill, None)
-                if target.exists() or a.action == 'skill-set':
-                    write(target, config.validate(current))
+            operation = {'domain': 'skill', 'action': a.action.removeprefix('skill-'),
+                         'scope': a.scope, 'skill': a.skill}
+            if a.action == 'skill-set':
+                operation['value'] = read(a.file)
+            apply_bound(a.request_id, operation, {'repository': a.repository, 'checkout': str(a.checkout),
+                                                  **({'upstream': a.upstream} if a.upstream else {}),
+                                                  **({'pr': a.pr} if a.pr else {})})
         if a.action == 'skill-preflight':
             result = invocation.preflight(list(skill_config.calls(a.skill, a.repository, a.upstream, options=local)),
                                           read(a.available), read(a.capabilities) if a.capabilities else None)
@@ -80,10 +74,13 @@ def main():
         config.effective(a.repository,a.upstream)['settings'],read(a.available),
         read(a.capabilities) if a.capabilities else None,process=a.process)
     else:
-        target=config.path(a.repository if a.scope=='repo' else None)
-        if a.action=='set':write(target,config.validate(read(a.file)))
-        elif target.exists():target.unlink()
-        result={'path':str(target),'action':a.action}
+        operation = {'domain': 'workflow', 'action': a.action, 'scope': a.scope}
+        if a.action == 'set':
+            operation['value'] = read(a.file)
+        apply_bound(a.request_id, operation, {'repository': a.repository, 'checkout': str(a.checkout),
+                                              **({'upstream': a.upstream} if a.upstream else {}),
+                                              **({'pr': a.pr} if a.pr else {})})
+        result={'path':str(config.path(a.repository if a.scope == 'repo' else None)), 'action':a.action}
     print(json.dumps(result,sort_keys=True))
 
 if __name__=='__main__':

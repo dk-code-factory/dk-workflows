@@ -204,7 +204,9 @@ def test_config_and_hook_spec_cli_roundtrip(configured, tmp_path):
     source = tmp_path/'settings.json'
     write(source, configuration)
     command = [sys.executable, str(ROOT/'scripts/config.py'), '--repository', REPOSITORY]
-    result = subprocess.run([*command, 'set', '--file', str(source)], text=True, capture_output=True)
+    from config_request_admission import admitted
+    request_id = admitted({'domain':'workflow', 'action':'set', 'value':configuration}, repository=REPOSITORY)
+    result = subprocess.run([*command, 'set', '--file', str(source), '--request-id', request_id], text=True, capture_output=True)
     assert result.returncode == 0, result.stdout + result.stderr
     shown = subprocess.run([*command, 'show'], text=True, capture_output=True, check=True)
     assert json.loads(shown.stdout)['settings'] == configuration

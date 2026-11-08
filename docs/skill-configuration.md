@@ -1,5 +1,7 @@
 # Skill-owned configuration
 
+Saved mutations use the [dedicated configuration agent](configuration-agent.md) and [request history](configuration-requests.md). Every saved-write command requires `--request-id ID` bound to its exact prepared operation; read commands are unchanged.
+
 Every bundled skill owns `config.json` (explicit bundled defaults) and `config.schema.json` (its accepted options) beside `SKILL.md`. Codex is the maintained source; `scripts/sync_skills.py` copies all three files into Claude's distribution. Empty configuration objects are intentional for skills without domain options. Shared invocation fields stay in [the invocation schema](../schemas/invocation.schema.json).
 
 Skill identities must always be fully qualified as `plugin:skill`, including bundled identities such as `dk-workflows:dk-ci`. Short names and paths are rejected. Configuration never launches Codex or Claude Code; the existing session owns execution and supported native delegation.
@@ -23,9 +25,9 @@ For an authorized settings change:
 
 ```sh
 python3 PLUGIN_ROOT/scripts/config.py --repository HOST/OWNER/REPO \
-  skill-set --skill dk-workflows:dk-ci --scope repo --file OPTIONS.json
+  skill-set --skill dk-workflows:dk-ci --scope repo --file OPTIONS.json --request-id REQUEST_ID
 python3 PLUGIN_ROOT/scripts/config.py --repository HOST/OWNER/REPO \
-  skill-reset --skill dk-workflows:dk-ci --scope repo
+  skill-reset --skill dk-workflows:dk-ci --scope repo --request-id REQUEST_ID
 ```
 
 `skill-set` replaces only that skill's options in the selected scope. `skill-reset` removes only those options, restoring inheritance. Both preserve other skills, instructions, agent controls and unrelated settings. Reads never save or normalize private records in place. Invalid saved values block resolution rather than being reset.

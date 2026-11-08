@@ -89,7 +89,11 @@ def test_drafting_uses_shared_invocation_and_preserves_schema_metadata(monkeypat
     value = {'$schema': 'drafting.schema.json', 'pr_description': selection}
     source = tmp_path/'drafting-input.json'
     source.write_text(json.dumps(value))
-    written = config.main(['drafting', 'set', '--scope', 'user', '--file', str(source)])
+    from config_request_admission import admitted
+    import config_adapters
+    monkeypatch.setattr(config_adapters, 'identities', config.identities)
+    request_id = admitted({'domain':'drafting', 'action':'set', 'scope':'user', 'value':value})
+    written = config.main(['drafting', 'set', '--scope', 'user', '--file', str(source), '--request-id', request_id])
     assert json.loads(Path(written['file']).read_text()) == value
     assert config.main(['drafting', 'show'])['value'] == {'pr_description': selection}
 

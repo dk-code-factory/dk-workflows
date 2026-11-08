@@ -24,12 +24,12 @@ or:
 
 Providers use the shared [invocation contract](invocations.md), requiring fully qualified skill identities, custom instructions, options and optional native model/effort controls. Instruction-only providers use the cleanup identity. Preflight provider installation and agent capabilities with the same shared invocation validator; unsupported requests block cleanup. Literal `prompt` policies are text and do not invoke an agent.
 
-Then use the existing configuration conventions:
+Apply through the [dedicated configuration agent and request history](configuration-requests.md). Existing saved-write commands require a request ID bound to the prepared operation:
 
 ```sh
-python3 PLUGIN_ROOT/scripts/pr_config.py --cwd REPO commit-policy set --scope user --file POLICY.json
+python3 PLUGIN_ROOT/scripts/pr_config.py --cwd REPO commit-policy set --scope user --file POLICY.json --request-id REQUEST_ID
 python3 PLUGIN_ROOT/scripts/pr_config.py --cwd REPO commit-policy show
-python3 PLUGIN_ROOT/scripts/pr_config.py --cwd REPO commit-policy reset --scope repo
+python3 PLUGIN_ROOT/scripts/pr_config.py --cwd REPO commit-policy reset --scope repo --request-id REQUEST_ID
 ```
 
 Use `--scope repo` to override the global policy. The entire policy resolves repository → upstream → global → built-in, using the existing PR repository identity resolver (`--pr PR_URL` supports fork/head and base identities). Reset restores inheritance. Show reports the effective value and its source. Malformed saved configuration blocks resolution; repair or reset it. Policies remain separate from rules, preferences, drafting selections and workflow finalizers. The owning cleanup skill also exposes `policy` in its options: null explicitly selects built-in behavior. Effective resolution combines old records and scoped options without moving either; within a scope the new option wins, and invocation-local options have highest precedence.

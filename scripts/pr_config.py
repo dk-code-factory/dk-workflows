@@ -4,11 +4,10 @@ import argparse
 import json
 from pathlib import Path
 import sys
-import fcntl
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'runtime'))
 from shared import ci_exceptions, pr_size, pr_partition_policy
 from shared.repository_scope import identities, repository
-from shared.private_state import write, atomic_text
+from config_requests import apply_bound
 from settings import domain_load, domain_path
 import commit_policy
 
@@ -42,45 +41,53 @@ def main(arguments=None):
         for action in ('show','set','reset'):
             a=s.add_parser(action);a.add_argument('--scope',choices=['repo','user','effective'],default='effective' if action=='show' else 'repo')
             if action=='set':a.add_argument('--file',type=Path,required=True)
+    # A request ID belongs to each mutating subcommand, including partition choices.
+    for domain_parser in sub.choices.values():
+        for action_group in domain_parser._subparsers._group_actions:
+            for action_name, action_parser in action_group.choices.items():
+                if action_name not in {'show', 'list'}:
+                    action_parser.add_argument('--request-id')
     a=p.parse_args(arguments)
-    if a.command=='pr-partition':return pr_partition_policy.dispatch(a,a.pr)
-    if a.command=='ci-exceptions':
-        # Exceptions belong to the PR base repository, even in a fork checkout.
-        from shared.flaky_actions import pr_repository
-        key='remote:'+pr_repository(a.pr) if a.pr else repository(a.cwd)
-        if a.action=='list':return ci_exceptions.load(key,a.scope)
-        value={k:getattr(a,k) for k in ('kind','workflow','job','test','signature','reason')} if a.action=='add' else None
-        return ci_exceptions.configure(key,a.action,scope=a.scope,value=value,entry_id=getattr(a,'id',None))
-    chain=identities(a.cwd,a.pr)
-    if a.command=='pr-size':
-        if a.action=='list':return pr_size.load(chain,a.scope)
-        settings={k:getattr(a,k) for k in pr_size.DEFAULTS if getattr(a,k,None) is not None}
-        return pr_size.configure(chain,a.action,scope=a.scope,settings=settings,keys=getattr(a,'keys',None))
-    if a.action=='show':
-        return domain_load(a.command, chain, a.scope)
-    if a.scope=='effective':raise ValueError('Mutations require repo or user scope')
-    target=domain_path(a.command, 'user' if a.scope=='user' else chain[0])
-    target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
-    with target.with_suffix('.lock').open('a') as lock:
-        fcntl.flock(lock,fcntl.LOCK_EX)
-        if a.action=='reset':target.unlink(missing_ok=True)
-        else:
-            if a.command=='completion':
-                text=a.file.read_text()
-                if not text.strip() or '\x00' in text:raise ValueError('Nonempty completion prompt text required')
-                atomic_text(target,text)
+    if a.action in {'show', 'list'}:
+        if a.command == 'pr-partition':
+            return pr_partition_policy.load(a.pr)
+        if a.command == 'ci-exceptions':
+            from shared.flaky_actions import pr_repository
+            key = 'remote:' + pr_repository(a.pr) if a.pr else repository(a.cwd)
+            return ci_exceptions.load(key, a.scope)
+        chain = identities(a.cwd, a.pr)
+        return pr_size.load(chain, a.scope) if a.command == 'pr-size' else domain_load(a.command, chain, a.scope)
+    operation = {'domain': a.command, 'action': a.action}
+    if a.command == 'pr-partition':
+        operation.update(reason=a.reason, source=a.source_file.read_text() if a.source_file else a.source)
+        if a.action == 'instructions':
+            operation['instructions'] = a.file.read_text() if a.file else a.text
+    else:
+        operation['scope'] = a.scope
+        if a.command == 'ci-exceptions':
+            if a.action == 'add':
+                operation['value'] = {k: getattr(a, k) for k in ('kind', 'workflow', 'job', 'test', 'signature', 'reason')}
+            elif a.action == 'remove':
+                operation['id'] = a.id
+        elif a.command == 'pr-size':
+            if a.action == 'set':
+                operation['value'] = {k: getattr(a, k) for k in pr_size.DEFAULTS if getattr(a, k, None) is not None}
             else:
-                value=json.loads(a.file.read_text())
-                if a.command=='commit-policy':value=commit_policy.validate(value)
-                if a.command!='commit-policy' and (not isinstance(value,dict) or not value):
-                    raise ValueError('Nonempty domain settings object required')
-                if a.command=='drafting':
-                    for role,selection in value.items():
-                        if role == '$schema':
-                            if not invocation.text(selection):raise ValueError('Nonempty $schema reference required')
-                        else:invocation.validate(selection)
-                write(target,value)
-    return {'action':a.action,'file':str(target)}
+                operation['keys'] = a.keys
+        elif a.action == 'set':
+            operation['value'] = a.file.read_text() if a.command == 'completion' else json.loads(a.file.read_text())
+    context = {'checkout': a.cwd, **({'pr': a.pr} if a.pr else {})}
+    apply_bound(a.request_id, operation, context)
+    if a.command == 'pr-partition':
+        return pr_partition_policy.load(a.pr)
+    if a.command == 'pr-size':
+        return pr_size.load(identities(a.cwd, a.pr))
+    if a.command == 'ci-exceptions':
+        from shared.flaky_actions import pr_repository
+        key = 'remote:' + pr_repository(a.pr) if a.pr else repository(a.cwd)
+        return ci_exceptions.load(key)
+    target = domain_path(a.command, 'user' if a.scope == 'user' else identities(a.cwd, a.pr)[0])
+    return {'action': a.action, 'file': str(target)}
 
 if __name__=='__main__':
     try:print(json.dumps(main(),sort_keys=True))

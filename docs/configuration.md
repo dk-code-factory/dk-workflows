@@ -1,5 +1,7 @@
 # Workflow configuration
 
+Saved mutations use the [dedicated configuration agent](configuration-agent.md) and [request history](configuration-requests.md). Every saved-write command requires `--request-id ID` bound to its exact prepared operation; read commands are unchanged.
+
 Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts remain private.
 
 Each bundled skill owns `config.json` and `config.schema.json` beside `SKILL.md`. Use [skill-owned configuration](skill-configuration.md) for resolution, scoped edits, invocation-local overrides, plans and managed specs. These files are synchronized between the Codex and Claude distributions. All skill identities must be fully qualified as `plugin:skill`.
@@ -36,7 +38,7 @@ Each bundled skill owns `config.json` and `config.schema.json` beside `SKILL.md`
 
 Private overrides retain `${XDG_CONFIG_HOME:-~/.config}/dk-workflows/v2/user.json` and repository digest files. Existing domain policy records remain in their original stores. Scope precedence is defaults, user, optional upstream, repository, then invocation-local options. Objects merge by key, lists replace and commit policies replace as a whole. Empty lists disable inherited selections. New skill-specific settings are never added to a central responsibility map.
 
-Read effective options with `scripts/config.py --repository HOST/OWNER/REPO skill-show --skill PLUGIN:SKILL`. Save or reset one skill's options with `skill-set --scope repo|user --file FILE` or `skill-reset --scope repo|user`. These preserve unrelated settings and invocation controls. Put `--upstream HOST/OWNER/REPO` before the subcommand and pass the same upstream throughout the workflow. Invocation-local options use `--options FILE` and are never persisted by reads.
+Read effective options with `scripts/config.py --repository HOST/OWNER/REPO skill-show --skill PLUGIN:SKILL`. Save or reset one skill's options with `skill-set --scope repo|user --file FILE --request-id ID` or `skill-reset --scope repo|user --request-id ID`. These preserve unrelated settings and invocation controls. Put `--upstream HOST/OWNER/REPO` before the subcommand and pass the same upstream throughout the workflow. Invocation-local options use `--options FILE` and are never persisted by reads.
 
 `tasks`, `finalizers` and `reviewers` are invocation lists. Tasks/finalizers run sequentially except explicit `{"parallel":[...]}` groups; reviewers also honor their scheduling settings. Repeated skills and instruction-only calls are supported. The owning skill's instructions govern iteration, applicability, dependencies and completion. Read with `skill-plan`, preflight with `skill-preflight`, and generate managed leaf specs with `scripts/dk.py skill-spec`. Helpers never launch Codex or Claude Code.
 

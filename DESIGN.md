@@ -156,3 +156,83 @@ Retry, CI repair and rerun limits accept zero. Existing run counters and minimum
 retained limits still govern recovery; changing settings cannot replenish them.
 Review-cycle allowances remain positive and keep their explicit continuation
 contract. These changes add no durable store or claim of measured token savings.
+
+## Dedicated configuration admission
+
+Saved dk-workflows changes enter through `dk-config`, which hands a stable request
+ID and configuration-only assignment to a fresh supported native agent. The main
+agent relays clarification and reconciles existing native execution after an
+interruption. `dk-preferences` mutations use the same agent and retain their
+existing semantic admission rules. Inspection/explanation delegate with a transient assignment and no request ID;
+that agent and ordinary workflow reads use existing helpers without creating
+request history. Ordinary workflow reads do not delegate. Helpers do not launch or emulate
+agents; unavailable native delegation blocks execution. PR work, source edits,
+installation and other plugins' settings are outside this assignment.
+
+A new private local Git repository at the centralized state root's
+`configuration-history` retains exact asks, necessary clarification excerpts,
+normalized typed operations, changed setting leaves, semantic assessments and
+admission fingerprints. This is deliberately separate from PR task manifests:
+configuration decisions span repositories and PR lifetimes, and reusing the exact
+user choice avoids reconstructing its meaning or asking again in a fresh session.
+The record is admitted for those consumers, not for audit completeness. Live
+settings, preference IDs, domain histories, task fingerprints, budgets and review
+caches stay in their existing stores. No transcript, effective-settings snapshot,
+rendered summary, status index or model telemetry is retained. Preference admission
+context is hashed live rather than copied from the existing catalog. Whole-workflow operations retain sparse edits plus their exact input binding,
+rather than copying unrelated live settings. Setting diffs contain only changed
+leaves (one independently applicable record for a preference). The retained-operation
+selector reconstructs exact preparation inputs deterministically from the existing
+store and changed values, avoiding model reconstruction on a fresh-session resume.
+
+Candidates are found deterministically across applicable scopes, then assessed for
+semantic contradictions by the native agent. A prepared fingerprint binds the
+exact operations, observed values, clarification excerpts, applicable earlier
+decisions, settings and governing resources/instructions. Settings resources and
+applicable repository instructions are rediscovered on resume, including newly
+created instruction files. An unchanged assessment can be reused across sessions;
+changed inputs require affected configuration admission again. Configuration
+admission conservatively includes inherited scope settings and bundled contracts,
+since semantic conflicts can cross setting keys; this does not invalidate or clear
+any existing workflow analysis. Fresh sessions use compact `resume` and filtered
+`history`, then fetch asks/decisions/operations explicitly as needed. Default
+history is bounded to twenty requests and excludes full asks and changed values.
+
+Supersession references individual setting decisions, never a whole request.
+Successful replacements/narrowings retire only those decisions; scoped exceptions
+retain broader intent. Cancelling preserves the request and commits. Existing
+settings without history remain valid with unknown original intent. Explicit user
+replacement already resolves a conflict; agreed concrete changes need no second
+approval. Deterministic overlap checking is only a floor for native semantic
+admission. Helpers cannot prove the agent's interpretation or user authorization.
+
+Existing user-facing writers require a request ID bound to the exact normalized
+operation and context. Typed adapters resolve destinations and preserve validators,
+precedence, stable IDs, domain history and original lock addresses. A request can
+cover independent stores; changes to the same store must be combined in one
+operation. Under the history lock and sorted store locks, all operations and
+relevant inputs are revalidated before the first write. Commit each write intent
+to private Git before changing live settings, verify readback, then commit its
+receipt. These minimal progress facts prevent duplicate writes and repeated agent
+recovery after interruption. No remote is configured; Git hooks/global settings
+are excluded from helper Git operations.
+
+Recovery compares original before/after hashes under locks. Already observed desired
+values with an intent acquire their missing receipt without another write;
+completed siblings keep their receipts. Remaining writes require unchanged original
+preconditions and admission. Unexpected edits block recovery; changed governing inputs require fresh admission
+of the original operations while preserving intent and completed receipts; no blind retry, rollback or overwriting of concurrent changes occurs.
+An interrupted Git commit is completed before further configuration writes. Applied
+requests return their original outcome without replaying settings after later edits.
+`resume` itself is read-only, reports stale/reusable admission and identifies
+uncertain operations; `apply` performs reconciliation. If recovery is blocked, the
+agent reports the retained request ID and affected work as incomplete.
+
+Offline acceptance covers fresh-process admission reuse, request-bound writers,
+clarifications, unresolved conflicts, explicit replacements, partial supersession,
+scoped exceptions, cancelled history, legacy intent, duplicates, concurrent edits,
+new governing instructions, partial application and interruptions between writes
+and Git receipts. Native dispatch fixtures check handoff and unavailable-tool
+behavior without model/GitHub calls. They establish neither native adherence nor
+measured token savings. No new native execution or token evidence accompanies this
+change; helper/process counts remain proxies only.

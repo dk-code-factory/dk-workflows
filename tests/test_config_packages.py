@@ -63,7 +63,9 @@ def test_settings_roundtrip_preserves_native_options_and_references(tmp_path):
               'processes':{'pr-fix':{'tasks':{'reply_to_feedback': 'custom:reply'}}}, 'extensions':{'custom':'private/settings'}}
     source=tmp_path/'settings.json';source.write_text(json.dumps(settings))
     command=[sys.executable,str(ROOT/'scripts/config.py'),'--repository','github.com/owner/repo']
-    result=subprocess.run([*command,'set','--file',str(source)],capture_output=True,text=True)
+    from config_request_admission import admitted
+    request_id = admitted({'domain':'workflow','action':'set','value':settings}, repository='github.com/owner/repo')
+    result=subprocess.run([*command,'set','--file',str(source),'--request-id',request_id],capture_output=True,text=True)
     assert result.returncode==0,result.stderr
     assert json.loads(config.path('github.com/owner/repo').read_text())==settings
     result=subprocess.run([*command,'show','--expanded'],capture_output=True,text=True)

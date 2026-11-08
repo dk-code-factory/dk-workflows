@@ -202,7 +202,9 @@ def test_public_cli_roundtrip_plan_spec_and_empty_plan(tmp_path):
     settings = tmp_path/'settings.json'
     write(settings, {'processes': {'pr-fix': {'finalizers': PLAN}}})
     command = [sys.executable, str(ROOT/'scripts/config.py'), '--repository', REPOSITORY]
-    subprocess.run([*command, 'set', '--file', str(settings)], check=True, capture_output=True)
+    from config_request_admission import admitted
+    request_id = admitted({'domain':'workflow', 'action':'set', 'value':json.loads(settings.read_text())}, repository=REPOSITORY)
+    subprocess.run([*command, 'set', '--file', str(settings), '--request-id', request_id], check=True, capture_output=True)
     shown = subprocess.run([*command, 'show', '--expanded'], check=True, capture_output=True, text=True)
     assert json.loads(shown.stdout)['settings']['processes']['pr-fix']['finalizers'] == PLAN
     dk = [sys.executable, str(ROOT/'scripts/dk.py'), '--repository', REPOSITORY, '--pr', PR]

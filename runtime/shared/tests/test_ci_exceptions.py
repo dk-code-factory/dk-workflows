@@ -205,6 +205,17 @@ def test_cli_base_repository_identity_crud_and_private_permissions(setup, tmp_pa
     subprocess.run(['git', 'init', '-q', str(repo)], check=True)
     subprocess.run(['git', '-C', str(repo), 'remote', 'add', 'origin', 'git@github.com:fork/project.git'], check=True)
     def cli(*args):
+        if args[0] != 'list':
+            from config_request_admission import admitted
+            op = {'domain':'ci-exceptions', 'action':args[0],
+                  'scope':args[args.index('--scope')+1] if '--scope' in args else 'repo'}
+            if args[0] == 'add':
+                op['value'] = {key: args[args.index('--'+key)+1] if '--'+key in args else None
+                               for key in ('kind','workflow','job','test','signature','reason')}
+            elif args[0] == 'remove':
+                op['id'] = args[1]
+            request_id = admitted(op, checkout=repo, pr='https://github.com/acme/project/pull/1')
+            args = (*args, '--request-id', request_id)
         result = subprocess.run([sys.executable, str(ROOT.parent / 'scripts/pr_config.py'),
             '--cwd', str(repo), '--pr', 'https://github.com/acme/project/pull/1', 'ci-exceptions', *args],
             capture_output=True, text=True)
@@ -228,5 +239,10 @@ def test_cli_rejects_incomplete_matchers_without_writing_config(setup, tmp_path)
     base = [sys.executable, str(ROOT.parent / 'scripts/pr_config.py'), '--cwd', str(tmp_path),
             'ci-exceptions', 'add', '--kind', 'test', '--workflow', WORKFLOW, '--reason', 'Reason']
     result = subprocess.run(base, capture_output=True, text=True)
-    assert result.returncode != 0 and 'exact job and test' in result.stderr
+    assert result.returncode != 0 and '--request-id' in result.stderr
+    from config_request_admission import admitted
+    with pytest.raises(ValueError, match='exact job and test'):
+        admitted({'domain':'ci-exceptions', 'action':'add', 'value':{
+            'kind':'test', 'workflow':WORKFLOW, 'job':None, 'test':None,
+            'signature':None, 'reason':'Reason'}}, checkout=tmp_path/'checkout')
     assert not list(config.data_root().rglob('ci-exceptions.json'))
