@@ -40,6 +40,13 @@ def save(checkout, *records, remove=()):
 
 
 def cli(checkout, *args, ok=True):
+    if args[0] in {'commit', 'remove'} and ok:
+        from config_request_admission import admitted
+        proposal = (json.loads(Path(args[args.index('--file')+1]).read_text()) if args[0] == 'commit' else
+                    {'repository': repository(checkout), 'revision': int(args[args.index('--revision')+1]),
+                     'changes': {'remove': [args[index+1] for index, item in enumerate(args) if item == '--id']}})
+        request_id = admitted({'domain':'preferences', 'action':'commit', 'proposal':proposal}, checkout=checkout)
+        args = (*args, '--request-id', request_id)
     result = subprocess.run([sys.executable, str(ROOT / 'scripts/preferences.py'),
                              '--checkout', str(checkout), *map(str, args)], text=True, capture_output=True, timeout=15)
     assert result.returncode == (0 if ok else 2), result.stdout + result.stderr
@@ -250,13 +257,16 @@ def test_concurrent_admissions_require_fresh_context(checkout, tmp_path):
         path = tmp_path / f'proposal-{index}.json'
         path.write_text(json.dumps(prefs.prepare(checkout, {'upsert': [instruction(prompt=prompt)]})))
         paths.append(path)
+    from config_request_admission import admitted
+    request_ids = {path: admitted({'domain':'preferences', 'action':'commit',
+                                  'proposal':json.loads(path.read_text())}, checkout=checkout) for path in paths}
     def invoke(path):
         return subprocess.run([sys.executable, str(ROOT / 'scripts/preferences.py'), '--checkout', str(checkout),
-                               'commit', '--file', str(path)], text=True, capture_output=True, timeout=15)
+                               'commit', '--file', str(path), '--request-id', request_ids[path]], text=True, capture_output=True, timeout=15)
     with ThreadPoolExecutor(max_workers=2) as pool:
         outcomes = list(pool.map(invoke, paths))
     assert sorted(v.returncode for v in outcomes) == [0, 2]
-    assert 'Stale catalog revision' in json.loads(next(v for v in outcomes if v.returncode == 2).stdout)['reason']
+    assert 'changed' in json.loads(next(v for v in outcomes if v.returncode == 2).stdout)['reason']
     fresh = prefs.prepare(checkout, {'upsert': [instruction(prompt='Use fresh context.')]})
     assert len(fresh['context']['records']) == 1 and fresh['revision'] == 1
     assert len(prefs.commit(checkout, fresh)['records']) == 2
@@ -322,6 +332,6 @@ def test_cli_prepare_commit_resolve_and_render(checkout, tmp_path):
     assert selection['records'][0]['paths'] == ['tests/new.py']
     assert 'Instruction' in cli(checkout, 'render', '--file', source('result.json', selection))
     failure = json.loads(cli(checkout, 'commit', '--file', source('stale.json', prepared), ok=False))
-    assert failure['status'] == 'blocked' and 'Stale' in failure['reason']
+    assert failure['status'] == 'blocked' and '--request-id' in failure['reason']
     malformed = json.loads(cli(checkout, 'render', '--file', source('invalid.json', {'records': [None]}), ok=False))
     assert malformed['status'] == 'blocked' and 'Preference requires' in malformed['reason']

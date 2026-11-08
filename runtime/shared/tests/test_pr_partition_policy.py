@@ -101,9 +101,21 @@ def test_corrupted_history_never_reenables_a_disabled_pr():
 def test_pr_policy_cli_works_without_a_checkout_or_github_reads(tmp_path):
     source = tmp_path / 'human.txt'
     source.write_text('Do not partition this PR, even after new commits.\n')
-    command = [sys.executable, str(ROOT / 'scripts/pr_config.py'), '--cwd', str(tmp_path),
+    checkout = tmp_path/'checkout'
+    checkout.mkdir()
+    command = [sys.executable, str(ROOT / 'scripts/pr_config.py'), '--cwd', str(checkout),
                '--pr', PR, 'pr-partition']
     def invoke(*args):
+        if args[0] != 'show':
+            from config_request_admission import admitted
+            reason = (args[args.index('--reason')+1] if '--reason' in args else
+                      'Use the recorded conditions to decide whether to partition.')
+            op = {'domain':'pr-partition', 'action':args[0], 'reason':reason}
+            if '--source-file' in args:
+                op['source'] = Path(args[args.index('--source-file')+1]).read_text()
+            if args[0] == 'instructions':
+                op['instructions'] = args[args.index('--text')+1]
+            args = (*args, '--request-id', admitted(op, checkout=checkout, pr=PR))
         value = subprocess.run([*command, *args], text=True, capture_output=True)
         assert value.returncode == 0, value.stderr
         return json.loads(value.stdout)

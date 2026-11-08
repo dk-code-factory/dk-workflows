@@ -27,7 +27,17 @@ PROMPT = 'Squash all PR changes into one commit. Use a short subject without a b
 @pytest.fixture
 def settings(monkeypatch):
     monkeypatch.setattr(pr_config, 'identities', lambda *_: CHAIN)
-    return pr_config.main
+    import config_adapters
+    from config_request_admission import admitted
+    monkeypatch.setattr(config_adapters, 'identities', lambda *_: CHAIN)
+    def configured(arguments):
+        if arguments[1] in {'set', 'reset'}:
+            op = {'domain': arguments[0], 'action': arguments[1], 'scope': arguments[arguments.index('--scope')+1]}
+            if op['action'] == 'set':
+                op['value'] = json.loads(Path(arguments[arguments.index('--file')+1]).read_text())
+            arguments = [*arguments, '--request-id', admitted(op)]
+        return pr_config.main(arguments)
+    return configured
 
 
 @pytest.mark.parametrize('value', [{'prompt': PROMPT}, 'local:policy', {'skill': 'my-plugin:commit-policy'},
@@ -329,6 +339,17 @@ def test_public_commands_support_direct_provider_and_prompt_handoffs(context, tm
               '--repository', REPO, '--pr', PR]
     settings_cli = [sys.executable, str(ROOT/'scripts/pr_config.py'), '--cwd', context['git']['checkout'], '--pr', PR]
     def command(argv, success=True):
+        if str(ROOT/'scripts/pr_config.py') in argv:
+            index = argv.index('commit-policy')
+            action = argv[index+1]
+            if action in {'set', 'reset'}:
+                from config_request_admission import admitted
+                import config_adapters
+                monkeypatch.setattr(config_adapters, 'identities', lambda *_: ['remote:' + REPO])
+                op = {'domain':'commit-policy', 'action':action, 'scope':'user'}
+                if action == 'set':
+                    op['value'] = json.loads(Path(argv[argv.index('--file')+1]).read_text())
+                argv = [*argv, '--request-id', admitted(op, checkout=context['git']['checkout'], pr=PR)]
         result = subprocess.run(argv, capture_output=True, text=True, timeout=15)
         assert result.returncode == (0 if success else 2), result.stdout + result.stderr
         return json.loads(result.stdout)

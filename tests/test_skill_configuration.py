@@ -130,6 +130,19 @@ def test_lowered_ci_budget_diagnostic_reports_actual_limit(flag, limit, word):
 
 
 def cli(*arguments):
+    if arguments[0] in {'skill-set', 'skill-reset'}:
+        from config_request_admission import admitted
+        action = arguments[0].removeprefix('skill-')
+        operation = {'domain': 'skill', 'action': action, 'skill': arguments[arguments.index('--skill')+1],
+                     'scope': arguments[arguments.index('--scope')+1]}
+        if action == 'set':
+            operation['value'] = json.loads(Path(arguments[arguments.index('--file')+1]).read_text())
+        try:
+            request_id = admitted(operation, repository=REPOSITORY)
+            arguments = (*arguments, '--request-id', request_id)
+        except ValueError:
+            # Still exercise the actual CLI failure for invalid values.
+            pass
     return subprocess.run([sys.executable, str(ROOT/'scripts/config.py'), '--repository', REPOSITORY,
                            *arguments], capture_output=True, text=True)
 

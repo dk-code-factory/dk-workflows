@@ -159,6 +159,11 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
     context=save('context.json',{'scope':'Return two.','decisions':['Return two.'],'instructions':instructions})
     applicable_rules=save('applicable-rules.json',{'rules':['The settled value must be an integer.']})
     def preference_command(action, *args):
+        if action == 'commit':
+            from config_request_admission import admitted as request_admission
+            proposal = json.loads(Path(args[args.index('--file')+1]).read_text())
+            request_id = request_admission({'domain':'preferences', 'action':'commit', 'proposal':proposal}, checkout=checkout)
+            args = (*args, '--request-id', request_id)
         return command(ROOT/'scripts/preferences.py', '--checkout', checkout, action, *args)
     preference_changes=save('preference-changes.json',{'upsert':[{
         'owner':{'type':'user'},'prompt':'Check that the settled return value is an integer.',

@@ -8,6 +8,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'runtime'))
 import preferences
+from config_requests import apply_bound
 
 
 def load(path):
@@ -24,9 +25,12 @@ def main():
     for action in ('prepare', 'commit', 'render'):
         command = commands.add_parser(action)
         command.add_argument('--file', type=Path, required=True)
+        if action == 'commit':
+            command.add_argument('--request-id')
     remove = commands.add_parser('remove')
     remove.add_argument('--id', action='append', required=True)
     remove.add_argument('--revision', type=int, required=True)
+    remove.add_argument('--request-id')
     resolve = commands.add_parser('resolve')
     resolve.add_argument('--mode', choices=preferences.MODES, required=True)
     resolve.add_argument('--paths', type=Path, required=True)
@@ -39,7 +43,11 @@ def main():
     elif args.action == 'show':
         result = preferences.show(args.checkout, args.id)
     elif args.action == 'remove':
-        result = preferences.remove(args.checkout, args.id, args.revision)
+        proposal = {'repository': preferences.repository(args.checkout), 'revision': args.revision,
+                    'changes': {'remove': args.id}}
+        apply_bound(args.request_id, {'domain': 'preferences', 'action': 'commit', 'proposal': proposal},
+                    {'checkout': str(args.checkout)})
+        result = preferences.list_records(args.checkout)
     elif args.action == 'resolve':
         result = preferences.resolve(args.checkout, args.mode, load(args.paths))
     elif args.action == 'handoff':
@@ -67,6 +75,10 @@ def main():
     elif args.action == 'render':
         print(preferences.render(load(args.file)), end='')
         return
+    elif args.action == 'commit':
+        apply_bound(args.request_id, {'domain': 'preferences', 'action': 'commit', 'proposal': load(args.file)},
+                    {'checkout': str(args.checkout)})
+        result = preferences.list_records(args.checkout)
     else:
         result = getattr(preferences, args.action)(args.checkout, load(args.file))
     print(json.dumps(result, sort_keys=True, ensure_ascii=False))

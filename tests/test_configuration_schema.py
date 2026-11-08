@@ -115,7 +115,9 @@ def test_schema_metadata_roundtrips_without_becoming_a_setting(tmp_path):
     source = tmp_path/'config.json'
     write(source, settings)
     command = [sys.executable, str(ROOT/'scripts/config.py'), '--repository', REPOSITORY]
-    subprocess.run([*command, 'set', '--file', str(source)], check=True, capture_output=True)
+    from config_request_admission import admitted
+    request_id = admitted({'domain':'workflow', 'action':'set', 'value':settings}, repository=REPOSITORY)
+    subprocess.run([*command, 'set', '--file', str(source), '--request-id', request_id], check=True, capture_output=True)
     assert json.loads(config.path(REPOSITORY).read_text()) == settings
     compact = json.loads(subprocess.check_output([*command, 'show'], text=True))['settings']
     expanded = json.loads(subprocess.check_output([*command, 'show', '--expanded'], text=True))['settings']

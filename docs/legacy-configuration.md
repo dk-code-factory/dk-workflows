@@ -1,5 +1,7 @@
 # Legacy process compatibility
 
+Saved mutations use the [dedicated configuration agent](configuration-agent.md) and [request history](configuration-requests.md). Every saved-write command requires `--request-id ID` bound to its exact prepared operation; read commands are unchanged.
+
 Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 
 Configure a process coordinator, its named tasks and its permissions. Every call uses the same [invocation contract](invocations.md) and [JSON Schema](../schemas/invocation.schema.json): `coordinator`, values in `tasks`, reviewer lists, cycle hooks, finalizers, commit policy providers and saved drafting selections. Every selected skill must use its exact `plugin:skill` identity; short names and paths are rejected.
@@ -47,8 +49,8 @@ Run `python3 PLUGIN_ROOT/scripts/config.py --repository HOST/OWNER/REPO COMMAND`
 | --- | --- |
 | `show` | Effective explicit overrides and their source files. |
 | `show --expanded` | Overrides merged with every bundled process default. |
-| `set --scope repo\|user --file CONFIG.json` | Validate and replace the selected scope. |
-| `reset --scope repo\|user` | Remove that scope's workflow settings. |
+| `set --scope repo\|user --file CONFIG.json --request-id ID` | Validate and replace the selected scope. |
+| `reset --scope repo\|user --request-id ID` | Remove that scope's workflow settings. |
 | `preflight --available SKILLS.json [--capabilities HOST.json] [--process NAME]` | Verify selected skills and native agent controls. |
 
 Private files remain under `${XDG_CONFIG_HOME:-~/.config}/dk-workflows/v2/`: `user.json` and repository digest filenames. Objects merge by key across defaults, user, optional upstream and repository scopes. Lists replace inherited lists; `[]` clears one. Shared `skill_defaults` apply to every use of the selected skill; invocation-local settings override them. Custom instructions are preserved verbatim. An invocation object must select a `skill` or supply `instructions`, including when overriding an inherited string.

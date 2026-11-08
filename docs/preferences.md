@@ -1,6 +1,8 @@
 # Scoped preferences
 
-Use `dk-workflows:dk-preferences` to add, update, list, inspect or remove personal and repository preferences. `dk-workflows:dk-config` routes these requests to it. Preferences are concrete instructions admitted against existing records and repository instructions. Conflicts are settled with the user before saving. Clear requests need no additional approval.
+Saved mutations use the [dedicated configuration agent](configuration-agent.md) and [request history](configuration-requests.md). Every saved-write command requires `--request-id ID` bound to its exact prepared operation; read commands are unchanged.
+
+Use `dk-workflows:dk-preferences` to add, update, list, inspect or remove personal and repository preferences. Mutations route through the configuration agent, which executes preference admission directly without recursive delegation. Preferences are concrete instructions admitted against existing records and repository instructions. Conflicts are settled with the user before saving. Clear requests need no additional approval.
 
 One versioned catalog lives privately at `${XDG_CONFIG_HOME:-~/.config}/dk-workflows/v2/preferences.json`. It is separate from workflow settings and saved PR rules. Personal and repository records share a lock and atomic replacement, so a single transaction can replace both. Revision checks prevent concurrent admissions from silently overwriting each other. Storage inside the checkout or plugin is rejected. No upstream records are inherited. Repository identity comes from the existing checkout identity helper, including its local-path fallback.
 
@@ -36,8 +38,8 @@ Run `python3 PLUGIN_ROOT/scripts/preferences.py --checkout REPO COMMAND`. All co
 | `list` | Current personal and repository records and catalog revision. |
 | `show --id ID` | One persisted record in the current repository context. |
 | `prepare --file changes.json` | Normalize changes, generate IDs and return changes, duplicate reuse, admission context and revision. Does not save. |
-| `commit --file prepared.json` | Validate and save the complete change set under a lock if the expected revision still matches. |
-| `remove --id ID --revision N` | Remove records with the observed revision; repeat `--id` for atomic multi-record removal. |
+| `commit --file prepared.json --request-id ID` | Validate and save the complete change set under a lock if the expected revision still matches. |
+| `remove --id ID --revision N --request-id REQUEST_ID` | Remove records with the observed revision; repeat `--id` for atomic multi-record removal. |
 | `resolve --mode implementation\|review --paths paths.json` | Select current personal and repository records for the mode and match task paths. |
 | `render --file result.json` | Render a list, show, commit or resolve result as Markdown. |
 
