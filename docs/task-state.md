@@ -30,13 +30,116 @@ Use `prepare --file REQUEST.json` once for the current independent task group. T
 
 The request file may be temporary; referenced inputs need stable private paths across sessions. The helper discovers neither omitted inputs nor semantic conditions. Caching requires explicit completeness and nonempty resources. If capture is uncertain, use `cacheable:false`. Native review contracts follow [native handoffs](native-review.md); empty passes are valid only for skills without required children.
 
-Each task returns a `key` and one action:
+Each task returns a `key`, the complete `assignment` and generated `checklist` for managed work, and one action:
 
 - `reuse`: read necessary saved evidence using `result --key KEY --section findings|normalized|original`. Counts or empty findings alone cannot establish readiness or dispositions.
 - `invoke`: invoke the native skill with the prepared assignment. Retain the claim and actual host handle. The returned `native` field supplies expected observation bindings and requirements; it creates no execution evidence.
+- `recheck`: send the returned follow-up assignment to the same agent, following completion checks below. Retained analysis needs no new invocation.
+- `failed`: mandatory checklist checks exhausted; block dependents and report every omission.
 - `recover_required`: reconcile the original agent and uncertain writes before explicit recovery. Completed siblings remain reusable.
 
-After actual terminal execution, call `finish --key KEY --claim CLAIM_ID --report REPORT.json --original OUTPUT --native-evidence OBSERVATIONS.json`. Reports require explicit `complete:true|false` and findings. Omit `--original` when report bytes are the original output; omit native evidence only for tasks without native review requirements. Prose skills retain original output and supply a normalized report. Optional `--status failed` preserves failed execution; otherwise completion determines complete/incomplete status. Check the returned status: missing native evidence downgrades completion. Record each successful sibling immediately. The helper recaptures live inputs before recording. Use `--progress PROGRESS.json` for sourced dispositions, exact acceptances and recovery information whose retention avoids reconstruction.
+After actual terminal execution, call `finish --key KEY --claim CLAIM_ID --report REPORT.json --original OUTPUT --native-evidence OBSERVATIONS.json`. Reports require explicit `complete:true|false` and findings. Omit `--original` when report bytes are the original output; omit native evidence only for tasks without native review requirements. Prose skills retain original output and supply a normalized report. Optional `--status failed` preserves failed execution; otherwise completion determines complete/incomplete status. Check the returned action and status: missing native evidence downgrades completion; a valid initial completed report reserves a mandatory follow-up and returns `action:"recheck"`, never immediate managed acceptance. Record each successful sibling immediately. The helper recaptures live inputs before recording. Use `--progress PROGRESS.json` for sourced dispositions, exact acceptances and recovery information whose retention avoids reconstruction.
+
+## Completion checks
+
+Every managed task automatically supplements its assignment with built-in items
+for scope, evidence, validation and deliverables. Reviewers with native contracts
+also check required native evidence; verification checks every candidate; fixers
+check finding dispositions and relevant tests. Built-ins cannot be removed or
+replaced. Optional custom definition fields are:
+
+```json
+{
+  "required": false,
+  "checklist": {
+    "items": [{"id": "invariant", "text": "Verify the assigned invariant with evidence."}],
+    "max_checks": 3,
+    "required": true
+  }
+}
+```
+
+`required` on the definition carries selected reviewer required/optional status;
+pass it explicitly from reviewer configuration. It defaults true for all tasks,
+including verification, fixers, hooks, finalizers and workflow completion. The
+checklist's explicit `required` overrides that default for this task only. Optional
+reviewers therefore default best-effort. Custom IDs must be unique, stable and
+separate from built-in IDs. `max_checks` is a positive integer: N additional
+follow-ups after the initial completion, default three, with at least one required.
+These fields are excluded from the primary analysis fingerprint.
+
+When publication is part of this assignment and already authorized, include
+`options.publication:{"assigned":true,"authorized":true}` so the helper adds its
+publication item. Supply exact permissions and duties in the assignment as usual;
+this marker grants no permission. Do not add publication duties to analysis-only
+work. For hooks/finalizers use their definition's execution options.
+
+After the first complete primary report, `finish` atomically retains its original
+output and native observations and reserves round one before returning `recheck`,
+`round`, `claim` (the original claim ID), `check_number`, checklist and follow-up
+prompt. Send that prompt, assignment and checklist to the **same agent**. Ask it
+to verify every item and finish missing work, within its existing permissions.
+Submit its subsequent response with `finish --key KEY --claim ORIGINAL_CLAIM
+--round ROUND_ID --report CHECK.json --original CHECK_OUTPUT`. Do not resubmit or
+replace primary/native evidence. The check report explicitly covers every ID:
+
+```json
+{
+  "complete": false,
+  "checklist": [
+    {"id": "scope", "status": "completed", "evidence": ["SOURCE_OR_RESULT_REFERENCE"]},
+    {"id": "evidence", "status": "unfinished", "reason": "Required source is unavailable."}
+  ]
+}
+```
+
+This abbreviated example omits other generated IDs; real reports must include
+every item exactly once. Completed items require nonempty evidence references;
+unfinished items require a reason. `complete` must agree with all item outcomes.
+Use the prepared contract, not a handwritten subset. Follow `recheck` until early
+success or exactly N submitted rounds. The helper reserves each next round before
+returning it. Replay identical submissions with the same round ID; conflicting
+replays fail and malformed reports consume no further checks.
+
+Mandatory exhaustion returns `action:"failed"` and blocks dependent work.
+Best-effort exhaustion returns `action:"complete"`, `checklist_complete:false` and
+all `omissions`; carry each omission into the final private report. It never
+excuses failed execution, incomplete primary reports, required native evidence,
+CI requirements or publication readiness. Final success returns
+`checklist_complete:true`. Initial incomplete/failed reports retain their existing
+failure/retry protocol and cannot start checklist acceptance.
+
+On interruption, `resume` exposes `checklist.pending_round`, `checks_used`, outcome
+and targeted response references without reserving or resetting anything. Use
+`prepare` with the retained key to obtain that same pending assignment and round.
+Reconnect to the same agent when available. If unavailable, the coordinator reads
+retained original results and necessary checklist evidence and performs only the
+completion check; do not rerun completed analysis. Reconcile uncertain external
+actions through their original journals first. `result --section checklist`
+retrieves the contract, bounded round references and latest submitted report.
+Changed or absent checklists trigger completion-only checking on prepare;
+changed governing task inputs still refresh primary work. Resume flags an old
+contract as requiring refresh and never silently accepts it. Original evidence,
+cache identities, siblings and retry/review budgets remain intact.
+
+Follow-up reports may include additional `findings`. Findings retrieval,
+normalized results and status append these to the primary findings without
+replacing the original report. Exact duplicate findings appear once. Result
+responses expose `sources` for the contributing immutable artifacts; independent
+verification must capture every source, and CI approval checks that coverage.
+Checklist-only refresh retains references to earlier finding-bearing responses
+for the same primary result and governing fingerprint. Relevant input changes
+require fresh primary work. Missing response evidence blocks acceptance.
+
+For the fixer's own final live completion check, prepare one `kind:"completion"`
+task under the retained `run`, with the resolved `dk-pr-fix` definition, resources,
+assignment, permissions and live-input evidence; omit responsibility. Its optional
+`upstream` selects inherited configuration; descriptor `options` preserves this
+fix invocation's local options. The helper captures the current selected
+plan and generates its checklist, including for `[]`. Completion occurrences are
+noncacheable so later declarations still require a current live check. Follow the same first-report
+and follow-up gate before declaring the selected workflow complete. Disabled
+finalizers stay disabled; report missing readiness evidence separately.
 
 ## Resume in a new session
 
@@ -48,7 +151,7 @@ Prepare saved tasks with `{"tasks":[{"key":"TASK_KEY"}],"run":"RUN_ID","cycle":"
 
 Recovery adds `"recover":{"TASK_KEY":"CLAIM_ID"}` to prepare. Claims never expire: confirm the prior agent stopped and reconcile writes first. Retain the original run and unchanged-input cycle; changed review inputs use a new cycle. A lost prepare response requires resume and reconciliation before another launch. Use `invalidate --key KEY --reason TEXT --recover CLAIM_ID` to close a stopped claim when recapture is impossible. Never clear state to bypass limits.
 
-`coverage_complete` requires complete matching evidence, no unfinished claim or invalidation, and required native execution validation. `reusable` additionally requires cacheability. CI approval can accept current noncacheable evidence only with coverage complete. Saved results do not establish current CI or publication readiness. [Low-level spec/start/record commands](task-state-low-level.md) remain compatible for integrations; both interfaces share fingerprints and results.
+`coverage_complete` requires accepted checklist checks for managed tasks, complete matching evidence, no unfinished claim or invalidation, and required native execution validation. `reusable` additionally requires cacheability. CI approval can accept current noncacheable evidence only with coverage complete. Saved results do not establish current CI or publication readiness. [Low-level spec/start/record commands](task-state-low-level.md) remain compatible for integrations; both interfaces share fingerprints and results.
 
 ## Governing inputs and freshness
 

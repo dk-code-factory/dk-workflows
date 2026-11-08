@@ -201,8 +201,10 @@ def test_skill_owned_review_occurrences_verification_and_active_approval_claim(r
         write(path, spec)
         if result is not None:
             original = b'Original native result for the configured occurrence'
-            r.store.record(spec, started['claim']['id'], original, result, 'complete',
-                           native_evidence=observations(spec, started['claim'], original))
+            from checklist_reports import accept
+            check = coordinator.finish(started['key'], started['claim']['id'], original, result,
+                                       native_evidence=observations(spec, started['claim'], original))
+            accept(coordinator, check)
         return str(path), spec, started
 
     first, first_spec, _ = managed('dk-workflows:dk-pr-reviewers-run', 'reviewers', 0, definition,
@@ -243,6 +245,41 @@ def test_skill_owned_review_occurrences_verification_and_active_approval_claim(r
     assert result['status'] == 'verified' and r.remote.calls == [101, 202]
 
 
+@pytest.mark.parametrize('include_followup_source', [False, True])
+def test_followup_findings_require_verification_of_every_report_source(reviewed, include_followup_source):
+    from tasks import Tasks
+    from checklist_reports import report
+    r = reviewed
+    value = read(r.evidence)
+    spec = read(Path(value['discovery'][0]))
+    definition = {'skill_identity': spec['skill']['identity'], 'resources': spec['skill']['resources'],
+                  'responsibility': spec['task']['id'], 'assigned_instructions': spec['task']['instructions'],
+                  **{key: spec[key] for key in ('instructions', 'inputs', 'options', 'git',
+                                               'governing_inputs_complete', 'cacheable', 'native_review')}}
+    managed = Tasks(value['repository'], value['pr'], checkout=value['checkout'])
+    check = managed.prepare({'tasks': [{'definition': definition}], 'run': 'review', 'cycle': 'c1'})['tasks'][0]
+    response = report(check['checklist'], check['result'])
+    response['findings'] = [{'body': 'Finding discovered in the follow-up.'}]
+    managed.finish(check['key'], check['claim'], json.dumps(response).encode(), response, round_id=check['round'])
+    with pytest.raises(ValueError, match='Candidate findings require independent verification'):
+        r.cli.approve(r.evidence)
+    assert r.remote.calls == []
+    sources = managed.result(check['key'])['sources']
+    assert len(sources) == 2
+    inputs = {str(index): source for index, source in enumerate(sources if include_followup_source else sources[:1])}
+    verification = r.task('dk-workflows:dk-pr-review', 'finding-verification', inputs=inputs, normalized={
+        'complete': True, 'findings': [], 'dispositions': [
+            {'task': check['key'], 'index': 0, 'status': 'rejected', 'evidence': 'Verified all candidate sources'}]})
+    r.edit(lambda evidence: evidence.update(verification=verification), snapshot=True)
+    if include_followup_source:
+        assert r.cli.approve(r.evidence)['status'] == 'verified'
+        assert r.remote.calls == [101, 202]
+    else:
+        with pytest.raises(ValueError, match='Verification must capture the original current candidate reports'):
+            r.cli.approve(r.evidence)
+        assert r.remote.calls == []
+
+
 def test_managed_task_keys_supply_current_approval_evidence_without_spec_files(reviewed):
     from tasks import Tasks
     r = reviewed
@@ -257,11 +294,17 @@ def test_managed_task_keys_supply_current_approval_evidence_without_spec_files(r
             **{key: spec[key] for key in ('instructions', 'inputs', 'options', 'git',
                                          'governing_inputs_complete', 'cacheable', 'native_review')}}})
     prepared = managed.prepare({'tasks': definitions, 'run': 'review', 'cycle': 'c1'})
-    assert all(task['action'] == 'reuse' for task in prepared['tasks'])
+    from checklist_reports import accept
+    assert all(task['action'] == 'recheck' for task in prepared['tasks'])
     for path in value['discovery']:
         Path(path).unlink()
     value['discovery'] = [{'key': task['key']} for task in prepared['tasks']]
     write(r.evidence, value)
+    with pytest.raises(ValueError, match='checklist'):
+        r.cli.approve(r.evidence)
+    assert r.remote.calls == []
+    for task in prepared['tasks']:
+        accept(managed, task)
     result = r.cli.approve(r.evidence)
     assert result['status'] == 'verified' and len(result['operations']) == 2
     assert r.remote.calls == [101, 202]

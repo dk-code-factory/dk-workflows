@@ -18,3 +18,5 @@ Read complete, stable feedback from the supplied handoff. Without a handoff, col
 Before implementation, follow [preference retrieval and handoffs](../../../docs/preferences.md#workflow-handoffs-and-reuse) in `implementation` mode. Use a current complete caller handoff or resolve preferences and evaluate conditions directly. Preserve records and applicable paths. Refresh when paths, relevant records or condition context change, including before edits expand to new paths. Include the selection and condition decisions in managed task inputs.
 
 Record each finding's disposition with evidence and source links. Follow the caller's permissions for pushes, replies and thread resolution. Local fixes alone do not authorize remote changes. Use the publication and reply skills for authorized remote changes. Return tested fixes, dispositions and remaining blockers.
+
+For managed feedback and reviewer-finding fixes, use the prepared checklist to check every finding disposition, assigned deliverable and relevant test. Complete the caller's same-agent follow-ups before reporting accepted completion. Follow [completion checks](../../../docs/task-state.md#completion-checks).

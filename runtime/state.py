@@ -540,6 +540,24 @@ class Store:
     def saved(self, entry):
         return self._load_saved(entry)[0]
 
+    def findings_evidence(self, entry, saved):
+        """Derive effective findings and their sources from immutable reports."""
+        from checklists import supplemental
+        result = deepcopy(saved['normalized'])
+        findings = list(result.get('findings', []))
+        sources = [saved['path']]
+        gate = entry.get('checklist', {})
+        if gate.get('fingerprint') == saved['fingerprint'] and gate.get('result') == entry['result']['hash']:
+            added, paths = supplemental(self, entry)
+            seen = {digest(finding) for finding in findings}
+            for finding in added:
+                if digest(finding) not in seen:
+                    findings.append(finding)
+                    seen.add(digest(finding))
+            sources.extend(paths)
+        result['findings'] = findings
+        return result, sources
+
     def _load_saved(self, entry):
         reference = entry.get('result')
         if not reference:
@@ -585,16 +603,32 @@ class Store:
                 native_problem = {'code': 'malformed_provenance', 'reason': 'Retained native observations are damaged'}
         coverage_complete = bool(not native_problem and not entry.get('invalidated') and not entry.get('claim')
                                  and saved and saved['status'] == 'complete' and saved['fingerprint'] == captured['fingerprint'])
+        analysis_complete = coverage_complete
+        from checklists import contract as checklist_contract, summary
+        checklist = summary(self, entry, captured)
+        if 'managed' in entry:
+            expected = checklist_contract(captured['components'], entry['managed']['definition'])
+            if checklist is None or entry['checklist']['contract'] != expected:
+                checklist = {**(checklist or {}), 'complete': False, 'accepted': False,
+                             'outcome': 'refresh_required', 'required': expected['required'],
+                             'max_checks': expected['max_checks']}
+        if checklist is not None:
+            coverage_complete = coverage_complete and checklist['accepted']
         reusable = bool(coverage_complete and captured['cacheable'] and saved.get('cacheable') is True)
         described = {'key': captured['key'], 'task': captured['components']['task']['id'],
                 'reusable': reusable, 'coverage_complete': coverage_complete, 'changed': changed,
                 'unfinished': entry.get('claim'), 'attempts': len(entry.get('attempts', [])),
                 'result': saved['path'] if saved else None, 'completion': saved['status'] if saved else None,
-                'findings': saved['normalized'].get('findings', []) if reusable else None,
+                'findings': self.findings_evidence(entry, saved)[0]['findings'] if reusable else None,
                 'invalidated': entry.get('invalidated'),
                 'reason': ('reusable' if reusable else native_problem['code'] if native_problem else 'unfinished' if entry.get('claim') else
                            'invalidated' if entry.get('invalidated') else
                            'changed_inputs' if changed else saved['status'] if saved and saved['status'] != 'complete' else 'missing_or_incomplete_result')}
+        if checklist is not None:
+            described.update(analysis_complete=analysis_complete, checklist=checklist,
+                             checklist_complete=bool(analysis_complete and checklist['complete']))
+            if analysis_complete and not checklist['accepted']:
+                described['reason'] = 'checklist_' + (checklist['outcome'] or 'pending')
         if explain:
             blockers = []
             if not captured['cacheable']:
@@ -609,6 +643,8 @@ class Store:
                 blockers.append('changed_inputs')
             if native_problem:
                 blockers.append(native_problem['code'])
+            if checklist is not None and not checklist['accepted']:
+                blockers.append('checklist_not_accepted')
             if result_problem:
                 blockers.append(result_problem)
             elif saved:
@@ -806,7 +842,7 @@ class Store:
         return state
 
     def _start_captured(self, manifest, captured, *, recover=None, run=None, cycle=None,
-                        retry=False, ci_repair=False, ci_rerun=False, head=None):
+                        retry=False, ci_repair=False, ci_rerun=False, head=None, checklist=None):
         """Stage one start in the caller's locked manifest; never persist here."""
         options = captured['components'].get('options', {})
         phase = captured.get('hook_phase')
@@ -836,7 +872,19 @@ class Store:
             del entry['claim']
         elif recover:
             raise ValueError('Recovery id is not the active claim')
+        if checklist is not None:
+            from checklists import attach, reply, reserve
+            attach(self, entry, captured, checklist)
+            previous = self.describe(captured, entry)
+            if previous['analysis_complete'] and not previous['checklist']['accepted']:
+                gate = entry['checklist']
+                if previous['checklist']['outcome'] == 'stale':
+                    raise ValueError('Checklist evidence is damaged; retain results and reconcile its response references')
+                reserve(gate)
+                return {**previous, **reply(self, entry)}
         if previous['reusable']:
+            if checklist is not None and entry['checklist']['outcome'] == 'best_effort':
+                return {**previous, **reply(self, entry), 'action': 'reuse'}
             return {'action': 'reuse', **previous}
         state = self.budget(manifest, run=run, cycle=cycle, retry=retry, ci_repair=ci_repair,
                             ci_rerun=ci_rerun, head=head, task=captured['key'],
@@ -888,7 +936,7 @@ class Store:
                     'requirements': captured['components']['native_review']}
 
     def start_batch(self, specs, *, recover=None, run=None, cycle=None, retry=False,
-                    ci_repair=False, ci_rerun=False, head=None, retained=None):
+                    ci_repair=False, ci_rerun=False, head=None, retained=None, checklists=None):
         """Claim a set of tasks atomically, sharing only command-local Git work.
 
         All captures and checks must succeed before one manifest replacement.
@@ -920,7 +968,11 @@ class Store:
                 or any(not isinstance(value, dict) for value in retained.values())):
             raise ValueError('Retained definitions must belong to this batch')
         digest(retained)
+        checklists = {} if checklists is None else checklists
+        if checklists.keys() - retained.keys():
+            raise ValueError('Checklists require a retained managed definition')
         with self.locked() as manifest:
+            before = digest(manifest)
             # Explicit recovery mistakes reject the whole batch before staging
             # sibling starts. A missing recovery request is a normal outcome.
             for key, claim_id in recover.items():
@@ -932,21 +984,22 @@ class Store:
             for captured in captures:
                 result = self._start_captured(
                     manifest, captured, recover=recover.get(captured['key']), run=run,
-                    cycle=cycle, retry=retry, ci_repair=ci_repair, ci_rerun=ci_rerun, head=head)
+                    cycle=cycle, retry=retry, ci_repair=ci_repair, ci_rerun=ci_rerun, head=head,
+                    checklist=checklists.get(captured['key']))
                 tasks.append({**result, 'key': captured['key'],
                               'task': captured['components']['task']['id']})
-                if result['action'] in {'invoke', 'reuse'} and captured['key'] in retained:
+                if result['action'] in {'invoke', 'reuse', 'recheck', 'failed'} and captured['key'] in retained:
                     entry = manifest['entries'][captured['key']]
                     if entry.get('managed') != retained[captured['key']]:
                         entry['managed'] = deepcopy(retained[captured['key']])
                         retained_changed = True
-            if retained_changed or any(task['action'] == 'invoke' for task in tasks):
+            if retained_changed or digest(manifest) != before:
                 write(self.manifest, manifest)
             return {'tasks': tasks, 'manifest': str(self.manifest),
                     'unfinished': [entry['claim'] for entry in manifest['entries'].values()
                                    if entry.get('claim')]}
 
-    def record(self, spec, claim_id, original, normalized, status, *, progress=None, native_evidence=None):
+    def record(self, spec, claim_id, original, normalized, status, *, progress=None, native_evidence=None, checklist=None):
         captured = capture(spec)
         if captured['subject'] != self.subject:
             raise ValueError('Spec refers to another PR')
@@ -960,10 +1013,23 @@ class Store:
         with self.locked() as manifest:
             entry = manifest['entries'].get(captured['key'], {})
             claim = entry.get('claim')
+            submission = digest({'original': base64.b64encode(original).decode(), 'report': normalized,
+                                 'status': status, 'progress': progress,
+                                 'native': base64.b64encode(native_evidence).decode() if native_evidence is not None else None})
+            if (not claim and entry.get('checklist', {}).get('initial_submission') == submission
+                    and (checklist is None or entry['checklist']['contract'] == checklist)):
+                saved, problem = self._load_saved(entry)
+                if (not problem and saved['claim'] == claim_id and not entry.get('invalidated')
+                        and saved['fingerprint'] == captured['fingerprint']):
+                    from checklists import reply
+                    return reply(self, entry)
             if not claim or claim['id'] != claim_id:
                 raise ValueError('Claim is absent or owned by another attempt')
             if claim['fingerprint'] != captured['fingerprint']:
                 raise ValueError('Inputs changed during execution; retain claim and explicitly recover')
+            if checklist is not None:
+                from checklists import attach
+                attach(self, entry, captured, checklist)
             from native_review import assess, required
             native = None
             if required(captured['components']):
@@ -996,9 +1062,39 @@ class Store:
                 if not claim['run']:
                     raise ValueError('Progress requires a retained run id')
                 manifest['runs'][claim['run']]['progress'].append({'claim': claim_id, 'value': progress})
+            followup = None
+            if 'checklist' in entry:
+                from checklists import attach, reply, reserve
+                attach(self, entry, captured, entry['checklist']['contract'])
+                if status == 'complete':
+                    entry['checklist']['initial_submission'] = submission
+                    reserve(entry['checklist'])
+                    followup = reply(self, entry)
             write(self.manifest, manifest)
+            if followup is not None:
+                return followup
             return {'status': status, 'result': str(path), 'reusable': status == 'complete' and captured['cacheable'],
                     **({'execution_diagnostic': native['diagnostic']} if native and native['diagnostic'] else {})}
+
+    def check(self, spec, claim_id, round_id, original, report):
+        """Accept one reserved follow-up without replacing the primary report."""
+        from checklists import submit
+        captured = capture(spec)
+        if captured['subject'] != self.subject:
+            raise ValueError('Spec refers to another PR')
+        if not has_output_content(original):
+            raise ValueError('Checklist checks require nonempty original output')
+        with self.locked() as manifest:
+            entry = manifest['entries'].get(captured['key'], {})
+            described = self.describe(captured, entry)
+            gate = entry.get('checklist')
+            saved, problem = self._load_saved(entry)
+            if (not gate or problem or saved['claim'] != claim_id or not described.get('analysis_complete')
+                    or gate['fingerprint'] != captured['fingerprint'] or gate['result'] != entry['result']['hash']):
+                raise ValueError('Checklist requires unchanged complete primary evidence and its original claim')
+            result = submit(self, entry, round_id, original, report)
+            write(self.manifest, manifest)
+            return result
 
     def invalidate(self, keys, reason, *, recover=None):
         if not reason:

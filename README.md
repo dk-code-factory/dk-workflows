@@ -1,6 +1,6 @@
 # dk-workflows
 
-Version 5.0.0. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
+Version 5.1.0. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
 
 Use `dk-workflows:dk-pr-iter` as the universal entry point: it recognizes your accounts and routes your PRs to `dk-workflows:dk-pr-fix` and other authors' PRs to `dk-workflows:dk-pr-review`. Invoke either workflow directly when the intended responsibility is explicit. Fixing runs review/fix cycles followed by [configured finalizers](docs/finalizers.md); the default ending preserves commit cleanup and final CI. Incoming review verifies candidate findings independently before posting; automatic approval and merging each require separate authorization or enabled policy.
 
@@ -60,3 +60,5 @@ Edit skill prompts under `codex/skills/`, then run `python3 scripts/sync_skills.
 Install `pytest`, `pytest-subtests`, `pytest-xdist` and `jsonschema` to run `python3 scripts/test.py --workers 2`, as CI does. JSON Schema is a test dependency; runtime helpers retain their standard-library-only implementation. Recipe scenarios run in parallel after the other workflow tests, keeping Git capture process-count probes separate from concurrent test activity. The other suites retain separate serial processes. Every suite reports its 20 slowest test phases. The default test command remains serial and does not require `pytest-xdist`.
 
 CI checks package validity and PR release versions before installing test dependencies. New PR commits cancel superseded validation runs; main validations remain independent. Releases verify tag identity and main ancestry first, then reuse successful main validation only for the exact tagged commit. Missing, malformed or inaccessible evidence falls back to the complete test suite before publication.
+
+Managed tasks use [completion checklists](docs/task-state.md#completion-checks), with three additional checks by default and completion-only recovery that preserves original analysis.

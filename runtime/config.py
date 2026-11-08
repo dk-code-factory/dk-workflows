@@ -354,6 +354,23 @@ def check_selection(spec):
         raise ValueError('Inputs changed: configured invocation, policy or hook list changed')
 
 
+def make_completion_spec(*, repository, pr, run, definition, upstream=None, options=None):
+    """Bind the coordinator's completion check to its live skill-owned plan."""
+    if not invocation.text(run):
+        raise ValueError('Completion requires the retained run id')
+    owner = 'dk-workflows:dk-pr-fix'
+    if definition.get('skill_identity') != owner:
+        raise ValueError('Workflow completion requires the fix coordinator identity')
+    loaded = skill_config.effective(owner, repository, upstream, options=options)
+    execution = deepcopy(definition)
+    execution.update(cacheable=False, responsibility='workflow-completion:' + digest({'run': run}),
+                     options={'completion_plan': loaded['options']['finalizers'],
+                              'execution': definition.get('options', {})})
+    spec = make_spec(repository=repository, pr=pr, **execution)
+    skill_config.bind_options(spec, {'skill': owner, 'options': options or {}}, repository, upstream)
+    return spec
+
+
 def make_finalizer_spec(*, repository, pr, run, definition, finalizer=None, index=None,
                         process='pr-fix', upstream=None):
     if not invocation.text(run):

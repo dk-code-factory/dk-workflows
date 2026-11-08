@@ -26,7 +26,7 @@ def main():
     p.add_argument('--explain', action='store_true')
     p = sub.add_parser('result', help='Read one validated saved result section')
     p.add_argument('--key', required=True)
-    p.add_argument('--section', choices=['findings', 'normalized', 'original'], default='findings')
+    p.add_argument('--section', choices=['findings', 'normalized', 'original', 'checklist'], default='findings')
     p = sub.add_parser('progress', help='Read a bounded page of retained dispositions and acceptances')
     p.add_argument('--run', required=True)
     p.add_argument('--after', type=int, default=0)
@@ -34,6 +34,7 @@ def main():
     p = sub.add_parser('finish', help='Record a native result using its retained definition')
     p.add_argument('--key', required=True)
     p.add_argument('--claim', required=True)
+    p.add_argument('--round', dest='round_id', help='Reserved completion-check round; retains the primary result')
     p.add_argument('--report', type=Path, required=True, help='Skill report with explicit complete boolean')
     p.add_argument('--original', type=Path, help='Original output; defaults to report bytes')
     p.add_argument('--status', choices=['complete', 'failed', 'incomplete'])
@@ -142,7 +143,8 @@ def main():
             result = tasks.finish(args.key, args.claim, (args.original or args.report).read_bytes(),
                                   read(args.report), status=args.status,
                                   progress=read(args.progress) if args.progress else None,
-                                  native_evidence=args.native_evidence.read_bytes() if args.native_evidence else None)
+                                  native_evidence=args.native_evidence.read_bytes() if args.native_evidence else None,
+                                  round_id=args.round_id)
         print(json.dumps(result, sort_keys=True))
         return
     if args.command == 'spec':

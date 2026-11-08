@@ -3,7 +3,8 @@ import base64
 from copy import deepcopy
 from pathlib import Path
 
-from config import make_finalizer_spec, make_hook_spec
+from config import make_completion_spec, make_finalizer_spec, make_hook_spec
+from checklists import contract as checklist_contract
 from native_review import binding, required
 from state import Store, digest, make_spec
 import skill_config
@@ -18,12 +19,16 @@ class Tasks:
                 'kind', 'definition', 'run', 'cycle', 'phase', 'index', 'process', 'finalizer', 'upstream',
                 'skill', 'selection', 'options'}):
             raise ValueError('Task requires a definition and optional occurrence selector')
+        if not isinstance(descriptor.get('definition'), dict):
+            raise ValueError('Task requires an explicit definition')
         kind = descriptor.get('kind', 'task')
-        common = {**self.store.subject, 'definition': descriptor['definition']}
+        definition = {key: value for key, value in descriptor['definition'].items()
+                      if key not in {'checklist', 'required'}}
+        common = {**self.store.subject, 'definition': definition}
         if kind == 'task':
             if set(descriptor) - {'kind', 'definition'}:
                 raise ValueError('Ordinary task identity excludes run and occurrence selectors')
-            return make_spec(**self.store.subject, **descriptor['definition'])
+            return make_spec(**self.store.subject, **definition)
         if kind == 'skill':
             return skill_config.make_spec(**common, skill=descriptor['skill'], kind=descriptor['selection'],
                                           index=descriptor['index'], options=descriptor.get('options'),
@@ -35,7 +40,9 @@ class Tasks:
         if kind == 'finalizer':
             return make_finalizer_spec(**common, finalizer=descriptor.get('finalizer'),
                                        index=descriptor.get('index'), process=descriptor.get('process', 'pr-fix'))
-        raise ValueError('Task kind must be task, skill, hook or finalizer')
+        if kind == 'completion':
+            return make_completion_spec(**common, options=descriptor.get('options'))
+        raise ValueError('Task kind must be task, skill, hook, finalizer or completion')
 
     @staticmethod
     def compact(task):
@@ -83,7 +90,7 @@ class Tasks:
                                          for label, path in definition[field].items()}
             if isinstance(definition.get('git'), dict) and 'checkout' in definition['git']:
                 definition['git']['checkout'] = str(Path(definition['git']['checkout']).absolute())
-            if item.get('kind', 'task') in {'hook', 'finalizer'} or (
+            if item.get('kind', 'task') in {'hook', 'finalizer', 'completion'} or (
                     item.get('kind') == 'skill' and item.get('selection') == 'finalizers'):
                 item.setdefault('run', request.get('run'))
                 if item['kind'] == 'hook':
@@ -109,14 +116,19 @@ class Tasks:
         retained = {digest({**self.store.subject, 'task': spec['task']['id'],
                             'skill': spec['skill']['identity']}): item
                     for spec, item in zip(specs, descriptors)}
+        checklists = {key: checklist_contract(spec, item['definition'])
+                      for key, spec, item in zip(retained, specs, descriptors)}
+        assignments = {key: spec for key, spec in zip(retained, specs)}
         options = {key: value for key, value in request.items() if key != 'tasks'}
         if occurrence:
             options.pop('cycle', None)
-        result = self.store.start_batch(specs, retained=retained, **options)
+        result = self.store.start_batch(specs, retained=retained, checklists=checklists, **options)
         # Read committed bindings, including after a lost-response recovery. They
         # describe expectations only; finish still captures live inputs afresh.
         with self.store.locked() as manifest:
             for task in result['tasks']:
+                task['assignment'] = assignments[task['key']]
+                task['checklist'] = checklists[task['key']]
                 if task['action'] == 'invoke':
                     entry = manifest['entries'][task['key']]
                     if required(entry['components']):
@@ -140,7 +152,7 @@ class Tasks:
         entries = self._entries()
         if set(keys) - entries.keys():
             raise ValueError('Unknown task key')
-        specs, blocked, legacy = [], [], []
+        specs, blocked, legacy, contracts = [], [], [], {}
         for key, entry in entries.items():
             if keys and key not in keys:
                 continue
@@ -154,6 +166,7 @@ class Tasks:
                 continue
             try:
                 spec = self.spec(descriptor)
+                contracts[key] = checklist_contract(spec, descriptor['definition'])
                 specs.append(spec)
             except (ValueError, KeyError, TypeError, OSError, RuntimeError) as exc:
                 blocked.append({'key': key, 'reusable': False, 'coverage_complete': False,
@@ -163,6 +176,10 @@ class Tasks:
         pins = {digest({**self.store.subject, 'task': spec['task']['id'], 'skill': spec['skill']['identity']}): spec['git']
                 for spec in specs if 'git' in spec}
         for task in result['tasks']:
+            key = task['key']
+            if key in contracts and entries[key].get('checklist', {}).get('contract') != contracts[key]:
+                task.update(reusable=False, coverage_complete=False, checklist_complete=False,
+                            reason='checklist_refresh_required')
             if task['key'] in pins:
                 task['git'] = pins[task['key']]
         result['unmanaged'] = legacy
@@ -179,19 +196,32 @@ class Tasks:
             return {'run': run, 'records': deepcopy(records[after:end]),
                     'next': end if end < len(records) else None, 'total': len(records)}
 
-    def finish(self, key, claim, original, report, *, status=None, progress=None, native_evidence=None):
+    def finish(self, key, claim, original, report, *, status=None, progress=None, native_evidence=None, round_id=None):
         entry = self._entries().get(key, {})
         if 'managed' not in entry:
             raise ValueError('Task has no retained definition; prepare it before finishing')
         if not isinstance(report, dict) or type(report.get('complete')) is not bool:
             raise ValueError('Report requires explicit complete boolean')
-        status = status or ('complete' if report['complete'] else 'incomplete')
-        return self.store.record(self.spec(entry['managed']), claim, original, report, status,
-                                 progress=progress, native_evidence=native_evidence)
+        spec = self.spec(entry['managed'])
+        checklist = checklist_contract(spec, entry['managed']['definition'])
+        if round_id is not None:
+            if status is not None or progress is not None or native_evidence is not None:
+                raise ValueError('Checklist follow-ups retain primary status, progress and native evidence')
+            if entry.get('checklist', {}).get('contract') != checklist:
+                raise ValueError('Checklist changed; prepare retained analysis for completion-only checking')
+            result = self.store.check(spec, claim, round_id, original, report)
+        else:
+            status = status or ('complete' if report['complete'] else 'incomplete')
+            result = self.store.record(spec, claim, original, report, status,
+                                       progress=progress, native_evidence=native_evidence,
+                                       checklist=checklist)
+        if result.get('action') == 'recheck':
+            result['assignment'] = spec
+        return result
 
     def result(self, key, section='findings'):
-        if section not in {'findings', 'normalized', 'original'}:
-            raise ValueError('Result section must be findings, normalized or original')
+        if section not in {'findings', 'normalized', 'original', 'checklist'}:
+            raise ValueError('Result section must be findings, normalized, original or checklist')
         with self.store.locked() as manifest:
             entry = manifest['entries'].get(key)
             if entry is None:
@@ -199,8 +229,17 @@ class Tasks:
             saved, problem = self.store._load_saved(entry)
             if problem:
                 raise ValueError('Result unavailable: ' + problem)
+            if section == 'checklist':
+                from checklists import load_response
+                gate = deepcopy(entry.get('checklist'))
+                responses = [r['response'] for r in gate['rounds'] if 'response' in r] if gate else []
+                if responses:
+                    gate['latest_report'] = load_response(self.store, responses[-1])['report']
+                return {'key': key, 'checklist': gate}
+            normalized, sources = self.store.findings_evidence(entry, saved) if section != 'original' else (None, [])
         if section == 'original':
             value = base64.b64decode(saved['original'], validate=True).decode('utf-8', errors='replace')
         else:
-            value = saved['normalized'] if section == 'normalized' else saved['normalized'].get('findings', [])
-        return {'key': key, 'status': saved['status'], 'result': saved['path'], section: value}
+            value = normalized if section == 'normalized' else normalized['findings']
+        return {'key': key, 'status': saved['status'], 'result': saved['path'], section: value,
+                **({'sources': sources} if sources else {})}
