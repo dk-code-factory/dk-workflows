@@ -113,6 +113,14 @@ def verify(root):
     attempts = []
     for entry in manifest['entries'].values():
         spec = entry['components']
+        for attempt in entry['attempts']:
+            # Refreshing a noncacheable duty must retain its original output too.
+            filename = attempt.get('result', '')
+            original, damaged = tasks.store._load_saved({'key': entry['key'], 'result': {
+                'file': filename, 'hash': Path(filename).stem,
+                'fingerprint': attempt['fingerprint']}})
+            if damaged:
+                problems.append('Missing or damaged original attempt evidence')
         saved, problem = tasks.store._load_saved(entry)
         if problem:
             problems.append('Missing original task evidence')
@@ -122,8 +130,13 @@ def verify(root):
         if len(entry['attempts']) != expected:
             problems.append('Repeated cached analysis or missing fresh work: '+entry['key'])
         result = tasks.result(entry['key'], 'normalized')['normalized']
-        if (result.get('finding') != 'F1' or result.get('acceptance') != scenario['acceptance']
-                or result.get('source') != scenario['source']):
+        # Native reports may retain the finding as a normal findings[] item.
+        # The assignment fixes its meaning and exact bytes, not its JSON nesting.
+        outcomes = ([result] if result.get('finding') == 'F1' else []) + [
+            item for item in result.get('findings', [])
+            if isinstance(item, dict) and item.get('id') == 'F1']
+        if not outcomes or any(item.get('acceptance') != scenario['acceptance'] or
+                               item.get('source') != scenario['source'] for item in outcomes):
             problems.append('Lost original finding or exact sourced acceptance')
         attempts.append({'task': spec['task']['id'], 'attempts': len(entry['attempts']),
                          'cacheable': cacheable})

@@ -30,14 +30,21 @@ def collect(path, thread, *, expected_turns, descendants):
     zero = {key: 0 for key in native_usage.TOKEN_FIELDS}
     previous = dict(zero)
     active = None
-    for row in rows:
+    final_outputs, last_usage_positions = {}, {}
+    for position, row in enumerate(rows):
         payload = row['payload']
         if row['type'] == 'turn_context':
             require(payload['turn_id'] not in contexts, 'Duplicate turn context')
             contexts[payload['turn_id']] = payload
+        if (row['type'] == 'response_item' and payload.get('type') == 'message'
+                and payload.get('role') == 'assistant' and payload.get('phase') == 'final_answer'):
+            final_outputs[active] = (position, ''.join(
+                item.get('text', '') for item in payload.get('content', [])
+                if item.get('type') == 'output_text'))
         if row['type'] == 'token_usage_record' and payload['thread_id'] == thread:
             require(active == payload['turn_id'], 'Usage outside the active host turn')
             observed[active].append(payload['response_id'])
+            last_usage_positions[active] = position
         if row['type'] != 'event_msg':
             continue
         kind = payload.get('type')
@@ -66,6 +73,11 @@ def collect(path, thread, *, expected_turns, descendants):
             turn = payload['turn_id']
             require(active == turn and turn not in terminals, 'Unmatched terminal host outcome')
             require(bool(payload.get('last_agent_message', '').strip()), 'Missing terminal output')
+            output_position, output = final_outputs.get(turn, (-1, None))
+            require(output == payload['last_agent_message'] and output_position >= 0,
+                    'Missing or conflicting original terminal output')
+            require(last_usage_positions.get(turn, -1) > output_position,
+                    'Terminal response missing from host usage inventory')
             terminals[turn] = dict(controls)
             active = None
     require(active is None and starts == expected_turns and set(terminals) == set(starts),

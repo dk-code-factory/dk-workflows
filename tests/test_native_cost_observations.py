@@ -27,6 +27,8 @@ def seed():
             {'type': 'event_msg', 'payload': {'type': 'token_count', 'info': {
                 'total_token_usage': usage(i), 'last_token_usage': usage()}}},
         ])
+    rows.insert(-2, {'type': 'response_item', 'payload': {'type': 'message', 'role': 'assistant',
+        'phase': 'final_answer', 'content': [{'type': 'output_text', 'text': 'Complete native task.'}]}})
     rows.append({'type': 'event_msg', 'payload': {'type': 'task_complete', 'turn_id': 'turn',
                                                'last_agent_message': 'Complete native task.'}})
     return rows
@@ -117,3 +119,19 @@ def test_starting_context_does_not_normalize_semantic_instruction_drift(tmp_path
     rows[0]['payload']['base_instructions']['text'] = 'Changed host rules'
     path.write_text('\n'.join(map(json.dumps, rows))+'\n')
     assert observations.starting_context(path, replacements=replacements) != baseline
+
+
+@pytest.mark.parametrize('mutation', ['final-usage-and-counter', 'final-output', 'conflicting-output'])
+def test_terminal_inventory_is_bound_to_original_output(tmp_path, mutation):
+    rows = seed()
+    if mutation == 'final-usage-and-counter':
+        rows = [row for row in rows if not (
+            row['type'] == 'token_usage_record' and row['payload']['response_id'] == 'response-3' or
+            row['type'] == 'event_msg' and row['payload'].get('type') == 'token_count' and
+            row['payload']['info']['total_token_usage'] == usage(3))]
+    elif mutation == 'final-output':
+        rows = [row for row in rows if row['type'] != 'response_item']
+    else:
+        rows[-1]['payload']['last_agent_message'] = 'A different terminal output.'
+    with pytest.raises(ValueError, match='[Tt]erminal'):
+        collect(tmp_path, rows)
