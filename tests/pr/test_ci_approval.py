@@ -189,14 +189,51 @@ def test_discovery_lists_only_the_reviewed_head_without_scanning_repository_hist
 
 
 @pytest.mark.parametrize('count', [1000, 1001])
-def test_capped_head_discovery_falls_back_to_complete_repository_listing(reviewed, count):
+@pytest.mark.parametrize('eligible_runs', [False, True])
+def test_capped_head_discovery_falls_back_to_complete_repository_listing(reviewed, count, eligible_runs):
     r = reviewed
     r.remote.filtered_total = count
-    assert r.cli.approve(r.evidence)['status'] == 'verified'
+    if not eligible_runs:
+        r.remote.pages = lambda: [[]]
+    result = r.cli.approve(r.evidence)
+    assert result['status'] == 'verified' and result['noop'] is not eligible_runs
     full = 'repos/owner/repo/actions/runs?per_page=100'
     filtered = full + '&head_sha=' + r.head + '&event=pull_request'
     assert r.remote.list_routes == [filtered, full, filtered, full]
-    assert r.remote.calls == [101, 202]
+    assert r.remote.calls == ([101, 202] if eligible_runs else [])
+
+
+@pytest.mark.parametrize('counts', [[None], [-1], [True], ['2'], [2], [1, 2]])
+def test_unproven_fallback_listing_cannot_claim_a_noop(reviewed, monkeypatch, counts):
+    r = reviewed
+    r.remote.filtered_total = 1000
+    original = r.remote.run
+
+    def incomplete(argv, **kwargs):
+        if any('/actions/runs?per_page=100' in arg and '&head_sha=' not in arg for arg in argv):
+            return [{'total_count': count, 'workflow_runs': []} for count in counts]
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(r.cli.publish, 'run', incomplete)
+    with pytest.raises(ValueError, match='workflow run (count|pagination)'):
+        r.cli.approve(r.evidence)
+    assert not r.remote.calls
+
+
+def test_truncated_fallback_listing_blocks_before_any_approval(reviewed, monkeypatch):
+    r = reviewed
+    r.remote.filtered_total = 1000
+    original = r.remote.run
+
+    def incomplete(argv, **kwargs):
+        if any('/actions/runs?per_page=100' in arg and '&head_sha=' not in arg for arg in argv):
+            return [{'total_count': 2, 'workflow_runs': [deepcopy(r.remote.runs[101])]}]
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(r.cli.publish, 'run', incomplete)
+    with pytest.raises(ValueError, match='Incomplete workflow run pagination'):
+        r.cli.approve(r.evidence)
+    assert not r.remote.calls
 
 
 @pytest.mark.parametrize('count', [None, -1, True, '2', 1, 3])
