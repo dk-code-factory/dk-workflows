@@ -23,17 +23,19 @@ class Recovery:
         if live.get('url', '').lower() != request['pr'].lower():
             raise ValueError('Review-request PR identity changed')
         requested = handler.requested()
+        reviewers = {name.casefold() for name in request['reviewers']}
+        teams = {name.casefold() for name in request['team_reviewers']}
         events = []
-        for event in handler.pages('/issues/' + handler.number + '/timeline'):
+        for event in handler.pages('/issues/' + handler.number + '/timeline',
+                                   event_types={'review_requested', 'review_request_removed'}):
             user = (event.get('requested_reviewer') or {}).get('login')
             team = (event.get('requested_team') or {}).get('slug')
-            if (event.get('event') in {'review_requested', 'review_request_removed'}
-                    and (user in request['reviewers'] or team in request['team_reviewers'])):
+            if ((user or '').casefold() in reviewers or (team or '').casefold() in teams):
                 events.append({key: event.get(key) for key in ('id', 'event', 'created_at')}
                               | {'reviewer': user, 'team': team})
         reviews = []
         for review in handler.pages('/pulls/' + handler.number + '/reviews'):
-            if (review.get('user') or {}).get('login') in request['reviewers']:
+            if ((review.get('user') or {}).get('login') or '').casefold() in reviewers:
                 reviews.append({key: review.get(key) for key in ('id', 'state', 'submitted_at', 'commit_id')}
                                | {'reviewer': review['user']['login']})
         # Timeline/reviews are historical context, not proof this operation sent.

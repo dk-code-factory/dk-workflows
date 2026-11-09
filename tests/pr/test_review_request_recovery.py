@@ -1,7 +1,9 @@
 """Uncertain re-review writes retain history without starving independent replies."""
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 from shared import publication
@@ -110,6 +112,25 @@ def test_legacy_history_inspection_disposition_and_fresh_session_reuse(setup):
     for key in ('metadata', 'api', 'run'):
         setattr(fresh, key, getattr(remote, key))
     assert fresh.publish(operation, reconcile=True)['review_obligation'] == 'no_resend'
+    child = subprocess.run([sys.executable, '-c', '''
+import importlib.util, json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(root/'runtime'))
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+fixture = load('offline_remote', root/'tests/pr/fixtures/github_remote.py')
+publisher = load('fresh_publisher', root/'scripts/publish.py')
+remote = fixture.Remote(json.loads(sys.argv[3]))
+for key in ('metadata', 'api', 'run'):
+    setattr(publisher, key, getattr(remote, key))
+print(json.dumps(publisher.publish(sys.argv[2], reconcile=True)))
+''', str(ROOT), operation, json.dumps(remote.state)], capture_output=True, text=True, timeout=30)
+    assert child.returncode == 0, child.stderr
+    assert json.loads(child.stdout)['review_obligation'] == 'no_resend'
+    assert Path(operation).read_bytes() == stable
     assert fresh.prepare(request)['operation'] == operation
     with pytest.raises(ValueError, match='Uncertain publication'):
         fresh.prepare({**request, 'action_id': 'evade-duplicate'})
@@ -132,6 +153,8 @@ def test_legacy_history_inspection_disposition_and_fresh_session_reuse(setup):
 def test_transport_diagnostics_preserve_original_failure_and_safe_payload(setup, monkeypatch):
     publisher, remote = setup
     monkeypatch.setenv('CODEX_THREAD_ID', 'origin-session')
+    monkeypatch.delenv('CLAUDE_SESSION_ID', raising=False)
+    monkeypatch.delenv('DK_WORKFLOW_RUN_ID', raising=False)
     request = fixture.request('request-review')
     operation = publisher.prepare(request)['operation']
     original_run = publisher.run
@@ -174,3 +197,72 @@ def test_changed_or_unavailable_history_cannot_admit_disposition(setup, monkeypa
     with pytest.raises(OSError):
         publisher.review_recovery().dispose(operation, decision)
     assert 'review_request_disposition' not in publication.load(operation)
+
+
+def test_timeline_ignores_valid_idless_events_but_validates_review_events(setup):
+    publisher, remote = setup
+    _, operation = pending(publisher, remote)
+    remote.state['timeline'] = [
+        {'event': 'committed', 'sha': fixture.HEAD},
+        {'event': 'cross-referenced', 'source': {'type': 'issue', 'issue': {'id': 42}}},
+        {'id': 1, 'event': 'review_requested', 'requested_reviewer': {'login': 'reviewer'}}]
+    inspected = publisher.review_recovery().inspect(operation)
+    assert [event['id'] for event in inspected['current_observation']['events']] == [1]
+    decision = {'decision': 'no_resend', 'reason': 'No further request needed',
+                'observation': inspected['fingerprint']}
+    publisher.review_recovery().dispose(operation, decision)
+    assert publisher.publish(operation, reconcile=True)['status'] == 'disposed'
+    remote.state['timeline'].append({'event': 'review_request_removed',
+                                      'requested_reviewer': {'login': 'reviewer'}})
+    with pytest.raises(ValueError, match='Incomplete or duplicated'):
+        publisher.review_recovery().inspect(operation)
+    assert remote.state['writes'] == {'request-review': 1}
+
+
+@pytest.mark.parametrize('history', ['user_event', 'team_event', 'review'])
+def test_canonical_reviewer_history_invalidates_mixed_case_disposition(setup, history):
+    publisher, remote = setup
+    request = {**fixture.request('request-review'), 'reviewers': ['Reviewer'], 'team_reviewers': ['Team']}
+    operation = publisher.prepare(request)['operation']
+    remote.state['lose_response'] = ['request-review']
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    remote.state['requested'] = {'users': [], 'teams': []}
+    inspected = publisher.review_recovery().inspect(operation)
+    publisher.review_recovery().dispose(operation, {
+        'decision': 'no_resend', 'reason': 'No further request needed', 'observation': inspected['fingerprint']})
+    if history == 'review':
+        remote.state['reviews'] = [{'id': 1, 'user': {'login': 'reviewer'}, 'state': 'COMMENTED'}]
+    else:
+        who = {'requested_reviewer': {'login': 'reviewer'}} if history == 'user_event' else {'requested_team': {'slug': 'team'}}
+        remote.state['timeline'] = [{'id': 1, 'event': 'review_request_removed', **who}]
+    with pytest.raises(ValueError, match='Inspect and reassess'):
+        publisher.publish(operation, reconcile=True)
+    refreshed = publisher.review_recovery().inspect(operation)
+    assert refreshed['fingerprint'] != inspected['fingerprint']
+    assert remote.state['writes'] == {'request-review': 1}
+
+
+def test_reconciliation_reloads_disposition_saved_before_dispatch_lock(setup, monkeypatch):
+    publisher, remote = setup
+    _, operation = pending(publisher, remote)
+    remote.state['requested'] = {'users': [{'login': 'reviewer'}], 'teams': [{'slug': 'team'}]}
+    inspected = publisher.review_recovery().inspect(operation)
+    decision = {'decision': 'no_resend', 'reason': 'No further request needed',
+                'observation': inspected['fingerprint']}
+    original_load = publication.load
+    first = True
+
+    def load_then_dispose(path, *args):
+        nonlocal first
+        value = original_load(path, *args)
+        if first:
+            first = False
+            publisher.review_recovery().dispose(operation, decision)
+        return value
+
+    monkeypatch.setattr(publication, 'load', load_then_dispose)
+    assert publisher.publish(operation, reconcile=True)['status'] == 'disposed'
+    saved = publication.load(operation)
+    assert saved['status'] == 'pending' and 'receipt' not in saved
+    assert remote.state['writes'] == {'request-review': 1}

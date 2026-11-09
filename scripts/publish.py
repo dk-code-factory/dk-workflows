@@ -293,6 +293,7 @@ def publish(path, *, reconcile=False):
     scope = Path(path).resolve().parent.parent
     with (scope/'.dispatch.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
+        retained = publication.load(path, kind)
         for other in scope.glob('*/*.json') if retained['status']=='prepared' and not reconcile else []:
             if other.resolve()!=Path(path).resolve() and blocks(publication.load(other), retained['request']['approved']):
                 raise ValueError('Reconcile the pending publication before another write: '+str(other))

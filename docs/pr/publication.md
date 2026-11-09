@@ -51,8 +51,10 @@ request reached GitHub.
 
 New requests retain execution phase, exit status and available HTTP status in
 safe failure diagnostics. Request payload evidence comes from the original
-reviewer arrays. Response evidence uses a content hash/length, excluding raw
-response bodies and headers; credential-bearing error lines are redacted.
+reviewer arrays. Failed-command response evidence uses a content hash/length,
+excluding raw exception response bodies and headers; credential-bearing error lines
+are redacted. A response returned before a later observation failure stays retained
+with the original intent.
 Reconciliation errors are recorded separately and preserve the first failure.
 An error such as `unexpected end of JSON input` alone does not establish whether
 request parsing, response parsing, transport or GitHub caused the failure.
@@ -69,7 +71,12 @@ Run `python3 PACKAGE_ROOT/scripts/publish.py dispose-review-request --operation 
 Then reconcile the original operation. The result reports `status:disposed`,
 `historical_status:pending`, `delivery:unknown` and `review_obligation:no_resend`.
 The original intent and failure stay intact and no receipt is invented. Changed
-PR/head, reviewer set or historical evidence requires inspection and reassessment.
+PR/head, current reviewer set or retained historical reference fields requires
+inspection and reassessment. The fingerprint covers request/removal IDs, event
+types, times and reviewer identities, plus review IDs, states, submission times,
+commit IDs and reviewer identities. It does not cover review bodies or other
+discussion: reassess substantive discussion changes before reusing a decision.
+Each publication's own live gates still apply.
 There is no automatic replacement path; even a changed action ID remains blocked
 by this pending review intent. If another request is still required and delivery
 cannot be established, report that obligation as incomplete.
