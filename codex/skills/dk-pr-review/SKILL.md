@@ -5,7 +5,7 @@ description: Review another person's PR, verify findings independently and post 
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
-Persist workflow state only when it reduces total token consumption, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
+Persist workflow state only when it reduces total API dollar cost, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
 
 Set PLUGIN_ROOT to this plugin's root directory. Follow [the incoming review recipe](../../../runtime/pr-review.md) and [task state and handoffs](../../../docs/task-state.md). Read this skill's resolved `tasks`, `finalizers`, `limits` and `permissions` through [skill-owned configuration](../../../docs/skill-configuration.md). Execute each list in order, honoring parallel groups, while preserving the recipe's applicability, independent verification, freshness and completion requirements. Use managed skill-occurrence descriptors for list occurrences; the recipe owns repetition. Use `dk-workflows:dk-pr-reviewers-run` to find issues, then a separate native verification pass before publication.
 

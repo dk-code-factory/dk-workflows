@@ -20,6 +20,7 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
     p = sub.add_parser('prepare', help='Define, capture and claim native tasks in one call')
     p.add_argument('--file', type=Path, required=True, help='Tasks and retained run/cycle options')
+    p.add_argument('--compact', action='store_true', help='Omit known assignments unless invoking new work')
     p = sub.add_parser('resume', help='Recapture saved task definitions and return compact status')
     p.add_argument('--key', action='append', default=[])
     p.add_argument('--run')
@@ -40,6 +41,7 @@ def main():
     p.add_argument('--status', choices=['complete', 'failed', 'incomplete'])
     p.add_argument('--native-evidence', type=Path)
     p.add_argument('--progress', type=Path)
+    p.add_argument('--compact', action='store_true', help='Omit the unchanged assignment on rechecks')
     p = sub.add_parser('spec')
     p.add_argument('--definition', type=Path, required=True,
                    help='Explicit make_spec fields, excluding repository and pr')
@@ -132,7 +134,7 @@ def main():
         from tasks import Tasks
         tasks = Tasks(args.repository, args.pr, checkout=args.checkout)
         if args.command == 'prepare':
-            result = tasks.prepare(read(args.file))
+            result = tasks.prepare(read(args.file), compact=args.compact)
         elif args.command == 'resume':
             result = tasks.resume(keys=args.key, run=args.run, explain=args.explain)
         elif args.command == 'result':
@@ -144,7 +146,7 @@ def main():
                                   read(args.report), status=args.status,
                                   progress=read(args.progress) if args.progress else None,
                                   native_evidence=args.native_evidence.read_bytes() if args.native_evidence else None,
-                                  round_id=args.round_id)
+                                  round_id=args.round_id, compact=args.compact)
         print(json.dumps(result, sort_keys=True))
         return
     if args.command == 'spec':

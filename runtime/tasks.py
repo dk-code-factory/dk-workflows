@@ -52,7 +52,9 @@ class Tasks:
             task['finding_count'] = len(findings) if findings is not None else None
         return task
 
-    def prepare(self, request):
+    def prepare(self, request, *, compact=False):
+        if type(compact) is not bool:
+            raise ValueError('Compact presentation must be boolean')
         allowed = {'tasks', 'run', 'cycle', 'recover', 'retry', 'ci_repair', 'ci_rerun', 'head'}
         if (not isinstance(request, dict) or set(request) - allowed
                 or not isinstance(request.get('tasks'), list) or not request['tasks']):
@@ -127,7 +129,10 @@ class Tasks:
         # describe expectations only; finish still captures live inputs afresh.
         with self.store.locked() as manifest:
             for task in result['tasks']:
-                task['assignment'] = assignments[task['key']]
+                if not compact or task['action'] == 'invoke':
+                    task['assignment'] = assignments[task['key']]
+                else:
+                    task.pop('assignment', None)
                 task['checklist'] = checklists[task['key']]
                 if task['action'] == 'invoke':
                     entry = manifest['entries'][task['key']]
@@ -198,7 +203,10 @@ class Tasks:
             return {'run': run, 'records': deepcopy(records[after:end]),
                     'next': end if end < len(records) else None, 'total': len(records)}
 
-    def finish(self, key, claim, original, report, *, status=None, progress=None, native_evidence=None, round_id=None):
+    def finish(self, key, claim, original, report, *, status=None, progress=None, native_evidence=None,
+               round_id=None, compact=False):
+        if type(compact) is not bool:
+            raise ValueError('Compact presentation must be boolean')
         entry = self._entries().get(key, {})
         if 'managed' not in entry:
             raise ValueError('Task has no retained definition; prepare it before finishing')
@@ -217,7 +225,7 @@ class Tasks:
             result = self.store.record(spec, claim, original, report, status,
                                        progress=progress, native_evidence=native_evidence,
                                        checklist=checklist)
-        if result.get('action') == 'recheck':
+        if result.get('action') == 'recheck' and not compact:
             result['assignment'] = spec
         return result
 
@@ -237,6 +245,8 @@ class Tasks:
                 responses = [r['response'] for r in gate['rounds'] if 'response' in r] if gate else []
                 if responses:
                     gate['latest_report'] = load_response(self.store, responses[-1])['report']
+                elif gate and gate['outcome'] == 'complete':
+                    gate['latest_report'] = saved['normalized']
                 return {'key': key, 'checklist': gate}
             normalized, sources = self.store.findings_evidence(entry, saved) if section != 'original' else (None, [])
         if section == 'original':

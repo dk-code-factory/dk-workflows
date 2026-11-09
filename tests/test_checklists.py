@@ -35,21 +35,96 @@ def submit(tasks, check, unfinished=()):
                         round_id=check['round'])
 
 
-def test_first_followup_is_mandatory_even_when_initial_report_claims_all_items(case):
+def test_complete_initial_checklist_accepts_without_a_followup(case):
     spec, store = case
     tasks = Tasks(REPO, PR)
     prepared = tasks.prepare(setup_task(spec))['tasks'][0]
     assert capture(prepared['assignment']) == capture(spec)
     assert prepared['checklist']['max_checks'] == 3 and prepared['checklist']['required']
     value = {'complete': True, **report(prepared['checklist'])}
-    check = tasks.finish(prepared['key'], prepared['claim']['id'], b'All done', value)
-    assert check['action'] == 'recheck' and check['check_number'] == 1
+    completed = tasks.finish(prepared['key'], prepared['claim']['id'], b'All done', value)
+    assert completed['action'] == 'complete' and completed['checklist_complete']
     status = tasks.resume()['tasks'][0]
-    assert status['analysis_complete'] and not status['coverage_complete'] and not status['reusable']
-    assert status['checklist']['checks_used'] == 1
-    assert accept(tasks, check)['checklist_complete']
+    assert status['analysis_complete'] and status['coverage_complete'] and status['reusable']
+    assert status['checklist']['checks_used'] == 0
+    assert tasks.result(prepared['key'], 'checklist')['checklist']['latest_report'] == value
     assert tasks.prepare(setup_task(spec))['tasks'][0]['action'] == 'reuse'
     assert len(read(store.manifest)['entries'][prepared['key']]['attempts']) == 1
+    assert len(list((store.root/'results').iterdir())) == 1
+    before = store.manifest.read_bytes()
+    assert tasks.finish(prepared['key'], prepared['claim']['id'], b'All done', value) == completed
+    assert store.manifest.read_bytes() == before
+
+
+@pytest.mark.parametrize('mutation', ['missing', 'duplicate', 'unknown', 'no-evidence', 'status', 'completion'])
+def test_malformed_initial_checklist_preserves_claim_and_artifacts(case, mutation):
+    spec, store = case
+    tasks = Tasks(REPO, PR)
+    prepared = tasks.prepare(setup_task(spec))['tasks'][0]
+    value = report(prepared['checklist'])
+    if mutation == 'missing': value['checklist'].pop()
+    if mutation == 'duplicate': value['checklist'][1] = value['checklist'][0]
+    if mutation == 'unknown': value['checklist'][0]['id'] = 'unassigned'
+    if mutation == 'no-evidence': value['checklist'][0]['evidence'] = []
+    if mutation == 'status': value['checklist'][0]['status'] = 'passed'
+    if mutation == 'completion': value['checklist'][0] = {'id': 'scope', 'status': 'unfinished', 'reason': 'Missing work'}
+    before = {p: p.read_bytes() for p in store.root.rglob('*') if p.is_file()}
+    with pytest.raises(ValueError):
+        tasks.finish(prepared['key'], prepared['claim']['id'], b'Invalid initial report', value)
+    assert {p: p.read_bytes() for p in store.root.rglob('*') if p.is_file()} == before
+    assert tasks.resume()['unfinished'][0]['id'] == prepared['claim']['id']
+
+
+def test_initial_acceptance_fresh_process_resume_and_checklist_refresh(case):
+    spec, store = case
+    tasks = Tasks(REPO, PR)
+    body = setup_task(spec)
+    prepared = tasks.prepare(body)['tasks'][0]
+    value = report(prepared['checklist'])
+    tasks.finish(prepared['key'], prepared['claim']['id'], b'Primary checklist evidence', value)
+    before = {p: p.read_bytes() for p in store.root.rglob('*') if p.is_file()}
+    resumed = json.loads(subprocess.check_output(cli('resume'), text=True, timeout=60))
+    assert resumed['tasks'][0]['coverage_complete']
+    assert resumed['tasks'][0]['checklist']['checks_used'] == 0
+    assert {p: p.read_bytes() for p in store.root.rglob('*') if p.is_file()} == before
+    body['tasks'][0]['definition']['checklist'] = {'items': [{'id': 'new', 'text': 'New obligation'}]}
+    refreshed = tasks.prepare(body)['tasks'][0]
+    assert refreshed['action'] == 'recheck'
+    assert refreshed['check_number'] == 1
+    accept(tasks, refreshed)
+    assert tasks.result(prepared['key'], 'original')['original'] == 'Primary checklist evidence'
+    assert len(read(store.manifest)['entries'][prepared['key']]['attempts']) == 1
+
+
+def test_initial_checklist_cannot_bypass_native_execution_or_input_freshness(case):
+    from native_review_observations import CONTRACT, observations
+    spec, store = case
+    tasks = Tasks(REPO, PR)
+    body = setup_task(spec, native_review=CONTRACT, required=False)
+    prepared = tasks.prepare(body)['tasks'][0]
+    value = report(prepared['checklist'])
+    missing = tasks.finish(prepared['key'], prepared['claim']['id'], b'No native evidence', value)
+    assert missing['status'] == 'incomplete'
+    assert not tasks.resume()['tasks'][0]['coverage_complete']
+    prepared = tasks.prepare(body)['tasks'][0]
+    output = b'Native primary report and checklist'
+    evidence = observations({**spec, 'native_review': CONTRACT}, prepared['claim'], output)
+    accepted = tasks.finish(prepared['key'], prepared['claim']['id'], output, value, native_evidence=evidence)
+    assert accepted['checklist_complete']
+    Path(spec['inputs']['context']).write_text('Changed after initial acceptance')
+    assert not tasks.resume()['tasks'][0]['coverage_complete']
+
+
+def test_damaged_initial_checklist_artifact_cannot_supply_coverage(case):
+    spec, store = case
+    tasks = Tasks(REPO, PR)
+    prepared = tasks.prepare(setup_task(spec))['tasks'][0]
+    accepted = tasks.finish(prepared['key'], prepared['claim']['id'], b'Primary checklist evidence',
+                            report(prepared['checklist']))
+    Path(accepted['result']).unlink()
+    assert not tasks.resume()['tasks'][0]['coverage_complete']
+    with pytest.raises(ValueError, match='unavailable'):
+        tasks.result(prepared['key'], 'checklist')
 
 
 @pytest.mark.parametrize('maximum', [1, 2, 3, 5])

@@ -24,6 +24,66 @@ def run_cli(*arguments):
     return json.loads(subprocess.check_output(cli(*arguments), text=True, timeout=60))
 
 
+def test_compact_responses_keep_new_assignments_and_allow_full_retrieval(case):
+    spec, store = case
+    tasks = Tasks(REPO, PR)
+    body = request(spec)
+    prepared = tasks.prepare(body, compact=True)['tasks'][0]
+    assert prepared['action'] == 'invoke' and prepared['assignment'] == tasks.saved_spec(prepared['key'])
+    outstanding = tasks.prepare(body, compact=True)['tasks'][0]
+    assert outstanding['action'] == 'recover_required' and 'assignment' not in outstanding
+    checked = tasks.finish(prepared['key'], prepared['claim']['id'], b'Primary result',
+                           {'complete': True}, compact=True)
+    assert checked['action'] == 'recheck' and 'assignment' not in checked
+    assert checked['checklist']['items']
+    pending = tasks.prepare(body, compact=True)['tasks'][0]
+    assert pending['round'] == checked['round'] and 'assignment' not in pending
+    full = tasks.prepare(body)['tasks'][0]
+    assert full['round'] == checked['round'] and full['assignment'] == prepared['assignment']
+    accept(tasks, checked)
+    before = store.manifest.read_bytes()
+    compact = tasks.prepare(body, compact=True)['tasks'][0]
+    full = tasks.prepare(body)['tasks'][0]
+    assert compact['action'] == 'reuse' and 'assignment' not in compact
+    assert full['assignment'] == prepared['assignment']
+    assert store.manifest.read_bytes() == before
+
+
+def test_cli_compact_recheck_and_reuse_preserve_recovery_and_evidence(case, tmp_path):
+    spec, store = case
+    source = tmp_path/'request.json'
+    write(source, request(spec, run='run', cycle='c1'))
+    prepared = run_cli('prepare', '--compact', '--file', str(source))['tasks'][0]
+    report = tmp_path/'report.json'
+    write(report, {'complete': True})
+    check = run_cli('finish', '--compact', '--key', prepared['key'], '--claim', prepared['claim']['id'],
+                    '--report', str(report))
+    assert 'assignment' not in check and check['action'] == 'recheck'
+    write(report, checklist_report(check['checklist'], check['result']))
+    complete = run_cli('finish', '--compact', '--key', prepared['key'], '--claim', check['claim'],
+                       '--round', check['round'], '--report', str(report))
+    assert complete['checklist_complete']
+    reused = run_cli('prepare', '--compact', '--file', str(source))['tasks'][0]
+    assert reused['action'] == 'reuse' and 'assignment' not in reused
+    full = run_cli('prepare', '--file', str(source))['tasks'][0]
+    assert full['assignment'] == prepared['assignment']
+    assert run_cli('resume')['runs']['run']['cycles'] == ['c1']
+
+
+@pytest.mark.parametrize('compact', [None, 1, 'yes'])
+def test_compact_requires_an_explicit_boolean_before_mutation(case, compact):
+    spec, store = case
+    tasks = Tasks(REPO, PR)
+    with pytest.raises(ValueError, match='boolean'):
+        tasks.prepare(request(spec), compact=compact)
+    assert not store.manifest.exists()
+    prepared = tasks.prepare(request(spec))['tasks'][0]
+    before = store.manifest.read_bytes()
+    with pytest.raises(ValueError, match='boolean'):
+        tasks.finish(prepared['key'], prepared['claim']['id'], b'Complete', {'complete': True}, compact=compact)
+    assert store.manifest.read_bytes() == before
+
+
 def test_prepare_finish_and_fresh_session_resume_need_no_spec_reconstruction(case, tmp_path):
     spec, store = case
     source = tmp_path/'request.json'

@@ -102,9 +102,15 @@ def summary(store, entry, captured):
     if current and gate['outcome'] is not None:
         try:
             supplemental(store, entry)
-            if not rounds or len(rounds) > gate['contract']['max_checks']:
+            if len(rounds) > gate['contract']['max_checks']:
                 raise ValueError('Invalid checklist rounds')
-            report = load_response(store, rounds[-1]['response'])['report']
+            if rounds:
+                report = load_response(store, rounds[-1]['response'])['report']
+            else:
+                saved, problem = store._load_saved(entry)
+                if problem or saved['status'] != 'complete':
+                    raise ValueError('Missing complete primary checklist evidence')
+                report = saved['normalized']
             validate_report(gate, report)
             expected = ('complete' if report['complete'] else
                         'failed' if gate['contract']['required'] else 'best_effort')
@@ -172,6 +178,13 @@ def reply(store, entry, *, round_index=None):
     require_responses(store, entry)
     gate = entry['checklist']
     rounds = gate['rounds']
+    if not rounds and gate['outcome'] == 'complete':
+        saved, problem = store._load_saved(entry)
+        if problem or saved['status'] != 'complete':
+            raise ValueError('Missing complete primary checklist evidence')
+        validate_report(gate, saved['normalized'])
+        return {'action': 'complete', 'status': 'complete', 'key': entry['key'],
+                'result': saved['path'], 'checklist_complete': True, 'omissions': []}
     index = len(rounds) - 1 if round_index is None else round_index
     round_ = rounds[index]
     if 'response' in round_:
