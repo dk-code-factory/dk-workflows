@@ -1,6 +1,6 @@
 {
   "name": "dk-workflows",
-  "version": "5.2.1",
+  "version": "5.2.2",
   "description": "Agent-led PR workflows with bundled drafting, feedback, publication, cleanup and CI skills.",
   "author": {
     "name": "Dmitry Kropachev"

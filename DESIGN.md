@@ -34,6 +34,15 @@ the existing PR, ref and repository checks. Context changes still invalidate
 readiness, and every dispatch rechecks the live reviewed pins. This adds no
 durable state, resets no analysis and preserves publication intent and receipts.
 
+Fork-CI discovery first enumerates the reviewed head's pull-request runs rather
+than repository-wide history. Verify the filtered response's stable total count
+and complete pagination before dispatch or a no-op. At GitHub's 1,000-result
+search boundary, retain the unfiltered complete listing rather than accepting
+possibly truncated coverage. Existing per-run association, readiness rechecks
+and publication recovery remain unchanged. This adds no state and avoids
+repeated unrelated-history reads on ordinary finalization and fresh-session
+resume; no native API dollar savings are claimed.
+
 ## Managed task interface
 
 `scripts/dk.py prepare --file REQUEST.json` accepts explicit task definitions.
