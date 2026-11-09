@@ -43,6 +43,14 @@ and publication recovery remain unchanged. This adds no state and avoids
 repeated unrelated-history reads on ordinary finalization and fresh-session
 resume; no native API dollar savings are claimed.
 
+PR merging likewise binds the reviewed target to the live branch tip, rather
+than historical REST or GraphQL base commit metadata. Match the target branch
+name across REST and GraphQL and recheck its live tip after observing CI as well
+as before. Keep head binding, repository readiness, review and CI requirements,
+pre-dispatch checks and exact merge-commit parent verification unchanged. No
+state or analysis reset is needed; existing approval and publication receipts
+remain reusable within their original freshness boundaries.
+
 ## Managed task interface
 
 `scripts/dk.py prepare --file REQUEST.json` accepts explicit task definitions.

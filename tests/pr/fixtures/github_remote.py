@@ -10,7 +10,7 @@ def initial():
     return {'metadata': {'url': PR, 'headRefOid': HEAD, 'title': 'Fix the value', 'body': 'Scope: return two.\n## Decisions\n- Return two.'},
             'actor': 'author', 'run': {'id': 77, 'head_sha': HEAD, 'run_attempt': 1, 'status': 'completed', 'conclusion': 'failure'},
             'actor_id': 1, 'pr_author': {'id': 2, 'login': 'contributor'},
-            'merge_gate': {'baseRefOid': 'b'*40, 'state': 'OPEN', 'isDraft': False,
+            'merge_gate': {'baseRefOid': 'b'*40, 'baseRefName': 'main', 'state': 'OPEN', 'isDraft': False,
                            'mergeable': 'MERGEABLE', 'mergeStateStatus': 'CLEAN', 'reviewDecision': 'APPROVED'},
             'pull': {'state': 'open', 'draft': False, 'merged': False, 'mergeable': True,
                      'mergeable_state': 'clean', 'base': {'sha': 'b'*40, 'ref': 'main'}},

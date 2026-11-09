@@ -115,6 +115,58 @@ def test_merge_binds_reviewed_head_and_reconciles_exact_commit(remote, method):
     assert remote.state['writes'] == {'merge-pr': 1}
 
 
+@pytest.mark.parametrize('method', ['squash', 'merge'])
+@pytest.mark.parametrize('historical', ['rest', 'graphql', 'both'])
+def test_merge_uses_live_target_instead_of_historical_pr_base_metadata(remote, method, historical):
+    if historical in ('rest', 'both'):
+        remote.state['pull']['base']['sha'] = 'c'*40
+    if historical in ('graphql', 'both'):
+        remote.state['merge_gate']['baseRefOid'] = 'c'*40
+    request = fixture.request('merge-pr')
+    request['merge_method'] = method
+    operation = publisher.prepare(request)['operation']
+    result = publisher.publish(operation)
+    assert result['status'] == 'verified'
+    assert result['receipt']['base'] == 'b'*40
+    assert publisher.publish(operation)['status'] == 'verified'
+    assert remote.state['writes'] == {'merge-pr': 1}
+
+
+@pytest.mark.parametrize('ref', [None, 'partition', 'missing'])
+def test_merge_requires_consistent_target_branch_identity(remote, ref):
+    if ref == 'missing':
+        remote.state['merge_gate'].pop('baseRefName', None)
+    else:
+        remote.state['merge_gate']['baseRefName'] = ref
+    with pytest.raises(ValueError, match='review and merge requirements'):
+        publisher.prepare(fixture.request('merge-pr'))
+    assert not remote.state['writes']
+
+
+def test_historical_metadata_does_not_hide_a_changed_live_target(remote):
+    remote.state['pull']['base']['sha'] = 'c'*40
+    remote.state['merge_gate']['baseRefOid'] = 'c'*40
+    remote.state['branches']['main'] = 'd'*40
+    with pytest.raises(ValueError, match='Merge target tip changed'):
+        publisher.prepare(fixture.request('merge-pr'))
+    assert not remote.state['writes']
+
+
+def test_target_drift_during_ci_observation_blocks_merge_preparation(remote, monkeypatch):
+    original = remote.run
+
+    def changing(argv, **kwargs):
+        result = original(argv, **kwargs)
+        if argv[1:3] == ['pr', 'checks']:
+            remote.state['branches']['main'] = 'd'*40
+        return result
+
+    monkeypatch.setattr(publisher, 'run', changing)
+    with pytest.raises(ValueError, match='Merge target tip changed'):
+        publisher.prepare(fixture.request('merge-pr'))
+    assert not remote.state['writes']
+
+
 def test_merge_recovery_preserves_resolved_method_after_config_changes(remote):
     import config
     from state import write
