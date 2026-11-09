@@ -102,7 +102,7 @@ class Approval:
         if context != value.get('context'):
             raise ValueError('Reviewed head, target or governing discussion changed')
         if (context['html_url'] != request['pr'] or context['head']['sha'] != request['head']
-                or context['base']['sha'] != request['base'] or context['target_tip'] != request['base']
+                or context['target_tip'] != request['base']
                 or context['state'] != 'open' or context['draft'] is not False):
             raise ValueError('CI approval requires an open non-draft PR at the reviewed head and target')
         actor = h.api(request['pr'], 'user')
@@ -292,10 +292,11 @@ class Approval:
         if pull.get('number') != int(h.number):
             return False
         context = self.context() if context is None else context
-        if (context['head']['sha'] != r['head'] or context['base']['sha'] != r['base']
-                or context['target_tip'] != r['base']
+        # The live target binds review coverage; historical PR base metadata
+        # independently binds the run's source association.
+        if (context['head']['sha'] != r['head'] or context['target_tip'] != r['base']
                 or pull.get('head', {}).get('sha') != r['head']
-                or pull.get('base', {}).get('sha') != r['base']
+                or pull.get('base', {}).get('sha') != context['base']['sha']
                 or pull.get('base', {}).get('ref') != context['base']['ref']
                 or pull.get('base', {}).get('repo', {}).get('id') != context['base']['repo']['id']
                 or pull.get('head', {}).get('repo', {}).get('id') != context['head']['repo']['id']

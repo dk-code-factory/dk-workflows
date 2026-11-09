@@ -27,6 +27,13 @@ costly recovery after uncertain writes. Do not persist derived status, rendered
 summaries, duplicate transcripts, default telemetry or whole settings snapshots.
 Read current CI and publication readiness at their existing boundaries.
 
+Fork-CI approval binds reviewed source coverage to the current PR head and live
+target branch tip. The PR REST base SHA may be historical; retain it in the
+existing context and match workflow-run base metadata to that SHA, alongside
+the existing PR, ref and repository checks. Context changes still invalidate
+readiness, and every dispatch rechecks the live reviewed pins. This adds no
+durable state, resets no analysis and preserves publication intent and receipts.
+
 ## Managed task interface
 
 `scripts/dk.py prepare --file REQUEST.json` accepts explicit task definitions.

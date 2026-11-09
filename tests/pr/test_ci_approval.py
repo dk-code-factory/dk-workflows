@@ -173,6 +173,67 @@ def test_ready_finalization_approves_every_page_once_without_pr_approval_or_merg
     assert all(publication.load(op['operation'])['receipt']['execution_permitted'] for op in result['operations'])
 
 
+@pytest.mark.parametrize('historical_base', [False, True])
+@pytest.mark.parametrize('eligible_runs', [False, True])
+def test_reviewed_live_target_allows_historical_pr_and_run_bases(reviewed, historical_base, eligible_runs):
+    r = reviewed
+    if historical_base:
+        r.remote.state['pull']['base']['sha'] = 'b'*40
+        for run in r.remote.runs.values():
+            run['pull_requests'][0]['base']['sha'] = 'b'*40
+    if not eligible_runs:
+        r.remote.pages = lambda: [[]]
+    r.cli.snapshot(r.evidence)
+    result = r.cli.approve(r.evidence)
+    assert result['status'] == 'verified' and result['noop'] is not eligible_runs
+    assert r.remote.calls == ([101, 202] if eligible_runs else [])
+    assert r.remote.list_reads == 2
+    assert r.cli.approve(r.evidence)['noop']
+    assert r.remote.calls == ([101, 202] if eligible_runs else [])
+
+
+@pytest.mark.parametrize('historical_base', [False, True])
+@pytest.mark.parametrize('change', ['head', 'target'])
+def test_source_pin_drift_is_rejected_even_with_refreshed_context(reviewed, historical_base, change):
+    r = reviewed
+    if historical_base:
+        r.remote.state['pull']['base']['sha'] = 'b'*40
+    if change == 'head':
+        r.remote.state['metadata']['headRefOid'] = 'd'*40
+    else:
+        r.remote.state['branches']['main'] = 'd'*40
+    r.cli.snapshot(r.evidence)
+    with pytest.raises(ValueError, match='open non-draft PR at the reviewed head and target'):
+        r.cli.approve(r.evidence)
+    assert r.remote.list_reads == 0 and not r.remote.calls
+
+
+@pytest.mark.parametrize('change', [None, 'run-base', 'run-head', 'target-ref', 'target-repo',
+                                 'fork-repo', 'run-repo', 'live-target', 'live-head'])
+def test_historical_run_association_independently_checks_source_identities(reviewed, change):
+    from shared.ci_approval import Approval
+    r = reviewed
+    r.remote.state['pull']['base']['sha'] = 'b'*40
+    run = deepcopy(r.remote.runs[101])
+    pull = run['pull_requests'][0]
+    pull['base']['sha'] = 'b'*40
+    if change == 'run-base': pull['base']['sha'] = r.base
+    if change == 'run-head': pull['head']['sha'] = 'd'*40
+    if change == 'target-ref': pull['base']['ref'] = 'other'
+    if change == 'target-repo': pull['base']['repo']['id'] = 99
+    if change == 'fork-repo': pull['head']['repo']['id'] = 99
+    if change == 'run-repo': run['repository']['id'] = 99
+    if change == 'live-target': r.remote.state['branches']['main'] = 'd'*40
+    if change == 'live-head': r.remote.state['metadata']['headRefOid'] = 'd'*40
+    approval = Approval(r.cli.publish.handler(r.cli.request(r.evidence)))
+    if change is None:
+        assert approval.association(run) is True
+    else:
+        with pytest.raises(ValueError, match='fork/head/target association'):
+            approval.association(run)
+    assert not r.remote.calls
+
+
 @pytest.mark.parametrize('reviewer_identity,failure', [
     ('fixture:a', failure) for failure in [None, 'duplicate', 'missing', 'missing-verifier', 'wrong-claim', 'options']
 ] + [(None, None)])
