@@ -315,17 +315,33 @@ class Approval:
             raise ValueError('Workflow gate is ambiguous or is a deployment approval')
 
     def discover(self):
+        def listing_count(pages):
+            if not isinstance(pages, list) or not pages:
+                raise ValueError('Incomplete workflow run pagination')
+            counts = [page.get('total_count') if isinstance(page, dict) else None for page in pages]
+            if (any(type(count) is not int or count < 0 for count in counts)
+                    or len(set(counts)) != 1):
+                raise ValueError('Incomplete or changed workflow run count')
+            return counts[0]
+
         h = self.handler
-        # Unfiltered listing avoids GitHub's 1,000-result limit on searches.
-        pages = h.run(['gh', 'api', '--hostname', h.host, h.root + '/actions/runs?per_page=100',
+        route = h.root + '/actions/runs?per_page=100'
+        pages = h.run(['gh', 'api', '--hostname', h.host,
+                       route + '&head_sha=' + self.request['head'] + '&event=pull_request',
                        '--paginate', '--slurp'])
-        if not isinstance(pages, list) or not pages:
-            raise ValueError('Incomplete workflow run pagination')
+        count = listing_count(pages)
+        if count >= 1000:
+            # Filtered searches are capped at 1,000 results. Retain the complete
+            # unfiltered path for unusually large per-head histories.
+            pages = h.run(['gh', 'api', '--hostname', h.host, route, '--paginate', '--slurp'])
+            count = listing_count(pages)
         runs = []
         for page in pages:
             if not isinstance(page, dict) or not isinstance(page.get('workflow_runs'), list):
                 raise ValueError('Incomplete workflow run page')
             runs.extend(page['workflow_runs'])
+        if len(runs) != count:
+            raise ValueError('Incomplete workflow run pagination')
         ids = [run['id'] for run in runs]
         if len(set(ids)) != len(ids):
             raise ValueError('Duplicated workflow runs across pagination')

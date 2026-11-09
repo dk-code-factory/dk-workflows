@@ -115,6 +115,99 @@ def test_merge_binds_reviewed_head_and_reconciles_exact_commit(remote, method):
     assert remote.state['writes'] == {'merge-pr': 1}
 
 
+@pytest.mark.parametrize('method', ['squash', 'merge'])
+@pytest.mark.parametrize('historical', ['rest', 'graphql', 'both'])
+def test_merge_uses_live_target_instead_of_historical_pr_base_metadata(remote, method, historical):
+    if historical in ('rest', 'both'):
+        remote.state['pull']['base']['sha'] = 'c'*40
+    if historical in ('graphql', 'both'):
+        remote.state['merge_gate']['baseRefOid'] = 'c'*40
+    request = fixture.request('merge-pr')
+    request['merge_method'] = method
+    operation = publisher.prepare(request)['operation']
+    result = publisher.publish(operation)
+    assert result['status'] == 'verified'
+    assert result['receipt']['base'] == 'b'*40
+    assert publisher.publish(operation)['status'] == 'verified'
+    assert remote.state['writes'] == {'merge-pr': 1}
+
+
+@pytest.mark.parametrize('ref', [None, 'partition', 'missing'])
+def test_merge_requires_consistent_target_branch_identity(remote, ref):
+    if ref == 'missing':
+        remote.state['merge_gate'].pop('baseRefName', None)
+    else:
+        remote.state['merge_gate']['baseRefName'] = ref
+    with pytest.raises(ValueError, match='review and merge requirements'):
+        publisher.prepare(fixture.request('merge-pr'))
+    assert not remote.state['writes']
+
+
+def test_historical_metadata_does_not_hide_a_changed_live_target(remote):
+    remote.state['pull']['base']['sha'] = 'c'*40
+    remote.state['merge_gate']['baseRefOid'] = 'c'*40
+    remote.state['branches']['main'] = 'd'*40
+    with pytest.raises(ValueError, match='Merge target tip changed'):
+        publisher.prepare(fixture.request('merge-pr'))
+    assert not remote.state['writes']
+
+
+def test_target_drift_during_ci_observation_blocks_merge_preparation(remote, monkeypatch):
+    original = remote.run
+
+    def changing(argv, **kwargs):
+        result = original(argv, **kwargs)
+        if argv[1:3] == ['pr', 'checks']:
+            remote.state['branches']['main'] = 'd'*40
+        return result
+
+    monkeypatch.setattr(publisher, 'run', changing)
+    with pytest.raises(ValueError, match='Merge target tip changed'):
+        publisher.prepare(fixture.request('merge-pr'))
+    assert not remote.state['writes']
+
+
+@pytest.mark.parametrize('state', ['SKIPPED', 'NEUTRAL'])
+@pytest.mark.parametrize('method', ['squash', 'merge'])
+def test_successful_ci_can_include_skipped_or_neutral_checks(remote, state, method):
+    remote.state['checks'].append({'name': 'optional', 'bucket': 'skipping', 'state': state})
+    request = fixture.request('merge-pr')
+    request['merge_method'] = method
+    operation = publisher.prepare(request)['operation']
+    assert publisher.publish(operation)['status'] == 'verified'
+    assert remote.state['writes'] == {'merge-pr': 1}
+
+
+@pytest.mark.parametrize('state', ['SKIPPED', 'NEUTRAL'])
+def test_skips_or_neutral_checks_alone_do_not_establish_successful_validation(remote, state):
+    remote.state['checks'] = [{'name': 'optional', 'bucket': 'skipping', 'state': state}]
+    with pytest.raises(ValueError, match='successful CI checks'):
+        publisher.prepare(fixture.request('merge-pr'))
+    assert not remote.state['writes']
+
+
+@pytest.mark.parametrize('state', [None, 'PENDING', 'FAILURE', 'CANCELLED', 'UNKNOWN', 'SUCCESS'])
+def test_skipping_bucket_cannot_mask_unsafe_or_inconsistent_check_states(remote, state):
+    remote.state['checks'].append({'name': 'unsafe', 'bucket': 'skipping', 'state': state})
+    with pytest.raises(ValueError, match='successful CI checks'):
+        publisher.prepare(fixture.request('merge-pr'))
+    assert not remote.state['writes']
+
+
+@pytest.mark.parametrize('block', ['review', 'graphql', 'rest'])
+def test_skipped_checks_do_not_override_repository_requirements(remote, block):
+    remote.state['checks'].append({'name': 'optional', 'bucket': 'skipping', 'state': 'SKIPPED'})
+    if block == 'review':
+        remote.state['merge_gate']['reviewDecision'] = 'REVIEW_REQUIRED'
+    elif block == 'graphql':
+        remote.state['merge_gate']['mergeStateStatus'] = 'BLOCKED'
+    else:
+        remote.state['pull']['mergeable_state'] = 'blocked'
+    with pytest.raises(ValueError):
+        publisher.prepare(fixture.request('merge-pr'))
+    assert not remote.state['writes']
+
+
 def test_merge_recovery_preserves_resolved_method_after_config_changes(remote):
     import config
     from state import write

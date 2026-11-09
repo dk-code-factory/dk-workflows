@@ -34,6 +34,29 @@ the existing PR, ref and repository checks. Context changes still invalidate
 readiness, and every dispatch rechecks the live reviewed pins. This adds no
 durable state, resets no analysis and preserves publication intent and receipts.
 
+Fork-CI discovery first enumerates the reviewed head's pull-request runs rather
+than repository-wide history. Verify each listing's stable total count and
+complete pagination before dispatch or a no-op. At GitHub's 1,000-result search
+boundary, use the unfiltered listing with the same count and completeness checks
+rather than accepting possibly truncated coverage. Existing per-run association,
+readiness rechecks and publication recovery remain unchanged. This adds no state
+and avoids repeated unrelated-history reads on ordinary finalization and
+fresh-session resume; no native API dollar savings are claimed.
+
+PR merging likewise binds the reviewed target to the live branch tip, rather
+than historical REST or GraphQL base commit metadata. Match the target branch
+name across REST and GraphQL and recheck its live tip after observing CI as well
+as before. Keep head binding, repository readiness, review and CI requirements,
+pre-dispatch checks and exact merge-commit parent verification unchanged. No
+state or analysis reset is needed; existing approval and publication receipts
+remain reusable within their original freshness boundaries.
+
+Successful merge CI may include GitHub's terminal skipped or neutral checks,
+which gh groups into its skipping bucket. Require at least one passing check,
+accept only SKIPPED/NEUTRAL in that bucket, and reject other nonpassing buckets
+or unknown states. REST and GraphQL repository readiness must still be clean
+and review requirements satisfied; skipped checks cannot override those gates.
+
 ## Managed task interface
 
 `scripts/dk.py prepare --file REQUEST.json` accepts explicit task definitions.

@@ -29,17 +29,16 @@ class Merge:
             raise ValueError('Merge actor and PR author identities are required')
         if (pull.get('state') != 'open' or pull.get('merged') is not False
                 or pull.get('draft') is not False or pull.get('mergeable') is not True
-                or pull.get('mergeable_state') != 'clean'
-                or pull.get('base', {}).get('sha') != request['base']):
+                or pull.get('mergeable_state') != 'clean'):
             raise ValueError('PR is not ready to merge at the reviewed target')
         base_ref = pull['base'].get('ref')
         if (not isinstance(base_ref, str) or not base_ref
                 or self.get('/git/ref/heads/' + quote(base_ref, safe=''))['object']['sha'] != request['base']):
             raise ValueError('Merge target tip changed')
         review = self.run(['gh', 'pr', 'view', request['pr'], '--json',
-                           'url,headRefOid,baseRefOid,state,isDraft,mergeable,mergeStateStatus,reviewDecision'])
+                           'url,headRefOid,baseRefName,state,isDraft,mergeable,mergeStateStatus,reviewDecision'])
         if (review.get('url') != request['pr'] or review.get('headRefOid') != request['head']
-                or review.get('baseRefOid') != request['base'] or review.get('state') != 'OPEN'
+                or review.get('baseRefName') != base_ref or review.get('state') != 'OPEN'
                 or review.get('isDraft') is not False or review.get('mergeable') != 'MERGEABLE'
                 or review.get('mergeStateStatus') != 'CLEAN'
                 or 'reviewDecision' not in review
@@ -49,11 +48,17 @@ class Merge:
             raise ValueError('Current repository review and merge requirements are not satisfied')
         checks = self.run(['gh', 'pr', 'checks', request['pr'], '--json', 'name,bucket,state,link,workflow'])
         if (not isinstance(checks, list) or not checks
-                or any(not isinstance(check, dict) or check.get('bucket') != 'pass' for check in checks)):
+                or any(not isinstance(check, dict) or (
+                    check.get('bucket') != 'pass' and not (
+                        check.get('bucket') == 'skipping' and check.get('state') in ('SKIPPED', 'NEUTRAL')))
+                       for check in checks)
+                or not any(check.get('bucket') == 'pass' for check in checks)):
             raise ValueError('Automatic merge requires current successful CI checks')
         # Bind the check observation to source pins on both sides of the read.
         if self.pull() != pull:
             raise ValueError('PR changed while observing merge readiness')
+        if self.get('/git/ref/heads/' + quote(base_ref, safe=''))['object']['sha'] != request['base']:
+            raise ValueError('Merge target tip changed')
         return {'actor': {'id': actor['id'], 'login': actor['login']},
                 'author_id': author['id'], 'review': review,
                 'checks': sorted(checks, key=lambda value: json.dumps(value, sort_keys=True))}

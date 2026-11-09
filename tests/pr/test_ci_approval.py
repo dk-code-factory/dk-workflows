@@ -62,10 +62,16 @@ class Remote(fixture.Remote):
                 'url': fixture.PR, 'headRefOid': self.state['metadata']['headRefOid'],
                 'reviewThreads': {'nodes': self.state.get('thread_states', []),
                                   'pageInfo': {'hasNextPage': False, 'endCursor': None}}}}}}
-        if any(arg.endswith('/actions/runs?per_page=100') for arg in argv):
+        routes = [arg for arg in argv if '/actions/runs?per_page=100' in arg]
+        if routes:
             self.list_reads += 1
+            self.list_routes.append(routes[0])
             assert '--paginate' in argv and '--slurp' in argv
-            return [{'workflow_runs': deepcopy(page)} for page in self.pages()]
+            pages = self.pages()
+            count = sum(len(page) for page in pages if isinstance(page, list))
+            if '&head_sha=' in routes[0]:
+                count = getattr(self, 'filtered_total', count)
+            return [{'total_count': count, 'workflow_runs': deepcopy(page)} for page in pages]
         return super().run(argv, **kwargs)
 
 
@@ -76,6 +82,7 @@ def reviewed(tmp_path, monkeypatch):
     remote = Remote()
     remote.calls, remote.deny, remote.after_write = [], None, None
     remote.jobs, remote.deployments, remote.list_reads = {}, {}, 0
+    remote.list_routes = []
     checkout = tmp_path/'checkout'
     checkout.mkdir()
 
@@ -171,6 +178,96 @@ def test_ready_finalization_approves_every_page_once_without_pr_approval_or_merg
     assert r.cli.approve(r.evidence)['noop']
     assert r.remote.calls == [101, 202]
     assert all(publication.load(op['operation'])['receipt']['execution_permitted'] for op in result['operations'])
+
+
+def test_discovery_lists_only_the_reviewed_head_without_scanning_repository_history(reviewed):
+    r = reviewed
+    assert r.cli.approve(r.evidence)['status'] == 'verified'
+    route = 'repos/owner/repo/actions/runs?per_page=100&head_sha=' + r.head + '&event=pull_request'
+    assert r.remote.list_routes == [route, route]
+    assert r.remote.calls == [101, 202]
+
+
+@pytest.mark.parametrize('count', [1000, 1001])
+@pytest.mark.parametrize('eligible_runs', [False, True])
+def test_capped_head_discovery_falls_back_to_complete_repository_listing(reviewed, count, eligible_runs):
+    r = reviewed
+    r.remote.filtered_total = count
+    if not eligible_runs:
+        r.remote.pages = lambda: [[]]
+    result = r.cli.approve(r.evidence)
+    assert result['status'] == 'verified' and result['noop'] is not eligible_runs
+    full = 'repos/owner/repo/actions/runs?per_page=100'
+    filtered = full + '&head_sha=' + r.head + '&event=pull_request'
+    assert r.remote.list_routes == [filtered, full, filtered, full]
+    assert r.remote.calls == ([101, 202] if eligible_runs else [])
+
+
+@pytest.mark.parametrize('counts', [[None], [-1], [True], ['2'], [2], [1, 2]])
+def test_unproven_fallback_listing_cannot_claim_a_noop(reviewed, monkeypatch, counts):
+    r = reviewed
+    r.remote.filtered_total = 1000
+    original = r.remote.run
+
+    def incomplete(argv, **kwargs):
+        if any('/actions/runs?per_page=100' in arg and '&head_sha=' not in arg for arg in argv):
+            return [{'total_count': count, 'workflow_runs': []} for count in counts]
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(r.cli.publish, 'run', incomplete)
+    with pytest.raises(ValueError, match='workflow run (count|pagination)'):
+        r.cli.approve(r.evidence)
+    assert not r.remote.calls
+
+
+def test_truncated_fallback_listing_blocks_before_any_approval(reviewed, monkeypatch):
+    r = reviewed
+    r.remote.filtered_total = 1000
+    original = r.remote.run
+
+    def incomplete(argv, **kwargs):
+        if any('/actions/runs?per_page=100' in arg and '&head_sha=' not in arg for arg in argv):
+            return [{'total_count': 2, 'workflow_runs': [deepcopy(r.remote.runs[101])]}]
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(r.cli.publish, 'run', incomplete)
+    with pytest.raises(ValueError, match='Incomplete workflow run pagination'):
+        r.cli.approve(r.evidence)
+    assert not r.remote.calls
+
+
+@pytest.mark.parametrize('count', [None, -1, True, '2', 1, 3])
+def test_unproven_filtered_listing_cannot_approve_or_claim_a_noop(reviewed, count):
+    r = reviewed
+    r.remote.filtered_total = count
+    with pytest.raises(ValueError, match='workflow run (count|pagination)'):
+        r.cli.approve(r.evidence)
+    assert not r.remote.calls
+
+
+def test_truncated_filtered_listing_blocks_before_any_approval(reviewed):
+    r = reviewed
+    r.remote.filtered_total = 2
+    r.remote.pages = lambda: [[r.remote.runs[101]]]
+    with pytest.raises(ValueError, match='Incomplete workflow run pagination'):
+        r.cli.approve(r.evidence)
+    assert not r.remote.calls
+
+
+def test_filtered_count_changes_between_pages_block_dispatch(reviewed, monkeypatch):
+    r = reviewed
+    original = r.remote.run
+
+    def changing(argv, **kwargs):
+        pages = original(argv, **kwargs)
+        if any('&head_sha=' in arg for arg in argv):
+            pages[1]['total_count'] += 1
+        return pages
+
+    monkeypatch.setattr(r.cli.publish, 'run', changing)
+    with pytest.raises(ValueError, match='changed workflow run count'):
+        r.cli.approve(r.evidence)
+    assert not r.remote.calls
 
 
 @pytest.mark.parametrize('historical_base', [False, True])
