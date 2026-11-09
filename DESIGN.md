@@ -51,6 +51,12 @@ pre-dispatch checks and exact merge-commit parent verification unchanged. No
 state or analysis reset is needed; existing approval and publication receipts
 remain reusable within their original freshness boundaries.
 
+Successful merge CI may include GitHub's terminal skipped or neutral checks,
+which gh groups into its skipping bucket. Require at least one passing check,
+accept only SKIPPED/NEUTRAL in that bucket, and reject other nonpassing buckets
+or unknown states. REST and GraphQL repository readiness must still be clean
+and review requirements satisfied; skipped checks cannot override those gates.
+
 ## Managed task interface
 
 `scripts/dk.py prepare --file REQUEST.json` accepts explicit task definitions.

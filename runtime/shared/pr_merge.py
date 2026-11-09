@@ -48,7 +48,11 @@ class Merge:
             raise ValueError('Current repository review and merge requirements are not satisfied')
         checks = self.run(['gh', 'pr', 'checks', request['pr'], '--json', 'name,bucket,state,link,workflow'])
         if (not isinstance(checks, list) or not checks
-                or any(not isinstance(check, dict) or check.get('bucket') != 'pass' for check in checks)):
+                or any(not isinstance(check, dict) or (
+                    check.get('bucket') != 'pass' and not (
+                        check.get('bucket') == 'skipping' and check.get('state') in ('SKIPPED', 'NEUTRAL')))
+                       for check in checks)
+                or not any(check.get('bucket') == 'pass' for check in checks)):
             raise ValueError('Automatic merge requires current successful CI checks')
         # Bind the check observation to source pins on both sides of the read.
         if self.pull() != pull:

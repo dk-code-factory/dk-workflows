@@ -167,6 +167,47 @@ def test_target_drift_during_ci_observation_blocks_merge_preparation(remote, mon
     assert not remote.state['writes']
 
 
+@pytest.mark.parametrize('state', ['SKIPPED', 'NEUTRAL'])
+@pytest.mark.parametrize('method', ['squash', 'merge'])
+def test_successful_ci_can_include_skipped_or_neutral_checks(remote, state, method):
+    remote.state['checks'].append({'name': 'optional', 'bucket': 'skipping', 'state': state})
+    request = fixture.request('merge-pr')
+    request['merge_method'] = method
+    operation = publisher.prepare(request)['operation']
+    assert publisher.publish(operation)['status'] == 'verified'
+    assert remote.state['writes'] == {'merge-pr': 1}
+
+
+@pytest.mark.parametrize('state', ['SKIPPED', 'NEUTRAL'])
+def test_skips_or_neutral_checks_alone_do_not_establish_successful_validation(remote, state):
+    remote.state['checks'] = [{'name': 'optional', 'bucket': 'skipping', 'state': state}]
+    with pytest.raises(ValueError, match='successful CI checks'):
+        publisher.prepare(fixture.request('merge-pr'))
+    assert not remote.state['writes']
+
+
+@pytest.mark.parametrize('state', [None, 'PENDING', 'FAILURE', 'CANCELLED', 'UNKNOWN', 'SUCCESS'])
+def test_skipping_bucket_cannot_mask_unsafe_or_inconsistent_check_states(remote, state):
+    remote.state['checks'].append({'name': 'unsafe', 'bucket': 'skipping', 'state': state})
+    with pytest.raises(ValueError, match='successful CI checks'):
+        publisher.prepare(fixture.request('merge-pr'))
+    assert not remote.state['writes']
+
+
+@pytest.mark.parametrize('block', ['review', 'graphql', 'rest'])
+def test_skipped_checks_do_not_override_repository_requirements(remote, block):
+    remote.state['checks'].append({'name': 'optional', 'bucket': 'skipping', 'state': 'SKIPPED'})
+    if block == 'review':
+        remote.state['merge_gate']['reviewDecision'] = 'REVIEW_REQUIRED'
+    elif block == 'graphql':
+        remote.state['merge_gate']['mergeStateStatus'] = 'BLOCKED'
+    else:
+        remote.state['pull']['mergeable_state'] = 'blocked'
+    with pytest.raises(ValueError):
+        publisher.prepare(fixture.request('merge-pr'))
+    assert not remote.state['writes']
+
+
 def test_merge_recovery_preserves_resolved_method_after_config_changes(remote):
     import config
     from state import write
