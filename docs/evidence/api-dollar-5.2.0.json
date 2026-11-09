@@ -1,0 +1,329 @@
+{
+  "scope": "Complete16-duty instruction-only native coordination fixture plus fresh-session resume; warmup charged; no model descendants. Root experiment implementation/orchestration is separate.",
+  "limitation": "Offline domain stand-ins do not establish production reviewer recall, GitHub behavior or full production PR cost. API-equivalent prices are not actual account billing.",
+  "source_revisions": {
+    "baseline": "dbb4802f59df04c62a73d4f0ea84375143adb73d",
+    "candidate": "8b5183e92ed38a0b632231d4ff2c529fd47f65f9"
+  },
+  "measured_candidate_files_unchanged": true,
+  "frozen_pins": {
+    "baseline": {
+      "runtime": "385cc1a28b71106eb8feab4a3415e68ce873915fd4377f3e143a2b644e06223e",
+      "guidance": "7fd00d9606fbc0996edb8f0b8b33761b8bd3f345f574d0fe08e0294f9f851fbe",
+      "resources": "82c058294ab9afb9f10d214ace4658568a57757fe4ecddc095aa5d61b0aed7d3",
+      "assignment": "e6c9d4c848941f7b637259ae91d832d438d6980c1cd6d4300139a4e325b34ab4",
+      "scenario": "a14c813b5bacc3ec3adbc9b744683afa6c623a2432b1757814d374929c745085",
+      "conditions": "cd99c3b0d47190f757ab983238348a47856ff51da29dea46dd021b4943aead1e"
+    },
+    "candidate": {
+      "runtime": "cc32eee696e33361bd049a8c6e7e8f22c33ac1b49e54b95893b15eedd42f7233",
+      "guidance": "2668166344e9aa853367717941f20f7061d732fa3c8f46dccdf098443c27eb94",
+      "resources": "82c058294ab9afb9f10d214ace4658568a57757fe4ecddc095aa5d61b0aed7d3",
+      "assignment": "e6c9d4c848941f7b637259ae91d832d438d6980c1cd6d4300139a4e325b34ab4",
+      "scenario": "a14c813b5bacc3ec3adbc9b744683afa6c623a2432b1757814d374929c745085",
+      "conditions": "cd99c3b0d47190f757ab983238348a47856ff51da29dea46dd021b4943aead1e"
+    }
+  },
+  "native_controls": [
+    {
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "service_tier": "default"
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "service_tier": "default"
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "service_tier": "default"
+    }
+  ],
+  "context_controls": {
+    "passed": true,
+    "observable_native_starting_contexts_equal": true,
+    "initial_tool_schemas_equal": true,
+    "context_sha256": [
+      "afb322985e6391208132b2f0f646194e8cf95aaa78534e0438a7dafb1a8f53c3",
+      "afb322985e6391208132b2f0f646194e8cf95aaa78534e0438a7dafb1a8f53c3"
+    ],
+    "tool_schema_sha256": [
+      "aeaaaa3ffd26d56fe0ddb6bf35bf559ec1b3aca1a1fb4d8db2f75632fbd85747",
+      "aeaaaa3ffd26d56fe0ddb6bf35bf559ec1b3aca1a1fb4d8db2f75632fbd85747"
+    ],
+    "assignment_control": "Identical literal caller templates and frozen scenario assignments; only declared arm paths differ. Native task message bodies are encrypted in rollout calls; sent templates are retained privately, separately from observable host instruction hashes."
+  },
+  "accounting": "All warmup, native task preparation/reads/recording/terminal output and fresh-session resume responses included. No descendants. Independent advancing host counters, cumulative deltas, original terminal output and per-response records agree; response IDs globally deduplicated. Experiment implementation/orchestration spending is separate.",
+  "instrumentation_corrections": [
+    "Accept native findings[] or top-level F1 evidence with the same exact acceptance/source criterion.",
+    "Validate every original attempt, including refreshed noncacheable duties.",
+    "Bind terminal usage inventory to original final output, including simultaneous missing final usage/counter detection."
+  ],
+  "trial_reruns": 0,
+  "excluded_pilot": "Transport-only preflight declared before paired trials; phase1 only, not a completed paired arm.",
+  "decision": {
+    "accepted": true,
+    "decision": "accepted",
+    "reasons": [],
+    "improved_pairs": 3,
+    "baseline_usd": [
+      "0.8772548",
+      "0.9015828",
+      "0.8325516"
+    ],
+    "candidate_usd": [
+      "0.5553068",
+      "0.7088156",
+      "0.7297104"
+    ],
+    "median_baseline_usd": "0.8772548",
+    "median_candidate_usd": "0.7088156",
+    "sum_baseline_usd": "2.6113892",
+    "sum_candidate_usd": "1.9938328",
+    "rate_card": {
+      "date": "2026-11-05",
+      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+      "pricing_source": "https://developers.openai.com/api/docs/pricing",
+      "model": "gpt-6.1-sol",
+      "per_million_usd": {
+        "input": "2",
+        "cache_read": ".1",
+        "cache_write_30m": "2.5",
+        "cache_write_12h": "5",
+        "output": "10"
+      },
+      "long_context_threshold": 272000,
+      "long_context_input_multiplier": "2",
+      "long_context_output_multiplier": "1.5",
+      "tiers": {
+        "default": "1",
+        "standard": "1",
+        "priority": "2",
+        "fast": "2",
+        "ultrafast": "6",
+        "batch": "0.5",
+        "flex": "0.5"
+      },
+      "regional_multiplier": "1.1",
+      "billing_basis": "API-equivalent cost; not actual account billing"
+    },
+    "limitation": "Three pairs give bounded evidence, not a general savings guarantee"
+  },
+  "trials": [
+    {
+      "pair": 1,
+      "variant": "baseline",
+      "api_equivalent_cost_usd": "0.8772548",
+      "phase_costs_usd": [
+        "0.5593224",
+        "0.3179324"
+      ],
+      "response_count": 63,
+      "tokens": {
+        "input_tokens": 4261613,
+        "cached_input_tokens": 4123648,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 18896,
+        "reasoning_output_tokens": 2276,
+        "total_tokens": 4280509,
+        "fresh_input_tokens": 137965
+      },
+      "original_rollout_sha256": [
+        "678e63b5851121bb6a24b36ff557ccf06173feb8f98736e4683b120299ba49b7",
+        "76c40ae7cc64f9d997c6bc076d618c9d1c2aaf2a1d31615635f81a85d623c02d"
+      ],
+      "correctness": {
+        "passed": true,
+        "completed_duties": 16,
+        "cacheable_reused_on_resume": 13,
+        "noncacheable_refreshed_on_resume": 3,
+        "review_cycles_used": 0
+      }
+    },
+    {
+      "pair": 1,
+      "variant": "candidate",
+      "api_equivalent_cost_usd": "0.5553068",
+      "phase_costs_usd": [
+        "0.2967456",
+        "0.2585612"
+      ],
+      "response_count": 40,
+      "tokens": {
+        "input_tokens": 2097503,
+        "cached_input_tokens": 1991168,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 14352,
+        "reasoning_output_tokens": 1941,
+        "total_tokens": 2111855,
+        "fresh_input_tokens": 106335
+      },
+      "original_rollout_sha256": [
+        "99c8396d274df99ab0c4ccb8ed36ea32404c972e255c2969564ffb3b05688792",
+        "0532a73c2832f310cfa7d24c625dd1fd4f6e8385fa22540887619455127252ce"
+      ],
+      "correctness": {
+        "passed": true,
+        "completed_duties": 16,
+        "cacheable_reused_on_resume": 13,
+        "noncacheable_refreshed_on_resume": 3,
+        "review_cycles_used": 0
+      }
+    },
+    {
+      "pair": 2,
+      "variant": "candidate",
+      "api_equivalent_cost_usd": "0.7088156",
+      "phase_costs_usd": [
+        "0.4713204",
+        "0.2374952"
+      ],
+      "response_count": 61,
+      "tokens": {
+        "input_tokens": 3245939,
+        "cached_input_tokens": 3127296,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 15880,
+        "reasoning_output_tokens": 2017,
+        "total_tokens": 3261819,
+        "fresh_input_tokens": 118643
+      },
+      "original_rollout_sha256": [
+        "a0af736bef99f6e69f681c44f2b2d59972d7bd50549175a59eeddc343747e284",
+        "7d414a69875538a8fe1a397efeacb163ef5e986865fbd8b93a20f9c77067accc"
+      ],
+      "correctness": {
+        "passed": true,
+        "completed_duties": 16,
+        "cacheable_reused_on_resume": 13,
+        "noncacheable_refreshed_on_resume": 3,
+        "review_cycles_used": 0
+      }
+    },
+    {
+      "pair": 2,
+      "variant": "baseline",
+      "api_equivalent_cost_usd": "0.9015828",
+      "phase_costs_usd": [
+        "0.4832656",
+        "0.4183172"
+      ],
+      "response_count": 64,
+      "tokens": {
+        "input_tokens": 4291082,
+        "cached_input_tokens": 4146048,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 19691,
+        "reasoning_output_tokens": 3099,
+        "total_tokens": 4310773,
+        "fresh_input_tokens": 145034
+      },
+      "original_rollout_sha256": [
+        "70afab87981e4b4b9ff789548e264c6b677f050bb3312ba5178a23005856fa93",
+        "52943466ccc14743d919b86887447f367660dab07761d7652bf38b5551d7a0fd"
+      ],
+      "correctness": {
+        "passed": true,
+        "completed_duties": 16,
+        "cacheable_reused_on_resume": 13,
+        "noncacheable_refreshed_on_resume": 3,
+        "review_cycles_used": 0
+      }
+    },
+    {
+      "pair": 3,
+      "variant": "baseline",
+      "api_equivalent_cost_usd": "0.8325516",
+      "phase_costs_usd": [
+        "0.4292852",
+        "0.4032664"
+      ],
+      "response_count": 68,
+      "tokens": {
+        "input_tokens": 4052762,
+        "cached_input_tokens": 3924096,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 18281,
+        "reasoning_output_tokens": 2293,
+        "total_tokens": 4071043,
+        "fresh_input_tokens": 128666
+      },
+      "original_rollout_sha256": [
+        "497d26d0950066d39c634ccf5bc5e0dfa1bc24a6b552b3729e6534f7cb2d7395",
+        "922f6d17ed5741e3f8d2a52293ffb38855c602a53661b14ad4a9f1a3f26a6fa1"
+      ],
+      "correctness": {
+        "passed": true,
+        "completed_duties": 16,
+        "cacheable_reused_on_resume": 13,
+        "noncacheable_refreshed_on_resume": 3,
+        "review_cycles_used": 0
+      }
+    },
+    {
+      "pair": 3,
+      "variant": "candidate",
+      "api_equivalent_cost_usd": "0.7297104",
+      "phase_costs_usd": [
+        "0.4444192",
+        "0.2852912"
+      ],
+      "response_count": 61,
+      "tokens": {
+        "input_tokens": 3478114,
+        "cached_input_tokens": 3362304,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 16186,
+        "reasoning_output_tokens": 2797,
+        "total_tokens": 3494300,
+        "fresh_input_tokens": 115810
+      },
+      "original_rollout_sha256": [
+        "8feddcca3fb3c726bf90f5952d169b1f7665967f57123e2fac8d104f10178c41",
+        "c55d66595ad6605b1855055ba2c2857f5c50fd7ce4cab8ffffe85a33085e96a5"
+      ],
+      "correctness": {
+        "passed": true,
+        "completed_duties": 16,
+        "cacheable_reused_on_resume": 13,
+        "noncacheable_refreshed_on_resume": 3,
+        "review_cycles_used": 0
+      }
+    }
+  ],
+  "validation": {
+    "local_complete_tests": 1696,
+    "subtests": 7,
+    "rate_card": {
+      "date": "2026-11-05",
+      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+      "pricing_source": "https://developers.openai.com/api/docs/pricing",
+      "model": "gpt-6.1-sol",
+      "per_million_usd": {
+        "input": "2",
+        "cache_read": ".1",
+        "cache_write_30m": "2.5",
+        "cache_write_12h": "5",
+        "output": "10"
+      },
+      "long_context_threshold": 272000,
+      "long_context_input_multiplier": "2",
+      "long_context_output_multiplier": "1.5",
+      "tiers": {
+        "default": "1",
+        "standard": "1",
+        "priority": "2",
+        "fast": "2",
+        "ultrafast": "6",
+        "batch": "0.5",
+        "flex": "0.5"
+      },
+      "regional_multiplier": "1.1",
+      "billing_basis": "API-equivalent cost; not actual account billing"
+    },
+    "actual_pr_review_and_exact_head_ci": "Separate pre-merge gates, excluded from local test counts."
+  },
+  "private_complete_result_sha256": "32c23fa237953cd5f60c499abb294168fd14acd2c3752ce9bd8d9a3b0dc3a912"
+}
