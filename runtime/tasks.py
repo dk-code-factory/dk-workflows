@@ -161,7 +161,9 @@ class Tasks:
                 legacy.append({'key': key, 'task': entry.get('components', {}).get('task', {}).get('id'),
                                'reason': 'definition_required'})
                 continue
-            if (run is not None and descriptor.get('kind', 'task') != 'task'
+            occurrence = (descriptor.get('kind', 'task') not in {'task', 'skill'} or
+                          descriptor.get('kind') == 'skill' and descriptor.get('selection') == 'finalizers')
+            if (run is not None and occurrence
                     and descriptor.get('run') != run):
                 continue
             try:
