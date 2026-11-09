@@ -3,11 +3,16 @@
 ## Objective and state admission
 
 The agent decides and invokes native skills. Python handles deterministic reads,
-input capture and recovery. Optimize total model tokens across the current task
+input capture and recovery. Optimize total API dollar cost across the current task
 and subsequent runs, including a new session with no inherited conversation.
+Count all attributable coordinator and descendant responses, preparation, waiting,
+finalization and result consumption. Price each response's fresh input, cache reads
+and writes, and output including reasoning using its observed model, service tier
+and context size. Token reductions alone do not establish savings. Unknown prices
+or incomplete telemetry make a cost comparison inconclusive.
 
-Durable state is justified only when its expected avoided model work exceeds
-the tokens needed to prepare, maintain, validate and consume it. A proposed state
+Durable state is justified only when its expected avoided API cost exceeds
+the cost to prepare, maintain, validate and consume it. A proposed state
 field must identify the repeated work it avoids, its consumer on a fresh-session
 resume, its freshness boundary and its failure/recovery behavior. Convenience,
 audit completeness and speculative future use alone are insufficient reasons.
@@ -53,6 +58,16 @@ Existing definitions, results, fingerprints, claims and counters are unchanged;
 live recapture still governs freshness. No new state or measured cost claim is
 introduced.
 
+`prepare --compact` omits an already retained assignment for reuse, recheck,
+failure and unresolved-claim responses; new invocations still receive their full
+assignment. `finish --compact` omits the unchanged assignment on rechecks. These
+are presentation choices only: all live capture, claim, checklist and budget
+checks still run. The unabridged commands recover the full assignment in a fresh
+session. No response cache, new command registry or durable field is introduced.
+The avoided work is repeated model consumption of known assignments. Savings end
+when the caller needs the assignment and must retrieve it; both reads count in
+native measurements.
+
 The low-level spec/start/record API remains compatible. Preparing a task through
 the managed interface can attach a definition to an existing reusable entry
 without invoking its reviewer, resetting budgets or changing its fingerprint.
@@ -66,9 +81,15 @@ required/optional status as definition `required`; other tasks default mandatory
 Explicit checklist overrides affect checklist acceptance only. Low-level tasks
 without managed definitions retain their existing behavior and fingerprints.
 
-A complete primary report and valid native observations are saved unchanged
-before reserving the first follow-up, in the same manifest transaction. The
-initial report never consumes a check. Each follow-up verifies every item against
+A complete primary report may include every checklist item with evidence. Validate
+that report against the entire prepared contract and accept it in the same
+transaction as its unchanged original output and valid native observations.
+Acceptance uses the existing primary-result reference and complete outcome with
+zero rounds; no duplicate checklist artifact or new state field is needed. Resume
+and replay validate that immutable primary report against the current contract.
+Missing checklist evidence reserves the first follow-up. A malformed supplied
+checklist rejects the submission without changing the claim or consuming checks.
+The initial report never consumes a check. Each follow-up verifies every item against
 the original assignment, finishes omissions and supplies evidence references or
 an unfinished reason. Success stops early; exactly N unfinished follow-ups fail
 mandatory work or accept best-effort work with every omission reported. This
@@ -198,8 +219,9 @@ host observations; capability assertions never replace execution evidence.
 - Relevant instructions, resources, preference decisions and Git changes stale
   affected work. Unrelated preferences and history-only cleanup preserve eligible
   reuse. Missing or damaged evidence remains incomplete.
-- Checklist follow-ups enforce at least one check, early success, exact exhaustion,
-  replay safety and fresh-session recovery without replacing original evidence.
+- Checklist acceptance requires every prepared item with evidence, in the primary
+  report or bounded follow-ups. Preserve early success, exact exhaustion, replay
+  safety and fresh-session recovery without replacing original evidence.
 - Existing manifests, fingerprints, settings, publication journals and low-level
   commands remain usable. No cache reset or new default reviewer is introduced.
 - Offline checks establish behavior, helper-call reductions and bounded output.

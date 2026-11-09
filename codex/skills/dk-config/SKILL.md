@@ -7,7 +7,7 @@ Read and obey [private workflow reporting](../../../docs/private-reporting.md), 
 
 Use this skill for configuration requests, including questions about available settings and their effective values or sources. During ordinary workflow execution, use the read-only helpers in [workflow configuration](../../../docs/configuration.md) and [PR configuration](../../../docs/pr/configuration.md) directly. Consuming an existing policy, checking selected-skill availability or merging a PR under current permissions does not require invoking this skill or changing saved settings. Source inspection while developing or troubleshooting this package is ordinary repository work.
 
-Persist workflow state only when it reduces total token consumption, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
+Persist workflow state only when it reduces total API dollar cost, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
 
 Set PLUGIN_ROOT to this plugin's root directory. Resolve this skill's scoped and invocation-local options through [skill configuration](../../../docs/skill-configuration.md), preserving original additional instructions. This skill owns its [defaults](config.json) and [schema](config.schema.json).
 

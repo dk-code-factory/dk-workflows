@@ -5,7 +5,7 @@ description: Run selected PR reviewers on pinned inputs and reuse complete resul
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
-Persist workflow state only when it reduces total token consumption, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
+Persist workflow state only when it reduces total API dollar cost, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
 
 Set PLUGIN_ROOT to this plugin's root directory. Use the current agent and native skill tools. Read [task state and handoffs](../../../docs/task-state.md) before managing a task. Follow [the review recipe](../../../runtime/pr-reviewers.md). Standalone reviews and iteration share task identities and the cache.
 
@@ -15,4 +15,4 @@ Resolve required native roles and deeper-look commands from the installed skill,
 
 Use resolved `reviewers`, with no default selection. Honor `execution` (`parallel` or `sequential`) and `max_parallel`; null adds no configured cap beyond actual host capacity. Wait for every launched reviewer, retain successful siblings and report optional failures. Read lists with `skill-plan` and prepare managed reviewer occurrences with `selection:"reviewers"` using the exact invocation-local options.
 
-Pass each selected reviewer’s required/optional status and any per-task checklist overrides to preparation. Give it the prepared assignment and checklist, and finish same-agent completion checks before accepting coverage. Report every best-effort omission. Follow [completion checks](../../../docs/task-state.md#completion-checks).
+Pass each selected reviewer’s required/optional status and any per-task checklist overrides to preparation. Give it the prepared assignment and checklist, and obtain checklist acceptance before accepting coverage; handle any recheck with the same agent. Report every best-effort omission. Follow [completion checks](../../../docs/task-state.md#completion-checks).

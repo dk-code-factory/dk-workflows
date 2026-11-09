@@ -2,7 +2,7 @@
 
 Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 
-Native agents resolve and invoke skills. Python manages bookkeeping. Follow [state admission](../DESIGN.md#objective-and-state-admission): persist something only when it reduces expected total token consumption, including the next run in a new session. Retain reusable analysis and minimum recovery records; avoid derived summaries, duplicate context and speculative telemetry. State and input artifacts stay outside repositories under `${XDG_STATE_HOME:-~/.local/state}/dk-workflows/v2/`. Save the manifest reference.
+Native agents resolve and invoke skills. Python manages bookkeeping. Follow [state admission](../DESIGN.md#objective-and-state-admission): persist something only when it reduces expected total API dollar cost, including the next run in a new session. Retain reusable analysis and minimum recovery records; avoid derived summaries, duplicate context and speculative telemetry. State and input artifacts stay outside repositories under `${XDG_STATE_HOME:-~/.local/state}/dk-workflows/v2/`. Save the manifest reference.
 
 Run commands as `python3 PLUGIN_ROOT/scripts/dk.py --repository HOST/OWNER/REPO --pr https://HOST/OWNER/REPO/pull/N --checkout REPO COMMAND`. Direct skill calls use this cache only when their caller manages them with these commands.
 
@@ -30,7 +30,7 @@ Use `prepare --file REQUEST.json` once for the current independent task group. T
 
 The request file may be temporary; referenced inputs need stable private paths across sessions. The helper discovers neither omitted inputs nor semantic conditions. Caching requires explicit completeness and nonempty resources. If capture is uncertain, use `cacheable:false`. Native review contracts follow [native handoffs](native-review.md); empty passes are valid only for skills without required children.
 
-Each task returns a `key`, the complete `assignment` and generated `checklist` for managed work, and one action:
+Each task returns a `key`, the complete `assignment` and generated `checklist` for managed work, and one action. Use `prepare --compact` when the assignment is already in context: new `invoke` responses still include it, but other actions omit it. An unabridged `prepare` with the saved key retrieves the current complete assignment without launching completed analysis. Use full responses when reconstructing a fresh session. `finish --compact` similarly omits unchanged assignments on rechecks. These flags change presentation only; capture, evidence, claim and budget checks still run.
 
 - `reuse`: read necessary saved evidence using `result --key KEY --section findings|normalized|original`. Counts or empty findings alone cannot establish readiness or dispositions.
 - `invoke`: invoke the native skill with the prepared assignment. Retain the claim and actual host handle. The returned `native` field supplies expected observation bindings and requirements; it creates no execution evidence.
@@ -38,7 +38,7 @@ Each task returns a `key`, the complete `assignment` and generated `checklist` f
 - `failed`: mandatory checklist checks exhausted; block dependents and report every omission.
 - `recover_required`: reconcile the original agent and uncertain writes before explicit recovery. Completed siblings remain reusable.
 
-After actual terminal execution, call `finish --key KEY --claim CLAIM_ID --report REPORT.json --original OUTPUT --native-evidence OBSERVATIONS.json`. Reports require explicit `complete:true|false` and findings. Omit `--original` when report bytes are the original output; omit native evidence only for tasks without native review requirements. Prose skills retain original output and supply a normalized report. Optional `--status failed` preserves failed execution; otherwise completion determines complete/incomplete status. Check the returned action and status: missing native evidence downgrades completion; a valid initial completed report reserves a mandatory follow-up and returns `action:"recheck"`, never immediate managed acceptance. Record each successful sibling immediately. The helper recaptures live inputs before recording. Use `--progress PROGRESS.json` for sourced dispositions, exact acceptances and recovery information whose retention avoids reconstruction.
+After actual terminal execution, call `finish --key KEY --claim CLAIM_ID --report REPORT.json --original OUTPUT --native-evidence OBSERVATIONS.json`. Reports require explicit `complete:true|false` and findings. Omit `--original` when report bytes are the original output; omit native evidence only for tasks without native review requirements. Prose skills retain original output and supply a normalized report. Optional `--status failed` preserves failed execution; otherwise completion determines complete/incomplete status. Check the returned action and status: missing native evidence downgrades completion. A complete initial report with every prepared checklist item and evidence can return `action:"complete"`; a complete report without checklist evidence returns `action:"recheck"`. Record each successful sibling immediately. The helper recaptures live inputs before recording. Use `--progress PROGRESS.json` for sourced dispositions, exact acceptances and recovery information whose retention avoids reconstruction.
 
 ## Completion checks
 
@@ -65,7 +65,9 @@ including verification, fixers, hooks, finalizers and workflow completion. The
 checklist's explicit `required` overrides that default for this task only. Optional
 reviewers therefore default best-effort. Custom IDs must be unique, stable and
 separate from built-in IDs. `max_checks` is a positive integer: N additional
-follow-ups after the initial completion, default three, with at least one required.
+follow-ups after the initial completion, default three. An initially accepted
+checklist uses zero follow-ups. Reports lacking checklist evidence require at
+least one follow-up; incomplete follow-ups retain the exact N-round allowance.
 These fields are excluded from the primary analysis fingerprint.
 
 When publication is part of this assignment and already authorized, include
@@ -74,8 +76,18 @@ publication item. Supply exact permissions and duties in the assignment as usual
 this marker grants no permission. Do not add publication duties to analysis-only
 work. For hooks/finalizers use their definition's execution options.
 
-After the first complete primary report, `finish` atomically retains its original
-output and native observations and reserves round one before returning `recheck`,
+Include all prepared checklist items and their evidence in the primary report
+when they are already satisfied. Validate them against the assignment before
+submitting. `finish` accepts a complete checklist only alongside successful primary
+execution, required native observations and current inputs. Original output and
+normalized checklist evidence share the existing immutable primary artifact;
+resume reports zero checks used and replay returns the original completion.
+Malformed supplied checklist evidence rejects the submission without changing the
+claim, output or counters. A failed or incomplete primary report remains incomplete
+even when its checklist is optional.
+
+For a complete primary report without a checklist, `finish` atomically retains its
+original output and native observations and reserves round one before returning `recheck`,
 `round`, `claim` (the original claim ID), `check_number`, checklist and follow-up
 prompt. Send that prompt, assignment and checklist to the **same agent**. Ask it
 to verify every item and finish missing work, within its existing permissions.
@@ -116,7 +128,8 @@ Reconnect to the same agent when available. If unavailable, the coordinator read
 retained original results and necessary checklist evidence and performs only the
 completion check; do not rerun completed analysis. Reconcile uncertain external
 actions through their original journals first. `result --section checklist`
-retrieves the contract, bounded round references and latest submitted report.
+retrieves the contract, bounded round references and latest submitted report,
+including the primary report when it supplied the accepted checklist.
 Changed or absent checklists trigger completion-only checking on prepare;
 changed governing task inputs still refresh primary work. Resume flags an old
 contract as requiring refresh and never silently accepts it. Original evidence,
@@ -138,7 +151,7 @@ assignment, permissions and live-input evidence; omit responsibility. Its option
 fix invocation's local options. The helper captures the current selected
 plan and generates its checklist, including for `[]`. Completion occurrences are
 noncacheable so later declarations still require a current live check. Follow the same first-report
-and follow-up gate before declaring the selected workflow complete. Disabled
+and checklist acceptance gate before declaring the selected workflow complete. Disabled
 finalizers stay disabled; report missing readiness evidence separately.
 
 ## Resume in a new session

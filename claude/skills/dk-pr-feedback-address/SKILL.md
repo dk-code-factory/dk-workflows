@@ -5,7 +5,7 @@ description: Verify and fix actionable PR feedback from inline threads, reviews 
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
-Persist workflow state only when it reduces total token consumption, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
+Persist workflow state only when it reduces total API dollar cost, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
 
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).
 
@@ -21,4 +21,4 @@ Before implementation, follow [preference retrieval and handoffs](../../../docs/
 
 Record each finding's disposition with evidence and source links. Follow the caller's permissions for pushes, replies and thread resolution. Local fixes alone do not authorize remote changes. Use the publication and reply skills for authorized remote changes. Return tested fixes, dispositions and remaining blockers.
 
-For managed feedback and reviewer-finding fixes, use the prepared checklist to check every finding disposition, assigned deliverable and relevant test. Complete the caller's same-agent follow-ups before reporting accepted completion. Follow [completion checks](../../../docs/task-state.md#completion-checks).
+For managed feedback and reviewer-finding fixes, use the prepared checklist to check every finding disposition, assigned deliverable and relevant test. Supply complete initial checklist evidence or finish the caller's recheck with the same agent before reporting accepted completion. Follow [completion checks](../../../docs/task-state.md#completion-checks).

@@ -1030,6 +1030,9 @@ class Store:
             if checklist is not None:
                 from checklists import attach
                 attach(self, entry, captured, checklist)
+            if 'checklist' in entry and 'checklist' in normalized:
+                from checklists import validate_report
+                validate_report(entry['checklist'], normalized)
             from native_review import assess, required
             native = None
             if required(captured['components']):
@@ -1068,7 +1071,10 @@ class Store:
                 attach(self, entry, captured, entry['checklist']['contract'])
                 if status == 'complete':
                     entry['checklist']['initial_submission'] = submission
-                    reserve(entry['checklist'])
+                    if 'checklist' in normalized:
+                        entry['checklist']['outcome'] = 'complete'
+                    else:
+                        reserve(entry['checklist'])
                     followup = reply(self, entry)
             write(self.manifest, manifest)
             if followup is not None:

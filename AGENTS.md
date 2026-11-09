@@ -2,9 +2,12 @@
 
 Read [DESIGN.md](DESIGN.md) before changing workflow coordination or persistence.
 
-- Optimize the complete workflow's token consumption, including the next run in
-  a new session. Do not add durable state unless it avoids more model work than
-  creating, validating, loading and explaining that state costs. Explain that
+- Optimize the complete workflow's API dollar cost, including the next run in
+  a new session. Count fresh input, cache reads and writes, output including
+  reasoning, service tiers and model-specific context charges. Token counts are
+  diagnostic, not the acceptance objective. Do not add durable state unless its
+  expected avoided API cost exceeds creating, validating, loading and explaining
+  that state. Explain that
   saving and its freshness boundary in the design and change description.
 - Reuse valid completed analysis across sessions. Preserve existing cache keys,
   fingerprints, original results, completed siblings and recovery information.
@@ -24,7 +27,7 @@ Read [DESIGN.md](DESIGN.md) before changing workflow coordination or persistence
   repeated agent recovery and duplicate external actions after interruptions.
 - Test unchanged fresh-session reuse, partial recovery and relevant-input
   invalidation for persistence changes. Helper/process counts are proxies, not
-  measured token savings. Report native token evidence separately when available.
+  measured API dollar savings. Report native cost evidence separately when available.
 - Maintain prompts in `codex/skills/`, then run `scripts/sync_skills.py`. Run
   `scripts/check.py` and the relevant offline tests; use `scripts/test.py` for
   complete validation. Tests must not make authenticated model or GitHub calls.
