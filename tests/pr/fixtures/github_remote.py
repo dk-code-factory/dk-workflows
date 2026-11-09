@@ -95,6 +95,8 @@ class Remote:
             return self.changed('create-draft-pr',deepcopy(value))
         if suffix == '/pulls/7/files':
             return deepcopy(self.state['files'])
+        if suffix == '/issues/7/timeline':
+            return deepcopy(self.state.get('timeline', []))
         if suffix == '/pulls/7/reviews':
             if payload is None:
                 return deepcopy(self.state['reviews'])

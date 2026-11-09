@@ -35,13 +35,15 @@ class Handler:
         from shared.ci_approval import Approval
         return Approval(self)
 
-    def pages(self, suffix):
+    def pages(self, suffix, *, event_types=None):
         separator = '&' if '?' in suffix else '?'
         pages = self.run(['gh', 'api', '--hostname', self.host,
                           self.root + suffix + separator + 'per_page=100', '--paginate', '--slurp'])
         if not isinstance(pages, list) or any(not isinstance(page, list) for page in pages):
             raise ValueError('Incomplete paginated GitHub response')
         values = [value for page in pages for value in page]
+        if event_types is not None:
+            values = [value for value in values if value.get('event') in event_types]
         ids = [v.get('id', v.get('filename')) for v in values]
         if any(i is None for i in ids) or len(set(ids)) != len(ids):
             raise ValueError('Incomplete or duplicated GitHub objects')

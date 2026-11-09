@@ -30,6 +30,64 @@ Reply callers supply a `source` object with `kind` (`inline_comment`, `review` o
 
 Retain source identity, routing parent, head, exact body and operation path through handoffs and resume. Reuse the operation for reconciliation; do not infer a different destination from prose, replace the source URL or regenerate an uncertain reply's attribution. Exact-body observation must preserve the heading as well as the response.
 
+## Recover an uncertain review request
+
+A pending `request-review` has an unknown delivery outcome. An empty current
+reviewer set does not prove it was never delivered: the reviewer may have
+completed review or the request may have been removed. Preserve the original
+intent, failure and any returned response. Do not resend it, add an action ID,
+change the reviewer set or edit the journal to bypass duplicate protection.
+
+Run `python3 PACKAGE_ROOT/scripts/publish.py inspect-review-request --operation FILE`.
+It reads current PR/head and requested reviewers, and paginated timeline/review
+history for the intended reviewers. Its `historical_failure`, available creation
+and dispatch times and native session/run references describe the retained
+operation; `current_observation` describes this inspection. Missing legacy
+provenance and root cause remain explicitly unknown. Timeline requests, removals
+and submitted reviews supply context, without attributing them to this operation
+or proving delivery/non-delivery. Read errors cannot establish a disposition.
+The dispatch timestamp records persisted dispatch intent, not proof that a network
+request reached GitHub.
+
+New requests retain execution phase, exit status and available HTTP status in
+safe failure diagnostics. Request payload evidence comes from the original
+reviewer arrays. Failed-command response evidence uses a content hash/length,
+excluding raw exception response bodies and headers; credential-bearing error lines
+are redacted. A response returned before a later observation failure stays retained
+with the original intent.
+Reconciliation errors are recorded separately and preserve the first failure.
+An error such as `unexpected end of JSON input` alone does not establish whether
+request parsing, response parsing, transport or GitHub caused the failure.
+
+Reassess whether another review request is needed against current code and
+discussion. When no further request is needed, save an explicit private decision
+with the inspected fingerprint:
+
+```json
+{"decision":"no_resend","reason":"The reviewer completed the requested review; the current code and discussion need no further request.","observation":"INSPECTED_FINGERPRINT"}
+```
+
+Run `python3 PACKAGE_ROOT/scripts/publish.py dispose-review-request --operation FILE --file DISPOSITION.json`.
+Then reconcile the original operation. The result reports `status:disposed`,
+`historical_status:pending`, `delivery:unknown` and `review_obligation:no_resend`.
+The original intent and failure stay intact and no receipt is invented. Changed
+PR/head, current reviewer set or retained historical reference fields requires
+inspection and reassessment. The fingerprint covers request/removal IDs, event
+types, times and reviewer identities, plus review IDs, states, submission times,
+commit IDs and reviewer identities. It does not cover review bodies or other
+discussion: reassess substantive discussion changes before reusing a decision.
+Each publication's own live gates still apply.
+There is no automatic replacement path; even a changed action ID remains blocked
+by this pending review intent. If another request is still required and delivery
+cannot be established, report that obligation as incomplete.
+
+Independent authorized `reply-inline` and `reply-comment` actions may proceed
+while an unrelated review request is pending, without changing or replaying it.
+Both preparation and dispatch enforce this exception and each reply's own live
+checks. Other actions remain blocked until reconciliation or a current
+`no_resend` disposition; their own publication gates still apply. Pending writes
+of other kinds retain the existing target-wide barrier.
+
 ## Recover a previously verified reply
 
 A saved verified receipt establishes a historical publication. If that exact comment later becomes unavailable or its body changes, preserve its original request, response and receipt. Another identical comment cannot substitute for the original receipt. A missing reply with an uncertain initial write remains pending and cannot use this recovery path.
@@ -88,7 +146,7 @@ Reserve the caller's rerun budget before publication. Pass the verified operatio
 
 For a new branch, use `kind:push`, `create_branch:true` and `expected_head:null`. The lease requires the remote branch to be absent, preventing overwrites. Capture and verify the candidate tree as for an existing branch.
 
-Preparation deduplicates identical payloads in a private journal for each target, even if the caller lost the operation path. A pending publication blocks other writes to that target until reconciled. Independent targets have separate journals. Use a stable optional `action_id` only for a distinct, newly authorized action. Changing it cannot bypass a pending write. Already satisfied description edits and identical replies by the same actor return verified no-ops after current checks.
+Preparation deduplicates identical payloads in a private journal for each target, even if the caller lost the operation path. A pending publication blocks other writes to that target until reconciled, subject to the uncertain-review-request recovery and independent-reply exception above. Independent targets have separate journals. Use a stable optional `action_id` only for a distinct, newly authorized action. Changing it cannot bypass a pending write. Already satisfied description edits and identical replies by the same actor return verified no-ops after current checks.
 
 The publisher serializes dispatch per target and saves original intent before sending. Reused receipts still require current checks. Keep observed writes recorded even if readiness later fails. Inaccessible, changed or ambiguous remote results remain unresolved.
 

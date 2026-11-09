@@ -2,7 +2,10 @@
 import hashlib
 import fcntl
 import json
+import os
+import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 import uuid
 
@@ -16,6 +19,25 @@ def digest(value):
                                     separators=(',', ':')).encode()).hexdigest()
 
 
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def provenance():
+    # References supplied by the native host, never a copied session/transcript.
+    return {key: os.environ[key] for key in ('CODEX_THREAD_ID', 'CLAUDE_SESSION_ID', 'DK_WORKFLOW_RUN_ID')
+            if os.environ.get(key)}
+
+
+def safe_error(value):
+    if isinstance(value, bytes):
+        value = value.decode('utf-8', errors='replace')
+    if not isinstance(value, str):
+        return None
+    value = re.sub(r'(?im)^.*(?:authorization|cookie|token|api[-_]key)\s*[:=].*$', '[redacted]', value)
+    return re.sub(r'\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b', '[redacted]', value)[:4096]
+
+
 def prepare(kind, target, expected, approved, reconcile_argv, *, repository=None, directory=None):
     directory = workflow_storage.allocate(repository=repository) if directory is None else workflow_storage.owned(directory)
     path = directory / (kind + '-' + uuid.uuid4().hex + '.json')
@@ -23,6 +45,8 @@ def prepare(kind, target, expected, approved, reconcile_argv, *, repository=None
     value = {'schema_version': 1, 'operation_id': uuid.uuid4().hex,
              'request': request, 'request_hash': digest(request), 'status': 'prepared',
              'reconcile_argv': [str(x) for x in reconcile_argv] + ['--operation', str(path)]}
+    if kind == 'request-review':
+        value.update(created_at=now(), origin=provenance())
     write(path, value)
     return {'operation': str(path), **value}
 
@@ -97,16 +121,31 @@ def execute(path, kind, *, check, send, observe, reconcile=False, reconcile_argv
                 task('Refresh current evidence and satisfy the current workflow gate. Do not repeat the publication.', path),
                 dispatched=True)
 
+        phase = 'reconcile' if value['status'] in {'pending', 'verified'} or reconcile else 'check'
+
         def retain_failure(exc):
-            if not any(hasattr(exc, key) for key in ('response', 'stdout', 'stderr')):
-                return
             def output(key):
                 value = getattr(exc, key, None)
                 # TimeoutExpired carries bytes even when the subprocess used text=True.
                 return value.decode('utf-8', errors='replace') if isinstance(value, bytes) else value
             failure = {'message': str(exc), 'stdout': output('stdout'),
-                       'stderr': output('stderr'), 'response': output('response')}
-            value['failure'] = failure
+                       'stderr': output('stderr'), 'response': output('response'),
+                       'phase': phase, 'observed_at': now(), 'exit_status': getattr(exc, 'returncode', None)}
+            if kind == 'request-review':
+                # Body hashes and sizes identify transport evidence without saving
+                # response headers, credentials or arbitrary GitHub response bodies.
+                for key in ('stdout', 'response'):
+                    raw = failure[key]
+                    failure[key] = None if raw is None else {'sha256': digest(raw), 'length': len(str(raw))}
+                failure['message'] = safe_error(str(exc))
+                failure['stderr'] = safe_error(failure['stderr'])
+                match = re.search(r'\bHTTP (\d{3})\b', failure['stderr'] or '')
+                failure['http_status'] = int(match[1]) if match else None
+            # A later read failure is not the original dispatch failure.
+            if phase == 'reconcile':
+                value['reconciliation_failure'] = failure
+            else:
+                value.setdefault('failure', failure)
             if 'response' not in value and failure['response'] is not None:
                 value['response'] = failure['response']
             try:
@@ -146,6 +185,8 @@ def execute(path, kind, *, check, send, observe, reconcile=False, reconcile_argv
                 task('Refresh current evidence and prepare the publication again.', path)) from exc
         value['status'] = 'pending'
         value['intent'] = {'operation_id': value['operation_id'], 'request_hash': value['request_hash']}
+        if kind == 'request-review':
+            value['dispatch_started_at'] = now()
         # A failure here prevents dispatch. Never write "prepared" after dispatch.
         try:
             write(path, value)
@@ -154,13 +195,16 @@ def execute(path, kind, *, check, send, observe, reconcile=False, reconcile_argv
                              task('Restore writable private storage and inspect the retained operation.', path),
                              outcome='error') from exc
         try:
+            phase = 'send'
             response = send(value)
             value['response'] = response
             write(path, value)
+            phase = 'observe'
             evidence = observe(value)
             value.update(status='verified', receipt=evidence)
             write(path, value)
             receipt_saved = True
+            phase = 'check'
             check(value, True)
         except Exception as exc:
             retain_failure(exc)
