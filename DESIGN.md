@@ -45,6 +45,14 @@ PR-wide unfinished claims and marks legacy entries needing a supplied definition
 available when assessing findings, dispositions or recovery. Resume is discovery
 of saved work; the coordinator must still select the current required task set.
 
+Run-scoped resume discovers ordinary skill-list tasks and reviewers as shared PR
+analysis, just like ordinary task definitions. Only hooks, finalizers and workflow
+completion are filtered by their retained run occurrence. This avoids rebuilding
+hidden task selectors or repeating valid analysis after a new-session resume.
+Existing definitions, results, fingerprints, claims and counters are unchanged;
+live recapture still governs freshness. No new state or measured cost claim is
+introduced.
+
 The low-level spec/start/record API remains compatible. Preparing a task through
 the managed interface can attach a definition to an existing reusable entry
 without invoking its reviewer, resetting budgets or changing its fingerprint.
