@@ -46,7 +46,7 @@ def test_unknown_or_unavailable_transport_blocks_before_launch(capabilities):
     assert 'keep review blocked' in diagnostic['supported_path']
 
 
-@pytest.mark.parametrize('field', ['inventory_complete', 'invocation_results', 'child_results', 'tool_observations'])
+@pytest.mark.parametrize('field', ['inventory_complete', 'invocation_results', 'child_results'])
 @pytest.mark.parametrize('value', [False, None])
 def test_partial_transport_is_not_supported(field, value):
     support = deepcopy(CAPABILITIES)
@@ -67,6 +67,17 @@ def test_full_transport_and_delegation_support_pass_without_agent_overrides():
     assert not check(support)['ready']
 
 
+@pytest.mark.parametrize('value', [False, None])
+def test_child_terminal_results_support_reviews_without_command_inventory(value):
+    support = deepcopy(CAPABILITIES)
+    support['native_evidence'].pop('inventory_complete')
+    if value is None:
+        support['native_evidence'].pop('tool_observations')
+    else:
+        support['native_evidence']['tool_observations'] = value
+    assert check(support)['ready']
+
+
 def test_contract_controls_required_capabilities_and_conditional_passes():
     support = deepcopy(CAPABILITIES)
     support['native_evidence'].pop('child_results')
@@ -78,7 +89,7 @@ def test_contract_controls_required_capabilities_and_conditional_passes():
     support['native_evidence']['child_results'] = True
     assert check(support, requirements)['ready']
     requirements['reviewer']['passes'].append(CONTRACT['passes'][0])
-    assert not check(support, requirements)['ready']
+    assert check(support, requirements)['ready']
 
 
 def test_repeated_reviewers_require_each_occurrence_contract_including_optional():
@@ -163,7 +174,9 @@ def test_cli_checks_requirements_without_changing_retained_work_or_budgets(tmp_p
     installed, requirements, capabilities = [tmp_path/name for name in ('available.json', 'reviews.json', 'host.json')]
     write(installed, available)
     write(requirements, {location: CONTRACT for location in locations})
-    write(capabilities, CAPABILITIES)
+    # Reproduce #181: actual native root/child results, no command inventory.
+    write(capabilities, {'delegation': True, 'native_evidence': {
+        'availability': 'available', 'invocation_results': True, 'child_results': True}})
     # Create actual completed and pending siblings in an already-consumed cycle.
     resource = tmp_path/'skill.md'
     resource.write_text('Offline analysis assignment')
