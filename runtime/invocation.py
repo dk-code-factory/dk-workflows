@@ -153,11 +153,13 @@ def preflight(calls, available, capabilities=None, *, native_reviews=None):
             if requirements is None:
                 gaps.append('resolved native review requirements')
             else:
-                needed = ['inventory_complete', 'invocation_results']
+                needed = ['invocation_results']
                 if requirements['passes']:
                     needed.append('child_results')
-                if any(item['drivers'] for item in requirements['passes']):
-                    needed.append('tool_observations')
+                # Command logs are optional transport. Required driver completion
+                # can instead be reported in each observed child's final output.
+                if transport.get('tool_observations') is True:
+                    needed.append('inventory_complete')
                 if not support.get('delegation'):
                     gaps.append('native delegation')
                 if transport.get('availability') != 'available':
@@ -168,9 +170,10 @@ def preflight(calls, available, capabilities=None, *, native_reviews=None):
                     'missing': gaps,
                     'reason': 'Cannot establish review execution before launch: ' + ', '.join(gaps),
                     'supported_path': ('Resolve the installed skill and applicable pass/driver requirements, '
-                        'then use a native host exposing the required identities, terminal results and '
-                        'tool observations. If unavailable, keep review blocked; a reviewer report '
-                        'or model subprocess cannot replace host evidence.')})
+                        'then use a native host exposing the required identities and terminal results. '
+                        'When command observations are unavailable, require exact driver completion '
+                        'reports in each native child result. If required host results are unavailable, '
+                        'keep review blocked; an aggregate report or model subprocess cannot replace them.')})
         if 'agent' in call:
             agent, support = call['agent'], capabilities or {}
             reason = None

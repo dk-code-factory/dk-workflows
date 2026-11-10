@@ -15,4 +15,6 @@ Resolve required native roles and deeper-look commands from the installed skill,
 
 Use resolved `reviewers`, with no default selection. Honor `execution` (`parallel` or `sequential`) and `max_parallel`; null adds no configured cap beyond actual host capacity. Wait for every launched reviewer, retain successful siblings and report optional failures. Read lists with `skill-plan` and prepare managed reviewer occurrences with `selection:"reviewers"` using the exact invocation-local options.
 
+When native child results are available but command logs are verified unavailable, use [reported driver completion](../../../docs/native-review.md#hosts-without-command-logs): each required pass reports its exact declared commands in its own original terminal output. Keep native identities and successful terminal observations mandatory, distinguish reported evidence from host-observed commands, and validate any supplied command observations strictly.
+
 Pass each selected reviewer’s required/optional status and any per-task checklist overrides to preparation. Give it the prepared assignment and checklist, and obtain checklist acceptance before accepting coverage; handle any recheck with the same agent. Report every best-effort omission. Follow [completion checks](../../../docs/task-state.md#completion-checks).

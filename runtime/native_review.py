@@ -1,7 +1,22 @@
-"""Validate coordinator-captured native host observations, never reviewer assertions."""
+"""Validate native results and distinguish observed from reported driver evidence."""
 import hashlib
 import json
 import re
+
+DRIVER_REPORT = 'NATIVE_REVIEW_DRIVERS_JSON='
+
+
+def reported_drivers(output, commands):
+    """Read completion only from the original terminal output of this role."""
+    reports = [line[len(DRIVER_REPORT):] for line in output.splitlines()
+               if line.startswith(DRIVER_REPORT)]
+    if len(reports) != 1:
+        return False
+    value = json.loads(reports[0])
+    return (isinstance(value, list) and all(isinstance(item, dict) for item in value)
+            and [item.get('argv') for item in value] == commands
+            and all(item.get('state') == 'completed' and type(item.get('exit_code')) is int
+                    and item['exit_code'] == 0 for item in value))
 
 
 def required(components):
@@ -79,8 +94,12 @@ def assess(components, claim, original, evidence):
             return {'code': 'incomplete_invocation', 'reason': 'Root native invocation did not successfully terminate with this original output'}
         if not root.get('receipt'):
             raise ValueError('Root native terminal observation is missing')
-        # A complete inventory distinguishes missing work from missing telemetry.
-        if observed.get('inventory_complete') is not True:
+        # Legacy evidence defaults to strict command observations. Only the
+        # trusted collector may explicitly identify unavailable command transport.
+        tool_observations = observed.get('tool_observations', True)
+        if type(tool_observations) is not bool:
+            raise ValueError('Native command transport must be boolean')
+        if tool_observations and observed.get('inventory_complete') is not True:
             return {'code': 'unavailable_provenance', 'reason': 'Native child/tool inventory is incomplete; execution is unestablished'}
         passes = observed.get('passes')
         if not isinstance(passes, list) or any(not isinstance(item, dict) for item in passes):
@@ -104,6 +123,13 @@ def assess(components, claim, original, evidence):
                 return {'code': 'incomplete_pass', 'reason': 'A required native role has no successful terminal result and separate original output'}
             if not item.get('spawn_receipt') or not item.get('terminal_receipt'):
                 raise ValueError('Native child spawn/terminal observations are missing')
+            if not tool_observations and requirement['drivers']:
+                if not reported_drivers(item['output'], requirement['drivers']):
+                    return {'code': 'missing_driver_report', 'reason': 'Required driver completion is not reported in the original native role output'}
+            # Supplied observations are never discarded in favor of a report.
+            # A partial or failed command trace therefore still blocks completion.
+            if not tool_observations and 'drivers' not in item:
+                continue
             drivers = item.get('drivers')
             if not isinstance(drivers, list) or any(not isinstance(driver, dict) for driver in drivers):
                 raise ValueError('Native driver observations are missing')

@@ -238,6 +238,23 @@ measured token savings are claimed. Failed preflight preserves existing results,
 claims, completed siblings and budgets. Completion still requires actual claim-bound
 host observations; capability assertions never replace execution evidence.
 
+Native result transport can establish independent review completion without child
+command logs. Root and required child identities, parent relationships, successful
+terminal outcomes and original outputs remain mandatory. When command transport
+is available, retain complete-inventory and exact successful command-observation
+validation. Otherwise the trusted coordinator explicitly records unavailable tool
+observations in the existing evidence artifact and each required child's original
+terminal output reports completion of its exact declared drivers. This is reported
+driver evidence, never host-observed command execution; any supplied observations
+still receive strict validation. Missing or failed native results cannot fall back.
+
+No new cache, store or status field is introduced. The existing immutable native
+evidence artifact retains the transport distinction and original child reports,
+avoiding repeated review/reconstruction on a fresh-session resume. Its freshness
+remains the existing claim, inputs, resources/version and requirements binding;
+changed governing inputs stale affected work without discarding siblings, claims,
+budgets or original results. Native API dollar savings have not been measured.
+
 ## Acceptance
 
 - An unchanged task prepared from a new process reuses its original result and

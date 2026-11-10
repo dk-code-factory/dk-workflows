@@ -32,6 +32,17 @@ def observations(spec, claim, original):
     return json.dumps(value).encode()
 
 
+def reported_observations(value):
+    """Offline stand-in for a host with child results but no command logs."""
+    value.pop('inventory_complete', None)
+    value['tool_observations'] = False
+    for item in value['passes']:
+        commands = [{'argv': driver['argv'], 'state': 'completed', 'exit_code': 0}
+                    for driver in item.pop('drivers')]
+        if commands:
+            item['output'] += '\nNATIVE_REVIEW_DRIVERS_JSON=' + json.dumps(commands)
+
+
 PREFLIGHT_CAPABILITIES = {'delegation': True, 'native_evidence': {
     'availability': 'available', 'inventory_complete': True, 'invocation_results': True,
     'child_results': True, 'tool_observations': True}}

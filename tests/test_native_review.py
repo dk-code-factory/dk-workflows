@@ -11,7 +11,7 @@ import pytest
 from test_state import case, REPO, PR, ROOT
 from state import Store, capture, digest, read, write
 from native_review import required
-from native_review_observations import CONTRACT, observations
+from native_review_observations import CONTRACT, observations, reported_observations
 
 
 @pytest.fixture
@@ -51,6 +51,72 @@ def test_complete_independent_native_evidence_reuses_and_binds_every_identity(re
     saved = read(result['result'])
     assert base64.b64decode(saved['native_execution']['evidence'])
     assert saved['native_execution']['diagnostic'] is None
+
+
+def test_reported_drivers_reuse_in_new_process_and_preserve_partial_recovery(review, tmp_path):
+    spec, store = review
+    result, _ = finish(spec, store, evidence=reported_observations)
+    assert result['status'] == 'complete'
+    original_artifact = Path(result['result']).read_bytes()
+    sibling = deepcopy(spec)
+    sibling['task']['id'] = 'sibling-review'
+    pending = store.start(sibling, run='run', cycle='c1')['claim']
+    task = tmp_path/'review.json'; write(task, spec)
+    command = [sys.executable, str(ROOT/'scripts/dk.py'), '--repository', REPO, '--pr', PR,
+               'start', '--spec', str(task), '--run', 'run', '--cycle', 'c1']
+    assert json.loads(subprocess.check_output(command))['action'] == 'reuse'
+    assert store.start(sibling, run='run', cycle='c1')['action'] == 'recover_required'
+    recovered, _ = finish(sibling, store, claim=pending, evidence=reported_observations)
+    assert recovered['status'] == 'complete'
+    assert Path(result['result']).read_bytes() == original_artifact
+    assert store.status([spec], run='run')['runs']['run']['cycles'] == ['c1']
+    Path(spec['inputs']['context']).write_text('changed review scope')
+    status_command = command[:command.index('start')] + ['status', '--spec', str(task)]
+    assert not json.loads(subprocess.check_output(status_command))['tasks'][0]['reusable']
+
+
+@pytest.mark.parametrize('change,code', [
+    (lambda v: v['passes'].pop(), 'missing_pass'),
+    (lambda v: v['passes'][0].update(state='cancelled'), 'incomplete_pass'),
+    (lambda v: v['passes'][0].update(output='No findings'), 'missing_driver_report'),
+    (lambda v: v['passes'][0].update(output=v['passes'][0]['output'].replace('"completed"', '"failed"')), 'missing_driver_report'),
+    (lambda v: v['passes'][0].update(output=v['passes'][0]['output'].replace('"exit_code": 0', '"exit_code": 1')), 'missing_driver_report'),
+    (lambda v: v['passes'][0].update(output=v['passes'][0]['output'].replace('"exit_code": 0', '"exit_code": false')), 'missing_driver_report'),
+    (lambda v: v['passes'][0].update(output=v['passes'][0]['output'].replace('--base', '--wrong-base')), 'missing_driver_report'),
+    (lambda v: v['passes'][0].update(output=v['passes'][1]['output']), 'missing_driver_report'),
+    (lambda v: v['passes'][0].update(output=v['passes'][0]['output'] + '\n' + v['passes'][0]['output']), 'missing_driver_report'),
+    (lambda v: v['passes'][0].update(output='NATIVE_REVIEW_DRIVERS_JSON=invalid'), 'malformed_provenance'),
+    (lambda v: v['passes'][0].pop('terminal_receipt'), 'malformed_provenance'),
+    (lambda v: v['passes'][0].update(parent='another-root'), 'nonindependent_pass'),
+    (lambda v: v['passes'][0].update(drivers=[]), 'missing_driver'),
+    (lambda v: v.update(tool_observations=True, inventory_complete=True), 'malformed_provenance'),
+    (lambda v: v.pop('tool_observations'), 'unavailable_provenance'),
+    (lambda v: v.update(tool_observations=None), 'malformed_provenance'),
+    (lambda v: v.update(claim='other-claim'), 'binding_mismatch'),
+    (lambda v: v.update(pins={}), 'binding_mismatch'),
+])
+def test_reported_evidence_never_substitutes_missing_or_failed_native_results(review, change, code):
+    def evidence(value):
+        reported_observations(value)
+        change(value)
+    result, _ = finish(*review, evidence=evidence)
+    assert result['status'] == 'incomplete'
+    assert result['execution_diagnostic']['code'] == code
+
+
+@pytest.mark.parametrize('failed', [False, True])
+def test_reported_mode_still_validates_supplied_host_observations(review, failed):
+    def evidence(value):
+        drivers = deepcopy([item['drivers'] for item in value['passes']])
+        reported_observations(value)
+        for item, commands in zip(value['passes'], drivers):
+            item['drivers'] = commands
+        if failed:
+            value['passes'][0]['drivers'][0]['exit_code'] = 1
+    result, _ = finish(*review, evidence=evidence)
+    assert result['status'] == ('incomplete' if failed else 'complete')
+    if failed:
+        assert result['execution_diagnostic']['code'] == 'incomplete_driver'
 
 
 @pytest.mark.parametrize('change,code', [
