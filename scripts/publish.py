@@ -3,6 +3,7 @@
 import argparse
 import json
 import fcntl
+import re
 import tempfile
 from pathlib import Path
 import subprocess
@@ -155,6 +156,48 @@ def blocks(retained, request):
     return True
 
 
+def rejected_push(value):
+    """Only the original failed send's exact-ref status proves non-delivery.
+
+    Remote state and generic error prose cannot establish a historical rejection.
+    Accept one conclusive porcelain or legacy status; mixed/partial statuses fail
+    closed. The request, intent and original failure remain the evidence source.
+    """
+    failure = value.get('failure', {})
+    if (value['request']['kind'] != 'push' or not isinstance(failure, dict)
+            or failure.get('phase') != 'send' or type(failure.get('exit_status')) is not int
+            or failure['exit_status'] <= 0 or value.get('response') is not None
+            or value.get('receipt') is not None or failure.get('response') is not None):
+        return False
+    request = value['request']['approved']
+    ref = 'refs/heads/' + request['branch']
+    statuses = []
+    for key in ('stdout', 'stderr'):
+        output = failure.get(key)
+        if output is None:
+            continue
+        if not isinstance(output, str):
+            return False
+        # Git ref bytes may contain Unicode whitespace and line separators.
+        # Only LF separates status rows; Git forbids ASCII whitespace in refs.
+        for line in output.split('\n'):
+            if line.startswith('remote:'):
+                continue  # Server diagnostics are prose, not Git's ref status.
+            if line.strip(' \t\r') in {'Everything up-to-date', 'Everything up to date'}:
+                return False
+            if '\t' in line and line[:1] in ' !+=*-':
+                match = re.fullmatch(r'!\t([^:\s]+):([^\s]+)\t\[(?:remote rejected|rejected)\] \([^\r\n]+\)', line, re.ASCII)
+                if not match or match[1] != request['head'] or match[2] != ref:
+                    return False
+                statuses.append(line)
+            elif ' -> ' in line or re.match(r'\s*!\s*\[', line):
+                match = re.fullmatch(r'\s*! \[(?:remote rejected|rejected)\]\s+(\S+) -> (\S+) \([^\r\n]+\)', line, re.ASCII)
+                if not match or match[1] != request['head'] or match[2] not in {request['branch'], ref}:
+                    return False
+                statuses.append(line)
+    return len(statuses) == 1
+
+
 def prepare(request, *, upstream=None, options=None):
     if options is not None:
         import skill_config
@@ -195,7 +238,7 @@ def prepare(request, *, upstream=None, options=None):
                     refreshed = {**request, '_payload_hash': payload_hash}
                     return publication.refresh_prepared(path, 'ci-approve', handler(refreshed).prepare(), refreshed)
                 return {'operation': str(path), **retained, 'reused_intent': True}
-            if approved.get('_payload_hash') == payload_hash:
+            if retained['status'] != 'not_applied' and approved.get('_payload_hash') == payload_hash:
                 if request.get('replaces'):
                     recovery().link(request['replaces'], str(path))
                 return {'operation':str(path),**retained,'reused_intent':True}
@@ -251,7 +294,7 @@ def publish(path, *, reconcile=False):
         if kind in KINDS:
             return handler(request).send(value['request']['expected'],value['operation_id'])
         if kind=='push':
-            return run(['git','push','--force-with-lease=refs/heads/'+request['branch']+':'+(request['expected_head'] or ''),
+            return run(['git','push','--porcelain','--force-with-lease=refs/heads/'+request['branch']+':'+(request['expected_head'] or ''),
                         request['remote'],request['head']+':refs/heads/'+request['branch']],
                        cwd=request['checkout'],json_output=False)
         if kind=='edit-pr':
@@ -301,7 +344,8 @@ def publish(path, *, reconcile=False):
             return review_recovery().reconcile(path, retained)
         try:
             result = publication.execute(path,kind,check=check,send=send,observe=observe,reconcile=reconcile,
-                reconcile_argv=[sys.executable,str(Path(__file__).resolve()),'reconcile'])
+                reconcile_argv=[sys.executable,str(Path(__file__).resolve()),'reconcile'],
+                confirm_not_applied=rejected_push if kind == 'push' else None)
         except Diagnostic as exc:
             if kind == 'request-review' and publication.load(path)['status'] == 'pending':
                 from shared.diagnostics import command

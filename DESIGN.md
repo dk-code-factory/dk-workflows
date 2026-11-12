@@ -185,6 +185,25 @@ unrelated catalog changes must not invalidate it.
 
 ## Settings and storage
 
+Confirmed push rejection reuses the existing operation's `not_applied` state.
+The push publisher validates only the original send failure: positive nonzero
+exit status and one unambiguous exact-ref rejection in porcelain or conclusive
+legacy Git output, with no conflicting status or successful response/receipt.
+Initial failure handling and later reconciliation settle it under the existing
+operation/dispatch locks. Retain the request, intent and original failure intact;
+no new journal, cache, setting or copied evidence is needed. Terminal reconciliation
+reports non-delivery without observing a later branch tip as this push's success.
+
+The freshness boundary for that historical outcome is its immutable original
+request and send evidence, independent of later remote changes or credentials.
+Uncertain failures remain pending. Identical fresh preparation excludes terminal
+operations and rechecks the remote and candidate tree; dispatch still checks the
+captured exact lease without silently refreshing it. This avoids repeated model
+reconstruction and futile reconciliation in this and fresh sessions while
+preserving unrelated completed analysis and all original recovery evidence.
+Offline fresh-process, partial recovery, concurrency and changed-input checks
+establish behavior, not measured native token or API dollar savings.
+
 Uncertain review requests retain their original pending intent and first failure.
 Small creation/dispatch timestamps, available native run/session references and
 safe transport diagnostics live in that existing operation. They avoid repeated

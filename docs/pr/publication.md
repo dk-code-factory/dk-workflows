@@ -116,6 +116,32 @@ Keep observations, dispositions, authorization evidence and operation paths priv
 
 Before preparing a push, verify branch and repository ownership, fetch and push URLs, authorship, target tip, tests and tree. Preparation saves the candidate tree. Dispatch uses an exact force-with-lease; observation checks the saved head. If the lease changes, inspect the remote change. Never update the lease and retry automatically. The publisher does not use a shell.
 
+## Recover a rejected push
+
+Pushes use Git porcelain status output. A retained original send failure with a
+positive nonzero exit status and one unambiguous rejection of the exact requested
+ref automatically settles as `not_applied`. Conclusive legacy Git rejection
+output is supported too. Conflicting, incomplete or unrelated ref statuses,
+successful response/receipt evidence, timeouts and connection failures cannot
+establish non-delivery. Generic error text and an unchanged remote branch are
+insufficient. These uncertain operations remain pending and block replacements.
+
+Initial failure handling settles a proven rejection immediately. For an older
+pending operation, run the normal `reconcile --operation FILE`; no separate
+recovery command is required. The original request, intent and failure stay
+intact. Repeated reconciliation reports `not_applied` without a send or remote
+read, even if the branch has since moved to the requested head. Publishing that
+original operation reports `fresh_preparation_required`.
+
+Correct the rejection's cause, then prepare a fresh reviewed push. An identical
+request can create a new operation without adding an action ID. Preparation and
+dispatch revalidate the candidate tree and exact remote lease; a changed remote
+requires inspection and a separately reviewed lease, never automatic renewal.
+The terminal outcome is bound to the immutable original send evidence; it is
+neither a receipt nor authorization for another action. Existing journals suffice
+to avoid repeated reconstruction on a fresh-session resume; native token savings
+have not been measured.
+
 Other actions use the same commands and journal. Requests include canonical `pr` and captured `head`:
 
 | kind | Additional request fields | Fresh validation and receipt |
