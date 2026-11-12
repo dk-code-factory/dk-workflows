@@ -178,18 +178,20 @@ def rejected_push(value):
             continue
         if not isinstance(output, str):
             return False
-        for line in output.splitlines():
+        # Git ref bytes may contain Unicode whitespace and line separators.
+        # Only LF separates status rows; Git forbids ASCII whitespace in refs.
+        for line in output.split('\n'):
             if line.startswith('remote:'):
                 continue  # Server diagnostics are prose, not Git's ref status.
-            if 'up-to-date' in line or 'up to date' in line:
+            if line.strip(' \t\r') in {'Everything up-to-date', 'Everything up to date'}:
                 return False
             if '\t' in line and line[:1] in ' !+=*-':
-                match = re.fullmatch(r'!\t([^:\s]+):([^\s]+)\t\[(?:remote rejected|rejected)\] \([^\r\n]+\)', line)
+                match = re.fullmatch(r'!\t([^:\s]+):([^\s]+)\t\[(?:remote rejected|rejected)\] \([^\r\n]+\)', line, re.ASCII)
                 if not match or match[1] != request['head'] or match[2] != ref:
                     return False
                 statuses.append(line)
             elif ' -> ' in line or re.match(r'\s*!\s*\[', line):
-                match = re.fullmatch(r'\s*! \[(?:remote rejected|rejected)\]\s+(\S+) -> (\S+) \([^\r\n]+\)', line)
+                match = re.fullmatch(r'\s*! \[(?:remote rejected|rejected)\]\s+(\S+) -> (\S+) \([^\r\n]+\)', line, re.ASCII)
                 if not match or match[1] != request['head'] or match[2] not in {request['branch'], ref}:
                     return False
                 statuses.append(line)
