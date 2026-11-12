@@ -97,7 +97,8 @@ def refresh_prepared(path, kind, expected, approved):
         return {'operation': str(path), **value, 'reused_intent': True}
 
 
-def execute(path, kind, *, check, send, observe, reconcile=False, reconcile_argv=None):
+def execute(path, kind, *, check, send, observe, reconcile=False, reconcile_argv=None,
+            confirm_not_applied=None):
     """Never retry a mutation. An intent without a verified receipt only permits reads.
 
     observe returns verified evidence, or raises. check is called even for receipt
@@ -120,6 +121,23 @@ def execute(path, kind, *, check, send, observe, reconcile=False, reconcile_argv
                 'Publication receipt is retained; current readiness failed: ' + str(exc),
                 task('Refresh current evidence and satisfy the current workflow gate. Do not repeat the publication.', path),
                 dispatched=True)
+
+        def terminal():
+            if reconcile:
+                return {'operation': str(path), 'status': 'not_applied', 'reused': True}
+            raise Diagnostic('fresh_preparation_required', 'Publication was not applied. Prepare and review a new publication.',
+                             task('Prepare a fresh publication with current evidence and the reviewed exact lease.', path))
+
+        def settle_rejection():
+            if value['status'] == 'pending' and confirm_not_applied and confirm_not_applied(value):
+                value['status'] = 'not_applied'
+                write(path, value)
+                return True
+            return False
+
+        # A terminal outcome cannot acquire a success receipt from later live state.
+        if value['status'] == 'not_applied' or settle_rejection():
+            return terminal()
 
         phase = 'reconcile' if value['status'] in {'pending', 'verified'} or reconcile else 'check'
 
@@ -168,9 +186,6 @@ def execute(path, kind, *, check, send, observe, reconcile=False, reconcile_argv
                 raise (not_ready(exc) if receipt_saved else pending(exc)) from exc
             return {'operation': str(path), 'status': 'verified', 'reused': True,
                     'receipt': value['receipt']}
-        if value['status'] == 'not_applied':
-            raise Diagnostic('fresh_preparation_required', 'Prepare and review a new publication.',
-                             command(value['reconcile_argv'], path))
         receipt_saved = False
         try:
             check(value, False)
@@ -208,6 +223,8 @@ def execute(path, kind, *, check, send, observe, reconcile=False, reconcile_argv
             check(value, True)
         except Exception as exc:
             retain_failure(exc)
+            if settle_rejection():
+                return terminal()
             raise (not_ready(exc) if receipt_saved else pending(exc)) from exc
         return {'operation': str(path), 'status': 'verified', 'reused': False,
                 'receipt': value['receipt']}
