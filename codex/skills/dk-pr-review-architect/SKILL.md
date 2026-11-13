@@ -1,6 +1,8 @@
 ---
 name: dk-pr-review-architect
-description: Run and record an architecture-only PR review on demand, including a fresh review after an earlier completed run.
+description: Manual entry point for architecture-only PR review. Run and record a fresh review on demand, including after an earlier completed run.
+metadata:
+  short-description: Manual architecture review
 ---
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.

@@ -12,6 +12,10 @@ selection and new architecture publications; keep existing evidence.
 Invoke `dk-workflows:dk-pr-review-architect` with a PR URL to run only this
 architecture process and record its results, even after a prior completed review.
 For example: `Use dk-workflows:dk-pr-review-architect on https://HOST/OWNER/REPO/pull/N`.
+`dk-architecture-review` is the internal, replaceable examination component. Its
+discovery description and short picker description identify it as internal and
+point to this manual entry point; it remains available for prepared workflow
+assignments under its existing identity.
 Use `dk-pr-review`'s current reviewer, rubric, selection policy, retained limits
 and publication permissions. Pass invocation-local `architecture.enabled:true`
 through preflight, every managed stage and publication/gate checks. This enables
