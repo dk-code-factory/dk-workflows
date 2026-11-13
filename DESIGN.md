@@ -205,6 +205,35 @@ they never redirect retained intents or clear original review results, siblings,
 claims or receipts. Live head and publication checks remain mandatory. Native
 API dollar savings have not been measured.
 
+Ordinary CI classification in both PR fix and incoming review learns from the
+current PR's failed checks. It records exact named outcomes and queries issues
+for those tests, refreshing only their linked issue evidence. It never enumerates
+repository Actions history automatically. Successful current-PR runs collect named
+passes only after a failure has been observed at that head; aggregate green jobs
+are not pass proof. Fresh heads without failures do no flake investigation.
+Explicit `dk-ci-flakes` discovery retains bounded repository history/issue scans.
+
+Reuse the existing repository registry, observations, issue snapshots, scan claims
+and immutable attempt artifacts; add no durable store, schema or copied report.
+The historical reader stays unchanged so its content fingerprint and original
+cache keys remain intact. Original broad-scan claims remain discoverable and
+reusable; new PR lookups depend on the failure fingerprint and issue limit, not
+historical lookback/run limits. Interrupted lookups retain their original claim;
+explicit discovery can gather missing evidence without clearing that claim.
+Named pass collection reuses the same validated attempt cache, including across
+fresh sessions. Its returned learning status is transient; only original outcomes
+and artifacts remain in the existing stores. Missing/corrupt artifacts require affected recollection; changed
+head/attempt/workflow/job identities select distinct evidence. Open-issue proof,
+failure signature and live CI checks still govern acceptance independently.
+
+Expected API dollar savings come from keeping unrelated history/logs and issue
+records out of agent handoffs and avoiding repeated reconstruction on the next
+session. Deterministic helpers provide bounded compact pages and targeted reads;
+local status creates no verification credential. Cached original artifacts avoid
+recollection, while selected issues and current attempts are checked live.
+These savings end when governing inputs change or retained evidence is missing;
+offline reuse/recovery tests do not establish measured native API dollar savings.
+
 CI infrastructure recovery keeps native diagnosis in the existing failed-attempt
 publication intent, with references to the already retained job/log evidence and
 a fingerprint of the PR changes, checks and attempts. The deterministic helper

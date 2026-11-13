@@ -66,7 +66,7 @@ Legacy process commands remain compatibility readers for existing saved settings
 
 CI and flake helpers read their owning options automatically and accept `--options FILE`. Explicit CLI timing/discovery flags override the selected options. CI deadline windows survive interruption; changing configuration does not restart an existing window. There is at most one pending-only extension.
 
-Automatic discovery during CI classification also reads `dk-workflows:dk-ci-flakes` options, using the CI caller's upstream. `ci_wait.py --flake-options FILE` supplies overrides for that skill separately from CI timing options. Unchanged scans reuse their retained identity, including older default-limit scans; changed discovery limits permit a distinct scan without deleting prior evidence. An interrupted unchanged scan is not silently retried.
+Default [flake learning](ci-flakes.md) during CI classification reads `dk-workflows:dk-ci-flakes` options using the CI caller's upstream. `ci_wait.py --flake-options FILE` supplies overrides separately from CI timing options. Only `max_issues` governs current-PR issue lookup; `lookback_days` and `max_runs` govern explicit active history scans. Unchanged lookups reuse their retained identity, including compatible older broad-scan claims; changed issue limits permit a distinct lookup without deleting prior evidence. An interrupted unchanged lookup is not silently retried.
 
 `limits.retries_per_task`, `limits.ci_repairs_per_cycle` and `limits.ci_reruns_per_head` accept zero to disable those attempts. The initial task and review remain eligible; `review_cycles` stays between one and five. Retained counters and tighter saved limits survive resume and cannot be replenished by changing configuration.
 

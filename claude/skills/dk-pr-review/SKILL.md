@@ -22,3 +22,5 @@ Keep original reviewer outputs, dispositions and sources, pinned head and target
 Give discovery and independent verification agents their prepared checklists. Accept reports only after the shared completion checks; retain original evidence and report optional omissions. Follow [completion checks](../../../docs/task-state.md#completion-checks).
 
 Follow [simplification review](../../../docs/simplification.md): use the live owning workflow selector for managed reviewer composition, retain independent ordinary coverage, and assess bounded recommendations through the existing verification or fix stages. Concrete maintainability benefits do not require a functional bug. Reject or defer insufficient-benefit or out-of-scope recommendations; no broad refactor is authorized.
+
+The default CI finalizer learns flaky-test evidence from failures on this PR and named passes after those failures. Follow [flake learning](../../../docs/ci-flakes.md); repository-wide CI history scans belong to explicitly requested `dk-workflows:dk-ci-flakes` discovery. This does not authorize code fixes or issue creation.

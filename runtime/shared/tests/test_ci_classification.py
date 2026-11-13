@@ -223,7 +223,7 @@ def test_deadline_during_discovery_issue_refresh_records_actual_phase(registry):
     issue_reads = [0]
     def issue(number):
         issue_reads[0] += 1
-        if issue_reads[0] == 2:
+        if issue_reads[0] == 1:
             tick[0] = 10
         return original(number)
     api.issue = issue
@@ -378,8 +378,7 @@ def test_automatic_discovery_reads_scopes_and_preserves_scan_reuse(registry):
     original_config = {path: path.read_bytes() for path in [config.path(), config.path(upstream), config.path(REPO)]}
     first = decide(FakeAPI(body='unrelated'), registry, upstream=upstream, flake_options={'max_runs': 3})
     assert first['result'] == 'failure'  # Discovery settings cannot accept an unverified test.
-    assert {key: first['discovery']['limits'][key] for key in ('days', 'runs', 'open_issues')} == {
-        'days': 7, 'runs': 3, 'open_issues': 9}
+    assert first['discovery']['limits'] == {'open_issues': 9}
     scans = copy.deepcopy(registry.load()['scans'])
     # A new registry/session reads the original scan claim instead of launching it again.
     fresh = Registry(REPO)
@@ -391,8 +390,9 @@ def test_automatic_discovery_reads_scopes_and_preserves_scan_reuse(registry):
     write(config.path(REPO), {'skill_defaults': {skill: {'options': {'max_issues': 9}},
                                                 'dk-workflows:dk-ci': {'options': {'timeout_seconds': 40}}}})
     assert 'discovery' not in decide(FakeAPI(body='unrelated'), fresh, upstream=upstream, flake_options={'max_runs': 3})
-    changed = decide(FakeAPI(body='unrelated'), fresh, upstream=upstream, flake_options={'max_runs': 2})
-    assert changed['discovery']['limits']['runs'] == 2
+    assert 'discovery' not in decide(FakeAPI(body='unrelated'), fresh, upstream=upstream, flake_options={'max_runs': 2})
+    changed = decide(FakeAPI(body='unrelated'), fresh, upstream=upstream, flake_options={'max_issues': 2})
+    assert changed['discovery']['limits'] == {'open_issues': 2}
     assert len(fresh.load()['scans']) == len(scans) + 1
     assert all(fresh.load()['scans'][key] == value for key, value in scans.items())
     assert config.path().read_bytes() == original_config[config.path()]
@@ -478,9 +478,9 @@ def discover(*args, **kwargs):
     tick[0] = 10
     if {status!r} == 'timed_out':
         raise ClassificationTimeout('discovery expired while another writer holds the lock')
-    return {{'limits': {{}}, 'limits_reached': [], 'missing': [],
+    return {{'limits': {{}}, 'limits_reached': [], 'missing': [], 'verification': {{'checked_at':'now','entries':[]}},
              'evidence_file': policy.evidence_file(registry, {{'discovery': 'complete'}})}}
-policy.discover = discover
+policy.investigate = discover
 try:
     result = policy.decide(FakeAPI(body='unrelated'), registry, snapshot(), snapshot,
                            classification_timeout=5, clock=lambda: tick[0])
@@ -781,7 +781,7 @@ def test_targeted_workflow_queries_share_one_run_limit(registry, monkeypatch):
 
 def test_historical_parse_timeout_keeps_both_current_and_attempt_evidence(registry, monkeypatch):
     from shared import test_evidence
-    api = FakeAPI(body=declaration(False))
+    api = FakeAPI(body=declaration(False), attempts=2)
     original = actions.archive_report
     tick, parses = [0], []
     def parse(*args):
@@ -791,17 +791,17 @@ def test_historical_parse_timeout_keeps_both_current_and_attempt_evidence(regist
             test_evidence.parse_report('')
         return original(*args)
     monkeypatch.setattr(actions, 'archive_report', parse)
-    result = decide(api, registry, classification_timeout=5, clock=lambda: tick[0])
-    assert result['classification']['timed_out'] and result['result'] == 'failure'
-    current = json.loads(Path(result['evidence_file']).read_text())
-    historical = json.loads(Path(result['discovery']['evidence_file']).read_text())
-    assert current['checks'][0]['job_id'] == 101
+    current = actions.collect_snapshot(api, registry, snapshot(job_id=102))
+    with Budget(5, clock=lambda: tick[0]).activate(), pytest.raises(ClassificationTimeout) as failed:
+        actions.discover(api, registry)
+    historical = json.loads(Path(failed.value.evidence_file).read_text())
+    assert current['checks'][0]['job_id'] == 102
     assert Path(historical['archive_file']).is_file() and historical['missing']
 
 
 @pytest.mark.parametrize('historical', [False, True])
 def test_log_download_expiry_retains_attempt_provenance(registry, historical):
-    api = FakeAPI(body=declaration(False))
+    api = FakeAPI(body=declaration(False), attempts=2 if historical else 1)
     original = api.request
     tick, downloads = [0], [0]
     def request(endpoint, binary=False):
@@ -811,17 +811,23 @@ def test_log_download_expiry_retains_attempt_provenance(registry, historical):
                 tick[0] = 10
         return original(endpoint, binary)
     api.request = request
-    result = decide(api, registry, classification_timeout=5, clock=lambda: tick[0])
-    assert result['classification']['timed_out'] and result['result'] == 'failure'
-    current = json.loads(Path(result['evidence_file']).read_text())
-    attempt_path = (result['discovery']['evidence_file'] if historical else
-                    current['checks'][0]['attempt_evidence_file'])
+    if historical:
+        current = actions.collect_snapshot(api, registry, snapshot(job_id=102))
+        with Budget(5, clock=lambda: tick[0]).activate(), pytest.raises(ClassificationTimeout) as failed:
+            actions.discover(api, registry)
+        attempt_path = failed.value.evidence_file
+    else:
+        result = decide(api, registry, classification_timeout=5, clock=lambda: tick[0])
+        assert result['classification']['timed_out'] and result['result'] == 'failure'
+        current = json.loads(Path(result['evidence_file']).read_text())
+        attempt_path = current['checks'][0]['attempt_evidence_file']
     attempt = json.loads(Path(attempt_path).read_text())
     source = json.loads(Path(attempt['source_file']).read_text())
     assert source['run']['id'] == attempt['run_id'] == 10
     assert source['jobs'][0]['id'] == 101
     assert any('deadline' in missing for missing in attempt['missing'])
-    assert Path(json.loads(Path(result['decision_file']).read_text())['evidence_file']).is_file()
+    if not historical:
+        assert Path(json.loads(Path(result['decision_file']).read_text())['evidence_file']).is_file()
 
 
 def test_large_issue_matching_respects_classification_deadline(registry, monkeypatch):

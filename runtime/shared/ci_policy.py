@@ -3,7 +3,8 @@ import time
 import subprocess
 from shared.ci_deadline import Budget, BoundedAPI, ClassificationTimeout, check_budget
 from shared.flaky_tests import digest, identity, now, require_head
-from shared.flaky_actions import collect_snapshot, discover, evidence_file
+from shared.flaky_actions import collect_snapshot, evidence_file
+from shared.pr_flakes import collect_followups, failure_targets, investigate
 from shared import ci_exceptions
 import skill_config
 
@@ -182,8 +183,20 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, pa
     budget.progress('collect_current', raw_result=snapshot['result'])
     evidence = collect_snapshot(api, registry, snapshot, exceptions['entries']) if snapshot['result'] == 'failure' else {}
     partial['evidence_file'] = evidence.get('evidence_file')
+    learning = None
+    if snapshot['result'] == 'success':
+        # Optional log learning leaves time for the authoritative live CI read.
+        learning_budget = Budget(budget.remaining() / 2, clock=budget.clock)
+        learning_budget.phase = 'learn_followups'
+        try:
+            with learning_budget.activate():
+                learning = collect_followups(BoundedAPI(api.api, learning_budget), registry, snapshot)
+        except ClassificationTimeout as exc:
+            learning = {'missing': [str(exc)]}
+            if exc.evidence_file:
+                learning['evidence_file'] = exc.evidence_file
     # New observations can prove a pass or match an existing issue.
-    verification = (registry.synchronize([], api.issue) if snapshot['result'] == 'failure'
+    verification = (registry.synchronize([], api.issue, targets=failure_targets(evidence)) if snapshot['result'] == 'failure'
                     else {})
     partial['issue_errors'] = verification.get('issue_errors', {})
     decision = evaluate(snapshot, evidence, verification, registry.repo, exceptions)
@@ -199,10 +212,14 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, pa
     if eligible:
         discovery_options = skill_config.for_context('dk-workflows:dk-ci-flakes', repository=registry.repo,
                                                      upstream=upstream, options=flake_options)['options']
-        # Preserve legacy scan identities for the original default limits. Only
-        # changed discovery inputs admit a distinct scan, retaining prior evidence.
-        if discovery_options != {'lookback_days': 30, 'max_runs': 100, 'max_issues': 500}:
-            key = digest({'failure': key, 'discovery_options': discovery_options})
+        # Existing broad-scan claims/results remain valid and are never reset.
+        # Only issue limits govern new PR lookups; history limits are explicit-scan options.
+        legacy_key = (key if discovery_options == {'lookback_days': 30, 'max_runs': 100, 'max_issues': 500}
+                      else digest({'failure': key, 'discovery_options': discovery_options}))
+        if legacy_key in registry.load().get('scans', {}):
+            key = legacy_key
+        elif discovery_options['max_issues'] != 500:
+            key = digest({'failure': key, 'pr_issue_limit': discovery_options['max_issues']})
     targets = (discovery_targets(evidence, unknown, budget) if eligible
                and key not in registry.load().get('scans', {}) else [])
     if targets:
@@ -220,8 +237,9 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, pa
                                     'target_count': len(targets), 'status': 'running'}
             try:
                 budget.progress('discover_unknown', target_count=len(targets))
-                discovery = discover(api, registry, discovery_options['lookback_days'],
-                                     discovery_options['max_runs'], discovery_options['max_issues'], targets=targets)
+                discovery = investigate(api, registry, targets=targets,
+                                        max_issues=discovery_options['max_issues'],
+                                        refresh_targets=failure_targets(evidence))
             except ClassificationTimeout as exc:
                 if exc.evidence_file:
                     partial['discovery']['evidence_file'] = exc.evidence_file
@@ -229,7 +247,7 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, pa
                 finish_scan(registry, key, 'timed_out', partial)
                 raise
             finish_scan(registry, key, 'completed', partial, evidence_file=discovery['evidence_file'])
-            verification = registry.synchronize([], api.issue)
+            verification = discovery['verification']
             partial['issue_errors'] = verification.get('issue_errors', {})
             decision = evaluate(snapshot, evidence, verification, registry.repo, exceptions)
             partial['blockers'] = decision['blockers']
@@ -263,6 +281,8 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, pa
     if discovery:
         decision['discovery'] = partial['discovery'] | {
             k: discovery[k] for k in ('limits', 'limits_reached', 'missing', 'evidence_file')}
+    if learning is not None:
+        decision['learning'] = learning
     return decision
 
 
@@ -310,5 +330,8 @@ def decide(api, registry, snapshot, refresh_snapshot, auto_discover=True, *,
         decision['classification']['next_action'] = (
             'Inspect retained evidence; run explicit narrowed flake discovery or repair current report parsing, '
             'then recheck live CI. An unchanged automatic scan is not retried.')
-    decision['decision_file'] = evidence_file(registry, decision)
+    # Optional learning is a transient presentation of observations/artifact refs
+    # already retained by the registry; it needs no second durable status copy.
+    decision['decision_file'] = evidence_file(registry, {key: value for key, value in decision.items()
+                                                       if key != 'learning'})
     return decision

@@ -37,7 +37,7 @@ Supporting skills use a subject name for broad ownership and a final action when
 | `dk-workflows:dk-pr-publish` | Publish prepared pushes, edits, replies, reviews and authorized merges with live checks and recovery. |
 | `dk-workflows:dk-ci-approve` | Approve blocked fork CI after current incoming review is ready. |
 | `dk-workflows:dk-ci` | Observe exact-head CI and handle authorized reruns. |
-| `dk-workflows:dk-ci-flakes` | Discover and verify known-flake evidence. |
+| `dk-workflows:dk-ci-flakes` | Actively scan CI history/issues or inspect saved flaky-test evidence. |
 | `dk-workflows:dk-commit-message` | Draft and refine commit messages. |
 | `dk-workflows:dk-issue` | Draft, create and update issues. |
 

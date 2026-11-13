@@ -13,7 +13,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 from shared.flaky_tests import Registry
-from shared.flaky_actions import GitHub, pr_repository
+from shared.flaky_actions import pr_repository
+from shared.pr_flakes import GitHub
 from shared.ci_policy import decide
 from shared.ci_observation import PermissionDenied, for_pr, bind_url
 from shared.github_reads import run as github_run
