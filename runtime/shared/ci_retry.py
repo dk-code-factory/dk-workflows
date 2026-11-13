@@ -61,6 +61,19 @@ def revisions(pull):
     return result
 
 
+def run_inputs(run):
+    """Bind retained source contents without unrelated GitHub profile metadata."""
+    source = retained(run['source_file'])
+    metadata = dict(source['run'])
+    for name in ('repository', 'head_repository', 'actor', 'triggering_actor'):
+        value = metadata.get(name)
+        if value:
+            keys = ('id', 'full_name') if name.endswith('repository') else ('id', 'login')
+            metadata[name] = {key: value[key] for key in keys if key in value}
+    return {key: value for key, value in run.items() if key not in {'capture', 'source_file'}} | {
+        'source': source | {'run': metadata}}
+
+
 def run_capture(api, pr, head, pull, files, snapshot, run):
     checks = []
     for check in snapshot['checks']:
@@ -72,7 +85,7 @@ def run_capture(api, pr, head, pull, files, snapshot, run):
             checks.append(check)
     return digest({'pr': pr, 'head': head, 'revisions': revisions(pull), 'changes': files,
                    'checks': fingerprint({'head': head, 'checks': checks}),
-                   'run': {k: v for k, v in run.items() if k != 'capture'}})
+                   'run': run_inputs(run)})
 
 
 def capture(api, pr, head, decision, snapshot):
@@ -136,8 +149,8 @@ def capture(api, pr, head, decision, snapshot):
                     for f in files], 'diff_command': ['gh', 'pr', 'diff', pr],
         'runs': sorted(runs.values(), key=lambda r: r['run_id']), 'blockers': blockers}
     result['capture'] = digest({'pr': pr, 'head': head, 'revisions': revisions(pull),
-        'changes': files, 'checks': fingerprint(snapshot), 'evidence': decision['evidence_file'],
-        'runs': result['runs'], 'blockers': blockers})
+        'changes': files, 'checks': fingerprint(snapshot),
+        'runs': [run['capture'] for run in result['runs']], 'blockers': blockers})
     return result
 
 

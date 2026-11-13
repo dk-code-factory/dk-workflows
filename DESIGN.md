@@ -199,6 +199,12 @@ Diagnosis fingerprints and their live start/end comparisons use head/base SHAs,
 refs and repository identities, excluding repository activity counts, timestamps
 and profile metadata. Unrelated repository activity therefore preserves valid
 analysis across sessions; changed revision identities still refresh diagnosis.
+Attempt-source fingerprints likewise retain repository/user identities without
+their descriptions or profile fields. Recollected source and evidence JSON
+paths remain evidence references, while semantic fingerprints bind normalized
+source contents, jobs and log archives rather than those JSON paths. This avoids
+repeating diagnosis after unrelated metadata changes on a fresh CI observation;
+changed source identity, jobs, logs, PR revisions or checks still refresh it.
 This adds no durable state and avoids repeated native diagnosis for unchanged
 PR changes and failure evidence. Existing original captures and preparations
 remain retained; changed governing helper inputs require affected diagnosis to

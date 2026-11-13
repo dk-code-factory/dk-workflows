@@ -50,6 +50,11 @@ not invalidate an unchanged sibling diagnosis. Ambiguous job log directories
 remain blocked because citations cannot identify their failed job uniquely.
 Head/base SHAs, branch refs and repository identities govern diagnosis freshness;
 unrelated repository stars, issue counts, timestamps or profile metadata do not.
+Recollecting an attempt after repository descriptions or user profiles change
+also preserves diagnosis. Original source/evidence JSON references remain intact;
+fingerprints use normalized source contents, jobs and log archives rather than
+the changed JSON reference paths. Changed repository/user identities, jobs, logs,
+revisions and checks still require fresh diagnosis.
 Existing diagnosis evidence and preparation history remain retained when changed
 governing inputs require a fresh diagnosis in the same operation.
 

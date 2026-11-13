@@ -8,6 +8,7 @@ import zipfile
 import pytest
 from shared.ci_retry import capture, requests, validate
 from shared.flaky_actions import evidence_file
+from test_flaky_tests import FakeAPI
 
 HEAD = 'a' * 40
 PR = 'https://github.com/owner/repo/pull/7'
@@ -91,6 +92,102 @@ def test_fresh_session_unchanged_capture_reuses_native_diagnosis(context):
     fresh = capture(API(), PR, HEAD, json.loads(json.dumps(decision)), json.loads(json.dumps(snapshot)))
     assert fresh['capture'] == handoff['capture']
     assert requests(fresh, restored) == requests(handoff, diagnosis)
+
+
+class RecollectionAPI(FakeAPI):
+    """Use the existing Actions transport fixture with current PR reads."""
+    def request(self, path, binary=False):
+        if path == 'pulls/7':
+            return copy.deepcopy(API().pull)
+        if path.startswith('pulls/7/files?'):
+            return copy.deepcopy(API().files)
+        return super().request(path, binary=binary)
+
+
+def recollected_diagnosis(api, registry):
+    from shared.flaky_actions import collect_snapshot
+    from test_flaky_tests import snapshot
+
+    current = snapshot()
+    evidence = collect_snapshot(api, registry, current)
+    decision = current | {'evidence_file': evidence['evidence_file']}
+    return capture(api, 'https://github.com/acme/project/pull/7', HEAD, decision, current), decision
+
+
+@pytest.mark.parametrize('change', ['metadata', 'repo_identity', 'actor_identity', 'jobs', 'logs'])
+def test_fresh_process_recollection_preserves_only_unchanged_diagnosis(tmp_path, change):
+    import os
+    import subprocess
+    import sys
+    from shared.flaky_tests import Registry
+    from test_flaky_tests import JOB, REPO, SIGNATURE
+
+    api = RecollectionAPI()
+    api.run.update(repository={'id': 1, 'full_name': 'acme/project', 'description': 'old'},
+        head_repository={'id': 2, 'full_name': 'fork/project', 'description': 'old'},
+        actor={'id': 3, 'login': 'actor', 'avatar_url': 'old'},
+        triggering_actor={'id': 4, 'login': 'trigger', 'avatar_url': 'old'})
+    registry = Registry(REPO)
+    original, original_decision = recollected_diagnosis(api, registry)
+    diagnosis = {'capture': original['capture'], 'runs': [{'run_id': 10, 'attempt': 1,
+        'jobs': [{'job_id': 101, 'verdict': 'unrelated', 'retryable': True,
+            'reason': 'External service failed', 'change_comparison': 'No service configuration changes',
+            'log_evidence': [{'member': f'{JOB}/1_Tests.txt', 'excerpt': SIGNATURE}]}]}]}
+    original_request = requests(original, diagnosis)['requests'][0]
+    artifacts = {path: Path(path).read_bytes() for path in
+        (original_request['diagnosis']['source_file'], original_request['diagnosis']['archive_file'],
+         original_decision['evidence_file'])}
+    if change == 'metadata':
+        for name in ('repository', 'head_repository'):
+            api.run[name].update(description='new', owner={'id': 5, 'avatar_url': 'new'})
+        for name in ('actor', 'triggering_actor'):
+            api.run[name]['avatar_url'] = 'new'
+    elif change == 'repo_identity':
+        api.run['repository']['id'] += 10
+    elif change == 'actor_identity':
+        api.run['actor']['id'] += 10
+    elif change == 'jobs':
+        api.job_changes['completed_at'] = '2026-11-15T00:00:00Z'
+    else:
+        api.texts[1] += '\nAdditional failure evidence'
+    request_file = tmp_path/'recollection.json'
+    request_file.write_text(json.dumps({'run': api.run, 'job_changes': api.job_changes,
+        'text': api.texts[1], 'original': original, 'diagnosis': diagnosis, 'change': change,
+        'evidence_file': original_decision['evidence_file']}))
+    script = '''
+import json, sys
+from pathlib import Path
+from shared.ci_retry import requests, validate
+from shared.flaky_tests import Registry
+from test_ci_retry import RecollectionAPI, recollected_diagnosis
+from test_flaky_tests import REPO
+state = json.loads(Path(sys.argv[1]).read_text())
+api = RecollectionAPI()
+api.run, api.job_changes, api.texts[1] = state['run'], state['job_changes'], state['text']
+current, snapshot = recollected_diagnosis(api, Registry(REPO))
+original = state['original']
+if state['change'] == 'metadata':
+    assert current['runs'][0]['source_file'] != original['runs'][0]['source_file']
+    assert snapshot['evidence_file'] != state['evidence_file']
+    assert current['runs'][0]['capture'] == original['runs'][0]['capture']
+    assert current['capture'] == original['capture']
+    prepared = requests(current, state['diagnosis'])['requests'][0]
+    validate(prepared, api, snapshot)
+else:
+    assert current['runs'][0]['capture'] != original['runs'][0]['capture']
+    try:
+        requests(current, state['diagnosis'])
+    except ValueError as exc:
+        assert 'inputs changed' in str(exc), str(exc)
+    else:
+        raise AssertionError('changed diagnosis inputs were reused')
+'''
+    root = Path(__file__).resolve().parents[3]
+    result = subprocess.run([sys.executable, '-c', script, str(request_file)],
+        env={**os.environ, 'PYTHONPATH': os.pathsep.join([str(root/'runtime'), str(Path(__file__).parent)])},
+        text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert all(Path(path).read_bytes() == data for path, data in artifacts.items())
 
 
 @pytest.mark.parametrize('reference', ['head', 'base'])
