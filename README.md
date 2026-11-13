@@ -1,6 +1,6 @@
 # dk-workflows
 
-Version 5.6.0. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
+Version 5.7.0. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
 
 Use `dk-workflows:dk-pr-iter` as the universal entry point: it recognizes your accounts and routes your PRs to `dk-workflows:dk-pr-fix` and other authors' PRs to `dk-workflows:dk-pr-review`. Invoke either workflow directly when the intended responsibility is explicit. Fixing runs review/fix cycles followed by [configured finalizers](docs/finalizers.md); the default ending preserves commit cleanup and final CI. Incoming review first runs the default-enabled [architecture gate](docs/architecture-review.md), settling alternatives and checking implementation alignment before ordinary reviewers. A verified material design mismatch produces an architecture-only rejection. Aligned review verifies candidate findings independently before posting; automatic approval and merging each require separate authorization or enabled policy.
 
@@ -25,6 +25,7 @@ Supporting skills use a subject name for broad ownership and a final action when
 | `dk-workflows:dk-pr-review-architect` | Run and record architecture-only PR review, including a fresh manually requested review. |
 | `dk-workflows:dk-code-simplify` | Recommend bounded simplifications without editing. |
 | `dk-workflows:dk-pr-reviewers-run` | Run configured reviewers and retain their results. |
+| `dk-workflows:dk-pr-approvers` | Return configured GitHub review recipients or discover appropriate approvers without publishing. |
 | `dk-workflows:dk-pr-feedback-read` | Collect complete PR discussion and feedback. |
 | `dk-workflows:dk-pr-feedback-address` | Verify feedback and implement justified fixes. |
 | `dk-workflows:dk-pr-feedback-reply` | Reply to feedback and resolve answered threads. |

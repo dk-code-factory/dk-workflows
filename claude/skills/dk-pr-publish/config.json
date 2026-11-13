@@ -1,4 +1,5 @@
 {
   "$schema": "./config.schema.json",
-  "default_merge_method": "squash"
+  "default_merge_method": "squash",
+  "review_requests": null
 }

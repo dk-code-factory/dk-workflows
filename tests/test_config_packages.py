@@ -52,7 +52,7 @@ def test_bundled_helpers_work_from_a_copied_plugin_without_an_external_repositor
 
 def test_default_process_invocations_resolve_to_bundled_skills():
     skills={p.parent.name for p in (ROOT/'codex/skills').glob('*/SKILL.md')}
-    assert len(skills)==23
+    assert len(skills)==24
     for _,call in config.calls(config.DEFAULTS):
         if 'skill' in call:
             assert call['skill'].removeprefix('dk-workflows:') in skills

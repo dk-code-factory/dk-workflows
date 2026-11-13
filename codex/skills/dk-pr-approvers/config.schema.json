@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/dk-code-factory/dk-workflows/main/codex/skills/dk-pr-approvers/config.schema.json",
+  "title": "dk-workflows:dk-pr-approvers options",
+  "type": "object",
+  "properties": {
+    "$schema": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

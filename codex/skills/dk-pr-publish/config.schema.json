@@ -4,6 +4,32 @@
   "title": "dk-workflows:dk-pr-publish options",
   "type": "object",
   "properties": {
+    "review_requests": {
+      "description": "Recipients for authorized review or re-review requests at PR fix finalization. Null asks dk-pr-approvers to discover appropriate recipients; two empty lists disable automatic requests. Explicit request recipients take precedence.",
+      "default": null,
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "properties": {
+            "reviewers": {
+              "type": "array",
+              "items": {"type": "string", "pattern": "^[A-Za-z0-9_-]+(?![\\s\\S])"},
+              "uniqueItems": true,
+              "description": "GitHub usernames without @, not numeric account IDs."
+            },
+            "team_reviewers": {
+              "type": "array",
+              "items": {"type": "string", "pattern": "^[A-Za-z0-9_-]+(?![\\s\\S])"},
+              "uniqueItems": true,
+              "description": "Repository organization team slugs without an organization prefix."
+            }
+          },
+          "required": ["reviewers", "team_reviewers"],
+          "additionalProperties": false
+        }
+      ]
+    },
     "default_merge_method": {
       "type": "string",
       "minLength": 1,

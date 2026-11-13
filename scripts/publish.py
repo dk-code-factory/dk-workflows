@@ -256,6 +256,13 @@ def prepare(request, *, upstream=None, options=None):
         configured = skill_config.for_context('dk-workflows:dk-pr-publish', pr=request.get('pr'),
                                               upstream=upstream, options=options)['options']
         request = {**request, 'merge_method': configured['default_merge_method']}
+    if (isinstance(request, dict) and request.get('kind') == 'request-review'
+            and not {'reviewers', 'team_reviewers'} & request.keys()):
+        import skill_config
+        configured = skill_config.for_context('dk-workflows:dk-pr-publish', pr=request.get('pr'),
+                                              upstream=upstream, options=options)['options']['review_requests']
+        if configured is not None:
+            request = {**request, **configured}
     if not isinstance(request,dict):
         raise ValueError('Publication request must be an object')
     # Recover even if the previous agent lost the printed operation path. The

@@ -53,6 +53,14 @@ def test_each_skill_owns_complete_explicit_defaults_and_a_valid_schema(skill):
     ('dk-workflows:dk-pr-feedback-address', {'additional_validation_commands': ['pytest -q']}),
     ('dk-workflows:dk-pr-review-post', {'blocking_event': 'APPROVE'}),
     ('dk-workflows:dk-ci-approve', {'skip_verification': True}),
+    ('dk-workflows:dk-pr-publish', {'review_requests': []}),
+    ('dk-workflows:dk-pr-publish', {'review_requests': {'reviewers': ['alice']}}),
+    ('dk-workflows:dk-pr-publish', {'review_requests': {'reviewers': [123], 'team_reviewers': []}}),
+    ('dk-workflows:dk-pr-publish', {'review_requests': {'reviewers': ['@alice'], 'team_reviewers': []}}),
+    ('dk-workflows:dk-pr-publish', {'review_requests': {'reviewers': ['alice\n'], 'team_reviewers': []}}),
+    ('dk-workflows:dk-pr-publish', {'review_requests': {'reviewers': ['alice', 'alice'], 'team_reviewers': []}}),
+    ('dk-workflows:dk-pr-publish', {'review_requests': {'reviewers': [], 'team_reviewers': ['org/team']}}),
+    ('dk-workflows:dk-pr-publish', {'review_requests': {'reviewers': [], 'team_reviewers': [], 'approve': True}}),
     ('dk-workflows:dk-preferences', {'default_applies_to': []}),
 ])
 def test_owned_options_reject_malformed_values_in_runtime_and_schema(skill, options):
@@ -76,6 +84,77 @@ def test_options_inherit_by_scope_then_invocation_without_writing_sources():
     assert selected['provenance']['poll_interval_seconds'] == str(config.path(upstream))
     assert all(path.read_bytes() == value for path, value in before.items())
     assert skill_config.scope_path(REPOSITORY) == config.path(REPOSITORY)
+
+
+def test_repository_review_selections_replace_inheritance_and_survive_fresh_reads(tmp_path):
+    runner, publisher = 'dk-workflows:dk-pr-reviewers-run', 'dk-workflows:dk-pr-publish'
+    upstream = 'github.com/upstream/repo'
+    inherited = {'reviewers': ['default-user'], 'team_reviewers': ['default-team']}
+    upstream_targets = {'reviewers': ['upstream-user'], 'team_reviewers': []}
+    selected = {'reviewers': ['repo-user'], 'team_reviewers': ['repo-team']}
+    def record(reviewers, targets):
+        return {'skill_defaults': {runner: {'options': {'reviewers': reviewers}},
+                                  publisher: {'options': {'review_requests': targets}}}}
+    write(config.path(), record(['team:default'], inherited))
+    write(config.path(upstream), record(['team:upstream'], upstream_targets))
+    write(config.path(REPOSITORY), record(['team:repository'], selected))
+    paths = [config.path(), config.path(upstream), config.path(REPOSITORY)]
+    before = {path: path.read_bytes() for path in paths}
+    for _ in range(2):
+        # Each CLI read starts a fresh process and must not save effective settings.
+        result = cli('--upstream', upstream, 'skill-plan', '--skill', runner, '--kind', 'reviewers')
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout)['groups'] == [['team:repository']]
+        result = cli('--upstream', upstream, 'skill-show', '--skill', publisher)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout)['options']['review_requests'] == selected
+    for owner in (FIX, 'dk-workflows:dk-pr-review'):
+        tasks = skill_config.effective(owner)['options']['tasks']
+        index = next(i for i, call in enumerate(tasks) if call.get('skill') == runner)
+        plan = skill_config.plan(runner, 'reviewers', REPOSITORY, upstream,
+                                 workflow={'skill': owner, 'index': index})
+        assert plan['options']['reviewers'][0] == 'team:repository'
+    assert skill_config.effective(publisher, 'github.com/other/repo', upstream)['options']['review_requests'] == upstream_targets
+    assert skill_config.effective(runner, 'github.com/other/repo')['options']['reviewers'] == ['team:default']
+    assert all(path.read_bytes() == value for path, value in before.items())
+    empty = {'reviewers': [], 'team_reviewers': []}
+    assert skill_config.effective(publisher, REPOSITORY, options={'review_requests': empty})['options']['review_requests'] == empty
+    assert skill_config.effective(publisher, REPOSITORY, options={'review_requests': None})['options']['review_requests'] is None
+    local = tmp_path/'options.json'
+    write(local, {'review_requests': None})
+    assert cli('skill-set', '--skill', publisher, '--scope', 'repo', '--file', str(local)).returncode == 0
+    assert skill_config.effective(publisher, REPOSITORY, upstream)['options']['review_requests'] is None
+    assert cli('skill-reset', '--skill', publisher, '--scope', 'repo').returncode == 0
+    assert skill_config.effective(publisher, REPOSITORY, upstream)['options']['review_requests'] == upstream_targets
+    assert skill_config.effective(runner, REPOSITORY)['options']['reviewers'] == ['team:repository']
+
+
+def test_review_recipient_changes_refresh_publisher_without_invalidating_siblings(tmp_path):
+    publisher = 'dk-workflows:dk-pr-publish'
+    resource = tmp_path/'SKILL.md'
+    resource.write_text('Complete the assigned finalizer and return evidence.')
+    def configure(user):
+        write(config.path(REPOSITORY), {'skill_defaults': {publisher: {'options': {
+            'review_requests': {'reviewers': [user], 'team_reviewers': []}}},
+            FIX: {'options': {'finalizers': ['team:check', publisher]}}}})
+    def spec(index, identity):
+        return skill_config.make_spec(repository=REPOSITORY, pr=PR, skill=FIX,
+            kind='finalizers', index=index, run='retained', definition={
+                'skill_identity': identity, 'resources': {'skill': str(resource)},
+                'assigned_instructions': 'Complete selected finalization.', 'instructions': {},
+                'inputs': {}, 'options': {}, 'governing_inputs_complete': True})
+    configure('original-user')
+    original, sibling = spec(1, publisher), spec(0, 'team:check')
+    initial, sibling_initial = capture(original), capture(sibling)
+    assert capture(spec(1, publisher)) == initial
+    configure('replacement-user')
+    with pytest.raises(ValueError, match='Inputs changed'):
+        skill_config.check_selection(original)
+    skill_config.check_selection(sibling)
+    refreshed = capture(spec(1, publisher))
+    assert refreshed['key'] == initial['key']
+    assert refreshed['fingerprint'] != initial['fingerprint']
+    assert capture(spec(0, 'team:check')) == sibling_initial
 
 
 @pytest.mark.parametrize('options', [[], False, '', 0])

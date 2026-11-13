@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.mark.parametrize('host', ['codex', 'claude'])
 def test_every_skill_explicitly_inherits_the_private_reporting_contract(host):
     paths = sorted((ROOT/host/'skills').glob('*/SKILL.md'))
-    assert len(paths) == 23
+    assert len(paths) == 24
     for path in paths:
         text = path.read_text()
         assert '[private workflow reporting](../../../docs/private-reporting.md)' in text
