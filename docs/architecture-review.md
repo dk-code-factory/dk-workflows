@@ -136,7 +136,9 @@ for every unchosen option, including after a user chooses a different approach.
 ## Publication and freshness
 
 Use `architecture.py decision --comparison KEY --selection KEY --body CURRENT_BODY`
-to construct a bounded body edit, then review its exact public text. Use the
+to construct a bounded body edit, then review its exact public text. After an
+author update, add `--impact KEY` to reuse the unchanged accepted selection
+under current nonmaterial impact. Use the
 existing `publish.py` edit-pr journal, never a second publisher or blind retry.
 The helper returns `decision_type:architecture`; decision entries distinguish
 these from scope/behavior decisions. Publish chosen approach, rationale,
@@ -149,25 +151,35 @@ only after current nonmaterial impact bound to that metadata evidence; later
 external edits require assessment again. Reuse journal paths
 for read-only recovery and duplicate prevention.
 
-After a change, prepare `impact` against the retained comparison and current
-sources. Supply `definition.inputs.architecture_current_pr` as a reference to the existing
+After a change, prepare `impact` against the retained comparison and selection
+(or the retained assessment for an architecture skip) and current sources. Assess
+applicability, feasible choices, confidence, estimate sensitivity and any sourced
+user choice; nonmaterial means these remain valid. Supply `definition.inputs.architecture_current_pr` as a reference to the existing
 current PR metadata evidence (including `body` and `headRefOid`); no second body
 snapshot is needed. Only evidence-backed `impact:nonmaterial` permits historical alternatives
-reuse; material or uncertain impact requires refreshed affected analysis. Include
-`impact` as a dependency of new selection/alignment tasks and in gate refs.
-Selection/alignment still use the original immutable comparison reference.
+reuse; material or uncertain impact requires refreshed affected analysis. Keep
+accepted assessment and selection results when impact is nonmaterial; run only
+impact and current alignment. Include `impact` in the new alignment dependencies
+and gate refs. The impact task must reference the retained selection when reusing
+it, or assessment when reusing a skip. New selections after policy or user choice
+changes depend on comparison and impact. All stages use original immutable result
+references, without rebinding unchanged analysis through another invocation.
 Always run current implementation alignment after author changes. Changed scoring
 or review guidance refreshes comparison, including changed prompt contents under
 the same skill identity; historical reuse recaptures that guidance. Changed auto-pick policy refreshes only
 selection. Keep originals, completed siblings, claims, budgets and publication
 recovery references. Treat the workflow's Decisions edit as self-produced only
-when the reconciled journal matches its exact before/after body. External edits
-still require current impact assessment. Use `architecture.py governing-body --body FILE --operation FILE` to recognize
+when reconciled journals match the exact before/after body lineage. Trace successive
+own edits back to the original governing body; stop at an external edit. Ambiguous
+or circular lineage blocks normalization privately. External edits still require
+current impact assessment. Use `architecture.py governing-body --body FILE --operation FILE` to recognize
 that exact self-produced body deterministically. Capture normalized governing context
 without the recognized self-produced subsection; retain the live body as a
 publication input, not a copied analysis snapshot.
 
-The bounded editor recognizes [CommonMark heading and HTML block boundaries](https://spec.commonmark.org/0.31.2/#html-blocks), conservatively treating complete unknown HTML tags and list containers as opaque.
+The bounded editor recognizes [CommonMark heading and HTML block boundaries](https://spec.commonmark.org/0.31.2/#html-blocks), treating block HTML and list containers as opaque. Complete unknown HTML tags
+start blocks only outside an open paragraph; code-starting list items do not
+create lazy paragraph continuations that hide a root heading.
 Read body files without newline translation. Public option descriptions are inline
 prose paragraphs so inserting them cannot absorb a following indented sibling
 into a generated alternatives list; full private comparisons retain formatting.

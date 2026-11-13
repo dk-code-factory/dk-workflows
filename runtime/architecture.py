@@ -23,11 +23,6 @@ PROFILES = {
     'quality': dict(zip(CRITERIA, (25, 30, 20, 10, 5, 10))),
     'minimal_change': dict(zip(CRITERIA, (15, 15, 20, 25, 20, 5))),
 }
-PROFILE_PROMPT = ('Assess new features, existing behavior, tests, CI and maintenance. Choose a built-in '
-                  'scoring profile and explain why its trade-offs fit these circumstances.')
-PICK_PROMPT = ('Assess confidence and sensitivity to LOC and complexity estimates. Accept a clear winner '
-               'only with supported feasibility, adequate score lead and no unresolved material doubts. '
-               'For a sole feasible option substantiate rejection of every alternative.')
 CHECKS = {
     'requirements': 'Account for functional and nonfunctional requirements and mandatory feasibility gates.',
     'alternatives': 'Cover materially distinct reasonable repository-supported approaches, including the PR and smallest viable alternative; explain omissions.',
@@ -45,16 +40,16 @@ CHECKS = {
     'recommendation': 'Support recommendations and rejected alternatives with source evidence.',
 }
 STAGES = ('assessment', 'comparison', 'impact', 'selection', 'alignment', 'verification')
-ALLOWS = {'assessment': (), 'comparison': ('assessment',), 'impact': ('comparison',),
+ALLOWS = {'assessment': (), 'comparison': ('assessment',), 'impact': ('assessment', 'comparison', 'selection'),
           'selection': ('comparison', 'impact'), 'alignment': ('comparison', 'selection', 'impact'),
           'verification': ('alignment',)}
-REQUIRES = {'assessment': (), 'comparison': ('assessment',), 'impact': ('comparison',),
+REQUIRES = {'assessment': (), 'comparison': ('assessment',), 'impact': (),
             'selection': ('comparison',), 'alignment': ('comparison', 'selection'),
             'verification': ('alignment',)}
 GUIDANCE = {
     'assessment': 'Inspect current requirements, complete discussion, Decisions and pinned diff. Require architecture review for material boundaries, interfaces, dependencies, state, concurrency, recovery or operational choices; otherwise explain a simple-change skip with evidence.',
     'comparison': 'Compare reasonable materially distinct approaches using the assigned prompt and mandatory checklist. Return all required solution fields; select a scoring profile when auto. Do not choose, publish or run ordinary reviewers.',
-    'impact': 'Compare retained alternatives analysis with current requirements, solution choices, constraints and relevant evidence. Return material, nonmaterial or uncertain impact with evidence. Only nonmaterial permits reuse; always refresh current alignment. Own Decisions edits require exact reconciled before/after evidence.',
+    'impact': 'Compare retained applicability, alternatives and settled selection with current requirements, solution choices, constraints and relevant evidence. Nonmaterial requires unchanged applicability, feasibility, choice, confidence and estimate sensitivity, including any sourced user choice. Return material, nonmaterial or uncertain impact with evidence. Only nonmaterial permits reuse; always refresh current alignment. Own Decisions edits require exact reconciled before/after evidence.',
     'selection': 'Apply assigned selection policy to accepted comparison. Evaluate confidence and estimate sensitivity. Manual choices require an explicit user source and rationale. Pending choice blocks other reviewers. Do not publish.',
     'alignment': 'Compare current pinned implementation to the selected approach. Return aligned, mismatch or uncertain with evidence. A material mismatch needs substantive required design changes. Do not run ordinary reviewers.',
     'verification': 'Independently challenge the material architecture mismatch against the selected decision and current pinned implementation. Return confirmed, rejected or uncertain with evidence and required design changes. Verify only; no publication or ordinary review.',
@@ -189,7 +184,7 @@ def choose(compared, policy, assessment):
     return winner['id']
 
 
-def validate_report(spec, report):
+def validate_report(spec, report, *, compared=None):
     assigned = spec.get('options', {}).get('architecture')
     if assigned is None or not report.get('complete'):
         return
@@ -204,7 +199,8 @@ def validate_report(spec, report):
         if report.get('impact') not in {'nonmaterial', 'material', 'uncertain'} or not text(report.get('reason')):
             raise ValueError('Impact requires a supported material/nonmaterial/uncertain assessment')
     elif stage == 'selection':
-        compared = read(spec['inputs']['architecture_comparison'])['normalized']
+        if compared is None:
+            compared = read(spec['inputs']['architecture_comparison'])['normalized']
         compared = comparison(compared, assigned['comparison_scoring'])
         selected = choose(compared, config['auto_pick'], report)
         if report.get('choice') != selected:
@@ -263,32 +259,48 @@ def accepted(tasks, key, *, historical=False):
 def _accepted(tasks, key, context, *, historical=False):
     """Validate original evidence and checklist; historical comparisons need impact."""
     from state import capture
-    # Resolve current definitions outside the manifest lock (dependencies also
-    # read this manifest). Historical analysis uses its original captured contract.
-    current_spec = tasks.saved_spec(key)
-    current_capture = capture(current_spec, _context=context['capture'])
-    spec = None if historical else current_spec
-    captured = None if historical else current_capture
+    # Historical checks regenerate guidance without resolving live dependencies.
+    # Impact, rather than another invocation of each old stage, governs changed inputs.
     with tasks.store.locked() as manifest:
-        entry = manifest['entries'][key]
-        saved, problem = tasks.store._load_saved(entry)
-        if problem or saved['status'] != 'complete':
-            raise ValueError('Architecture evidence is incomplete or damaged')
-        if historical:
-            original_components = entry['components']
-            for field in ('task', 'skill', 'instructions', 'native_review', 'instruction_policy'):
-                if current_capture['components'].get(field) != original_components.get(field):
-                    raise ValueError('Architecture review guidance changed; refresh comparison')
-            spec = deepcopy(original_components)
-            captured = {'key': key, 'fingerprint': saved['fingerprint'],
-                        'components': spec, 'cacheable': saved['cacheable']}
-        described = tasks.store.describe(captured, entry)
-        if not described['coverage_complete'] or not described.get('checklist', {}).get('complete'):
-            raise ValueError('Architecture evidence lacks fresh native/checklist coverage')
-        report = deepcopy(saved['normalized'])
-        reference = saved['path']
-        native = json.loads(base64.b64decode(saved['native_execution']['evidence']))
-    validate_report(spec, report)
+        entry = deepcopy(manifest['entries'][key])
+    if historical:
+        descriptor = entry['managed']
+        tasks._retained_policy(descriptor)
+        loaded = skill_config.effective(OWNER, tasks.store.subject['repository'], descriptor.get('upstream'),
+                                        options=descriptor.get('options'))
+        definition = {k: v for k, v in descriptor['definition'].items() if k not in {'checklist', 'required'}}
+        execution = stage_execution(definition, descriptor['stage'], loaded['options'])
+        current_spec = make_spec(**tasks.store.subject, **execution)
+    else:
+        current_spec = tasks.saved_spec(key)
+    current_capture = capture(current_spec, _context=context['capture'])
+    saved, problem = tasks.store._load_saved(entry)
+    if problem or saved['status'] != 'complete':
+        raise ValueError('Architecture evidence is incomplete or damaged')
+    if historical:
+        original_components = entry['components']
+        for field in ('task', 'skill', 'instructions', 'native_review', 'instruction_policy'):
+            if current_capture['components'].get(field) != original_components.get(field):
+                raise ValueError('Architecture review guidance changed; refresh affected analysis')
+        spec = deepcopy(original_components)
+        captured = {'key': key, 'fingerprint': saved['fingerprint'],
+                    'components': spec, 'cacheable': saved['cacheable']}
+    else:
+        spec, captured = current_spec, current_capture
+    described = tasks.store.describe(captured, entry)
+    if not described['coverage_complete'] or not described.get('checklist', {}).get('complete'):
+        raise ValueError('Architecture evidence lacks fresh native/checklist coverage')
+    report = deepcopy(saved['normalized'])
+    reference = saved['path']
+    native = json.loads(base64.b64decode(saved['native_execution']['evidence']))
+    compared = None
+    if historical and spec['options']['architecture']['stage'] == 'selection':
+        from state import resource
+        source = accepted(tasks, spec['options']['architecture']['dependencies']['comparison'], historical=True)
+        if spec['inputs']['architecture_comparison'] != resource(source['reference']):
+            raise ValueError('Architecture selection refers to a changed comparison')
+        compared = source['report']
+    validate_report(spec, report, compared=compared)
     assigned = spec['options']['architecture']
     return {'key': key, 'spec': spec, 'report': report, 'reference': reference, 'native_handle': native['invocation']['handle'], **assigned}
 
@@ -314,7 +326,9 @@ def _stage_spec(tasks, descriptor, definition):
         raise ValueError('Architecture dependencies must reference stage task keys')
     if set(REQUIRES[stage]) - dependencies.keys():
         raise ValueError('Architecture stage is missing prerequisite evidence')
-    retained = {name: accepted(tasks, key, historical=(name == 'comparison' and (stage == 'impact' or 'impact' in dependencies)))
+    if stage == 'impact' and not {'assessment', 'comparison'} & dependencies.keys():
+        raise ValueError('Impact requires retained applicability or comparison')
+    retained = {name: accepted(tasks, key, historical=(name in {'assessment', 'comparison', 'selection'} and (stage == 'impact' or 'impact' in dependencies)))
                 for name, key in dependencies.items()}
     for name, value in retained.items():
         if value['stage'] != name:
@@ -327,6 +341,18 @@ def _stage_spec(tasks, descriptor, definition):
         raise ValueError('Architecture choice remains pending')
     if stage == 'verification' and retained['alignment']['report']['alignment'] != 'mismatch':
         raise ValueError('Only material mismatches require independent verification')
+    execution = stage_execution(definition, stage, loaded['options'])
+    execution.setdefault('inputs', {}).update({'architecture_' + name: value['reference']
+                                               for name, value in retained.items()})
+    execution['options']['architecture']['dependencies'] = dependencies
+    if stage == 'selection':
+        execution['options']['architecture']['comparison_scoring'] = retained['comparison']['policy']['scoring']
+    return make_spec(**tasks.store.subject, **execution)
+
+
+def stage_execution(definition, stage, options):
+    """Construct current guidance independently of retained analysis inputs."""
+    config = options['architecture']
     execution = deepcopy(definition)
     if stage == 'impact':
         source = execution.get('inputs', {}).get('architecture_current_pr')
@@ -361,14 +387,9 @@ def _stage_spec(tasks, descriptor, definition):
     target = skill_config.directory(identity)
     if target:
         resources['architecture_prompt'] = str(target/'SKILL.md')
-    execution.setdefault('inputs', {}).update({'architecture_' + name: value['reference']
-                                               for name, value in retained.items()})
-    execution.setdefault('options', {})['process_limits'] = loaded['options']['limits']
-    execution['options']['architecture'] = {
-        'stage': stage, 'policy': policy, 'dependencies': dependencies,
-        **({'comparison_scoring': retained['comparison']['policy']['scoring']} if stage == 'selection' else {}),
-    }
-    return make_spec(**tasks.store.subject, **execution)
+    execution.setdefault('options', {})['process_limits'] = options['limits']
+    execution['options']['architecture'] = {'stage': stage, 'policy': policy, 'dependencies': {}}
+    return execution
 
 
 def linked(value, name, other):
@@ -414,14 +435,20 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
         return {'outcome': 'disabled', 'release_reviewers': True}
     if not isinstance(refs, dict) or 'assessment' not in refs:
         raise ValueError('Incoming review requires architecture applicability evidence')
-    assessment = accepted(tasks, refs['assessment'])
+    impact = accepted(tasks, refs['impact']) if refs.get('impact') else None
+    assessment = accepted(tasks, refs['assessment'], historical=impact is not None)
     if assessment['spec']['skill']['identity'] != loaded['architecture']['review_skill']:
         raise ValueError('Architecture review skill changed; refresh affected applicability and comparison')
     if assessment['stage'] != 'assessment':
         raise ValueError('Architecture assessment stage required')
+    if impact and impact['report']['impact'] != 'nonmaterial':
+        return {'outcome': 'analysis_required', 'release_reviewers': False}
     if not assessment['report']['required']:
-        return {'outcome': 'skipped', 'release_reviewers': True, 'reason': assessment['report']['reason']}
-    impact = accepted(tasks, refs['impact']) if refs.get('impact') else None
+        if impact:
+            linked(impact, 'assessment', assessment)
+        current = impact or assessment
+        return {'outcome': 'skipped', 'release_reviewers': True, 'reason': assessment['report']['reason'],
+                'current_evidence': current['key'], 'applicability_reference': assessment['reference']}
     compared = accepted(tasks, refs['comparison'], historical=impact is not None)
     if compared['spec']['skill']['identity'] != loaded['architecture']['review_skill']:
         raise ValueError('Architecture review skill changed; refresh affected comparison')
@@ -433,9 +460,10 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
         linked(impact, 'comparison', compared)
         if impact['report']['impact'] != 'nonmaterial':
             return {'outcome': 'analysis_required', 'release_reviewers': False}
-    else:
-        linked(compared, 'assessment', assessment)
-    selection = accepted(tasks, refs['selection'])
+    linked(compared, 'assessment', assessment)
+    selection = accepted(tasks, refs['selection'], historical=impact is not None)
+    if impact and selection['dependencies'].get('impact') != impact['key']:
+        linked(impact, 'selection', selection)
     linked(selection, 'comparison', compared)
     if selection['policy']['auto_pick'] != loaded['architecture']['auto_pick']:
         raise ValueError('Architecture selection policy changed; refresh selection only')
@@ -450,7 +478,7 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
     if impact:
         linked(alignment, 'impact', impact)
     pins = alignment['spec'].get('git', {})
-    for current in (assessment, impact):
+    for current in (impact or assessment,):
         if current is not None and any(current['spec'].get('git', {}).get(k) != pins.get(k) for k in ('head', 'base', 'target')):
             raise ValueError('Architecture live stages must assess the same current Git pins')
     head = pins.get('head')
@@ -516,7 +544,7 @@ HTML_BLOCK_TAGS = (
 ).split()
 
 
-def html_end(line):
+def html_end(line, *, paragraph=False):
     """Return the raw-block terminator, or None for ordinary Markdown."""
     if re.match(r' {0,3}<(?:pre|script|style|textarea)(?:[ \t>]|$)', line, re.I):
         return re.compile(r'</(?:pre|script|style|textarea)>', re.I)
@@ -527,9 +555,8 @@ def html_end(line):
         return re.compile('>')
     if re.match(r' {0,3}</?(?:' + '|'.join(HTML_BLOCK_TAGS) + r')(?:[ \t>]|/>|$)', line, re.I):
         return 'blank'
-    # Unknown complete tags are conservatively kept opaque until a blank line.
-    # This also avoids guessing at attribute grammar in user-supplied HTML.
-    if re.fullmatch(r' {0,3}</?[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[^<>]*)?/?>[ \t]*', line):
+    # CommonMark type 7 cannot interrupt an open paragraph.
+    if not paragraph and re.fullmatch(r' {0,3}</?[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[^<>]*)?/?>[ \t]*', line):
         return 'blank'
     return None
 
@@ -559,7 +586,7 @@ class ListContext:
                 self.paragraph = not bool(re.match(r'(?:#{1,6}(?:[ \t]|$)|>|[-+*] |[0-9]+[.)] |`{3,}|~{3,})', expanded[self.indent:]))
                 self.after_blank = False
                 return self.opaque(line)
-            if item or block or rule or self.after_blank or not self.paragraph or html_end(expanded):
+            if item or block or rule or self.after_blank or not self.paragraph or html_end(expanded, paragraph=self.paragraph):
                 self.indent = None
             else:
                 return self.opaque(line)
@@ -567,7 +594,7 @@ class ListContext:
             spaces = len(item[1])
             self.indent = item.start(1) + (spaces if 1 <= spaces <= 4 else 1)
             content = expanded[item.end():]
-            self.paragraph = bool(content) and not bool(re.match(r'(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|<)', content))
+            self.paragraph = spaces <= 4 and bool(content) and not bool(re.match(r'(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|<)', content))
             self.after_blank = False
             return self.opaque(line)
         return line
@@ -575,7 +602,7 @@ class ListContext:
 
 def heading_view(body):
     """Mask Markdown examples without moving document character offsets."""
-    masked, fence, raw = [], None, None
+    masked, fence, raw, paragraph = [], None, None, False
     lists = ListContext()
     for line in body.splitlines(keepends=True):
         stripped = line.rstrip('\r\n')
@@ -590,17 +617,21 @@ def heading_view(body):
             visible = lists.mask(line)
             if visible != line:
                 masked.append(visible)
+                paragraph = False
                 continue
             opening = re.match(r' {0,3}(`{3,}|~{3,})(.*)$', stripped)
             if opening and (opening[1][0] != '`' or '`' not in opening[2]):
                 fence = (opening[1][0], len(opening[1]))
             else:
-                raw = html_end(stripped)
+                raw = html_end(stripped, paragraph=paragraph)
                 if raw is None:
+                    paragraph = bool(stripped.strip()) and not bool(re.match(
+                        r' {0,3}(?:#{1,6}(?:[ \t]|$)|>|(?:=+|-+)[ \t]*$)| {4}', stripped))
                     masked.append(line)
                     continue
                 if raw != 'blank' and raw.search(stripped):
                     raw = None
+        paragraph = False
         masked.append(''.join(c if c in '\r\n' else ' ' for c in line))
     if fence is not None or raw not in (None, 'blank'):
         raise ValueError('Unclosed Markdown example blocks a bounded Decisions edit')
@@ -709,10 +740,12 @@ def _enforce(spec, tasks, *, options=None, upstream=None):
     if not result['release_reviewers']:
         raise ValueError('Architecture gate blocks ordinary tasks: ' + result['outcome'])
     if result['outcome'] == 'skipped':
-        assessment = accepted(tasks, execution['architecture_evidence']['assessment'])
-        if any(spec.get('git', {}).get(k) != assessment['spec'].get('git', {}).get(k) for k in ('head', 'base', 'target')):
+        current = accepted(tasks, result['current_evidence'])
+        if any(spec.get('git', {}).get(k) != current['spec'].get('git', {}).get(k) for k in ('head', 'base', 'target')):
             raise ValueError('Ordinary review pins differ from architecture applicability')
-        spec['inputs']['architecture_applicability'] = assessment['reference']
+        spec['inputs']['architecture_applicability'] = result['applicability_reference']
+        if current['stage'] == 'impact':
+            spec['inputs']['architecture_impact'] = current['reference']
     if result.get('decision'):
         alignment = accepted(tasks, execution['architecture_evidence']['alignment'])
         for pin in ('head', 'base', 'target'):
@@ -724,23 +757,56 @@ def _enforce(spec, tasks, *, options=None, upstream=None):
 
 
 def governing_body(body, operation, tasks, *, upstream=None):
-    """Remove only our exact reconciled edit from governing discussion context."""
+    """Normalize the exact reconciled lineage, stopping at external text changes."""
     from shared import publication
-    value = publication.load(operation, 'edit-pr')
-    request = value['request']
-    if (value['status'] != 'verified' or not value.get('receipt')
-            or request['target'].lower() != tasks.store.subject['pr'].lower()):
-        raise ValueError('Own Decisions normalization requires a reconciled operation')
-    fields = request['approved']['fields']
-    if set(fields) != {'body'}:
-        raise ValueError('Own Decisions normalization cannot cover unrelated fields')
-    approved = fields['body']
+    from shared.workflow_storage import operations_root
     heading = skill_config.effective('dk-workflows:dk-pr-decisions', tasks.store.subject['repository'], upstream)['options']['section_heading']
-    section = decision_section(approved, heading)
-    bounds = architecture_bounds(approved, section) if section else None
-    if not bounds or replace_decision(request['expected']['body'], approved[bounds[0]:bounds[1]].strip('\n'), heading=heading) != approved:
-        raise ValueError('Own Decisions normalization requires a bounded architecture edit')
-    return request['expected']['body'] if body == approved else body
+
+    def transition(value):
+        request = value['request']
+        if (value['status'] != 'verified' or not value.get('receipt')
+                or request['target'].lower() != tasks.store.subject['pr'].lower()):
+            raise ValueError('Own Decisions normalization requires a reconciled operation')
+        fields = request['approved']['fields']
+        if set(fields) != {'body'}:
+            raise ValueError('Own Decisions normalization cannot cover unrelated fields')
+        approved = fields['body']
+        section = decision_section(approved, heading)
+        bounds = architecture_bounds(approved, section) if section else None
+        if not bounds or replace_decision(request['expected']['body'], approved[bounds[0]:bounds[1]].strip('\r\n'), heading=heading) != approved:
+            raise ValueError('Own Decisions normalization requires a bounded architecture edit')
+        return approved, request['expected']['body']
+
+    approved, before = transition(publication.load(operation, 'edit-pr'))
+    if body != approved:
+        return body
+    # Read existing PR-scoped journals, including the low-level publisher layout.
+    # No lineage database, saved summary or copied body is needed.
+    root = operations_root()
+    paths = set((root/publication.digest(tasks.store.subject['pr'].lower())).glob('*/edit-pr-*.json'))
+    paths.update(root.glob('workflow-*/edit-pr-*.json'))
+    paths.update(Path(operation).parent.glob('edit-pr-*.json'))
+    predecessors = {}
+    for path in paths:
+        value = publication.load(path, 'edit-pr')
+        request = value['request']
+        if (value['status'] != 'verified' or not value.get('receipt')
+                or request['target'].lower() != tasks.store.subject['pr'].lower()
+                or set(request['approved'].get('fields', {})) != {'body'}):
+            continue
+        try:
+            after, prior = transition(value)
+        except ValueError:
+            continue  # An ordinary body edit is an external governing boundary.
+        if after != prior:
+            predecessors.setdefault(after, set()).add(prior)
+    visited = set()
+    while before in predecessors:
+        if before in visited or len(predecessors[before]) != 1:
+            raise ValueError('Ambiguous or circular own Decisions publication lineage')
+        visited.add(before)
+        before = next(iter(predecessors[before]))
+    return before
 
 
 def scoring_handoff(spec):

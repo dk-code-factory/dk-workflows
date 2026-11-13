@@ -32,6 +32,7 @@ def main():
     p = sub.add_parser('decision')
     p.add_argument('--comparison', required=True, help='Accepted comparison task key')
     p.add_argument('--selection', required=True, help='Accepted settled selection task key')
+    p.add_argument('--impact', help='Current nonmaterial impact permitting retained selection reuse')
     p.add_argument('--body', type=Path, required=True)
     args = parser.parse_args()
     tasks = Tasks(args.repository, args.pr, checkout=args.checkout)
@@ -41,12 +42,14 @@ def main():
     elif args.command == 'governing-body':
         result = {'body': architecture.governing_body(body_text(args.body), args.operation, tasks, upstream=args.upstream)}
     else:
-        selected = architecture.accepted(tasks, args.selection)
-        impact_key = selected['dependencies'].get('impact')
+        selected = architecture.accepted(tasks, args.selection, historical=args.impact is not None)
+        impact_key = args.impact or selected['dependencies'].get('impact')
         accepted = architecture.accepted(tasks, args.comparison, historical=impact_key is not None)
         if impact_key:
             impact = architecture.accepted(tasks, impact_key)
             architecture.linked(impact, 'comparison', accepted)
+            if selected['dependencies'].get('impact') != impact_key:
+                architecture.linked(impact, 'selection', selected)
             if impact['report']['impact'] != 'nonmaterial':
                 raise ValueError('Changed architecture analysis requires refresh')
         architecture.linked(selected, 'comparison', accepted)

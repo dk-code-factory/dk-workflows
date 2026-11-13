@@ -598,15 +598,22 @@ and original diff base/head. Selection separately binds scoring/auto-pick policy
 and the comparison reference; changing auto-pick policy repeats selection only.
 After changed live inputs, a native impact task compares the original analysis
 with current evidence. Reuse requires a supported nonmaterial finding and a fresh
-implementation alignment check. Material or uncertain impact reopens affected
+implementation alignment check. Retained applicability and selection are checked
+against current guidance without resolving their old live dependencies; nonmaterial
+impact explicitly covers applicability, feasibility, confidence and the sourced
+choice. It references the reused selection (or assessment for a skip). This avoids
+rerunning those agents solely to rebind current pins. Material or uncertain impact reopens affected
 analysis, retaining original results, completed siblings, claims and budgets.
 Selection, alignment and impact reference exactly the analysis they assess. Every
 normal review handoff includes the settled decision as governing context.
 
 Decision edits use the existing exact-body publication journal, constrained to
 Architecture decisions under the configured Decisions heading. Recognize the
-workflow's own edit only by its reconciled journal's exact before/after body;
-external text edits still require impact assessment. The gate reads the live
+workflow's own edits only by exact reconciled before/after body chains in existing
+PR publication journals. Consecutive own edits normalize to the original governing
+body, avoiding self-invalidating analysis across policy or rationale updates. No
+lineage database is saved. External edits end the chain and still require impact;
+ambiguous or circular histories fail privately rather than guessing. The gate reads the live
 PR head and selected decision subsection before releasing reviewers; a historical
 receipt alone cannot establish that the decision remains published. Unrelated
 body edits require impact bound to the existing current PR metadata source.

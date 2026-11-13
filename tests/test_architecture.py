@@ -331,18 +331,27 @@ def test_changed_author_code_uses_targeted_impact_and_current_alignment(case):
     checkout = Path(spec['git']['checkout']); (checkout/'code').write_text('same architecture; author fix\n')
     git(checkout, 'commit', '-qam', 'Author fix')
     spec = deepcopy(spec); spec['git']['head'] = git(checkout, 'rev-parse', 'HEAD')
-    refs['assessment'] = complete(tasks, spec, 'assessment', {'required': True, 'reason': 'Still state boundaries', 'evidence': ['diff:1']})
-    refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'Only implementation detail changed', 'evidence': ['diff:1']}, {'comparison': refs['comparison']})
-    deps = {k: refs[k] for k in ('comparison', 'impact')}
-    # Selection is unchanged analysis, but rebind to the impact assessment.
-    refs['selection'] = complete(tasks, spec, 'selection', selection(), deps)
+    retained = {name: arch.accepted(tasks, refs[name], historical=True)['reference'] for name in ('assessment', 'comparison', 'selection')}
+    originals = {name: Path(path).read_bytes() for name, path in retained.items()}
+    refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'Applicability, feasible choices and selection confidence unchanged; only implementation detail changed', 'evidence': ['diff:1']}, {k: refs[k] for k in ('comparison', 'selection')})
     decision_operation = refs['decision_operation']
     refs['alignment'] = complete(tasks, spec, 'alignment', {'alignment': 'aligned', 'reason': 'Current code still uses the selected state owner', 'evidence': ['code:1']}, {k: refs[k] for k in ('comparison', 'selection', 'impact')})
     refs['decision_operation'] = decision_operation
     LIVE[PR]['headRefOid'] = spec['git']['head']
     assert arch.gate(tasks, refs)['outcome'] == 'aligned'
     assert Path(reference).read_bytes() == original
-    assert len(read(store.manifest)['entries'][refs['comparison']]['attempts']) == 1
+    for name, path in retained.items():
+        assert Path(path).read_bytes() == originals[name]
+        assert len(read(store.manifest)['entries'][refs[name]]['attempts']) == 1
+    # A new coordinator process can construct the normal reviewer handoff from
+    # just the original stage refs plus current impact/alignment evidence.
+    request = checkout.parent/'ordinary.json'
+    write(request, {'tasks': [ordinary(spec, refs)]})
+    child = ('import architecture, json, sys; from state import read; from tasks import Tasks; '
+             'architecture.live_pr = lambda pr: read(sys.argv[1]); '
+             'print(json.dumps(Tasks(sys.argv[2], sys.argv[3]).prepare(read(sys.argv[4]))))')
+    result = json.loads(subprocess.check_output([sys.executable, '-c', child, str(checkout.parent/'current-pr.json'), REPO, PR, str(request)], text=True, timeout=60))
+    assert result['tasks'][0]['action'] == 'invoke'
 
 
 @pytest.mark.parametrize('impact', ['material', 'uncertain'])
@@ -356,12 +365,12 @@ def test_material_or_uncertain_impact_requires_analysis_refresh(case, impact):
 def test_fixed_profile_does_not_ask_for_automatic_selection_and_override_is_bound(case):
     spec, store = case; tasks = Tasks(REPO, PR)
     assessment = complete(tasks, spec, 'assessment', {'required': True, 'reason': 'Interfaces change', 'evidence': ['diff']})
-    options = {'architecture': {'review_skill': 'team:architect', 'scoring': {'profile': 'minimal_change'}}}
+    options = {'architecture': {'review_skill': 'team:architect', 'scoring': {'profile': 'minimal_change', 'profile_selection_prompt': 'PROFILE SELECTION SENTINEL'}}}
     d = descriptor(spec, 'comparison', {'assessment': assessment}, options)
     d['definition']['skill_identity'] = 'team:architect'
     task = tasks.prepare({'tasks': [d]})['tasks'][0]
     assert task['assignment']['skill']['identity'] == 'team:architect'
-    assert arch.PROFILE_PROMPT not in task['assignment']['task']['instructions']
+    assert options['architecture']['scoring']['profile_selection_prompt'] not in task['assignment']['task']['instructions']
     value = compared(); value['profile'] = 'quality'
     with pytest.raises(ValueError, match='profile differs'):
         finish(tasks, task, value)
@@ -495,18 +504,16 @@ def test_changed_author_recovery_can_draft_new_decision_without_reanalysis(case,
     checkout = Path(spec['git']['checkout']); (checkout/'code').write_text('author implementation fix\n')
     git(checkout, 'commit', '-qam', 'Author update')
     spec = deepcopy(spec); spec['git']['head'] = git(checkout, 'rev-parse', 'HEAD')
-    refs['assessment'] = complete(tasks, spec, 'assessment', {'required': True, 'reason': 'Same state boundary', 'evidence': ['diff']})
-    refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'Only implementation detail', 'evidence': ['diff']}, {'comparison': refs['comparison']})
-    refs['selection'] = complete(tasks, spec, 'selection', selection(reason='Reconfirmed choice after author update'), {k: refs[k] for k in ('comparison', 'impact')})
+    refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'Applicability and choice remain valid; only implementation detail changed', 'evidence': ['diff']}, {k: refs[k] for k in ('comparison', 'selection')})
     body = tmp_path/'body.md'; body.write_text('Summary\n')
     command = [sys.executable, str(ROOT/'scripts/architecture.py'), '--repository', REPO, '--pr', PR,
-               'decision', '--comparison', refs['comparison'], '--selection', refs['selection'], '--body', str(body)]
+               'decision', '--comparison', refs['comparison'], '--selection', refs['selection'], '--impact', refs['impact'], '--body', str(body)]
     result = json.loads(subprocess.check_output(command, text=True, timeout=60))
     assert result['decision_type'] == 'architecture'
-    assert 'Reconfirmed choice after author update' in result['body']
+    assert selection()['reason'] in result['body']
     accepted = arch.accepted(tasks, refs['comparison'], historical=True)
     assert Path(accepted['reference']).read_bytes() == original
-    assert len(read(store.manifest)['entries'][refs['comparison']]['attempts']) == 1
+    assert all(len(read(store.manifest)['entries'][refs[name]]['attempts']) == 1 for name in ('assessment', 'comparison', 'selection'))
 
 
 def test_published_invocation_schema_uses_architecture_options_contract():
@@ -792,3 +799,48 @@ def test_dependency_validation_is_shared_within_each_fresh_boundary(case, monkey
     Path(spec['inputs']['context']).write_text('Requirements changed after the preceding helper command')
     with pytest.raises(ValueError, match='fresh'):
         tasks.prepare({'tasks': [ordinary(spec, refs)]})
+
+
+@pytest.mark.parametrize('paragraph', ['Old architecture\n<span>\n', '-     code example\n'])
+def test_inline_html_and_code_list_do_not_hide_root_siblings(paragraph):
+    sibling = ('### Other decisions\nKeep unrelated.\n\n' if paragraph.startswith('Old') else
+               'Unrelated section\n-----------------\nKeep unrelated.\n\n')
+    body = '## Decisions\n\n### Architecture decisions\n\n' + paragraph + sibling + '## Tests\nKeep tests.\n'
+    updated = arch.replace_decision(body, 'New architecture')
+    assert updated.endswith(sibling + '## Tests\nKeep tests.\n')
+    assert arch.replace_decision(updated, 'New architecture') == updated
+
+
+def test_nonmaterial_impact_reuses_skipped_applicability(case):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = initial(tasks, spec, required=False)
+    checkout = Path(spec['git']['checkout']); (checkout/'code').write_text('another typo\n')
+    git(checkout, 'commit', '-qam', 'Second typo')
+    spec = deepcopy(spec); spec['git']['head'] = git(checkout, 'rev-parse', 'HEAD')
+    refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'Still only typos; no material design choices', 'evidence': ['diff']}, {'assessment': refs['assessment']})
+    assert arch.gate(tasks, refs)['outcome'] == 'skipped'
+    assert tasks.prepare({'tasks': [ordinary(spec, refs)]})['tasks'][0]['action'] == 'invoke'
+    assert len(read(store.manifest)['entries'][refs['assessment']]['attempts']) == 1
+
+
+def test_successive_own_publications_normalize_original_body_in_fresh_process(case, tmp_path):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    before = '# Summary\nOriginal governing context.\n'
+    body = before
+    for index in range(3):
+        updated = arch.replace_decision(body, 'Chosen approach: revision ' + str(index))
+        operation = publication.prepare('edit-pr', PR, {'body': body},
+                    {'kind': 'edit-pr', 'pr': PR, 'head': spec['git']['head'], 'fields': {'body': updated}}, ['fixture-reconcile'])
+        value = read(operation['operation']); value.update(status='verified', receipt={'url': PR}); write(operation['operation'], value)
+        body = updated
+    source = tmp_path/'body.md'; source.write_text(body)
+    command = [sys.executable, str(ROOT/'scripts/architecture.py'), '--repository', REPO, '--pr', PR,
+               'governing-body', '--body', str(source), '--operation', operation['operation']]
+    assert json.loads(subprocess.check_output(command, text=True, timeout=60))['body'] == before
+    assert arch.governing_body(body + 'External edit', operation['operation'], tasks) == body + 'External edit'
+    external = body + 'External edit'
+    updated = arch.replace_decision(external, 'Chosen approach: after external edit')
+    operation = publication.prepare('edit-pr', PR, {'body': external},
+                {'kind': 'edit-pr', 'pr': PR, 'head': spec['git']['head'], 'fields': {'body': updated}}, ['fixture-reconcile'])
+    value = read(operation['operation']); value.update(status='verified', receipt={'url': PR}); write(operation['operation'], value)
+    assert arch.governing_body(updated, operation['operation'], tasks) == external
