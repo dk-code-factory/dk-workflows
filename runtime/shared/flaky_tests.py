@@ -124,12 +124,15 @@ class Registry:
                     seen.add(key)
         self.update(save)
 
-    def synchronize(self, issues, fetch_issue):
-        """Refresh every linked issue directly, then verify against current evidence."""
+    def synchronize(self, issues, fetch_issue, *, targets=None):
+        """Refresh selected linked issues (all when targets is omitted) and verify."""
         check_budget()
         saved = self.load()
-        urls = {e['issue_url'] for e in saved.get('entries', {}).values()}
-        failures = [o for o in saved.get('observations', []) if o.get('outcome') == 'fail']
+        selected = {tuple(identity(t)) for t in targets} if targets is not None else None
+        def relevant(item):
+            return selected is None or tuple(identity(item)) in selected
+        urls = {e['issue_url'] for e in saved.get('entries', {}).values() if relevant(e)}
+        failures = [o for o in saved.get('observations', []) if o.get('outcome') == 'fail' and relevant(o)]
         urls.update(i['html_url'] for i in issues if i.get('html_url') and not i.get('pull_request')
                     and any(issue_match(i, o) for o in failures))
         live = {}
@@ -161,7 +164,7 @@ class Registry:
                 if issue:
                     sources.setdefault(digest(issue), issue)
             observations = data.get('observations', [])
-            failures = {digest(identity(o)): o for o in observations if o.get('outcome') == 'fail'}
+            failures = {digest(identity(o)): o for o in observations if o.get('outcome') == 'fail' and relevant(o)}
             for url, issue in live.items():
                 if not issue:
                     continue
@@ -174,6 +177,8 @@ class Registry:
                     entries[key].update(issue_url=url)
             for entry in entries.values():
                 check_budget()
+                if not relevant(entry):
+                    continue
                 issue = live.get(entry['issue_url'])
                 state = issue.get('state') if issue else 'unavailable'
                 match = issue_match(issue, entry) if issue else None
@@ -187,7 +192,7 @@ class Registry:
                 if not history or any(history[-1].get(k) != v for k, v in event.items()):
                     history.append(event | {'at': checked})
                 entry.update(event, active=active, checked_at=checked)
-            return {'checked_at': checked, 'entries': list(entries.values()),
+            return {'checked_at': checked, 'entries': [e for e in entries.values() if relevant(e)],
                     'unavailable_issues': [url for url, issue in live.items() if issue is None],
                     'issue_errors': errors}
         try:

@@ -123,6 +123,9 @@ class FakeAPI:
         self.calls.append(('issues', limit))
         return [copy.deepcopy(self.issue_data)] if self.issue_data['state'] == 'open' else []
 
+    def find_issues(self, targets, limit):
+        return self.open_issues(limit)
+
     def jobs(self, run_id, attempt):
         self.calls.append(('jobs', run_id, attempt))
         outcome = 'success' if 'PASSED' in self.texts[attempt] else 'failure'
