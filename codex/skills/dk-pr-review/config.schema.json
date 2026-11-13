@@ -157,6 +157,11 @@
             "enabled": false,
             "method": "squash"
           }
+        },
+        "edit_architecture_decisions": {
+          "type": "boolean",
+          "description": "Edit only Architecture decisions entries under the configured Decisions heading.",
+          "default": true
         }
       },
       "additionalProperties": false,
@@ -174,7 +179,8 @@
         "merge_pr": {
           "enabled": false,
           "method": "squash"
-        }
+        },
+        "edit_architecture_decisions": true
       },
       "description": "Actions permitted by saved policy, subject to the actual assignment and narrower current user instructions."
     },
@@ -182,6 +188,103 @@
       "type": "string",
       "minLength": 1,
       "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*\\u0000)[\\s\\S]*$"
+    },
+    "architecture": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "review_skill": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*:[A-Za-z0-9][A-Za-z0-9_.-]*$",
+          "default": "dk-workflows:dk-architecture-review"
+        },
+        "scoring": {
+          "type": "object",
+          "properties": {
+            "profile": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "minimal_change_edge_coverage",
+                "quality",
+                "minimal_change",
+                "custom"
+              ],
+              "default": "auto"
+            },
+            "profile_selection_prompt": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*\\u0000)[\\s\\S]*$",
+              "default": "Assess new features, existing behavior, tests, CI and maintenance. Choose a built-in scoring profile and explain why its trade-offs fit these circumstances."
+            },
+            "custom_prompt": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*\\u0000)[\\s\\S]*$"
+                }
+              ],
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "profile": "auto",
+            "profile_selection_prompt": "Assess new features, existing behavior, tests, CI and maintenance. Choose a built-in scoring profile and explain why its trade-offs fit these circumstances.",
+            "custom_prompt": null
+          }
+        },
+        "auto_pick": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "prompt": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*\\u0000)[\\s\\S]*$",
+              "default": "Assess confidence and sensitivity to LOC and complexity estimates. Accept a clear winner only with supported feasibility, adequate score lead and no unresolved material doubts. For a sole feasible option substantiate rejection of every alternative."
+            },
+            "min_score_gap": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100,
+              "default": 10
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "enabled": true,
+            "prompt": "Assess confidence and sensitivity to LOC and complexity estimates. Accept a clear winner only with supported feasibility, adequate score lead and no unresolved material doubts. For a sole feasible option substantiate rejection of every alternative.",
+            "min_score_gap": 10
+          }
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "enabled": true,
+        "review_skill": "dk-workflows:dk-architecture-review",
+        "scoring": {
+          "profile": "auto",
+          "profile_selection_prompt": "Assess new features, existing behavior, tests, CI and maintenance. Choose a built-in scoring profile and explain why its trade-offs fit these circumstances.",
+          "custom_prompt": null
+        },
+        "auto_pick": {
+          "enabled": true,
+          "prompt": "Assess confidence and sensitivity to LOC and complexity estimates. Accept a clear winner only with supported feasibility, adequate score lead and no unresolved material doubts. For a sole feasible option substantiate rejection of every alternative.",
+          "min_score_gap": 10
+        }
+      }
     }
   },
   "additionalProperties": false

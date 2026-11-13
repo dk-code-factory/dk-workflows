@@ -465,6 +465,25 @@
                   }
                 }
               }
+            },
+            {
+              "if": {
+                "properties": {
+                  "skill": {
+                    "const": "dk-workflows:dk-architecture-review"
+                  }
+                },
+                "required": [
+                  "skill"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "options": {
+                    "$ref": "../codex/skills/dk-architecture-review/config.schema.json"
+                  }
+                }
+              }
             }
           ],
           "type": "object",

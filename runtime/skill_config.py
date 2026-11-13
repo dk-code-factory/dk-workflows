@@ -234,6 +234,10 @@ def effective(skill, repository=None, upstream=None, *, options=None, domain=Tru
     result = merge_options(result, options)
     provenance.update({key: 'invocation' for key in options})
     validate(skill, result)
+    if skill == 'dk-workflows:dk-pr-review':
+        scoring = result['architecture']['scoring']
+        if scoring['profile'] == 'custom' and not invocation.text(scoring['custom_prompt']):
+            raise ValueError('Custom architecture scoring requires custom_prompt')
     if skill == 'dk-workflows:dk-pr-iter':
         seen = set()
         for account in result['personal_accounts']:
@@ -363,9 +367,11 @@ def plan(skill, kind, repository=None, upstream=None, *, options=None, resolved=
     return loaded
 
 
-def calls(skill, repository=None, upstream=None, *, options=None):
+def calls(skill, repository=None, upstream=None, *, options=None, stage=None):
     """Enumerate selected native calls for availability checks, without launching."""
     import invocation
+    if stage not in {None, 'architecture', 'review', 'finalizers'}:
+        raise ValueError('Unknown preflight stage')
     def visit(call, location, ancestors=()):
         call = configured_call(call, repository, upstream)
         identity = call.get('skill')
@@ -376,6 +382,12 @@ def calls(skill, repository=None, upstream=None, *, options=None):
         yield location, call
         nested = (*ancestors, signature)
         keys = ('tasks', 'finalizers', 'reviewers') if identity and directory(identity) else ('reviewers',)
+        if identity == 'dk-workflows:dk-pr-review':
+            if stage in {None, 'architecture'} and settings['architecture']['enabled']:
+                yield from visit({'skill': settings['architecture']['review_skill'], 'required': True},
+                                 location + '/architecture', nested)
+            keys = (() if stage == 'architecture' else ('tasks',) if stage == 'review'
+                    else ('finalizers',) if stage == 'finalizers' else keys)
         for key in keys:
             for group_index, group in enumerate(groups(settings.get(key, []))):
                 for index, child in enumerate(group):
@@ -438,6 +450,9 @@ def make_spec(*, repository, pr, skill, kind, index, definition, upstream=None, 
                             'process_limits': owner['options'].get('limits', {}),
                             'process_permissions': owner['options'].get('permissions', {})}
     spec = task_spec(repository=repository, pr=pr, **execution)
+    if skill == 'dk-workflows:dk-pr-review':
+        from architecture import enforce
+        enforce(spec, repository, pr, options=options, upstream=upstream)
     spec['skill_configuration'] = {'skill': skill, 'kind': kind, 'index': index,
                                    'repository': repository, 'upstream': upstream,
                                    'options': options or {}, 'owner_limits': owner['options'].get('limits', {}),
@@ -461,6 +476,9 @@ def check_selection(spec):
                           selection['upstream'], options=selection['options'])
     call = invocation.normalize(value)
     actual = effective(call['skill'], selection['repository'], selection['upstream'], options=call.get('options', {}))['options'] if 'skill' in call else call.get('options', {})
+    if selection['skill'] == 'dk-workflows:dk-pr-review':
+        from architecture import enforce
+        enforce(spec, selection['repository'], spec['pr'], options=selection['options'], upstream=selection['upstream'])
     if (call != spec['options'].get('invocation') or actual != spec['options'].get('configured')
             or owner['options'].get('limits', {}) != selection['owner_limits']
             or owner['options'].get('permissions', {}) != selection['owner_permissions']):

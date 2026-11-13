@@ -1,8 +1,8 @@
 # dk-workflows
 
-Version 5.2.4. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
+Version 5.4.0. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
 
-Use `dk-workflows:dk-pr-iter` as the universal entry point: it recognizes your accounts and routes your PRs to `dk-workflows:dk-pr-fix` and other authors' PRs to `dk-workflows:dk-pr-review`. Invoke either workflow directly when the intended responsibility is explicit. Fixing runs review/fix cycles followed by [configured finalizers](docs/finalizers.md); the default ending preserves commit cleanup and final CI. Incoming review verifies candidate findings independently before posting; automatic approval and merging each require separate authorization or enabled policy.
+Use `dk-workflows:dk-pr-iter` as the universal entry point: it recognizes your accounts and routes your PRs to `dk-workflows:dk-pr-fix` and other authors' PRs to `dk-workflows:dk-pr-review`. Invoke either workflow directly when the intended responsibility is explicit. Fixing runs review/fix cycles followed by [configured finalizers](docs/finalizers.md); the default ending preserves commit cleanup and final CI. Incoming review first runs the default-enabled [architecture gate](docs/architecture-review.md), settling alternatives and checking implementation alignment before ordinary reviewers. A verified material design mismatch produces an architecture-only rejection. Aligned review verifies candidate findings independently before posting; automatic approval and merging each require separate authorization or enabled policy.
 
 "Check out this PR, run dk-pr-iter, then merge it" authorizes that ordered sequence with default settings. Routing and finalization preserve the merge request for your PR or another author's PR. Merge only after current clean review, verification, successful CI and repository requirements pass. Default automatic-merge settings do not veto an explicit request; PR approval remains separately authorized.
 
@@ -21,6 +21,7 @@ Supporting skills use a subject name for broad ownership and a final action when
 | Skill | Responsibility |
 | --- | --- |
 | `dk-workflows:dk-preferences` | Admit, store, inspect and remove scoped implementation and review preferences. |
+| `dk-workflows:dk-architecture-review` | Examine architecture alternatives for incoming review; prompt-only and replaceable. |
 | `dk-workflows:dk-pr-reviewers-run` | Run configured reviewers and retain their results. |
 | `dk-workflows:dk-pr-feedback-read` | Collect complete PR discussion and feedback. |
 | `dk-workflows:dk-pr-feedback-address` | Verify feedback and implement justified fixes. |

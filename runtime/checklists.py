@@ -31,6 +31,11 @@ def contract(spec, definition):
             {'id': 'dispositions', 'text': 'Account for every assigned finding with a sourced disposition and remaining blockers.'},
             {'id': 'tests', 'text': 'Run relevant tests for the fixes and retain results; finish missing required checks.'},
         ]
+    architecture = spec.get('options', {}).get('architecture')
+    if architecture and architecture['stage'] == 'comparison':
+        from architecture import CHECKS
+        items += [{'id': 'architecture-' + key, 'text': value + ' Explain irrelevance with evidence.'}
+                  for key, value in CHECKS.items()]
     if role == 'finding-verification':
         items.append({'id': 'verification', 'text': 'Challenge every candidate independently and return confirmed, rejected or uncertain with evidence and required locations.'})
     if 'native_review' in spec:

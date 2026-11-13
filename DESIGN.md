@@ -574,3 +574,89 @@ and Git receipts. Native dispatch fixtures check handoff and unavailable-tool
 behavior without model/GitHub calls. They establish neither native adherence nor
 measured token savings. No new native execution or token evidence accompanies this
 change; helper/process counts remain proxies only.
+
+## Incoming architecture gate
+
+Incoming review assesses architecture before every configured task or parallel
+review group. Its replaceable prompt supplies examination guidance only. The
+framework supplies stage assignments, mandatory checklist, weighted arithmetic,
+selection gates and publication/recovery rules. Standalone reviewer execution and
+the independent dk-architecture catalog remain separate.
+
+Use existing managed tasks for assessment, comparison, selection, impact,
+alignment and independent mismatch verification. Retain only their definitions,
+original immutable results, native observations and dependency references in the
+existing PR manifest. There is no architecture database, completion flag or saved
+rendered comparison. Completion is derived from accepted task evidence and the
+existing publication journal. Native tools execute the prompts; helpers never
+launch model sessions. Missing execution/verification evidence blocks dependents.
+An architecture-only rejection is a completed, separately named outcome, with
+ordinary review and approval/merge finalizers unperformed.
+
+Comparison binds the requirements, discussion, constraints, preferences, prompt
+and original diff base/head. Selection separately binds scoring/auto-pick policy
+and the comparison reference; changing auto-pick policy repeats selection only.
+After changed live inputs, a native impact task compares the original analysis
+with current evidence. Reuse requires a supported nonmaterial finding and a fresh
+implementation alignment check. Retained applicability and selection are checked
+against current guidance without resolving their old live dependencies; nonmaterial
+impact explicitly covers applicability, feasibility, confidence and the sourced
+choice. It references the reused selection (or assessment for a skip). This avoids
+rerunning those agents solely to rebind current pins. Material or uncertain impact reopens affected
+analysis, retaining original results, completed siblings, claims and budgets.
+Selection, alignment and impact reference exactly the analysis they assess.
+Replaying impact resolves its original selection input hash through existing
+immutable results and attempt references, rather than depending on the current
+selection claim. That source is historical context, never current coverage. This
+lets selection refresh after policy or user-choice changes without creating a
+claim cycle, copying a contract or repeating impact analysis. The new selection
+remains independently subject to native/checklist acceptance. Missing or damaged
+original sources block recovery. Selection/impact linkage compares exact captured
+result bindings, so another attempt under the same task key cannot upgrade old
+coverage. Every normal review handoff includes the settled
+decision as governing context.
+
+Decision edits use the existing exact-body publication journal, constrained to
+Architecture decisions under the configured Decisions heading. Recognize the
+workflow's own edits only by exact reconciled before/after body chains in existing
+PR publication journals. Consecutive own edits normalize to the original governing
+body, avoiding self-invalidating analysis across policy or rationale updates. No
+lineage database is saved. External edits end the chain and still require impact;
+ambiguous or circular histories fail privately rather than guessing. The gate reads the live
+PR head and selected decision subsection before releasing reviewers; a historical
+receipt alone cannot establish that the decision remains published. Unrelated
+body edits require impact bound to the existing current PR metadata source.
+Code-only head updates preserve the receipt when the selected
+subsection remains exact and current analysis/alignment are accepted. Public text contains design
+reasoning and rejected alternatives, never private comparisons, handles or task
+state. Analysis-only and denied decision permission leave publication incomplete
+and private; disabled architecture bypasses all stages and new writes without
+removing retained evidence. An unavailable ordinary reviewer cannot block the
+separately preflighted architecture stage or its verified rejection.
+
+The expected saving is avoiding repeated alternatives analysis, user selection
+and uncertain-publication reconstruction in later sessions. Consumers read compact
+status then only referenced evidence. Small definitions/references reuse the
+existing accepted-result and publication machinery, so their expected avoided
+native analysis and recovery cost exceeds their capture/validation/loading cost.
+Freshness ends at changed governing inputs, material/uncertain impact, changed
+selection policy or damaged/missing evidence; current authorization, publication
+and CI checks are never cached. Offline reuse/recovery tests establish behavior,
+not API dollar savings. Native API cost telemetry is unavailable for this change.
+
+Architecture dependency validation memoizes accepted tasks and shares Git capture
+only within one read-only validation boundary, across sibling incoming occurrences.
+Managed prepare/resume use separate contexts for assignment construction and live
+capture; each reads the live PR once, rather than once per sibling. Contexts end
+before native execution, publication or the next helper command. Preparation and
+completion keep separate live checks. This replaces recursive repeated reads of the same immutable reports
+and diff without adding durable state. Historical reuse separately recaptures
+review resources, instructions and native contracts: changed guidance refreshes
+comparison even when impact reports that implementation changes are nonmaterial.
+Offline capture counts are process/I/O proxies, not native API dollar evidence.
+
+Markdown boundary scanning advances through nested list prefixes by offset and
+locates the homogeneous thematic-marker suffix once. It avoids quadratic suffix
+rescanning and copying on long descriptions. Offline scan/copy budgets measure
+deterministic work rather than elapsed time or native API dollar savings. This
+adds no persisted parser output, readiness cache or telemetry.

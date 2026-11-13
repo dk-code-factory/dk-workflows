@@ -235,6 +235,14 @@
             }
           },
           "unevaluatedProperties": false
+        },
+        "dk-workflows:dk-architecture-review": {
+          "$ref": "invocation.schema.json#/$defs/settings",
+          "properties": {
+            "options": {
+              "$ref": "../codex/skills/dk-architecture-review/config.schema.json"
+            }
+          }
         }
       }
     },
@@ -345,6 +353,9 @@
                 "additionalProperties": false
               },
               "approve_fork_ci": {
+                "type": "boolean"
+              },
+              "edit_architecture_decisions": {
                 "type": "boolean"
               }
             },

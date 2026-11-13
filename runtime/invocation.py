@@ -145,7 +145,7 @@ def preflight(calls, available, capabilities=None, *, native_reviews=None):
             else:
                 resolved[reference] = candidates[0]
         reviewer = (re.search(r'/(?:options/reviewers/[0-9]+|reviewers/[0-9]+/[0-9]+)$', location)
-                    is not None or location == 'reviewer'
+                    is not None or location == 'reviewer' or location.endswith('/architecture')
                     or (reference or '').split(':')[-1].startswith('code-review'))
         if reviewer or location in native_reviews:
             requirements = native_reviews.get(location)

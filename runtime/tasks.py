@@ -23,10 +23,10 @@ class Tasks:
                 and instruction_sources.binding(checkout, self.store.subject['repository']) is not None):
             raise ValueError('Legacy repository guidance requires a rebuilt assignment and handoff')
 
-    def spec(self, descriptor):
+    def spec(self, descriptor, *, replay=False):
         if (not isinstance(descriptor, dict) or set(descriptor) - {
                 'kind', 'definition', 'run', 'cycle', 'phase', 'index', 'process', 'finalizer', 'upstream',
-                'skill', 'selection', 'options'}):
+                'skill', 'selection', 'options', 'stage', 'dependencies'}):
             raise ValueError('Task requires a definition and optional occurrence selector')
         if not isinstance(descriptor.get('definition'), dict):
             raise ValueError('Task requires an explicit definition')
@@ -43,6 +43,9 @@ class Tasks:
             if set(descriptor) - {'kind', 'definition'}:
                 raise ValueError('Ordinary task identity excludes run and occurrence selectors')
             return make_spec(**self.store.subject, **definition)
+        if kind == 'architecture':
+            from architecture import stage_spec
+            return stage_spec(self, descriptor, definition, replay=replay)
         if kind == 'skill':
             return skill_config.make_spec(**common, skill=descriptor['skill'], kind=descriptor['selection'],
                                           index=descriptor['index'], options=descriptor.get('options'),
@@ -122,10 +125,12 @@ class Tasks:
         selections = {item.get('selection') for item in descriptors} if kinds == {'skill'} else set()
         if len(selections) > 1:
             raise ValueError('Prepare one skill-owned list kind at a time')
-        occurrence = bool(kinds - {'task', 'skill'} or selections == {'finalizers'})
+        occurrence = bool(kinds - {'task', 'skill', 'architecture'} or selections == {'finalizers'})
         if occurrence and any(request.get(key) for key in ('retry', 'ci_repair', 'ci_rerun')):
             raise ValueError('Occurrence tasks do not reserve reviewer or CI retry budgets')
-        specs = [self.spec(item) for item in descriptors]
+        from architecture import evaluation
+        with evaluation(self):
+            specs = [self.spec(item) for item in descriptors]
         for spec, item in zip(specs, descriptors):
             if 'instruction_policy' in spec:
                 item['definition']['instruction_policy'] = deepcopy(spec['instruction_policy'])
@@ -142,7 +147,8 @@ class Tasks:
         options = {key: value for key, value in request.items() if key != 'tasks'}
         if occurrence:
             options.pop('cycle', None)
-        result = self.store.start_batch(specs, retained=retained, checklists=checklists, **options)
+        with evaluation(self):
+            result = self.store.start_batch(specs, retained=retained, checklists=checklists, **options)
         # Read committed bindings, including after a lost-response recovery. They
         # describe expectations only; finish still captures live inputs afresh.
         with self.store.locked() as manifest:
@@ -152,6 +158,11 @@ class Tasks:
                 else:
                     task.pop('assignment', None)
                 task['checklist'] = checklists[task['key']]
+                if task['action'] == 'invoke' and retained[task['key']].get('kind') == 'architecture':
+                    from architecture import scoring_handoff
+                    scores = scoring_handoff(assignments[task['key']])
+                    if scores is not None:
+                        task['architecture_scores'] = scores
                 if task['action'] == 'invoke':
                     entry = manifest['entries'][task['key']]
                     if required(entry['components']):
@@ -170,35 +181,38 @@ class Tasks:
         if 'managed' not in entry:
             raise ValueError('Task has no retained definition')
         self._retained_policy(entry['managed'])
-        return self.spec(entry['managed'])
+        return self.spec(entry['managed'], replay=True)
 
     def resume(self, *, keys=(), run=None, explain=False):
         entries = self._entries()
         if set(keys) - entries.keys():
             raise ValueError('Unknown task key')
         specs, blocked, legacy, contracts = [], [], [], {}
-        for key, entry in entries.items():
-            if keys and key not in keys:
-                continue
-            descriptor = entry.get('managed')
-            if descriptor is None:
-                legacy.append({'key': key, 'task': entry.get('components', {}).get('task', {}).get('id'),
-                               'reason': 'definition_required'})
-                continue
-            occurrence = (descriptor.get('kind', 'task') not in {'task', 'skill'} or
-                          descriptor.get('kind') == 'skill' and descriptor.get('selection') == 'finalizers')
-            if (run is not None and occurrence
-                    and descriptor.get('run') != run):
-                continue
-            try:
-                self._retained_policy(descriptor)
-                spec = self.spec(descriptor)
-                contracts[key] = checklist_contract(spec, descriptor['definition'])
-                specs.append(spec)
-            except (ValueError, KeyError, TypeError, OSError, RuntimeError) as exc:
-                blocked.append({'key': key, 'reusable': False, 'coverage_complete': False,
-                                'reason': 'refresh_required', 'detail': str(exc)})
-        result = self.store.status(specs, compact=True, run=run, explain=explain, tolerate_missing=True)
+        from architecture import evaluation
+        with evaluation(self):
+            for key, entry in entries.items():
+                if keys and key not in keys:
+                    continue
+                descriptor = entry.get('managed')
+                if descriptor is None:
+                    legacy.append({'key': key, 'task': entry.get('components', {}).get('task', {}).get('id'),
+                                   'reason': 'definition_required'})
+                    continue
+                occurrence = (descriptor.get('kind', 'task') not in {'task', 'skill', 'architecture'} or
+                              descriptor.get('kind') == 'skill' and descriptor.get('selection') == 'finalizers')
+                if (run is not None and occurrence
+                        and descriptor.get('run') != run):
+                    continue
+                try:
+                    self._retained_policy(descriptor)
+                    spec = self.spec(descriptor, replay=True)
+                    contracts[key] = checklist_contract(spec, descriptor['definition'])
+                    specs.append(spec)
+                except (ValueError, KeyError, TypeError, OSError, RuntimeError) as exc:
+                    blocked.append({'key': key, 'reusable': False, 'coverage_complete': False,
+                                    'reason': 'refresh_required', 'detail': str(exc)})
+        with evaluation(self):
+            result = self.store.status(specs, compact=True, run=run, explain=explain, tolerate_missing=True)
         result['tasks'] = [self.compact(task) for task in result['tasks']] + blocked
         pins = {digest({**self.store.subject, 'task': spec['task']['id'], 'skill': spec['skill']['identity']}): spec['git']
                 for spec in specs if 'git' in spec}
@@ -232,8 +246,11 @@ class Tasks:
             raise ValueError('Task has no retained definition; prepare it before finishing')
         if not isinstance(report, dict) or type(report.get('complete')) is not bool:
             raise ValueError('Report requires explicit complete boolean')
-        spec = self.spec(entry['managed'])
+        spec = self.spec(entry['managed'], replay=True)
         checklist = checklist_contract(spec, entry['managed']['definition'])
+        if round_id is None:
+            from architecture import validate_report
+            validate_report(spec, report)
         if round_id is not None:
             if status is not None or progress is not None or native_evidence is not None:
                 raise ValueError('Checklist follow-ups retain primary status, progress and native evidence')
