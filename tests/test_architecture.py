@@ -1044,3 +1044,30 @@ def test_underline_without_preceding_paragraph_is_plain_text(text):
     sibling = '### Other decisions\nKeep unrelated.\n\n## Tests\nKeep.\n'
     body = '## Decisions\n\n### Architecture decisions\n\n' + text + '\n<span>\n' + sibling
     assert arch.replace_decision(body, 'Chosen approach: new').endswith(sibling)
+
+
+
+def test_deep_list_prefix_work_and_copying_are_linear(monkeypatch):
+    class Counted(str):
+        copied = 0
+        def __getitem__(self, index):
+            value = super().__getitem__(index)
+            if isinstance(index, slice):
+                type(self).copied += len(value)
+                assert type(self).copied <= 4 * len(line)
+                return type(self)(value)
+            return value
+    line = Counted('- ' * 30000 + 'text')
+    original = arch.THEMATIC_BREAK
+    class BoundedPattern:
+        visited = 0
+        def fullmatch(self, value, start=0):
+            self.visited += len(value) - start
+            assert self.visited <= 4 * len(line)
+            return original.fullmatch(value, start)
+    pattern = BoundedPattern()
+    monkeypatch.setattr(arch, 'THEMATIC_BREAK', pattern)
+    context = arch.ListContext()
+    context.content(line)
+    assert context.paragraph and context.block_indent == 60000
+    assert Counted.copied <= 4 * len(line) and pattern.visited <= 4 * len(line)

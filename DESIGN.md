@@ -654,3 +654,9 @@ and diff without adding durable state. Historical reuse separately recaptures
 review resources, instructions and native contracts: changed guidance refreshes
 comparison even when impact reports that implementation changes are nonmaterial.
 Offline capture counts are process/I/O proxies, not native API dollar evidence.
+
+Markdown boundary scanning advances through nested list prefixes by offset and
+locates the homogeneous thematic-marker suffix once. It avoids quadratic suffix
+rescanning and copying on long descriptions. Offline scan/copy budgets measure
+deterministic work rather than elapsed time or native API dollar savings. This
+adds no persisted parser output, readiness cache or telemetry.

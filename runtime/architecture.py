@@ -599,6 +599,8 @@ HTML_BLOCK_TAGS = (
 
 
 # CommonMark complete tags: angle brackets are allowed in quoted attributes.
+LIST_ITEM = re.compile(r' {0,3}(?:[-+*]|[0-9]{1,9}[.)])([ \t]+|$)')
+ORDERED_ITEM = re.compile(r' {0,3}([0-9]{1,9})[.)]')
 THEMATIC_BREAK = re.compile(r' {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})')
 HTML_NAME = r'[A-Za-z][A-Za-z0-9-]*'
 HTML_VALUE = r'''(?:[^ \t\r\n\f\v"'=<>`]+|"[^"]*"|'[^']*')'''
@@ -639,11 +641,11 @@ class ListContext:
         return ''.join(c if c in '\r\n' else ' ' for c in line)
 
     @staticmethod
-    def item(line, *, paragraph=False):
-        match = re.match(r' {0,3}(?:[-+*]|[0-9]{1,9}[.)])([ \t]+|$)', line)
-        if match is None or THEMATIC_BREAK.fullmatch(line):
+    def item(line, *, paragraph=False, start=0, thematic=True):
+        match = LIST_ITEM.match(line, start)
+        if match is None or thematic and THEMATIC_BREAK.fullmatch(line, start):
             return None
-        ordered = re.match(r' {0,3}([0-9]{1,9})[.)]', line)
+        ordered = ORDERED_ITEM.match(line, start)
         if paragraph and (not line[match.end():].strip() or ordered and int(ordered[1]) != 1):
             return None
         return match
@@ -669,16 +671,29 @@ class ListContext:
             self.paragraph = False
             return
         self.block_indent = 0
-        # Remove nested list prefixes iteratively. Their block content cannot
-        # authorize a lazy paragraph after an HTML/fence/thematic block ends.
-        while (item := self.item(line, paragraph=self.paragraph)) is not None:
+        # Only a homogeneous marker suffix can form a thematic break. Locate it
+        # once, then match nested prefixes by offset without copying suffixes.
+        tail = len(line)
+        while tail and line[tail - 1] in ' \t':
+            tail -= 1
+        if tail and line[tail - 1] in '*_-':
+            marker = line[tail - 1]
+            while tail and (line[tail - 1] == marker or line[tail - 1] in ' \t'):
+                tail -= 1
+        else:
+            tail = len(line)
+        position = 0
+        while (item := self.item(line, paragraph=self.paragraph, start=position,
+                                 thematic=position >= tail)) is not None:
             spaces = len(item[1])
-            self.block_indent += item.start(1) + (spaces if 1 <= spaces <= 4 else 1)
-            line = line[item.end():]
+            self.block_indent += item.start(1) - position + (spaces if 1 <= spaces <= 4 else 1)
+            position = item.end()
             self.paragraph = False
             if spaces > 4:
-                line = '    ' + line
+                line = '    ' + line[position:]
+                position = 0
                 break
+        line = line[position:]
         opening = re.match(r' {0,3}(`{3,}|~{3,})(.*)$', line)
         if opening and (opening[1][0] != '`' or '`' not in opening[2]):
             self.fence = (opening[1][0], len(opening[1]))
