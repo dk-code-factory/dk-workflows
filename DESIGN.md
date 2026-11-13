@@ -461,6 +461,9 @@ checks keep exact selected lexical spellings separate from resolved-target
 exclusions, preserving explicit exclusions and rejection of unsafe source links. Safe
 selected directory aliases therefore retain their exact adoption spelling. These
 corrections add no state and preserve existing content bindings and reuse.
+Directory handoff checks visit each lexical spelling independently and bound link
+cycles by resolved ancestors on that branch. An adopted alias cannot hide an
+unselected canonical source in a sibling input or enclosing resource bundle.
 
 The freshness boundary is the current repository identity, saved choice and
 selected source contents. New sources follow the explicit saved mode and

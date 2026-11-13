@@ -177,9 +177,9 @@ def check_paths(checkout, identity, paths):
     excluded = {path.resolve(): name for path, name in unselected.items() if path.resolve() not in selected}
     if not unselected:
         return
-    pending, visited = [Path(value) for value in paths], set()
+    pending, visited = [(Path(value), frozenset()) for value in paths], set()
     while pending:
-        item = pending.pop()
+        item, ancestors = pending.pop()
         path = item.resolve()
         directory = item.is_dir()
         unselected_name = unselected.get(item.parent.resolve()/item.name)
@@ -188,8 +188,9 @@ def check_paths(checkout, identity, paths):
         found = next((source for source in excluded if source == path or directory and source.is_relative_to(path)), None)
         if found is not None:
             raise ValueError('Excluded repository instruction source in handoff: ' + excluded[found])
-        if item.is_symlink():
-            pending.append(item.parent/item.readlink())
-        if directory and path not in visited:
-            visited.add(path)
-            pending.extend(child for child in item.iterdir() if child.name not in {'.git', '__pycache__', '.pytest_cache'})
+        if item.is_symlink() and not directory:
+            pending.append((item.parent/item.readlink(), ancestors))
+        if directory and path not in ancestors and item.absolute() not in visited:
+            visited.add(item.absolute())
+            pending.extend((child, ancestors | {path}) for child in item.iterdir()
+                           if child.name not in {'.git', '__pycache__', '.pytest_cache'})

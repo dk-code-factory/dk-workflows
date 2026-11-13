@@ -469,6 +469,49 @@ def test_selected_directory_alias_preserves_exact_handoff_adoption(case, tmp_pat
 
 
 @pytest.mark.parametrize('field', ['instructions', 'inputs', 'resources'])
+@pytest.mark.parametrize('mode', ['custom', 'human', 'all'])
+@pytest.mark.parametrize('directory', ['alias', 'chain'])
+@pytest.mark.parametrize('alias_first', [False, True])
+def test_directory_handoffs_check_each_source_spelling(case, field, mode, directory, alias_first):
+    spec, _ = case
+    checkout = Path(spec['git']['checkout'])
+    real, alias = checkout/'real', checkout/'alias'
+    if alias_first:
+        alias.symlink_to(real, target_is_directory=True)
+    real.mkdir()
+    (real/'AGENTS.md').write_text('Instructions selected only through an exact directory alias')
+    if not alias_first:
+        alias.symlink_to(real, target_is_directory=True)
+    if directory == 'chain':
+        (checkout/'chain').symlink_to('alias', target_is_directory=True)
+    save(policy(mode, include=[directory+'/AGENTS.md']))
+    selected = checkout/directory
+    capture(build(spec, **{field: {'selected-directory': str(selected)}}))
+    paths = [real, selected] if alias_first else [selected, real]
+    for values in [{str(index): str(path) for index, path in enumerate(paths)}, {'bundle': str(checkout)}]:
+        bound = build(spec, **{field: values})
+        if mode == 'all':
+            capture(bound)
+        else:
+            with pytest.raises(ValueError, match='Excluded repository instruction.*real/AGENTS.md'):
+                capture(bound)
+
+
+@pytest.mark.parametrize('field', ['instructions', 'inputs', 'resources'])
+def test_directory_handoff_cycles_keep_resource_failure_bounded(case, field):
+    spec, _ = case
+    checkout = Path(spec['git']['checkout'])
+    real = checkout/'real'
+    real.mkdir()
+    (real/'AGENTS.md').write_text('Selected through a directory alias')
+    (real/'loop').symlink_to(real, target_is_directory=True)
+    (checkout/'alias').symlink_to(real, target_is_directory=True)
+    save(policy('custom', include=['alias/AGENTS.md']))
+    with pytest.raises(ValueError, match='Cyclic resource symlink'):
+        capture(build(spec, **{field: {'cyclic-directory': str(checkout/'alias')}}))
+
+
+@pytest.mark.parametrize('field', ['instructions', 'inputs', 'resources'])
 @pytest.mark.parametrize('value', [policy('all'), policy('custom', include=['CLAUDE.md'])])
 def test_unsafe_alias_does_not_exclude_an_independently_selected_source(case, field, value):
     spec, _ = case
