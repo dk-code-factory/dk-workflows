@@ -1,5 +1,6 @@
 """Resolve local repository and fork-parent identities for private settings."""
 import json
+import os
 from pathlib import Path
 import subprocess
 from urllib.parse import urlparse
@@ -20,17 +21,24 @@ def checkout_roots(cwd):
     cwd = Path(cwd).resolve()
     result = subprocess.run(['git', '-C', str(cwd), 'rev-parse', '--path-format=absolute',
                              '--show-toplevel', '--git-common-dir'],
-                            capture_output=True, text=True, timeout=15)
+                            capture_output=True, timeout=15)
+    flags = ['--show-toplevel', '--git-common-dir']
     if result.returncode:
         # A bare repository has no worktree but its metadata is still protected.
         result = subprocess.run(['git', '-C', str(cwd), 'rev-parse',
                                  '--path-format=absolute', '--git-common-dir'],
-                                capture_output=True, text=True, timeout=15)
+                                capture_output=True, timeout=15)
+        flags = ['--git-common-dir']
     if result.returncode:
-        if 'not a git repository' in result.stderr.lower():
+        if b'not a git repository' in result.stderr.lower():
             return []
-        raise RuntimeError(result.stderr.strip() or 'Could not resolve repository storage')
-    return [Path(line).resolve() for line in result.stdout.splitlines()]
+        raise RuntimeError(os.fsdecode(result.stderr).strip() or 'Could not resolve repository storage')
+    rows = result.stdout.removesuffix(b'\n').split(b'\n')
+    if len(rows) != len(flags):
+        # Newlines may belong to a pathname; read each result separately in that case.
+        rows = [subprocess.check_output(['git', '-C', str(cwd), 'rev-parse', '--path-format=absolute', flag],
+                                       stderr=subprocess.PIPE, timeout=15).removesuffix(b'\n') for flag in flags]
+    return [Path(os.fsdecode(row)).resolve() for row in rows]
 
 
 def inside_checkout(path, cwd):

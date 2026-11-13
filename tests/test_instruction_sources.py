@@ -1,5 +1,6 @@
 """Source adoption, retained handoff freshness and request-bound offline recovery."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -96,6 +97,109 @@ def test_raw_git_pathnames_preserve_discovery_and_fresh_process_reuse(case, tmp_
     else:
         assert json.loads(subprocess.check_output(command))['action'] == 'reuse'
         assert store.manifest.read_bytes() == before
+
+
+@pytest.mark.parametrize('selection', ['all', 'include', 'exclude'])
+@pytest.mark.parametrize('interrupted', [False, True])
+def test_raw_source_choice_survives_request_admission_and_recovery(case, monkeypatch, selection, interrupted):
+    spec, _ = case
+    checkout = Path(spec['git']['checkout'])
+    name = os.fsdecode(b'raw-\xff/CLAUDE.md')
+    source = checkout/name
+    source.parent.mkdir()
+    source.write_text('Original selected instructions')
+    value = policy('all') if selection == 'all' else policy('custom', **{selection: [name]})
+    operation = {'domain': 'instruction-sources', 'action': 'set', 'scope': 'repo', 'value': value}
+    store = config_requests.Requests()
+    request_id = store.start('Use the selected source paths.', {'checkout': str(checkout), 'repository': REPO})['id']
+    result = store.prepare(request_id, {'operations': [operation]})
+    store.prepare(request_id, {'operations': [operation], 'assessment': {
+        'fingerprint': result['fingerprint'], 'summary': 'User chose exact filesystem paths.',
+        'reviewed': [], 'relations': [], 'unresolved': []}})
+    command = [sys.executable, str(ROOT/'scripts/config_requests.py')]
+    resume = [*command, 'resume', '--request-id', request_id]
+    before = store._path(request_id).read_bytes()
+    assert json.loads(subprocess.check_output(resume))['admission'] == 'reusable'
+    assert store._path(request_id).read_bytes() == before
+    shown = json.loads(subprocess.check_output([*command, 'show', '--request-id', request_id, '--section', 'operations']))
+    assert shown['operations'] == [operation]
+    source.write_text('Changed instructions')
+    assert json.loads(subprocess.check_output(resume))['admission'] == ('reusable' if selection == 'exclude' else 'stale')
+    source.write_text('Original selected instructions')
+    if interrupted:
+        original = config_requests.atomic_text
+        def lost_response(path, content):
+            original(path, content)
+            if path == sources.policy_path(REPO):
+                raise OSError('Lost raw-source write response')
+        monkeypatch.setattr(config_requests, 'atomic_text', lost_response)
+        with pytest.raises(OSError, match='Lost raw-source'):
+            store.apply(request_id)
+        monkeypatch.setattr(config_requests, 'atomic_text', lambda *_: pytest.fail('Repeated raw-source write'))
+    assert config_requests.Requests().resume(request_id)['admission'] == 'reusable'
+    assert config_requests.Requests().apply(request_id)['status'] == 'applied'
+    assert sources.load(REPO)['policy'] == value
+    assert sources.inspect(checkout, REPO)['sources'] == [
+        {'path': name, 'kind': 'automation', 'selected': selection != 'exclude'}]
+
+
+@pytest.mark.parametrize('suffix', [' ', '\t', '\n', os.fsdecode(b'-\xff')])
+@pytest.mark.parametrize('git_checkout', [False, True])
+@pytest.mark.parametrize('explicit_identity', [False, True])
+def test_source_policy_requests_preserve_checkout_pathnames(tmp_path, suffix, git_checkout, explicit_identity):
+    checkout = tmp_path/('source-repo'+suffix)
+    checkout.mkdir()
+    if git_checkout:
+        subprocess.run(['git', '-C', str(checkout), 'init', '-q'], check=True)
+    files(checkout)
+    assert sources.root(checkout) == checkout
+    context = {'checkout': str(checkout), **({'repository': REPO} if explicit_identity else {})}
+    store = config_requests.Requests()
+    request_id = store.start('Use human contributor guidance.', context)['id']
+    operation = {'domain': 'instruction-sources', 'action': 'set', 'scope': 'repo', 'value': policy()}
+    result = store.prepare(request_id, {'operations': [operation]})
+    store.prepare(request_id, {'operations': [operation], 'assessment': {
+        'fingerprint': result['fingerprint'], 'summary': 'Human sources selected for the exact checkout.',
+        'reviewed': [], 'relations': [], 'unresolved': []}})
+    command = [sys.executable, str(ROOT/'scripts/config_requests.py'), 'resume', '--request-id', request_id]
+    assert json.loads(subprocess.check_output(command))['admission'] == 'reusable'
+    assert config_requests.Requests().apply(request_id)['status'] == 'applied'
+    identity = store.show(request_id, 'context')['context']['repository']
+    source_command = [sys.executable, str(ROOT/'scripts/instruction_sources.py'), '--checkout', str(checkout)]
+    if explicit_identity:
+        source_command.extend(['--repository', identity])
+    output = json.loads(subprocess.check_output([*source_command, 'show']))
+    assert output['policy'] == policy()
+    assert sources.inspect(checkout, identity if explicit_identity else None)['policy'] == policy()
+    assert any(item['path'] == 'AGENTS.md' and not item['selected'] for item in output['sources'])
+    with pytest.raises(ValueError, match='Excluded repository instruction'):
+        sources.check_paths(checkout, identity, [checkout/'AGENTS.md'])
+    before = sources.binding(checkout, identity)
+    assert before['checkout'] == str(checkout)
+    (checkout/'CONTRIBUTING.md').write_text('Changed selected contributor instructions')
+    assert sources.binding(checkout, identity)['fingerprint'] != before['fingerprint']
+
+
+def test_source_path_encoding_preserves_existing_unicode_hashes():
+    value = {'mode': 'custom', 'include': ['docs/\u00e9quipe.md'], 'exclude': []}
+    original = json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
+    assert config_requests.fingerprint(value) == hashlib.sha256(original.encode()).hexdigest()
+    assert config_adapters.encode(value) == json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + '\n'
+    for identity in [REPO, 'remote:'+REPO.upper(), 'path:/tmp/\u00e9quipe']:
+        assert sources.policy_path(identity).name == hashlib.sha256(sources.key(identity).encode()).hexdigest()[:24] + '-instructions.json'
+
+
+def test_raw_and_literal_escape_repository_identities_have_distinct_policy_addresses(tmp_path):
+    raw = tmp_path/os.fsdecode(b'repo-\xff')
+    literal = tmp_path/r'repo-\udcff'
+    identities = ['path:'+str(path) for path in [raw, literal]]
+    paths = [sources.policy_path(identity) for identity in identities]
+    assert paths[0] != paths[1]
+    for root, identity, value in zip([raw, literal], identities, [policy('all'), policy('human')]):
+        root.mkdir()
+        write(sources.policy_path(identity), sources.envelope(identity, value))
+    assert sources.load(identities[0])['policy'] == policy('all')
+    assert sources.load(identities[1])['policy'] == policy('human')
 
 
 @pytest.mark.parametrize('value', [policy(), policy('custom')])
@@ -439,13 +543,17 @@ def test_configuration_admission_reuses_only_selected_unchanged_sources(case, ch
     assert config_requests.Requests().resume(request_id)['admission'] == expected
 
 
-def test_configuration_admission_tracks_ancestor_instructions_across_processes(case):
+@pytest.mark.parametrize('nested_checkout', [False, True])
+def test_configuration_admission_tracks_ancestor_instructions_across_processes(case, nested_checkout):
     spec, _ = case
     checkout = Path(spec['git']['checkout'])
     files(checkout)
     save(policy())
-    ancestor = checkout.parent/'AGENTS.md'
+    ancestor = checkout/'AGENTS.md' if nested_checkout else checkout.parent/'AGENTS.md'
     ancestor.write_text('Host-loaded configuration admission rules.')
+    if nested_checkout:
+        checkout = checkout/'component'
+        checkout.mkdir()
     store = config_requests.Requests()
     request_id = store.start('Use a 42 second CI timeout.', {'checkout': str(checkout), 'repository': REPO})['id']
     operation = {'domain': 'skill', 'action': 'set', 'scope': 'repo', 'skill': 'dk-workflows:dk-ci',

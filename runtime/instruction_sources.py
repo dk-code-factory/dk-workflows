@@ -25,7 +25,7 @@ def key(identity):
 
 
 def policy_path(identity):
-    return location('config')/'repositories'/(hashlib.sha256(key(identity).encode()).hexdigest()[:24] + '-instructions.json')
+    return location('config')/'repositories'/(hashlib.sha256(os.fsencode(key(identity))).hexdigest()[:24] + '-instructions.json')
 
 
 def relative(value):
@@ -69,8 +69,8 @@ def load(identity):
 def root(checkout):
     checkout = Path(checkout).resolve()
     result = subprocess.run(['git', '-C', str(checkout), 'rev-parse', '--show-toplevel'],
-                            capture_output=True, text=True, timeout=15)
-    return Path(result.stdout.strip()).resolve() if result.returncode == 0 else checkout
+                            capture_output=True, timeout=15)
+    return Path(os.fsdecode(result.stdout.removesuffix(b'\n'))).resolve() if result.returncode == 0 else checkout
 
 
 def kind(name):

@@ -130,7 +130,9 @@ def policy_chain(context, domain):
 
 
 def encode(value):
-    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + '\n'
+    rendered = json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False)
+    # Match atomic_text's escaping of filesystem surrogates without changing valid Unicode.
+    return rendered.encode(errors='backslashreplace').decode() + '\n'
 
 
 def project(context, op, raw):
@@ -258,14 +260,15 @@ def input_paths(context, operations):
     for folder in (root/'codex/skills').iterdir():
         paths.update([folder/'config.json', folder/'config.schema.json'])
     paths.update(config.path(key) for key in [None, context.get('upstream'), context['repository']])
-    checkout = instruction_sources.root(context['checkout'])
+    requested_checkout = Path(context['checkout']).resolve()
+    checkout = instruction_sources.root(requested_checkout)
     selection = next((op for op in operations if op['domain'] == 'instruction-sources'), None)
     saved = (instruction_sources.envelope(context['repository'], selection.get('value')) if selection else
              instruction_sources.load(context['repository']))
     paths.add(instruction_sources.policy_path(context['repository']))
     paths.add(root/'runtime/instruction_sources.py')
     paths.add(root/'scripts/instruction_sources.py')
-    paths.update(parent/'AGENTS.md' for parent in checkout.parents)
+    paths.update(parent/'AGENTS.md' for parent in requested_checkout.parents)
     if saved is None:
         paths.add(checkout/'AGENTS.md')
         paths.update(checkout.rglob('AGENTS.md'))

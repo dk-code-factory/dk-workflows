@@ -448,6 +448,11 @@ directory pruning with guidance-specific ignored-path queries. Ignored automatio
 and contributor sources therefore remain subject to the same choice and handoff
 checks without enumerating every ignored dependency file. This adds no stored
 inventory; selected ignored sources share the existing content freshness binding.
+Filesystem decoding also preserves checkout-root whitespace and raw bytes.
+Request JSON escapes only filesystem surrogates, retaining existing valid-Unicode
+hash bytes and private-store readback. Host ancestor freshness follows the original
+requested checkout before normalizing source discovery to the Git root. These
+boundary corrections add no state or cache and retain the same freshness inputs.
 
 The freshness boundary is the current repository identity, saved choice and
 selected source contents. New sources follow the explicit saved mode and
