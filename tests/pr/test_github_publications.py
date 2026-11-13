@@ -347,6 +347,107 @@ def test_same_capture_preserves_original_diagnosis_without_another_preparation(r
     assert reused['request']['approved']['diagnosis'] == diagnosed_retry['diagnosis']
 
 
+@pytest.mark.parametrize('original_state', ['healthy', 'missing', 'corrupt'])
+def test_fresh_process_recovers_equivalent_recollected_evidence(remote, diagnosed_retry, tmp_path,
+                                                               original_state):
+    import copy
+    import json
+    import os
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+    from shared.ci_retry import capture, requests
+    from shared.flaky_actions import collect_snapshot
+    from shared.flaky_tests import Registry
+
+    source = json.loads(Path(diagnosed_retry['diagnosis']['source_file']).read_text())
+    logs = Path(diagnosed_retry['diagnosis']['archive_file']).read_bytes()
+    remote.state['run'].update(path='.github/workflows/ci.yml', actor={'id': 1, 'login': 'author',
+                                                                  'avatar_url': 'old'})
+    jobs = source['jobs']
+    for job in jobs:
+        job.update(run_id=77, head_sha=fixture.HEAD, run_attempt=1,
+                   html_url=remote.state['checks'][0]['link'])
+        job['steps'][0]['number'] = 1
+
+    def read(path, binary=False):
+        if path == 'actions/runs/77/attempts/1':
+            return copy.deepcopy(remote.state['run'])
+        if path == 'actions/runs/77/attempts/1/logs':
+            return logs
+        return remote.api(fixture.PR, 'repos/owner/repo/' + path)
+
+    api = SimpleNamespace(repo='github.com/owner/repo', request=read,
+                          jobs=lambda run_id, attempt: copy.deepcopy(jobs))
+    registry = Registry(api.repo)
+    snapshot = {'head': fixture.HEAD, 'result': 'failure', 'checks': remote.state['checks']}
+
+    def recollect():
+        evidence = collect_snapshot(api, registry, snapshot)
+        handoff = capture(api, fixture.PR, fixture.HEAD,
+                          snapshot | {'evidence_file': evidence['evidence_file']}, snapshot)
+        report = {'capture': handoff['capture'], 'runs': [{'run_id': 77, 'attempt': 1,
+                  'jobs': diagnosed_retry['diagnosis']['jobs']}]}
+        return requests(handoff, report)['requests'][0]
+
+    original_request = recollect()
+    operation = publisher.prepare(original_request)['operation']
+    original_source = Path(original_request['diagnosis']['source_file'])
+    if original_state == 'missing':
+        original_source.unlink()
+    elif original_state == 'corrupt':
+        original_source.write_text('{}')
+    if original_state != 'healthy':
+        with pytest.raises(Diagnostic):
+            publisher.publish(operation)
+        assert remote.state['writes'] == {}
+    original = publication.load(operation)
+    remote.state['run']['actor']['avatar_url'] = 'new'
+    replacement = recollect()
+    assert replacement['diagnosis']['capture'] == original_request['diagnosis']['capture']
+    assert replacement['diagnosis']['source_file'] != str(original_source)
+    state = tmp_path/'remote.json'
+    state.write_text(json.dumps(remote.state))
+    request = tmp_path/'request.json'
+    request.write_text(json.dumps(replacement))
+    script = '''
+import importlib.util, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    value = importlib.util.module_from_spec(spec); spec.loader.exec_module(value)
+    return value
+publisher = load('fresh_publisher', root/'scripts/publish.py')
+fixture = load('fresh_fixture', root/'tests/pr/fixtures/github_remote.py')
+from shared import publication
+remote = fixture.Remote(json.loads(Path(sys.argv[2]).read_text()))
+for key in ('metadata', 'api', 'run'): setattr(publisher, key, getattr(remote, key))
+request = json.loads(Path(sys.argv[3]).read_text())
+operation, damaged = sys.argv[4], sys.argv[5] != 'healthy'
+original = publication.load(operation)
+prepared = publisher.prepare(request)
+assert prepared['operation'] == operation
+assert len(prepared.get('preparations', [])) == int(damaged)
+if damaged:
+    assert publication.load(prepared['preparations'][0]) == original
+    assert prepared['request']['approved']['diagnosis'] == request['diagnosis']
+else:
+    assert publication.load(operation) == original
+before = Path(operation).read_bytes()
+assert publisher.prepare(request)['operation'] == operation
+assert Path(operation).read_bytes() == before
+assert publisher.publish(operation)['status'] == 'verified'
+assert remote.state['writes'] == {'ci-rerun': 1}
+'''
+    result = subprocess.run([sys.executable, '-c', script, str(ROOT), str(state), str(request),
+        operation, original_state], env={**os.environ, 'PYTHONPATH': str(ROOT/'runtime')},
+        text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    if original_state != 'healthy':
+        assert publication.load(publication.load(operation)['preparations'][0]) == original
+
+
 def test_refreshed_diagnosis_reuses_prepared_operation_and_retains_original(remote, diagnosed_retry, tmp_path):
     from types import SimpleNamespace
     from shared.ci_retry import capture, requests

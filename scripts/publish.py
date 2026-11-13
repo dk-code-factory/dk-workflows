@@ -291,9 +291,20 @@ def prepare(request, *, upstream=None, options=None):
                     refreshed['automatic_limit'] = min(request['automatic_limit'], approved.get('automatic_limit', 3))
                     if request.get('user_retry') and not approved.get('user_retry'):
                         refreshed['user_retry'] = request['user_retry']
-                    if (request.get('diagnosis') and request['diagnosis'].get('capture')
-                            != approved.get('diagnosis', {}).get('capture')):
-                        refreshed['diagnosis'] = request['diagnosis']
+                    if request.get('diagnosis'):
+                        previous = approved.get('diagnosis', {})
+                        diagnosis = request['diagnosis']
+                        replace = diagnosis.get('capture') != previous.get('capture')
+                        if not replace and any(diagnosis.get(key) != previous.get(key)
+                                               for key in ('source_file', 'archive_file')):
+                            from shared.ci_retry import retained as retained_evidence
+                            try:
+                                retained_evidence(previous['source_file'])
+                                retained_evidence(previous['archive_file'], binary=True)
+                            except (OSError, ValueError, KeyError, TypeError):
+                                replace = True
+                        if replace:
+                            refreshed['diagnosis'] = diagnosis
                     expected = handler(refreshed).prepare()
                     publication.refresh_prepared(path, 'ci-rerun', expected, refreshed)
             records = [(path, publication.load(path)) for path, _ in records]

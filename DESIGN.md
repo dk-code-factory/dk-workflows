@@ -245,6 +245,14 @@ reconstructing a replacement after a title or body edit, without another state
 field or store. Head, attempt and diagnosis freshness still gate dispatch;
 pending sends retain their original expectations for reconciliation.
 
+Equivalent recollection can replace missing or corrupt evidence references on an
+unsent retry without changing its semantic capture. Keep healthy original
+references and diagnosis unchanged; retain replaced evidence in the existing
+preparation history. This adds no state fields or stores and avoids reconstructing
+a replacement operation after evidence loss in a fresh session. Current inputs
+and replacement evidence still require dispatch validation, and pending operations
+only reconcile.
+
 
 Confirmed push rejection reuses the existing operation's `not_applied` state.
 The push publisher validates only the original send failure: positive nonzero

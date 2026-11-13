@@ -57,6 +57,10 @@ also preserves diagnosis. Original source/evidence JSON references remain intact
 fingerprints use normalized source contents, jobs and log archives rather than
 the changed JSON reference paths. Changed repository/user identities, jobs, logs,
 revisions and checks still require fresh diagnosis.
+When an unsent operation's original evidence is missing or corrupt, preparing
+again can replace its references with validated equivalent recollection even
+when the semantic capture is unchanged. Healthy original evidence remains in use;
+replaced references and diagnosis remain in existing preparation history.
 Existing diagnosis evidence and preparation history remain retained when changed
 governing inputs require a fresh diagnosis in the same operation.
 
