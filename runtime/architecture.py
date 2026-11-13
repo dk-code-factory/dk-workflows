@@ -193,6 +193,8 @@ def validate_report(spec, report, *, compared=None):
     if stage == 'assessment':
         if type(report.get('required')) is not bool or not text(report.get('reason')):
             raise ValueError('Applicability requires boolean required and an evidence-backed reason')
+        if spec['inputs'].get('architecture_request') and not report['required']:
+            raise ValueError('Explicit architecture review requires comparison; it cannot skip applicability')
     elif stage == 'comparison':
         comparison(report, config['scoring'])
     elif stage == 'impact':
@@ -340,6 +342,12 @@ def _stage_spec(tasks, descriptor, definition, *, replay=False):
             raise ValueError('Architecture dependency stage mismatch')
     if stage == 'comparison' and retained['assessment']['report']['required'] is not True:
         raise ValueError('Skipped applicability cannot start comparison')
+    if stage == 'comparison':
+        request = retained['assessment']['spec']['inputs'].get('architecture_request')
+        if request:
+            definition = deepcopy(definition)
+            definition.setdefault('inputs', {})['architecture_request'] = request
+            descriptor['definition'].setdefault('inputs', {})['architecture_request'] = request
     if 'impact' in retained and retained['impact']['report']['impact'] != 'nonmaterial':
         raise ValueError('Material or uncertain impact requires refreshed architecture analysis')
     if stage == 'alignment' and 'impact' in retained:
@@ -411,6 +419,16 @@ def stage_execution(definition, stage, options):
             execution['assigned_instructions'] += '\n' + config['scoring']['custom_prompt']
     else:
         execution['assigned_instructions'] = GUIDANCE[stage]
+    request = execution.get('inputs', {}).get('architecture_request')
+    if request:
+        original = read(request)
+        if (not isinstance(original, dict)
+                or any(not text(original.get(key)) for key in ('id', 'source', 'instruction'))):
+            raise ValueError('Architecture request requires its stable id, original source and exact instruction')
+        execution['assigned_instructions'] += (
+            '\nAn explicit manual architecture review was requested. Read architecture_request. '
+            'Require comparison even for a simple change; assess alternatives afresh for this request. '
+            'Resume completed stages of the same request rather than repeating them.')
     if stage == 'selection':
         execution['assigned_instructions'] += '\n' + config['auto_pick']['prompt']
     assigned = definition.get('assigned_instructions')

@@ -7,6 +7,49 @@ independent dk-architecture catalog is separate. Resolve the owner's
 skill-owned configuration. Disabling architecture bypasses assessment, execution,
 selection and new architecture publications; keep existing evidence.
 
+## Manual architecture review
+
+Invoke `dk-workflows:dk-pr-review-architect` with a PR URL to run only this
+architecture process and record its results, even after a prior completed review.
+For example: `Use dk-workflows:dk-pr-review-architect on https://HOST/OWNER/REPO/pull/N`.
+Use `dk-pr-review`'s current reviewer, rubric, selection policy, retained limits
+and publication permissions. Pass invocation-local `architecture.enabled:true`
+through preflight, every managed stage and publication/gate checks. This enables
+the requested manual review even when the automatic gate is disabled; it changes
+no saved configuration. Preflight only the architecture stage, never ordinary
+reviewers or finalizers. Collect complete original PR evidence and scoped review
+preferences before preparing analysis.
+
+Each new explicit invocation requests fresh assessment and comparison. Reference
+the original request artifact in assessment `definition.inputs.architecture_request`.
+It is a JSON object containing nonempty `id`, `source` and `instruction`: a stable
+identity for the actual user message, its source reference and exact instruction.
+Reuse an existing original input artifact when available; otherwise retain only
+that request excerpt in the existing private input area. A repeated instruction
+from a distinct user message has a different source identity. Never manufacture a
+new identity for automatic recovery or replace the old artifact in place.
+
+The helper binds this input to assessment and propagates it into comparison,
+constructs the manual assignment and rejects a simple-change applicability skip.
+Changed request content refreshes those stages under the same existing task keys;
+dependent selection and alignment bind the new immutable source results. Preserve
+the retained run and budgets; a new request is not a counter reset. Use a new
+cycle when governing inputs change and existing bounded continuation rules if
+the allowance is exhausted. No `invalidate`, cache deletion or new review store
+is needed. An interruption retains the request reference: start with compact
+`resume`, reconcile claims, reuse completed stages and finish outstanding stages
+through the normal managed lifecycle. Governing PR or policy changes still
+refresh affected work under this contract.
+
+Complete comparison, selection, bounded decision publication and current
+alignment, including independent mismatch verification when needed. Use the same
+publication journal and gate validation below. Stop after architecture: an aligned
+manual result completes only this assignment, without executing incoming-review
+tasks or finalizers. A verified rejection remains architecture-only. Analysis-only
+instructions preserve private results but cannot claim public decision publication
+or a reconciled gate. Report pending selection, unavailable execution, permission
+failures and uncertain publication privately; never claim ordinary review passed.
+
 After inspection, preflight only `--stage architecture` with `config.py
 skill-preflight`. Resolve the installed review prompt's native contract and host
 capabilities before claims. Do not preflight normal reviewers until alignment
