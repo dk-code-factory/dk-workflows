@@ -194,6 +194,38 @@ def test_directory_alias_cannot_adopt_an_explicitly_excluded_source(case):
 
 
 @pytest.mark.parametrize('field', ['instructions', 'inputs', 'resources'])
+@pytest.mark.parametrize('value', [policy('all'), policy('custom', include=['CLAUDE.md'])])
+def test_unsafe_alias_does_not_exclude_an_independently_selected_source(case, field, value):
+    spec, _ = case
+    checkout = Path(spec['git']['checkout'])
+    source = checkout/'CLAUDE.md'
+    source.write_text('Selected repository instructions')
+    alias = checkout/'AGENTS.md'
+    alias.symlink_to(source)
+    save(value)
+    assert sources.read_source(checkout, 'CLAUDE.md', identity=REPO)['adopted']
+    bound = build(spec, **{field: {'selected-guidance': str(source)}})
+    capture(bound)
+    nested = checkout/'nested'
+    nested.mkdir()
+    selected_alias = nested/'selected.md'
+    selected_alias.symlink_to(source)
+    capture(build(spec, **{field: {'selected-alias': str(selected_alias)}}))
+    unsafe_alias = nested/'unsafe.md'
+    unsafe_alias.symlink_to(alias)
+    for path in [alias, nested/'../AGENTS.md', unsafe_alias, checkout]:
+        with pytest.raises(ValueError, match='Excluded repository instruction.*AGENTS.md'):
+            capture(build(spec, **{field: {'unsafe-guidance': str(path)}}))
+    with pytest.raises(ValueError, match='missing or unsafe'):
+        sources.read_source(checkout, 'AGENTS.md', identity=REPO)
+    save(policy('all', exclude=['AGENTS.md']))
+    with pytest.raises(ValueError, match='not adopted'):
+        sources.read_source(checkout, 'CLAUDE.md', identity=REPO)
+    with pytest.raises(ValueError, match='Excluded repository instruction'):
+        capture(build(spec, **{field: {'excluded-guidance': str(source)}}))
+
+
+@pytest.mark.parametrize('field', ['instructions', 'inputs', 'resources'])
 def test_nested_resource_links_cannot_reintroduce_excluded_sources(case, tmp_path, field):
     spec, _ = case
     checkout = Path(spec['git']['checkout'])

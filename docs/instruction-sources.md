@@ -18,7 +18,7 @@ A value has `mode`, `include` and `exclude` fields, for example:
 
 `human` selects discovered human-facing sources, `all` selects all discovered sources, and `custom` selects only exact included paths. Explicit includes add files; excludes override mode-based selection. The include and exclude lists must be disjoint. Paths are repository-relative references, not shell commands or globs. New discovered sources follow the saved mode and exclusions; a custom selection does not adopt newly discovered files automatically. The choice is specific to the current repository, without user or upstream inheritance. Read the current inventory when resuming; do not ask the same initialization question again while a valid saved choice exists.
 
-Exclusions also apply to resolved aliases of the same source. Unsafe instruction symlinks remain unselected inventory entries so governing handoffs cannot reintroduce them; ordinary and discovery reads reject those links. Handoff validation covers resources, instructions and inputs, including directory references containing excluded sources.
+Exclusions also apply to resolved aliases of the same source. Unsafe instruction symlinks remain unselected inventory entries so governing handoffs cannot reintroduce them; ordinary and discovery reads reject those links. An unsafe alias does not exclude its independently selected regular target unless the policy explicitly excludes that source or an alias. Handoff validation covers resources, instructions and inputs, including directory references containing excluded sources.
 
 ## Read, change and reset
 

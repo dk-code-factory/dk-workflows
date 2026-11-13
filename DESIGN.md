@@ -458,7 +458,9 @@ uninitialized captures retain compatibility with existing fingerprints; native
 workflow initialization still requires the source question before source loading.
 Source checks cover governing resources as well as instructions and inputs.
 Explicit custom exclusions and unsafe source links remain visible to admission;
-resolved aliases cannot override an exclusion. Tasks without Git pins use the
+resolved aliases cannot override an exclusion. Unsafe aliases remain rejected
+when their regular target is independently selected; the alias does not exclude
+that adopted target without an explicit exclusion. Tasks without Git pins use the
 caller's repository checkout for their existing binding, then retain that binding
 for later sessions. Configuration admission also captures the source-selection
 contract and preserves ancestor `AGENTS.md` freshness checks independently of
