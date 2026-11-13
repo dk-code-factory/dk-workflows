@@ -195,6 +195,15 @@ base, checks, attempts or missing/corrupt evidence require affected diagnosis
 again. Native agents assess semantic unrelatedness against the actual diff;
 log strings alone do not establish that boundary.
 
+Diagnosis fingerprints and their live start/end comparisons use head/base SHAs,
+refs and repository identities, excluding repository activity counts, timestamps
+and profile metadata. Unrelated repository activity therefore preserves valid
+analysis across sessions; changed revision identities still refresh diagnosis.
+This adds no durable state and avoids repeated native diagnosis for unchanged
+PR changes and failure evidence. Existing original captures and preparations
+remain retained; changed governing helper inputs require affected diagnosis to
+be refreshed in the same intent. Native savings remain unmeasured.
+
 Each retained diagnosis uses the existing capture field for its workflow's input
 fingerprint. Dispatch recaptures the PR changes and that workflow's checks and
 validates the original source/archive references before an unsent retry. A sibling

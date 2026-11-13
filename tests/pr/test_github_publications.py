@@ -424,13 +424,18 @@ def test_independent_workflow_retry_preserves_sibling_diagnosis(remote, diagnose
 
 
 @pytest.mark.parametrize('metadata_refresh', [False, True])
-def test_fresh_process_reuses_unchanged_prepared_diagnosis(remote, diagnosed_retry, tmp_path, metadata_refresh):
+@pytest.mark.parametrize('repository_activity', [False, True])
+def test_fresh_process_reuses_unchanged_prepared_diagnosis(remote, diagnosed_retry, tmp_path,
+                                                        metadata_refresh, repository_activity):
     import json
     import os
     import subprocess
     import sys
 
     operation = publisher.prepare(diagnosed_retry)['operation']
+    if repository_activity:
+        remote.state['pull']['base']['repo'] = {'stargazers_count': 3, 'open_issues_count': 8,
+            'updated_at': '2026-11-14T00:00:00Z', 'pushed_at': '2026-11-14T00:00:00Z'}
     if metadata_refresh:
         remote.state['metadata']['title'] += ' updated'
         assert publisher.prepare(diagnosed_retry)['operation'] == operation

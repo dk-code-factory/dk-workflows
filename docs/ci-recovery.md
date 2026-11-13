@@ -48,6 +48,10 @@ workflow checks and retained source/log evidence. Changed inputs require a fresh
 diagnosis in the same prepared operation. Retrying an independent workflow does
 not invalidate an unchanged sibling diagnosis. Ambiguous job log directories
 remain blocked because citations cannot identify their failed job uniquely.
+Head/base SHAs, branch refs and repository identities govern diagnosis freshness;
+unrelated repository stars, issue counts, timestamps or profile metadata do not.
+Existing diagnosis evidence and preparation history remain retained when changed
+governing inputs require a fresh diagnosis in the same operation.
 
 Publish each operation through `scripts/publish.py publish --operation FILE`.
 The failed-job endpoint reruns only failed jobs and required dependencies,

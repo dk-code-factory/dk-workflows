@@ -6,7 +6,7 @@ from pathlib import Path
 import zipfile
 
 import pytest
-from shared.ci_retry import capture, requests
+from shared.ci_retry import capture, requests, validate
 from shared.flaky_actions import evidence_file
 
 HEAD = 'a' * 40
@@ -17,7 +17,9 @@ class API:
     repo = 'github.com/owner/repo'
 
     def __init__(self):
-        self.pull = {'head': {'sha': HEAD}, 'base': {'sha': 'b' * 40}, 'changed_files': 1}
+        self.pull = {'head': {'sha': HEAD, 'ref': 'feature', 'repo': {'id': 2, 'full_name': 'fork/repo'}},
+                     'base': {'sha': 'b' * 40, 'ref': 'main', 'repo': {'id': 1, 'full_name': 'owner/repo'}},
+                     'changed_files': 1}
         self.files = [{'filename': 'app.py', 'status': 'modified', 'patch': '@@ -1 +1 @@\n-old\n+new'}]
         self.runs = {run_id: {'id': run_id, 'head_sha': HEAD, 'run_attempt': 1,
             'status': 'completed', 'conclusion': 'failure', 'path': f'.github/workflows/{run_id}.yml'}
@@ -89,6 +91,85 @@ def test_fresh_session_unchanged_capture_reuses_native_diagnosis(context):
     fresh = capture(API(), PR, HEAD, json.loads(json.dumps(decision)), json.loads(json.dumps(snapshot)))
     assert fresh['capture'] == handoff['capture']
     assert requests(fresh, restored) == requests(handoff, diagnosis)
+
+
+@pytest.mark.parametrize('reference', ['head', 'base'])
+def test_unrelated_repository_metadata_preserves_diagnosis(context, reference):
+    api, decision, snapshot, handoff, diagnosis = context
+    api.pull[reference]['repo'].update(stargazers_count=3, open_issues_count=8,
+        updated_at='2026-11-14T00:00:00Z', pushed_at='2026-11-14T00:00:00Z',
+        owner={'login': 'owner', 'avatar_url': 'https://example.test/new-avatar'})
+    fresh = API()
+    fresh.pull = json.loads(json.dumps(api.pull))
+    current = capture(fresh, PR, HEAD, decision, snapshot)
+    assert current['capture'] == handoff['capture']
+    assert current['runs'] == handoff['runs']
+    for request in requests(current, json.loads(json.dumps(diagnosis)))['requests']:
+        validate(request, fresh, snapshot)
+
+
+@pytest.mark.parametrize('reference', ['head', 'base'])
+def test_repository_activity_during_live_reads_preserves_diagnosis(context, monkeypatch, reference):
+    api, decision, snapshot, handoff, diagnosis = context
+    original = api.request
+
+    def active_repository(path):
+        result = original(path)
+        if path == 'pulls/7':
+            repo = api.pull[reference]['repo']
+            repo['stargazers_count'] = repo.get('stargazers_count', 0) + 1
+        return result
+
+    monkeypatch.setattr(api, 'request', active_repository)
+    current = capture(api, PR, HEAD, decision, snapshot)
+    assert current['capture'] == handoff['capture']
+    for request in requests(current, diagnosis)['requests']:
+        validate(request, api, snapshot)
+
+
+@pytest.mark.parametrize('reference', ['head', 'base'])
+@pytest.mark.parametrize('field', ['ref', 'repo_id', 'repo_name'])
+def test_reference_identity_changes_invalidate_diagnosis(context, reference, field):
+    api, decision, snapshot, _, diagnosis = context
+    value = api.pull[reference]
+    if field == 'ref':
+        value['ref'] = 'other-branch'
+    elif field == 'repo_id':
+        value['repo']['id'] += 10
+    else:
+        value['repo']['full_name'] = 'other/repo'
+    current = capture(api, PR, HEAD, decision, snapshot)
+    with pytest.raises(ValueError, match='inputs changed'):
+        requests(current, diagnosis)
+
+
+@pytest.mark.parametrize('phase', ['capture', 'validate'])
+@pytest.mark.parametrize('reference', ['head', 'base'])
+@pytest.mark.parametrize('field', ['sha', 'ref', 'repo_id', 'repo_name'])
+def test_revision_changes_during_live_reads_block_diagnosis(context, monkeypatch, phase, reference, field):
+    api, decision, snapshot, handoff, diagnosis = context
+    original = api.request
+
+    def moved_revision(path):
+        result = original(path)
+        if path == 'pulls/7':
+            value = api.pull[reference]
+            if field == 'sha':
+                value['sha'] = 'c' * 40
+            elif field == 'ref':
+                value['ref'] = 'other-branch'
+            elif field == 'repo_id':
+                value['repo']['id'] += 10
+            else:
+                value['repo']['full_name'] = 'other/repo'
+        return result
+
+    monkeypatch.setattr(api, 'request', moved_revision)
+    with pytest.raises(ValueError, match='moved during'):
+        if phase == 'capture':
+            capture(api, PR, HEAD, decision, snapshot)
+        else:
+            validate(requests(handoff, diagnosis)['requests'][0], api, snapshot)
 
 
 @pytest.mark.parametrize('change', ['diff', 'base', 'attempt', 'head', 'checks'])

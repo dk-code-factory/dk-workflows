@@ -48,6 +48,19 @@ def changes(api, pr, head):
     return pull, files
 
 
+def revisions(pull):
+    """Keep source/target identity without unrelated repository activity."""
+    result = {}
+    for name in ('head', 'base'):
+        ref = pull[name]
+        result[name] = {key: ref[key] for key in ('sha', 'ref') if key in ref}
+        repo = {key: ref['repo'][key] for key in ('id', 'full_name')
+                if ref.get('repo') and key in ref['repo']}
+        if repo:
+            result[name]['repo'] = repo
+    return result
+
+
 def run_capture(api, pr, head, pull, files, snapshot, run):
     checks = []
     for check in snapshot['checks']:
@@ -57,7 +70,7 @@ def run_capture(api, pr, head, pull, files, snapshot, run):
             continue
         if run_id == run['run_id']:
             checks.append(check)
-    return digest({'pr': pr, 'head': head, 'base': pull['base'], 'changes': files,
+    return digest({'pr': pr, 'head': head, 'revisions': revisions(pull), 'changes': files,
                    'checks': fingerprint({'head': head, 'checks': checks}),
                    'run': {k: v for k, v in run.items() if k != 'capture'}})
 
@@ -115,13 +128,14 @@ def capture(api, pr, head, decision, snapshot):
         except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
             blockers.append({'link': check.get('link'), 'reason': str(exc)})
     latest_pull = api.request('pulls/' + number)
-    if any(latest_pull.get(key) != pull.get(key) for key in ('head', 'base', 'changed_files')):
+    if (revisions(latest_pull) != revisions(pull)
+            or latest_pull.get('changed_files') != pull.get('changed_files')):
         raise ValueError('PR changes moved during retry diagnosis')
     result = {'pr': pr, 'head': head, 'base': pull['base']['sha'],
         'changes': [{k: f[k] for k in ('filename', 'status', 'additions', 'deletions') if k in f}
                     for f in files], 'diff_command': ['gh', 'pr', 'diff', pr],
         'runs': sorted(runs.values(), key=lambda r: r['run_id']), 'blockers': blockers}
-    result['capture'] = digest({'pr': pr, 'head': head, 'base': pull['base'],
+    result['capture'] = digest({'pr': pr, 'head': head, 'revisions': revisions(pull),
         'changes': files, 'checks': fingerprint(snapshot), 'evidence': decision['evidence_file'],
         'runs': result['runs'], 'blockers': blockers})
     return result
@@ -148,7 +162,8 @@ def validate(request, api, snapshot):
                != diagnosis['capture']):
         raise ValueError('Retry diagnosis inputs changed; inspect current changes and logs')
     latest = api.request('pulls/' + request['pr'].rstrip('/').rsplit('/', 1)[-1])
-    if any(latest.get(key) != pull.get(key) for key in ('head', 'base', 'changed_files')):
+    if (revisions(latest) != revisions(pull)
+            or latest.get('changed_files') != pull.get('changed_files')):
         raise ValueError('PR changes moved during retry diagnosis validation')
 
 
