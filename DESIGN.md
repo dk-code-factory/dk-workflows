@@ -185,6 +185,26 @@ unrelated catalog changes must not invalidate it.
 
 ## Settings and storage
 
+Repository review selections use the existing skill-owned scope records: native
+skills remain with the reviewer runner, and GitHub recipient defaults belong to
+the publisher. Resolve recipients only for a new authorized request at fix
+finalization; explicit concrete recipients take precedence as a whole selection.
+The read-only `dk-pr-approvers` skill returns overrides exactly, including empty
+lists, or discovers appropriate recipients for null from current PR review and
+repository ownership evidence. Its helper constructs only the override/discovery
+handoff; the native session owns semantic selection. The selected publisher calls
+it as supporting work, without restoring omitted finalizers. Keep its evidence
+in the existing caller task result and bind consumed resources/inputs there;
+unchanged selection can be reused only while override, PR/head and consumed
+review/ownership sources remain current. No extra cache, settings snapshot or
+execution-state field is introduced. The existing publication intent retains
+the resolved concrete recipients, avoiding
+repeated selection and duplicate dispatch during fresh-session recovery. Settings
+changes affect new preparations and the publisher's managed option freshness;
+they never redirect retained intents or clear original review results, siblings,
+claims or receipts. Live head and publication checks remain mandatory. Native
+API dollar savings have not been measured.
+
 CI infrastructure recovery keeps native diagnosis in the existing failed-attempt
 publication intent, with references to the already retained job/log evidence and
 a fingerprint of the PR changes, checks and attempts. The deterministic helper

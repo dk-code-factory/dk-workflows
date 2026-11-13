@@ -21,6 +21,108 @@ def remote(monkeypatch):
     for key in ('metadata','api','run'):monkeypatch.setattr(publisher,key,getattr(value,key))
     return value
 
+
+def test_scoped_review_recipients_request_review_without_prior_history(remote):
+    import config
+    from state import write
+    skill = 'dk-workflows:dk-pr-publish'
+    selected = {'reviewers': ['alice', 'bob'], 'team_reviewers': ['maintainers']}
+    write(config.path('github.com/owner/repo'), {'skill_defaults': {skill: {'options': {'review_requests': selected}}}})
+    request = {'kind': 'request-review', 'pr': fixture.PR, 'head': fixture.HEAD}
+    assert remote.state['reviews'] == []
+    operation = publisher.prepare(request)['operation']
+    approved = publication.load(operation)['request']['approved']
+    assert {key: approved[key] for key in selected} == selected
+    publisher.publish(operation)
+    assert remote.state['requested'] == {'users': [{'login': 'alice'}, {'login': 'bob'}],
+                                         'teams': [{'slug': 'maintainers'}]}
+    # The same completed request reuses its original concrete intent.
+    assert publisher.prepare(request)['operation'] == operation
+    publisher.publish(operation)
+    assert remote.state['writes'] == {'request-review': 1}
+
+
+@pytest.mark.parametrize('explicit', [{'reviewers': ['specific-user']}, {'team_reviewers': ['specific-team']},
+                                      {'reviewers': ['specific-user'], 'team_reviewers': []}])
+def test_explicit_review_recipients_do_not_mix_with_configured_defaults(remote, explicit):
+    configured = {'review_requests': {'reviewers': ['default-user'], 'team_reviewers': ['default-team']}}
+    operation = publisher.prepare({'kind': 'request-review', 'pr': fixture.PR, 'head': fixture.HEAD, **explicit},
+                                  options=configured)['operation']
+    approved = publication.load(operation)['request']['approved']
+    for key in ('reviewers', 'team_reviewers'):
+        assert approved[key] == explicit.get(key, [])
+    publisher.publish(operation)
+    assert remote.state['writes'] == {'request-review': 1}
+
+
+def test_review_defaults_keep_pending_intent_when_configuration_changes(remote, tmp_path):
+    import config
+    import json
+    import subprocess
+    import sys
+    from state import write
+    skill = 'dk-workflows:dk-pr-publish'
+    path = config.path('github.com/owner/repo')
+    def select(user):
+        write(path, {'skill_defaults': {skill: {'options': {'review_requests': {
+            'reviewers': [user], 'team_reviewers': []}}}}})
+    select('original-user')
+    request = {'kind': 'request-review', 'pr': fixture.PR, 'head': fixture.HEAD}
+    operation = publisher.prepare(request)['operation']
+    remote.state['lose_response'] = ['request-review']
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    original = publication.load(operation)
+    # A fresh session finds the exact same pending operation from unchanged settings.
+    child = subprocess.run([sys.executable, '-c', '''
+import importlib.util, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location('fresh_publisher', root/'scripts/publish.py')
+publisher = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(publisher)
+print(json.dumps(publisher.prepare(json.loads(sys.argv[2]))))
+''', str(ROOT), json.dumps(request)], capture_output=True, text=True, timeout=30)
+    assert child.returncode == 0, child.stderr
+    assert json.loads(child.stdout)['operation'] == operation
+    select('replacement-user')
+    with pytest.raises(ValueError, match='Uncertain publication'):
+        publisher.prepare(request)
+    publisher.publish(operation, reconcile=True)
+    saved = publication.load(operation)
+    assert saved['request'] == original['request']
+    assert saved['failure'] == original['failure']
+    assert remote.state['requested']['users'] == [{'login': 'original-user'}]
+    assert remote.state['writes'] == {'request-review': 1}
+    # Only a subsequent new preparation uses the changed selection.
+    replacement = publisher.prepare(request)['operation']
+    assert replacement != operation
+    assert publication.load(replacement)['request']['approved']['reviewers'] == ['replacement-user']
+
+
+def test_review_defaults_accept_upstream_and_invocation_options(remote):
+    import config
+    from state import write
+    upstream = 'github.com/upstream/repo'
+    targets = {'reviewers': ['upstream-user'], 'team_reviewers': []}
+    write(config.path(upstream), {'skill_defaults': {'dk-workflows:dk-pr-publish': {
+        'options': {'review_requests': targets}}}})
+    request = {'kind': 'request-review', 'pr': fixture.PR, 'head': fixture.HEAD}
+    operation = publisher.prepare(request, upstream=upstream)['operation']
+    assert publication.load(operation)['request']['approved']['reviewers'] == targets['reviewers']
+    local = {'reviewers': [], 'team_reviewers': ['local-team']}
+    operation = publisher.prepare(request, upstream=upstream, options={'review_requests': local})['operation']
+    approved = publication.load(operation)['request']['approved']
+    assert {key: approved[key] for key in local} == local
+
+
+@pytest.mark.parametrize('selection', [None, {'reviewers': [], 'team_reviewers': []}])
+def test_empty_or_inferred_review_defaults_never_manufacture_a_recipient(remote, selection):
+    with pytest.raises(ValueError, match='At least one reviewer'):
+        publisher.prepare({'kind': 'request-review', 'pr': fixture.PR, 'head': fixture.HEAD},
+                          options={'review_requests': selection})
+    assert remote.state['writes'] == {}
+
 @pytest.mark.parametrize('kind',KINDS)
 def test_lost_response_reconciles_same_intent_once(remote,kind):
     request=fixture.request(kind)

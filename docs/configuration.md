@@ -48,6 +48,70 @@ Workflow-owned permissions are passed downstream; a selected invocation grants n
 
 Use `dk-workflows:dk-config` for repository instruction-source initialization and when changing, inspecting or explaining saved settings is the user's task. Ordinary skills read their configuration directly. Scoped implementation/review preferences remain owned by `dk-workflows:dk-preferences`; existing PR policies and records are described in [PR configuration](pr/configuration.md).
 
+## Repository review selections
+
+Native review skills and GitHub review recipients are separate selections. Ask
+`dk-workflows:dk-config` to save either or both for `HOST/OWNER/REPO` with repository
+scope. For example, the repository record can contain:
+
+```json
+{
+  "skill_defaults": {
+    "dk-workflows:dk-pr-reviewers-run": {
+      "options": {
+        "reviewers": [
+          {"skill": "code-review-ad:code-review-ad", "required": true}
+        ]
+      }
+    },
+    "dk-workflows:dk-pr-publish": {
+      "options": {
+        "review_requests": {
+          "reviewers": ["alice", "bob"],
+          "team_reviewers": ["maintainers"]
+        }
+      }
+    }
+  }
+}
+```
+
+The runner's `reviewers` list replaces inherited native review skills for this
+repository in both PR workflows and standalone reviews. Workflow simplification
+remains separately configured. Invocation-local selections still take precedence.
+
+The publisher's `review_requests` sets the complete GitHub recipient selection
+for authorized review or re-review requests at `pr-fix` finalization, including
+people who have not reviewed yet. Use usernames without `@`, not numeric account
+IDs, and organization team slugs without `ORG/`. Supply both lists. The default
+`null` invokes `dk-workflows:dk-pr-approvers` to discover appropriate reviewers;
+setting both lists to `[]`
+disables automatic requests. Resetting repository options restores inheritance;
+an explicit repository `null` overrides inherited recipients with automatic
+discovery. Other repositories retain their own effective settings.
+
+Invoke `dk-workflows:dk-pr-approvers` directly to resolve recipients without
+requesting reviews. It returns an override immediately, including empty lists.
+Without one, it assesses existing review requests and prior human reviewers,
+then ownership rules and relevant maintainers if needed. Its result binds the PR
+and published head and includes recipients, sources, reasons and completion.
+Incomplete access or uncertain eligibility is a blocker, not an empty selection.
+The selected publisher consumes this skill at fix finalization and retains its
+evidence in the existing task result; there is no separate recipient cache.
+
+The selected publisher runs after final CI in the default plan and requests
+against the final published head. Honor caller permissions and narrower user
+instructions. Recipient settings do not add an omitted publisher, require GitHub
+approvals for merging or grant approval/merge permission. Already pending requests
+send nothing. Reconcile uncertain publications using their original concrete
+intent, even after recipients change.
+
+Inspect each effective selection with `skill-show --skill
+dk-workflows:dk-pr-reviewers-run` or `skill-show --skill dk-workflows:dk-pr-publish`
+on `scripts/config.py --repository HOST/OWNER/REPO`. Use the scoped editing and
+reset commands above through the configuration request lifecycle; these changes
+preserve unrelated options, prompts and retained review results.
+
 ## Compatibility and migration
 
 The existing `show`, `set`, `reset`, process preflight, named task selectors and cycle hook helpers remain available for older process records. Their compatibility views derive defaults from the owning skills. See [legacy process compatibility](legacy-configuration.md). New configurations use skill-owned invocation lists and do not need a configured coordinator, responsibility registry or declarative control-flow language.
