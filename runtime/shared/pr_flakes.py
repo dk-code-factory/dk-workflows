@@ -66,6 +66,14 @@ def failure_targets(evidence):
     return list(targets.values())
 
 
+def missing_followup_steps(collected, failed_steps):
+    """Check prior failing steps without treating setup logs as test reports."""
+    return [f'{job["job_id"]}/{step["number"]}: {step["report"]["reason"]}'
+            for job in collected['jobs'] for step in job['steps']
+            if (collected['workflow'], job['job'], step['number']) in failed_steps
+            and step.get('conclusion') == 'success' and not step['report']['complete']]
+
+
 def collect_followups(api, registry, snapshot):
     """Collect named passes only after an observed failure on this PR head.
 
@@ -79,6 +87,7 @@ def collect_followups(api, registry, snapshot):
     if not failures:
         return None
     scope = {(item['workflow'], item['job']) for item in failures}
+    failed_steps = {(item['workflow'], item['job'], item.get('step')) for item in failures}
     report = {'attempts': [], 'missing': []}
     seen = set()
     for check in snapshot.get('checks', []):
@@ -98,12 +107,20 @@ def collect_followups(api, registry, snapshot):
                 continue
             collected = actions.collect_attempt(api, registry, run, run['run_attempt'],
                                                 reuse=True, job_scope=scope)
+            missing = missing_followup_steps(collected, failed_steps)
+            if collected.get('cached') and missing:
+                # Historical caches may contain incomplete successful test steps.
+                # Refresh only this attempt, retaining its original artifacts/key.
+                collected = actions.collect_attempt(api, registry, run, run['run_attempt'],
+                                                    reuse=False, job_scope=scope)
+                missing = missing_followup_steps(collected, failed_steps)
             if not any(job['job_id'] == job_id for job in collected['jobs']):
                 raise ValueError('follow-up check is not in the observed failing job scope')
             current = api.request(f'actions/runs/{run_id}')
             if any(current.get(key) != run.get(key) for key in ('id', 'head_sha', 'run_attempt', 'status', 'path')):
                 raise ValueError('follow-up attempt changed during collection')
             report['missing'].extend(collected['missing'])
+            report['missing'].extend(missing)
             report['attempts'].append({'run_id': run_id, 'attempt': run['run_attempt'],
                 'source_file': collected['source_file'], 'archive_file': collected.get('archive_file')})
         except ClassificationTimeout:

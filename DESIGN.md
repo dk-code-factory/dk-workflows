@@ -211,6 +211,7 @@ for those tests, refreshing only their linked issue evidence. It never enumerate
 repository Actions history automatically. Successful current-PR runs collect named
 passes only after a failure has been observed at that head; aggregate green jobs
 are not pass proof. Fresh heads without failures do no flake investigation.
+Successful checks contribute even while an independent workflow remains failed.
 Explicit `dk-ci-flakes` discovery retains bounded repository history/issue scans.
 
 Reuse the existing repository registry, observations, issue snapshots, scan claims
@@ -221,7 +222,10 @@ reusable; new PR lookups depend on the failure fingerprint and issue limit, not
 historical lookback/run limits. Interrupted lookups retain their original claim;
 explicit discovery can gather missing evidence without clearing that claim.
 Named pass collection reuses the same validated attempt cache, including across
-fresh sessions. Its returned learning status is transient; only original outcomes
+fresh sessions. It also validates successful reports for previously failing steps;
+an incomplete cached report refreshes only that attempt without changing the
+historical reader or cache identities. Unrelated setup logs do not invalidate
+named-test evidence. Its returned learning status is transient; only original outcomes
 and artifacts remain in the existing stores. Missing/corrupt artifacts require affected recollection; changed
 head/attempt/workflow/job identities select distinct evidence. Open-issue proof,
 failure signature and live CI checks still govern acceptance independently.
@@ -458,11 +462,12 @@ resume, finish and external-action checks still read their own live inputs.
 Publication preparation accepts upstream and invocation-local options, resolves
 an omitted merge method once and retains only that concrete method in the existing
 intent. Recovery reconciles that original intent regardless of later defaults.
-Automatic CI discovery reads the flake skill's live options at the scan boundary.
-Default-limit scans keep their existing fingerprint; nondefault limits join the
-failure fingerprint, so changed limits refresh only affected scans while old
-results and incomplete claims remain retained. This reuses the existing scan
-registry and evidence rather than saving another settings snapshot.
+Automatic PR flake lookups read the flake skill's live options at the lookup
+boundary. New lookup identities depend on the failure fingerprint and issue
+limit; lookback and run limits govern explicit history scans. Compatible legacy
+scan identities remain reusable, while old results and incomplete claims stay
+retained. This reuses the existing scan registry and evidence rather than saving
+another settings snapshot.
 
 Retry, CI repair and rerun limits accept zero. Existing run counters and minimum
 retained limits still govern recovery; changing settings cannot replenish them.

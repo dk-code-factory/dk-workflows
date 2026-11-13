@@ -184,7 +184,7 @@ def _decide(api, registry, snapshot, refresh_snapshot, auto_discover, budget, pa
     evidence = collect_snapshot(api, registry, snapshot, exceptions['entries']) if snapshot['result'] == 'failure' else {}
     partial['evidence_file'] = evidence.get('evidence_file')
     learning = None
-    if snapshot['result'] == 'success':
+    if any(check.get('bucket') == 'pass' for check in snapshot.get('checks', [])):
         # Optional log learning leaves time for the authoritative live CI read.
         learning_budget = Budget(budget.remaining() / 2, clock=budget.clock)
         learning_budget.phase = 'learn_followups'

@@ -5,9 +5,12 @@ failures on the PR being handled. It records exact test outcomes from the failed
 checks, looks up open issues for the named failures, and refreshes relevant linked
 issues. It does not scan repository Actions history. A successful PR head without
 an observed failure needs no flake investigation. After an observed failure,
-successful checks at that head can contribute named pass evidence; a green job,
+successful checks at that head can contribute named pass evidence even while
+another workflow remains failed; a green job,
 skipped test or aggregate pass count cannot. Missing follow-up logs contribute no
-proof. Current CI and publication checks remain independent live gates.
+proof. Incomplete successful reports for previously failing steps remain visible
+and refresh the affected attempt on the next observation, including in a fresh
+session. Current CI and publication checks remain independent live gates.
 
 Observations are shared across PRs in the same base repository. An active flake
 still needs a matching open issue and either an explicit exact-context declaration

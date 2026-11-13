@@ -10,7 +10,7 @@ import pytest
 
 from shared import ci_policy, flaky_actions, pr_flakes
 from shared.flaky_tests import Registry, identity
-from test_flaky_tests import FakeAPI, REPO, WORKFLOW, JOB, TEST, SIGNATURE, SHA, OTHER, PASS, snapshot, declaration
+from test_flaky_tests import FakeAPI, REPO, WORKFLOW, JOB, TEST, SIGNATURE, SHA, OTHER, PASS, snapshot, declaration, archive
 
 
 @pytest.fixture
@@ -119,6 +119,37 @@ def test_new_head_does_not_collect_passes_for_old_failure(registry):
     assert not api.calls
 
 
+def test_passing_workflow_is_learned_while_independent_workflow_stays_red(registry):
+    api = FakeAPI(body=declaration(False))
+    classify(api, registry)
+    api.run.update(run_attempt=2, conclusion='success')
+    api.texts[2] = PASS
+    original_request, original_jobs = api.request, api.jobs
+    other_workflow = '.github/workflows/other.yml'
+    def request(endpoint, binary=False):
+        value = original_request(endpoint.replace('runs/20', 'runs/10'), binary)
+        if endpoint.startswith('actions/runs/20') and not binary:
+            value.update(id=20, path=other_workflow, run_attempt=1, conclusion='failure')
+        return value
+    def jobs(run_id, attempt):
+        values = original_jobs(run_id, attempt)
+        if run_id == 20:
+            values[0].update(id=201, html_url='https://github.com/acme/project/actions/runs/20/job/201')
+        return values
+    api.request, api.jobs = request, jobs
+    snap = green()
+    snap['result'] = 'failure'
+    snap['checks'].append({'name': JOB, 'workflow': 'Other', 'bucket': 'fail',
+                          'link': 'https://github.com/acme/project/actions/runs/20/job/201'})
+    assert classify(api, registry, snap)['result'] == 'failure'
+    assert any(item['outcome'] == 'pass' and item['workflow'] == WORKFLOW
+               and item['attempt'] == 2 for item in registry.load()['observations'])
+    proof = registry.synchronize([], api.issue,
+        targets=[dict(workflow=WORKFLOW, job=JOB, test=TEST, signature=SIGNATURE)])
+    assert proof['entries'][0]['active']
+    assert_no_history(api)
+
+
 def test_optional_followup_deadline_leaves_green_ci_verification_time(registry):
     api = FakeAPI(body=declaration(False))
     classify(api, registry)
@@ -181,6 +212,72 @@ def test_corrupt_followup_artifact_refreshes_only_that_attempt(registry):
     assert ('request', 'actions/runs/10/attempts/2/logs') in api.calls
     assert ('request', 'actions/runs/10/attempts/1/logs') not in api.calls
     assert set(registry.load()['attempt_evidence']) == old_keys
+
+
+@pytest.mark.parametrize('bad_archive', [archive(PASS, steps={2: 'setup complete'}), archive(b'\xff')],
+                         ids=['missing-step-member', 'invalid-step-encoding'])
+def test_incomplete_successful_step_recovers_in_fresh_process(registry, bad_archive):
+    api = FakeAPI(body=declaration(False))
+    classify(api, registry)
+    api.run.update(run_attempt=2, conclusion='success')
+    api.texts[2] = PASS
+    original = api.request
+    def request(endpoint, binary=False):
+        if endpoint.endswith('/2/logs'):
+            api.calls.append(('request', endpoint))
+            return bad_archive
+        return original(endpoint, binary)
+    api.request = request
+    result = classify(api, registry, green())
+    assert result['result'] == 'success'
+    assert result['learning']['missing']
+    assert api.calls.count(('request', 'actions/runs/10/attempts/2/logs')) == 1
+    assert not any(item['outcome'] == 'pass' for item in registry.load()['observations'])
+    before = registry.load()
+    original_archive = Path(result['learning']['attempts'][0]['archive_file'])
+    driver = f'''
+import sys
+sys.path.insert(0, {str(Path(__file__).parent)!r})
+from test_flaky_tests import FakeAPI, REPO, PASS, declaration
+from test_pr_flakes import classify, green
+from shared.flaky_tests import Registry
+api = FakeAPI(body=declaration(False), attempts=2)
+api.run['conclusion'] = 'success'
+api.texts[2] = PASS
+result = classify(api, Registry(REPO), green())
+assert result['result'] == 'success' and not result['learning']['missing']
+assert ('request', 'actions/runs/10/attempts/2/logs') in api.calls
+api.calls.clear()
+assert classify(api, Registry(REPO), green())['result'] == 'success'
+assert not any(call[0] == 'request' and call[1].endswith('/logs') for call in api.calls)
+'''
+    child = subprocess.run([sys.executable, '-c', driver], capture_output=True, text=True, timeout=5)
+    assert child.returncode == 0, child.stderr
+    saved = registry.load()
+    assert set(saved['attempt_evidence']) == set(before['attempt_evidence'])
+    assert saved['observations'][:len(before['observations'])] == before['observations']
+    assert saved['scans'] == before['scans']
+    assert original_archive.read_bytes() == bad_archive
+    assert any(item['outcome'] == 'pass' for item in saved['observations'])
+
+
+def test_unrelated_successful_setup_step_preserves_followup_reuse(registry):
+    api = FakeAPI(body=declaration(False))
+    classify(api, registry)
+    api.run.update(run_attempt=2, conclusion='success')
+    api.texts[2] = PASS
+    original_jobs = api.jobs
+    def jobs(run_id, attempt):
+        values = original_jobs(run_id, attempt)
+        values[0]['steps'].append({'number': 2, 'name': 'Setup', 'conclusion': 'success'})
+        return values
+    api.jobs = jobs
+    assert not classify(api, registry, green())['learning']['missing']
+    before = registry.path.read_bytes()
+    api.calls.clear()
+    assert not classify(api, Registry(REPO), green())['learning']['missing']
+    assert not any(call[0] == 'request' and call[1].endswith('/logs') for call in api.calls)
+    assert registry.path.read_bytes() == before
 
 
 def test_scoped_refresh_preserves_unrelated_issue_record(registry):
