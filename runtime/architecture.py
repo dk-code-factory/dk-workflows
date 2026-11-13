@@ -305,12 +305,12 @@ def _accepted(tasks, key, context, *, historical=False):
     return {'key': key, 'spec': spec, 'report': report, 'reference': reference, 'native_handle': native['invocation']['handle'], **assigned}
 
 
-def stage_spec(tasks, descriptor, definition):
+def stage_spec(tasks, descriptor, definition, *, replay=False):
     with evaluation(tasks):
-        return _stage_spec(tasks, descriptor, definition)
+        return _stage_spec(tasks, descriptor, definition, replay=replay)
 
 
-def _stage_spec(tasks, descriptor, definition):
+def _stage_spec(tasks, descriptor, definition, *, replay=False):
     if set(descriptor) - {'kind', 'stage', 'dependencies', 'definition', 'options', 'upstream'}:
         raise ValueError('Architecture descriptors use stage, dependencies and owner options only')
     stage = descriptor.get('stage')
@@ -328,8 +328,13 @@ def _stage_spec(tasks, descriptor, definition):
         raise ValueError('Architecture stage is missing prerequisite evidence')
     if stage == 'impact' and not {'assessment', 'comparison'} & dependencies.keys():
         raise ValueError('Impact requires retained applicability or comparison')
-    retained = {name: accepted(tasks, key, historical=(name in {'assessment', 'comparison', 'selection'} and (stage == 'impact' or 'impact' in dependencies)))
-                for name, key in dependencies.items()}
+    retained = {}
+    for name, key in dependencies.items():
+        if replay and stage == 'impact' and name == 'selection':
+            retained[name] = impact_selection_source(tasks, key)
+        else:
+            retained[name] = accepted(tasks, key, historical=(name in {'assessment', 'comparison', 'selection'}
+                                                             and (stage == 'impact' or 'impact' in dependencies)))
     for name, value in retained.items():
         if value['stage'] != name:
             raise ValueError('Architecture dependency stage mismatch')
@@ -348,6 +353,35 @@ def _stage_spec(tasks, descriptor, definition):
     if stage == 'selection':
         execution['options']['architecture']['comparison_scoring'] = retained['comparison']['policy']['scoring']
     return make_spec(**tasks.store.subject, **execution)
+
+
+def impact_selection_source(tasks, key):
+    """Recover context already bound by impact, never current selection coverage.
+
+    New impact preparation accepts the current selection normally. Replaying that
+    assignment keeps its exact immutable source while selection is refreshed.
+    """
+    from state import digest, resource
+    impact_key = digest({**tasks.store.subject, 'task': 'architecture-impact-review', 'skill': OWNER})
+    with tasks.store.locked() as manifest:
+        impact = manifest['entries'][impact_key]
+        expected = impact['components']['inputs']['architecture_selection']
+        attempts = deepcopy(manifest['entries'][key]['attempts'])
+    for attempt in reversed(attempts):
+        filename = attempt.get('result')
+        if not filename or Path(filename).name != filename:
+            continue
+        path = tasks.store.root/'results'/filename
+        if not path.is_file() or resource(path) != expected:
+            continue
+        envelope = read(path)
+        entry = {'key': key, 'result': {'file': filename, 'hash': Path(filename).stem,
+                                       'fingerprint': envelope['fingerprint']}}
+        saved, problem = tasks.store._load_saved(entry)
+        if problem or saved['status'] != 'complete':
+            raise ValueError('Impact selection source is incomplete or damaged')
+        return {'stage': 'selection', 'reference': saved['path']}
+    raise ValueError('Impact selection source is missing; retain original analysis and recovery references')
 
 
 def stage_execution(definition, stage, options):
@@ -463,7 +497,10 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
     linked(compared, 'assessment', assessment)
     selection = accepted(tasks, refs['selection'], historical=impact is not None)
     if impact and selection['dependencies'].get('impact') != impact['key']:
+        from state import resource
         linked(impact, 'selection', selection)
+        if resource(impact['spec']['inputs']['architecture_selection']) != resource(selection['reference']):
+            raise ValueError('Impact assessed a different selection result; refresh affected evidence')
     linked(selection, 'comparison', compared)
     if selection['policy']['auto_pick'] != loaded['architecture']['auto_pick']:
         raise ValueError('Architecture selection policy changed; refresh selection only')
@@ -612,7 +649,7 @@ class ListContext:
         self.paragraph = bool(line.strip()) and not bool(re.match(
             r'(?: {0,3}(?:#{1,6}(?:[ \t]|$)|>|[-+*] |[0-9]+[.)] )| {4})', line))
 
-    def mask(self, line):
+    def mask(self, line, *, paragraph=False):
         expanded = line.expandtabs(4).rstrip('\r\n')
         indent = len(expanded) - len(expanded.lstrip(' '))
         item = re.match(r' {0,3}(?:[-+*]|[0-9]{1,9}[.)])([ \t]+|$)', expanded)
@@ -633,6 +670,9 @@ class ListContext:
             else:
                 return self.opaque(line)
         if item and not rule:
+            ordered = re.match(r' {0,3}([0-9]{1,9})[.)]', expanded)
+            if paragraph and (not expanded[item.end():].strip() or ordered and int(ordered[1]) != 1):
+                return line
             spaces = len(item[1])
             self.indent = item.start(1) + (spaces if 1 <= spaces <= 4 else 1)
             content = expanded[item.end():]
@@ -657,7 +697,7 @@ def heading_view(body):
             if re.fullmatch(r' {0,3}' + re.escape(fence[0]) + '{' + str(fence[1]) + r',}[ \t]*', stripped):
                 fence = None
         else:
-            visible = lists.mask(line)
+            visible = lists.mask(line, paragraph=paragraph)
             if visible != line:
                 masked.append(visible)
                 paragraph = False
@@ -683,21 +723,23 @@ def heading_view(body):
 
 def next_section(view, start, level):
     """Recognize ATX and Setext boundaries without consuming sibling content."""
-    candidates = [m.start() for m in re.finditer(
-        r'(?m)^ {0,3}#{1,' + str(level) + r'}(?:[ \t]|\r?$)', view[start:])]
-    for match in re.finditer(r'(?m)^ {0,3}[^ \t\r\n][^\r\n]*\r?\n {0,3}(=+|-+)[ \t]*(?=\r?$)', view[start:]):
+    atx = re.search(r'(?m)^ {0,3}#{1,' + str(level) + r'}(?:[ \t]|\r?$)', view[start:])
+    end = start + atx.start() if atx else len(view)
+    for match in re.finditer(r'(?m)^ {0,3}[^ \t\r\n][^\r\n]*\r?\n {0,3}(=+|-+)[ \t]*(?=\r?$)', view[start:end]):
         if (1 if match[1][0] == '=' else 2) <= level:
             first = start + match.start()
-            # A Setext heading consumes its entire preceding paragraph.
+            # A Setext heading consumes only its own preceding paragraph.
             while first > start:
                 previous_end = first - 1
                 previous_start = max(start, view.rfind('\n', start, previous_end) + 1)
                 previous = view[previous_start:first].rstrip('\r\n')
-                if (not previous.strip() or re.match(r' {0,3}(?:#{1,6}(?:[ \t]|$)|>|[-+*] |[0-9]+[.)] )', previous)):
+                if (not previous.strip()
+                        or re.match(r' {0,3}(?:#{1,6}(?:[ \t]|$)|>|[-+*] |[0-9]+[.)] )', previous)
+                        or re.fullmatch(r' {0,3}(?:=+|-+)[ \t]*', previous)):
                     break
                 first = previous_start
-            candidates.append(first - start)
-    return start + min(candidates) if candidates else len(view)
+            return first
+    return end
 
 
 def decision_section(body, heading):

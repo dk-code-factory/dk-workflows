@@ -23,7 +23,7 @@ class Tasks:
                 and instruction_sources.binding(checkout, self.store.subject['repository']) is not None):
             raise ValueError('Legacy repository guidance requires a rebuilt assignment and handoff')
 
-    def spec(self, descriptor):
+    def spec(self, descriptor, *, replay=False):
         if (not isinstance(descriptor, dict) or set(descriptor) - {
                 'kind', 'definition', 'run', 'cycle', 'phase', 'index', 'process', 'finalizer', 'upstream',
                 'skill', 'selection', 'options', 'stage', 'dependencies'}):
@@ -45,7 +45,7 @@ class Tasks:
             return make_spec(**self.store.subject, **definition)
         if kind == 'architecture':
             from architecture import stage_spec
-            return stage_spec(self, descriptor, definition)
+            return stage_spec(self, descriptor, definition, replay=replay)
         if kind == 'skill':
             return skill_config.make_spec(**common, skill=descriptor['skill'], kind=descriptor['selection'],
                                           index=descriptor['index'], options=descriptor.get('options'),
@@ -181,7 +181,7 @@ class Tasks:
         if 'managed' not in entry:
             raise ValueError('Task has no retained definition')
         self._retained_policy(entry['managed'])
-        return self.spec(entry['managed'])
+        return self.spec(entry['managed'], replay=True)
 
     def resume(self, *, keys=(), run=None, explain=False):
         entries = self._entries()
@@ -205,7 +205,7 @@ class Tasks:
                     continue
                 try:
                     self._retained_policy(descriptor)
-                    spec = self.spec(descriptor)
+                    spec = self.spec(descriptor, replay=True)
                     contracts[key] = checklist_contract(spec, descriptor['definition'])
                     specs.append(spec)
                 except (ValueError, KeyError, TypeError, OSError, RuntimeError) as exc:
@@ -246,7 +246,7 @@ class Tasks:
             raise ValueError('Task has no retained definition; prepare it before finishing')
         if not isinstance(report, dict) or type(report.get('complete')) is not bool:
             raise ValueError('Report requires explicit complete boolean')
-        spec = self.spec(entry['managed'])
+        spec = self.spec(entry['managed'], replay=True)
         checklist = checklist_contract(spec, entry['managed']['definition'])
         if round_id is None:
             from architecture import validate_report

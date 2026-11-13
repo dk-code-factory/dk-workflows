@@ -604,8 +604,15 @@ impact explicitly covers applicability, feasibility, confidence and the sourced
 choice. It references the reused selection (or assessment for a skip). This avoids
 rerunning those agents solely to rebind current pins. Material or uncertain impact reopens affected
 analysis, retaining original results, completed siblings, claims and budgets.
-Selection, alignment and impact reference exactly the analysis they assess. Every
-normal review handoff includes the settled decision as governing context.
+Selection, alignment and impact reference exactly the analysis they assess.
+Replaying impact resolves its original selection input hash through existing
+immutable results and attempt references, rather than depending on the current
+selection claim. That source is historical context, never current coverage. This
+lets selection refresh after policy or user-choice changes without creating a
+claim cycle, copying a contract or repeating impact analysis. The new selection
+remains independently subject to native/checklist acceptance. Missing or damaged
+original sources block recovery. Every normal review handoff includes the settled
+decision as governing context.
 
 Decision edits use the existing exact-body publication journal, constrained to
 Architecture decisions under the configured Decisions heading. Recognize the

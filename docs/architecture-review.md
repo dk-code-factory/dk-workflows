@@ -164,6 +164,9 @@ and gate refs. The impact task must reference the retained selection when reusin
 it, or assessment when reusing a skip. New selections after policy or user choice
 changes depend on comparison and impact. All stages use original immutable result
 references, without rebinding unchanged analysis through another invocation.
+The helper keeps impact bound to the exact selection it originally assessed when
+that selection is later refreshed; it does not treat historical context as current
+selection coverage. Missing original sources block recovery.
 Always run current implementation alignment after author changes. Changed scoring
 or review guidance refreshes comparison, including changed prompt contents under
 the same skill identity; historical reuse recaptures that guidance. Changed auto-pick policy refreshes only
@@ -181,7 +184,10 @@ The bounded editor recognizes [CommonMark heading and HTML block boundaries](htt
 start blocks only outside an open paragraph; code-starting list items do not
 create lazy paragraph continuations that hide a root heading. Quoted HTML
 attributes retain their complete-tag grammar, and list-contained HTML/fences
-retain block state so closing them cannot create a false paragraph.
+retain block state so closing them cannot create a false paragraph. Only eligible
+markers interrupt paragraphs: ordered lists start at 1 and empty items cannot
+interrupt. Boundary scanning stops at the nearest heading and avoids rescanning
+previous Setext headings.
 
 Sibling task preparation and resume share prerequisite validation and one live PR
 read within each construction/capture boundary. A separate boundary and every

@@ -910,3 +910,58 @@ def test_invalid_complete_tags_cannot_hide_real_sibling_headings(tag):
     sibling = '### Other decisions\nKeep unrelated.\n\n## Tests\nKeep.\n'
     body = '## Decisions\n\n### Architecture decisions\n\n' + tag + '\n' + sibling
     assert arch.replace_decision(body, 'Chosen approach: new').endswith(sibling)
+
+
+@pytest.mark.parametrize('marker', ['2.', '3)', '123.', '-', '1.'])
+def test_noninterrupting_list_markers_preserve_real_siblings(marker):
+    # Empty items never interrupt paragraphs; ordered items need start number 1.
+    content = ' This is paragraph text' if marker not in {'-', '1.'} else ''
+    sibling = '   ### Other decisions\nKeep unrelated.\n\n## Tests\nKeep tests.\n'
+    body = '## Decisions\n\n### Architecture decisions\n\nOld design.\n' + marker + content + '\n' + sibling
+    assert arch.replace_decision(body, 'Chosen approach: new').endswith(sibling)
+
+
+def test_dense_setext_suffix_is_not_rescanned_after_known_boundary():
+    class Counted(str):
+        scans = 0
+        def rfind(self, *args):
+            type(self).scans += 1
+            return super().rfind(*args)
+    for prefix in ['## Changelog\n', 'Changelog\n---------\n']:
+        view = Counted('old\n\n' + prefix + 'x\n--\n' * 10000)
+        Counted.scans = 0
+        assert arch.next_section(view, 0, 3) == len('old\n\n')
+        assert Counted.scans <= 1
+
+
+@pytest.mark.parametrize('manual', [False, True])
+def test_selection_refresh_finishes_after_impact_bound_old_selection(case, tmp_path, manual):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = initial(tasks, spec)
+    old_selection = arch.accepted(tasks, refs['selection'])['reference']
+    old_bytes = Path(old_selection).read_bytes()
+    refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'Applicability and existing choice remain valid', 'evidence': ['discussion']}, {k: refs[k] for k in ('comparison', 'selection')})
+    old_impact = arch.accepted(tasks, refs['impact'])['reference']
+    impact_bytes = Path(old_impact).read_bytes()
+    options = {'architecture': {'auto_pick': {'enabled': False}}}
+    d = descriptor(spec, 'selection', {k: refs[k] for k in ('comparison', 'impact')}, options)
+    value = selection(choice=None)
+    if manual:
+        choice_source = tmp_path/'choice.txt'; choice_source.write_text('User chooses the smaller approach for this PR.')
+        d['definition']['inputs']['user_choice'] = str(choice_source)
+        value = {'mode': 'manual', 'choice': 'smaller', 'user_source': str(choice_source),
+                 'reason': 'User prefers smaller change', 'rejection_reasons': {'implemented': 'User rejects additional scope'}, 'evidence': [str(choice_source)]}
+    task = tasks.prepare({'tasks': [d]})['tasks'][0]
+    assert task['action'] == 'invoke' and task['key'] == refs['selection']
+    assert finish(tasks, task, value)['checklist_complete']
+    assert arch.accepted(tasks, refs['impact'])['reference'] == old_impact
+    assert arch.accepted(tasks, refs['selection'])['report']['choice'] == ('smaller' if manual else None)
+    child = ('import architecture, json, sys; from tasks import Tasks; '
+             't=Tasks(sys.argv[1], sys.argv[2]); '
+             'print(json.dumps([architecture.accepted(t, k)["report"] for k in sys.argv[3:]]))')
+    reports = json.loads(subprocess.check_output([sys.executable, '-c', child, REPO, PR, refs['impact'], refs['selection']], text=True, timeout=60))
+    assert reports[0]['impact'] == 'nonmaterial' and reports[1]['choice'] == value['choice']
+    assert Path(old_selection).read_bytes() == old_bytes and Path(old_impact).read_bytes() == impact_bytes
+    assert len(read(store.manifest)['entries'][refs['selection']]['attempts']) == 2
+    if not manual:
+        assert arch.gate(tasks, refs, options=options)['outcome'] == 'choice_pending'
