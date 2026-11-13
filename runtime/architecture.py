@@ -4,6 +4,8 @@ No execution engine or architecture store: the native session owns analysis.
 """
 import base64
 import json
+from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 from decimal import Decimal
 import re
@@ -225,20 +227,59 @@ def validate_report(spec, report):
             raise ValueError('Confirmed mismatch requires substantive design changes')
 
 
+_EVALUATION = ContextVar('architecture_evaluation', default=None)
+
+
+@contextmanager
+def evaluation(tasks):
+    """One read-only validation boundary; nothing survives native work or commands."""
+    existing = _EVALUATION.get()
+    if existing is not None and existing['tasks'] is tasks:
+        yield existing
+        return
+    from state import _CaptureContext
+    context = {'tasks': tasks, 'accepted': {}, 'active': set(), 'capture': _CaptureContext()}
+    token = _EVALUATION.set(context)
+    try:
+        yield context
+    finally:
+        _EVALUATION.reset(token)
+
+
 def accepted(tasks, key, *, historical=False):
+    with evaluation(tasks) as context:
+        identity = (key, historical)
+        if identity in context['active']:
+            raise ValueError('Circular architecture evidence dependencies')
+        if identity not in context['accepted']:
+            context['active'].add(identity)
+            try:
+                context['accepted'][identity] = _accepted(tasks, key, context, historical=historical)
+            finally:
+                context['active'].remove(identity)
+        return context['accepted'][identity]
+
+
+def _accepted(tasks, key, context, *, historical=False):
     """Validate original evidence and checklist; historical comparisons need impact."""
     from state import capture
     # Resolve current definitions outside the manifest lock (dependencies also
     # read this manifest). Historical analysis uses its original captured contract.
-    spec = None if historical else tasks.saved_spec(key)
-    captured = None if historical else capture(spec)
+    current_spec = tasks.saved_spec(key)
+    current_capture = capture(current_spec, _context=context['capture'])
+    spec = None if historical else current_spec
+    captured = None if historical else current_capture
     with tasks.store.locked() as manifest:
         entry = manifest['entries'][key]
         saved, problem = tasks.store._load_saved(entry)
         if problem or saved['status'] != 'complete':
             raise ValueError('Architecture evidence is incomplete or damaged')
         if historical:
-            spec = deepcopy(entry['components'])
+            original_components = entry['components']
+            for field in ('task', 'skill', 'instructions', 'native_review', 'instruction_policy'):
+                if current_capture['components'].get(field) != original_components.get(field):
+                    raise ValueError('Architecture review guidance changed; refresh comparison')
+            spec = deepcopy(original_components)
             captured = {'key': key, 'fingerprint': saved['fingerprint'],
                         'components': spec, 'cacheable': saved['cacheable']}
         described = tasks.store.describe(captured, entry)
@@ -253,6 +294,11 @@ def accepted(tasks, key, *, historical=False):
 
 
 def stage_spec(tasks, descriptor, definition):
+    with evaluation(tasks):
+        return _stage_spec(tasks, descriptor, definition)
+
+
+def _stage_spec(tasks, descriptor, definition):
     if set(descriptor) - {'kind', 'stage', 'dependencies', 'definition', 'options', 'upstream'}:
         raise ValueError('Architecture descriptors use stage, dependencies and owner options only')
     stage = descriptor.get('stage')
@@ -358,6 +404,11 @@ def live_pr(pr):
     return value
 
 def gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
+    with evaluation(tasks):
+        return _gate(tasks, refs, options=options, upstream=upstream, analysis_only=analysis_only)
+
+
+def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
     loaded = skill_config.effective(OWNER, tasks.store.subject['repository'], upstream, options=options)['options']
     if not loaded['architecture']['enabled']:
         return {'outcome': 'disabled', 'release_reviewers': True}
@@ -483,42 +534,49 @@ def html_end(line):
     return None
 
 
-def mask_list_containers(view, original):
-    """Keep list examples opaque while retaining document-level heading offsets."""
-    result, content_indent, after_blank, paragraph = [], None, False, False
-    for line, source in zip(view.splitlines(keepends=True), original.splitlines(keepends=True)):
+class ListContext:
+    """Mask list-contained examples before interpreting document fences or HTML."""
+    def __init__(self):
+        self.indent = None
+        self.after_blank = False
+        self.paragraph = False
+
+    @staticmethod
+    def opaque(line):
+        return ''.join(c if c in '\r\n' else ' ' for c in line)
+
+    def mask(self, line):
         expanded = line.expandtabs(4).rstrip('\r\n')
         indent = len(expanded) - len(expanded.lstrip(' '))
-        item = re.match(r' {0,3}(?:[-+*]|[0-9]{1,9}[.)])([ \t]+)', expanded)
-        heading = re.match(r' {0,3}#{1,6}(?:[ \t]|$)', expanded)
+        item = re.match(r' {0,3}(?:[-+*]|[0-9]{1,9}[.)])([ \t]+|$)', expanded)
+        block = re.match(r' {0,3}(?:#{1,6}(?:[ \t]|$)|>|`{3,}|~{3,})', expanded)
         rule = re.fullmatch(r' {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})', expanded)
-        if content_indent is not None:
-            original_indent = len(source.expandtabs(4)) - len(source.expandtabs(4).lstrip(' '))
+        if self.indent is not None:
             if not expanded.strip():
-                if source.strip() and original_indent < content_indent:
-                    content_indent = None  # A masked document-level fence/HTML block ends the list.
-                after_blank = True
-            elif indent >= content_indent:
-                paragraph = not bool(re.match(r'(?:#{1,6}(?:[ \t]|$)|>|[-+*] |[0-9]+[.)] )', expanded[content_indent:]))
-                after_blank = False
-                result.append(''.join(c if c in '\r\n' else ' ' for c in line))
-                continue
-            elif item or heading or rule or after_blank or not paragraph:
-                content_indent = None
+                self.after_blank = True
+                return line
+            if indent >= self.indent:
+                self.paragraph = not bool(re.match(r'(?:#{1,6}(?:[ \t]|$)|>|[-+*] |[0-9]+[.)] |`{3,}|~{3,})', expanded[self.indent:]))
+                self.after_blank = False
+                return self.opaque(line)
+            if item or block or rule or self.after_blank or not self.paragraph or html_end(expanded):
+                self.indent = None
             else:
-                result.append(''.join(c if c in '\r\n' else ' ' for c in line))
-                continue
-        if content_indent is None and item and not rule:
+                return self.opaque(line)
+        if item and not rule:
             spaces = len(item[1])
-            content_indent = item.start(1) + (spaces if spaces <= 4 else 1)
-            paragraph, after_blank = True, False
-        result.append(line)
-    return ''.join(result)
+            self.indent = item.start(1) + (spaces if 1 <= spaces <= 4 else 1)
+            content = expanded[item.end():]
+            self.paragraph = bool(content) and not bool(re.match(r'(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|<)', content))
+            self.after_blank = False
+            return self.opaque(line)
+        return line
 
 
 def heading_view(body):
     """Mask Markdown examples without moving document character offsets."""
     masked, fence, raw = [], None, None
+    lists = ListContext()
     for line in body.splitlines(keepends=True):
         stripped = line.rstrip('\r\n')
         if raw is not None:
@@ -529,6 +587,10 @@ def heading_view(body):
             if re.fullmatch(r' {0,3}' + re.escape(fence[0]) + '{' + str(fence[1]) + r',}[ \t]*', stripped):
                 fence = None
         else:
+            visible = lists.mask(line)
+            if visible != line:
+                masked.append(visible)
+                continue
             opening = re.match(r' {0,3}(`{3,}|~{3,})(.*)$', stripped)
             if opening and (opening[1][0] != '`' or '`' not in opening[2]):
                 fence = (opening[1][0], len(opening[1]))
@@ -542,7 +604,7 @@ def heading_view(body):
         masked.append(''.join(c if c in '\r\n' else ' ' for c in line))
     if fence is not None or raw not in (None, 'blank'):
         raise ValueError('Unclosed Markdown example blocks a bounded Decisions edit')
-    return mask_list_containers(''.join(masked), body)
+    return ''.join(masked)
 
 
 def next_section(view, start, level):
@@ -635,18 +697,24 @@ def render_decision(report, scoring, choice, *, selection=None):
 def enforce(spec, repository, pr, *, options=None, upstream=None):
     """Only incoming-review occurrences use this gate; standalone review is unchanged."""
     from tasks import Tasks
+    tasks = Tasks(repository, pr)
+    with evaluation(tasks):
+        _enforce(spec, tasks, options=options, upstream=upstream)
+
+
+def _enforce(spec, tasks, *, options=None, upstream=None):
     execution = spec.get('options', {}).get('execution', spec.get('options', {}))
-    result = gate(Tasks(repository, pr), execution.get('architecture_evidence'), options=options,
+    result = gate(tasks, execution.get('architecture_evidence'), options=options,
                   upstream=upstream, analysis_only=execution.get('analysis_only', False))
     if not result['release_reviewers']:
         raise ValueError('Architecture gate blocks ordinary tasks: ' + result['outcome'])
     if result['outcome'] == 'skipped':
-        assessment = accepted(Tasks(repository, pr), execution['architecture_evidence']['assessment'])
+        assessment = accepted(tasks, execution['architecture_evidence']['assessment'])
         if any(spec.get('git', {}).get(k) != assessment['spec'].get('git', {}).get(k) for k in ('head', 'base', 'target')):
             raise ValueError('Ordinary review pins differ from architecture applicability')
         spec['inputs']['architecture_applicability'] = assessment['reference']
     if result.get('decision'):
-        alignment = accepted(Tasks(repository, pr), execution['architecture_evidence']['alignment'])
+        alignment = accepted(tasks, execution['architecture_evidence']['alignment'])
         for pin in ('head', 'base', 'target'):
             if spec.get('git', {}).get(pin) != alignment['spec'].get('git', {}).get(pin):
                 raise ValueError('Ordinary review pins differ from architecture alignment')
@@ -655,7 +723,7 @@ def enforce(spec, repository, pr, *, options=None, upstream=None):
             spec['inputs']['architecture_governing_' + str(index)] = path
 
 
-def governing_body(body, operation, tasks):
+def governing_body(body, operation, tasks, *, upstream=None):
     """Remove only our exact reconciled edit from governing discussion context."""
     from shared import publication
     value = publication.load(operation, 'edit-pr')
@@ -667,7 +735,7 @@ def governing_body(body, operation, tasks):
     if set(fields) != {'body'}:
         raise ValueError('Own Decisions normalization cannot cover unrelated fields')
     approved = fields['body']
-    heading = skill_config.effective('dk-workflows:dk-pr-decisions', tasks.store.subject['repository'])['options']['section_heading']
+    heading = skill_config.effective('dk-workflows:dk-pr-decisions', tasks.store.subject['repository'], upstream)['options']['section_heading']
     section = decision_section(approved, heading)
     bounds = architecture_bounds(approved, section) if section else None
     if not bounds or replace_decision(request['expected']['body'], approved[bounds[0]:bounds[1]].strip('\n'), heading=heading) != approved:

@@ -627,3 +627,12 @@ Freshness ends at changed governing inputs, material/uncertain impact, changed
 selection policy or damaged/missing evidence; current authorization, publication
 and CI checks are never cached. Offline reuse/recovery tests establish behavior,
 not API dollar savings. Native API cost telemetry is unavailable for this change.
+
+Architecture dependency validation memoizes accepted tasks and shares Git capture
+only within one read-only validation boundary. Discard it before native execution,
+publication and the next helper command; preparation and completion keep separate
+live checks. This replaces recursive repeated reads of the same immutable reports
+and diff without adding durable state. Historical reuse separately recaptures
+review resources, instructions and native contracts: changed guidance refreshes
+comparison even when impact reports that implementation changes are nonmaterial.
+Offline capture counts are process/I/O proxies, not native API dollar evidence.

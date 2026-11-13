@@ -713,3 +713,82 @@ def test_public_alternatives_do_not_absorb_indented_siblings():
     updated = arch.replace_decision(body, rendered)
     assert updated.endswith(sibling)
     assert arch.replace_decision(updated, rendered) == updated
+
+
+@pytest.mark.parametrize('marker', ['-', '*', '+', '1.'])
+def test_marker_only_list_does_not_expose_architecture_example(marker):
+    indent = ' ' * (len(marker)+1)
+    example = marker + '\n' + indent + '### Architecture decisions\n\n' + indent + 'Keep this example.\n\n'
+    body = '## Decisions\n\n' + example + '### Other decisions\nKeep unrelated.\n'
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert example in updated
+    assert '### Other decisions\nKeep unrelated.' in updated
+    assert arch.replace_decision(updated, 'Chosen approach: new') == updated
+
+
+@pytest.mark.parametrize('opener,closer', [('```text', '```'), ('~~~text', '~~~')])
+def test_closed_list_fences_do_not_become_unclosed_document_examples(opener, closer):
+    example = '- ' + opener + '\n  example\n  ' + closer + '\n\n'
+    body = example + '## Tests\nKeep.\n'
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert updated.startswith(body)
+    assert arch.replace_decision(updated, 'Chosen approach: new') == updated
+
+
+def test_historical_comparison_rejects_same_identity_changed_guidance(case):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = initial(tasks, spec)
+    reference = arch.accepted(tasks, refs['comparison'])['reference']
+    original = Path(reference).read_bytes()
+    # The fixture's installed governing resource keeps its identity and path.
+    Path(spec['skill']['resources']['entry']).write_text('Updated architecture examination requirements')
+    refs['assessment'] = complete(tasks, spec, 'assessment', {'required': True, 'reason': 'Current guidance still requires architecture', 'evidence': ['guidance']})
+    with pytest.raises(ValueError, match='review guidance changed'):
+        complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'Implementation is unchanged', 'evidence': ['diff']}, {'comparison': refs['comparison']})
+    assert Path(reference).read_bytes() == original
+    assert len(read(store.manifest)['entries'][refs['comparison']]['attempts']) == 1
+
+
+def test_upstream_heading_is_preserved_in_own_publication_normalization(case, tmp_path):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    upstream = 'github.com/upstream/project'
+    write(config.path(upstream), {'skill_defaults': {'dk-workflows:dk-pr-decisions': {'options': {'section_heading': 'Design choices'}}}})
+    refs = initial(tasks, spec)
+    before = 'Summary\n'
+    source = tmp_path/'body.md'; source.write_text(before)
+    command = [sys.executable, str(ROOT/'scripts/architecture.py'), '--repository', REPO, '--pr', PR, '--upstream', upstream]
+    result = json.loads(subprocess.check_output([*command, 'decision', '--comparison', refs['comparison'],
+                        '--selection', refs['selection'], '--body', str(source)], text=True, timeout=60))
+    assert '## Design choices' in result['body']
+    operation = publication.prepare('edit-pr', PR, {'body': before},
+                                    {'kind': 'edit-pr', 'pr': PR, 'head': spec['git']['head'], 'fields': {'body': result['body']}}, ['fixture-reconcile'])
+    saved = read(operation['operation']); saved.update(status='verified', receipt={'url': PR}); write(operation['operation'], saved)
+    source.write_text(result['body'])
+    restored = json.loads(subprocess.check_output([*command, 'governing-body', '--body', str(source), '--operation', operation['operation']], text=True, timeout=60))
+    assert restored['body'] == before
+    assert arch.governing_body(result['body'], operation['operation'], tasks, upstream=upstream) == before
+
+
+def test_dependency_validation_is_shared_within_each_fresh_boundary(case, monkeypatch):
+    from collections import Counter
+    import state
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = aligned(tasks, spec)
+    captures = Counter()
+    original_capture = state.capture
+    def capture(assignment, **kwargs):
+        if 'architecture' in assignment.get('options', {}):
+            captures[assignment['task']['id']] += 1
+        return original_capture(assignment, **kwargs)
+    monkeypatch.setattr(state, 'capture', capture)
+    task = tasks.prepare({'tasks': [ordinary(spec, refs)]})['tasks'][0]
+    assert task['action'] == 'invoke'
+    # Construction and claim are separate live boundaries, with each stage once.
+    expected = {'architecture-' + stage + '-review': 2 for stage in ('assessment', 'comparison', 'selection', 'alignment')}
+    assert dict(captures) == expected
+    captures.clear()
+    task = tasks.prepare({'tasks': [ordinary(spec, refs)]})['tasks'][0]
+    assert task['action'] == 'recover_required' and dict(captures) == expected
+    Path(spec['inputs']['context']).write_text('Requirements changed after the preceding helper command')
+    with pytest.raises(ValueError, match='fresh'):
+        tasks.prepare({'tasks': [ordinary(spec, refs)]})

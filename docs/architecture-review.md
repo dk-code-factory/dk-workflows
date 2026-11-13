@@ -157,7 +157,8 @@ reuse; material or uncertain impact requires refreshed affected analysis. Includ
 `impact` as a dependency of new selection/alignment tasks and in gate refs.
 Selection/alignment still use the original immutable comparison reference.
 Always run current implementation alignment after author changes. Changed scoring
-or review guidance refreshes comparison; changed auto-pick policy refreshes only
+or review guidance refreshes comparison, including changed prompt contents under
+the same skill identity; historical reuse recaptures that guidance. Changed auto-pick policy refreshes only
 selection. Keep originals, completed siblings, claims, budgets and publication
 recovery references. Treat the workflow's Decisions edit as self-produced only
 when the reconciled journal matches its exact before/after body. External edits

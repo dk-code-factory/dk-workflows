@@ -39,7 +39,7 @@ def main():
         result = architecture.gate(tasks, read(args.file), options=read(args.options) if args.options else None,
                                    upstream=args.upstream, analysis_only=args.analysis_only)
     elif args.command == 'governing-body':
-        result = {'body': architecture.governing_body(body_text(args.body), args.operation, tasks)}
+        result = {'body': architecture.governing_body(body_text(args.body), args.operation, tasks, upstream=args.upstream)}
     else:
         selected = architecture.accepted(tasks, args.selection)
         impact_key = selected['dependencies'].get('impact')
