@@ -1004,3 +1004,43 @@ def test_new_impact_key_alias_does_not_imply_selection_consumed_new_result(case)
     assert arch.accepted(tasks, refs['impact'])['reference'] != prior_impact
     with pytest.raises(ValueError, match='different selection'):
         tasks.prepare({'tasks': [descriptor(spec, 'alignment', {k: refs[k] for k in ('comparison', 'selection', 'impact')})]})
+
+
+@pytest.mark.parametrize('prefix', ['- ', '- - ', '1. - - '])
+@pytest.mark.parametrize('opening,closing', [('<pre>', '</pre>'), ('<custom-tag>', '</custom-tag>'), ('```md', '```'), ('***', None)])
+def test_nested_list_blocks_preserve_following_root_sections(prefix, opening, closing):
+    sibling = 'Other section\n-------------\nKeep unrelated.\n\n## Tests\nKeep.\n'
+    block = prefix + opening + '\n'
+    if closing is not None:
+        block += ' ' * len(prefix) + 'example\n' + ' ' * len(prefix) + closing + '\n'
+    body = '## Decisions\n\n### Architecture decisions\n\n' + block + sibling
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert updated.endswith(sibling)
+    assert arch.replace_decision(updated, 'Chosen approach: new') == updated
+
+
+def test_thematic_break_ends_root_paragraph_before_html_example():
+    example = '<custom-tag>\n### Architecture decisions\nExample only.\n</custom-tag>\n\n'
+    body = '## Decisions\n\nOld paragraph.\n* * *\n' + example + '## Tests\nKeep.\n'
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert example in updated and updated.endswith('## Tests\nKeep.\n')
+
+
+
+def test_indented_paragraph_continuation_cannot_start_html_block():
+    sibling = '### Other decisions\nKeep unrelated.\n\n## Tests\nKeep.\n'
+    body = '## Decisions\n\n### Architecture decisions\n\nParagraph.\n    Continuation.\n<span>\n' + sibling
+    assert arch.replace_decision(body, 'Chosen approach: new').endswith(sibling)
+
+
+def test_new_list_item_starts_its_own_html_block():
+    sibling = 'Other section\n-------------\nKeep unrelated.\n\n## Tests\nKeep.\n'
+    body = '## Decisions\n\n### Architecture decisions\n\n- Paragraph.\n- <custom-tag>\n  example\n  </custom-tag>\n' + sibling
+    assert arch.replace_decision(body, 'Chosen approach: new').endswith(sibling)
+
+
+@pytest.mark.parametrize('text', ['===', '--'])
+def test_underline_without_preceding_paragraph_is_plain_text(text):
+    sibling = '### Other decisions\nKeep unrelated.\n\n## Tests\nKeep.\n'
+    body = '## Decisions\n\n### Architecture decisions\n\n' + text + '\n<span>\n' + sibling
+    assert arch.replace_decision(body, 'Chosen approach: new').endswith(sibling)

@@ -599,6 +599,7 @@ HTML_BLOCK_TAGS = (
 
 
 # CommonMark complete tags: angle brackets are allowed in quoted attributes.
+THEMATIC_BREAK = re.compile(r' {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})')
 HTML_NAME = r'[A-Za-z][A-Za-z0-9-]*'
 HTML_VALUE = r'''(?:[^ \t\r\n\f\v"'=<>`]+|"[^"]*"|'[^']*')'''
 HTML_ATTRIBUTE = r'[A-Za-z_:][A-Za-z0-9_.:-]*(?:[ \t]*=[ \t]*' + HTML_VALUE + r')?'
@@ -631,13 +632,31 @@ class ListContext:
         self.paragraph = False
         self.raw = None
         self.fence = None
+        self.block_indent = 0
 
     @staticmethod
     def opaque(line):
         return ''.join(c if c in '\r\n' else ' ' for c in line)
 
+    @staticmethod
+    def item(line, *, paragraph=False):
+        match = re.match(r' {0,3}(?:[-+*]|[0-9]{1,9}[.)])([ \t]+|$)', line)
+        if match is None or THEMATIC_BREAK.fullmatch(line):
+            return None
+        ordered = re.match(r' {0,3}([0-9]{1,9})[.)]', line)
+        if paragraph and (not line[match.end():].strip() or ordered and int(ordered[1]) != 1):
+            return None
+        return match
+
     def content(self, line):
         """Only paragraph content can authorize a lazy list continuation."""
+        if (self.raw is not None or self.fence is not None) and line.strip():
+            indent = len(line) - len(line.lstrip(' '))
+            if indent < self.block_indent:
+                self.raw = self.fence = None
+                self.paragraph = False
+            else:
+                line = line[self.block_indent:]
         if self.raw is not None:
             ended = not line.strip() if self.raw == 'blank' else self.raw.search(line)
             if ended:
@@ -649,6 +668,17 @@ class ListContext:
                 self.fence = None
             self.paragraph = False
             return
+        self.block_indent = 0
+        # Remove nested list prefixes iteratively. Their block content cannot
+        # authorize a lazy paragraph after an HTML/fence/thematic block ends.
+        while (item := self.item(line, paragraph=self.paragraph)) is not None:
+            spaces = len(item[1])
+            self.block_indent += item.start(1) + (spaces if 1 <= spaces <= 4 else 1)
+            line = line[item.end():]
+            self.paragraph = False
+            if spaces > 4:
+                line = '    ' + line
+                break
         opening = re.match(r' {0,3}(`{3,}|~{3,})(.*)$', line)
         if opening and (opening[1][0] != '`' or '`' not in opening[2]):
             self.fence = (opening[1][0], len(opening[1]))
@@ -659,17 +689,18 @@ class ListContext:
             self.raw = raw if raw == 'blank' or not raw.search(line) else None
             self.paragraph = False
             return
-        rule = re.fullmatch(r' {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})', line)
+        rule = THEMATIC_BREAK.fullmatch(line)
         setext = self.paragraph and re.fullmatch(r' {0,3}(?:=+|-+)[ \t]*', line)
-        self.paragraph = bool(line.strip()) and not (rule or setext or re.match(
-            r'(?: {0,3}(?:#{1,6}(?:[ \t]|$)|>|[-+*](?:[ \t]|$)|[0-9]+[.)](?:[ \t]|$))| {4})', line))
+        indented_code = not self.paragraph and line.startswith('    ')
+        self.paragraph = bool(line.strip()) and not (rule or setext or indented_code or re.match(
+            r' {0,3}(?:#{1,6}(?:[ \t]|$)|>)', line))
 
     def mask(self, line, *, paragraph=False):
         expanded = line.expandtabs(4).rstrip('\r\n')
         indent = len(expanded) - len(expanded.lstrip(' '))
-        item = re.match(r' {0,3}(?:[-+*]|[0-9]{1,9}[.)])([ \t]+|$)', expanded)
+        item = self.item(expanded)
         block = re.match(r' {0,3}(?:#{1,6}(?:[ \t]|$)|>|`{3,}|~{3,})', expanded)
-        rule = re.fullmatch(r' {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})', expanded)
+        rule = THEMATIC_BREAK.fullmatch(expanded)
         if self.indent is not None:
             if not expanded.strip():
                 self.after_blank = True
@@ -685,13 +716,13 @@ class ListContext:
             else:
                 return self.opaque(line)
         if item and not rule:
-            ordered = re.match(r' {0,3}([0-9]{1,9})[.)]', expanded)
-            if paragraph and (not expanded[item.end():].strip() or ordered and int(ordered[1]) != 1):
+            if self.item(expanded, paragraph=paragraph) is None:
                 return line
             spaces = len(item[1])
             self.indent = item.start(1) + (spaces if 1 <= spaces <= 4 else 1)
             content = expanded[item.end():]
             self.raw = self.fence = None
+            self.paragraph = False
             self.content(content if spaces <= 4 else '    ' + content)
             self.after_blank = False
             return self.opaque(line)
@@ -723,8 +754,10 @@ def heading_view(body):
             else:
                 raw = html_end(stripped, paragraph=paragraph)
                 if raw is None:
-                    paragraph = bool(stripped.strip()) and not bool(re.match(
-                        r' {0,3}(?:#{1,6}(?:[ \t]|$)|>|(?:=+|-+)[ \t]*$)| {4}', stripped))
+                    indented_code = not paragraph and stripped.startswith('    ')
+                    setext = paragraph and re.fullmatch(r' {0,3}(?:=+|-+)[ \t]*', stripped)
+                    paragraph = bool(stripped.strip()) and not (indented_code or setext or THEMATIC_BREAK.fullmatch(stripped) or re.match(
+                        r' {0,3}(?:#{1,6}(?:[ \t]|$)|>)', stripped))
                     masked.append(line)
                     continue
                 if raw != 'blank' and raw.search(stripped):
