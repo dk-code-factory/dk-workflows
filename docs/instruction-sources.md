@@ -20,6 +20,8 @@ A value has `mode`, `include` and `exclude` fields, for example:
 
 Exclusions also apply to resolved aliases of the same source. Unsafe instruction symlinks remain unselected inventory entries so governing handoffs cannot reintroduce them; ordinary and discovery reads reject those links. An unsafe alias does not exclude its independently selected regular target unless the policy explicitly excludes that source or an alias. Handoff validation covers resources, instructions and inputs, including directory references containing excluded sources.
 
+Git-ignored automation and contributor guidance participates in discovery and the saved selection too. Ignoring a local instruction file in Git does not adopt it or exempt its direct, alias or directory handoffs from source checks. Selected ignored files use the same content freshness checks as tracked guidance.
+
 ## Read, change and reset
 
 After initialization, load selected files with `read --source REPO_RELATIVE_PATH`; ordinary reads reject unselected sources. Discovery reads remain available to explain a proposed change, with the same evidence-only boundary. Apply each file only within its documented scope. A saved source choice does not change the host's instruction priority, grant permission, or make every sentence in a selected source a repository-wide rule.

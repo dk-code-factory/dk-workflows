@@ -443,6 +443,11 @@ settings cache or transcript. The expected avoided native cost of repeated
 source-choice explanation and clarification exceeds reading and validating this
 small record for repeated repository use; actual API dollar savings are unmeasured.
 Inventory discovery and targeted content reads remain live costs in both sessions.
+Discovery preserves Git's raw pathname bytes and supplements its ordinary ignored
+directory pruning with guidance-specific ignored-path queries. Ignored automation
+and contributor sources therefore remain subject to the same choice and handoff
+checks without enumerating every ignored dependency file. This adds no stored
+inventory; selected ignored sources share the existing content freshness binding.
 
 The freshness boundary is the current repository identity, saved choice and
 selected source contents. New sources follow the explicit saved mode and

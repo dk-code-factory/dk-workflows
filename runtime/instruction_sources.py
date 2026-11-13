@@ -1,6 +1,7 @@
 """Repository instruction discovery and explicit adoption, without saved source text."""
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import subprocess
 
@@ -14,6 +15,9 @@ HOST_LIMITATIONS = (
     'override higher-priority instructions. If excluded rules are already active and conflict with '
     'your choice, stop affected work and use a supported host context configured to exclude them.'
 )
+AUTOMATION_NAMES = {'agents.md', 'agents.override.md', 'claude.md', 'claude.local.md', 'copilot-instructions.md', '.cursorrules'}
+HUMAN_PREFIXES = ('contributing', 'development', 'developing', 'hacking')
+RULE_DIRECTORIES = (('.cursor', 'rules'), ('.claude', 'rules'))
 
 
 def key(identity):
@@ -72,10 +76,9 @@ def root(checkout):
 def kind(name):
     path = PurePosixPath(name)
     lower, parts = path.name.lower(), tuple(part.lower() for part in path.parts)
-    if (lower in {'agents.md', 'agents.override.md', 'claude.md', 'claude.local.md', 'copilot-instructions.md', '.cursorrules'}
-            or lower.endswith('.instructions.md') or parts[:2] in {('.cursor', 'rules'), ('.claude', 'rules')}):
+    if (lower in AUTOMATION_NAMES or lower.endswith('.instructions.md') or parts[:2] in RULE_DIRECTORIES):
         return 'automation'
-    if (lower.startswith(('contributing', 'development', 'developing', 'hacking'))
+    if (lower.startswith(HUMAN_PREFIXES)
             or 'docs' in parts and any(p in {'development', 'developer', 'developers', 'contributing'} for p in parts[:-1])):
         return 'human'
     return None
@@ -83,11 +86,20 @@ def kind(name):
 
 def discover(checkout, policy=None):
     checkout = root(checkout)
-    # Git performs ignored-directory pruning, including large dependency trees.
+    # Prune ignored trees for ordinary files, then ask only for ignored guidance.
     result = subprocess.run(['git', '-C', str(checkout), 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
                             capture_output=True, timeout=15)
-    names = (set(result.stdout.decode().split('\x00')) - {''} if result.returncode == 0 else
+    names = (set(os.fsdecode(result.stdout).split('\x00')) - {''} if result.returncode == 0 else
              {p.relative_to(checkout).as_posix() for p in checkout.rglob('*') if p.is_file() and '.git' not in p.parts})
+    if result.returncode == 0:
+        patterns = [f':(glob,icase)**/{name}' for name in (
+            *sorted(AUTOMATION_NAMES), '*.instructions.md', *(prefix+'*' for prefix in HUMAN_PREFIXES))]
+        patterns.extend(':(glob,icase)'+'/'.join(parts)+'/**' for parts in RULE_DIRECTORIES)
+        patterns.append(':(glob,icase)**/docs/**')
+        ignored = subprocess.run(['git', '-C', str(checkout), 'ls-files', '-z', '--others', '--ignored',
+                                  '--exclude-standard', '--', *patterns], capture_output=True, timeout=15, check=True)
+        names.update(os.fsdecode(ignored.stdout).split('\x00'))
+        names.discard('')
     if policy:
         names.update(policy['include'])
         names.update(policy['exclude'])

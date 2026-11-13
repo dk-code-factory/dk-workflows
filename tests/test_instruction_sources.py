@@ -1,5 +1,6 @@
 """Source adoption, retained handoff freshness and request-bound offline recovery."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -62,6 +63,88 @@ def test_initialization_discovers_rules_without_adopting_or_writing(case):
     assert not evidence['adopted'] and 'model attribution' in evidence['text']
     assert sources.read_source(checkout, 'docs/team.md', discovery=True, identity=REPO)['kind'] == 'custom'
     assert sources.inspect(checkout, REPO)['status'] == 'choice-needed'
+
+
+@pytest.mark.parametrize('tracked', [False, True])
+@pytest.mark.parametrize('selected_source', [False, True])
+def test_raw_git_pathnames_preserve_discovery_and_fresh_process_reuse(case, tmp_path, tracked, selected_source):
+    spec, store = case
+    checkout = Path(spec['git']['checkout'])
+    name = os.fsdecode(b'raw-\xff/AGENTS.md' if selected_source else b'notes-\xff')
+    path = checkout/name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('Selected original instructions' if selected_source else 'Unrelated file')
+    if tracked:
+        subprocess.run(['git', '-C', str(checkout), 'add', '--', name], check=True)
+    output = sources.inspect(checkout, REPO)
+    assert {item['path'] for item in output['sources']} == ({name} if selected_source else set())
+    save(policy('all'))
+    bound = build(spec)
+    claim = store.start(bound)['claim']['id']
+    store.record(bound, claim, b'Original raw-path analysis', {'complete': True}, 'complete')
+    before = store.manifest.read_bytes()
+    saved = tmp_path/'raw-path-spec.json'
+    saved.write_text(json.dumps(bound))
+    command = [sys.executable, str(ROOT/'scripts/dk.py'), '--repository', REPO, '--pr', PR,
+               'start', '--spec', str(saved)]
+    assert json.loads(subprocess.check_output(command))['action'] == 'reuse'
+    assert store.manifest.read_bytes() == before
+    path.write_text('Changed content')
+    if selected_source:
+        with pytest.raises(ValueError, match='rebuild'):
+            capture(bound)
+    else:
+        assert json.loads(subprocess.check_output(command))['action'] == 'reuse'
+        assert store.manifest.read_bytes() == before
+
+
+@pytest.mark.parametrize('value', [policy(), policy('custom')])
+@pytest.mark.parametrize('field', ['instructions', 'inputs', 'resources'])
+def test_git_ignored_guidance_is_discovered_and_rejected_in_handoffs(case, value, field):
+    spec, _ = case
+    checkout = Path(spec['git']['checkout'])
+    names = {'CLAUDE.local.md', '.github/copilot-instructions.md',
+             'ignored/nested/AGENTS.md', 'ignored/nested/project.instructions.md',
+             '.cursor/rules/project.mdc', '.claude/rules/nested/project.md'}
+    (checkout/'.gitignore').write_text('*\n')
+    for name in [*names, 'ignored/node_modules/package/unrelated.js']:
+        path = checkout/name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('Ignored repository guidance')
+    initial = sources.inspect(checkout, REPO)
+    assert {item['path'] for item in initial['sources']} == names
+    assert not any(item['selected'] for item in initial['sources'])
+    save(value)
+    assert {item['path'] for item in sources.inspect(checkout, REPO)['sources']} == names
+    alias = checkout/'guidance-alias.md'
+    alias.symlink_to(checkout/'.github/copilot-instructions.md')
+    bundle = checkout.parent/'governing-bundle'
+    bundle.mkdir()
+    (bundle/'instructions.md').symlink_to(alias)
+    directory_alias = checkout/'guidance-directory'
+    directory_alias.symlink_to(checkout/'.github', target_is_directory=True)
+    for path in [*(checkout/name for name in names), alias, bundle, directory_alias,
+                 checkout/'.github', checkout/'ignored', checkout]:
+        with pytest.raises(ValueError, match='Excluded repository instruction'):
+            capture(build(spec, **{field: {'ignored-guidance': str(path)}}))
+
+
+def test_git_ignored_selected_guidance_controls_binding_freshness(case):
+    spec, _ = case
+    checkout = Path(spec['git']['checkout'])
+    (checkout/'.gitignore').write_text('*\n')
+    expected = {'AGENTS.md', 'CONTRIBUTING.md', 'docs/development/testing.md'}
+    for name in expected:
+        path = checkout/name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('Original ignored guidance')
+    save(policy('all'))
+    assert {item['path'] for item in sources.inspect(checkout, REPO)['sources'] if item['selected']} == expected
+    bound = build(spec)
+    capture(bound)
+    (checkout/'AGENTS.md').write_text('Changed selected ignored guidance')
+    with pytest.raises(ValueError, match='rebuild'):
+        capture(bound)
 
 
 @pytest.mark.parametrize('value,expected', [
