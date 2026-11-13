@@ -636,9 +636,11 @@ and CI checks are never cached. Offline reuse/recovery tests establish behavior,
 not API dollar savings. Native API cost telemetry is unavailable for this change.
 
 Architecture dependency validation memoizes accepted tasks and shares Git capture
-only within one read-only validation boundary. Discard it before native execution,
-publication and the next helper command; preparation and completion keep separate
-live checks. This replaces recursive repeated reads of the same immutable reports
+only within one read-only validation boundary, across sibling incoming occurrences.
+Managed prepare/resume use separate contexts for assignment construction and live
+capture; each reads the live PR once, rather than once per sibling. Contexts end
+before native execution, publication or the next helper command. Preparation and
+completion keep separate live checks. This replaces recursive repeated reads of the same immutable reports
 and diff without adding durable state. Historical reuse separately recaptures
 review resources, instructions and native contracts: changed guidance refreshes
 comparison even when impact reports that implementation changes are nonmaterial.

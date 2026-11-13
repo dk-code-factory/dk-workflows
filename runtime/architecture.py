@@ -234,7 +234,7 @@ def evaluation(tasks):
         yield existing
         return
     from state import _CaptureContext
-    context = {'tasks': tasks, 'accepted': {}, 'active': set(), 'capture': _CaptureContext()}
+    context = {'tasks': tasks, 'accepted': {}, 'active': set(), 'capture': _CaptureContext(), 'live': {}}
     token = _EVALUATION.set(context)
     try:
         yield context
@@ -496,7 +496,11 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
     heading = skill_config.effective('dk-workflows:dk-pr-decisions', tasks.store.subject['repository'], upstream)['options']['section_heading']
     if body != replace_decision(before, rendered, heading=heading):
         raise ValueError('Architecture publication changed unrelated PR text or lacks the settled decision')
-    live = live_pr(tasks.store.subject['pr'])
+    with evaluation(tasks) as context:
+        pr = tasks.store.subject['pr']
+        if pr not in context['live']:
+            context['live'][pr] = live_pr(pr)
+        live = context['live'][pr]
     if live['headRefOid'] != head:
         raise ValueError('PR head changed after architecture alignment')
     current_section = decision_section(live['body'], heading)
@@ -544,6 +548,14 @@ HTML_BLOCK_TAGS = (
 ).split()
 
 
+# CommonMark complete tags: angle brackets are allowed in quoted attributes.
+HTML_NAME = r'[A-Za-z][A-Za-z0-9-]*'
+HTML_VALUE = r'''(?:[^ \t\r\n\f\v"'=<>`]+|"[^"]*"|'[^']*')'''
+HTML_ATTRIBUTE = r'[A-Za-z_:][A-Za-z0-9_.:-]*(?:[ \t]*=[ \t]*' + HTML_VALUE + r')?'
+COMPLETE_HTML_TAG = re.compile(
+    r' {0,3}(?:<' + HTML_NAME + r'(?:[ \t]+' + HTML_ATTRIBUTE + r')*[ \t]*/?>|</' + HTML_NAME + r'[ \t]*>)[ \t]*')
+
+
 def html_end(line, *, paragraph=False):
     """Return the raw-block terminator, or None for ordinary Markdown."""
     if re.match(r' {0,3}<(?:pre|script|style|textarea)(?:[ \t>]|$)', line, re.I):
@@ -556,7 +568,7 @@ def html_end(line, *, paragraph=False):
     if re.match(r' {0,3}</?(?:' + '|'.join(HTML_BLOCK_TAGS) + r')(?:[ \t>]|/>|$)', line, re.I):
         return 'blank'
     # CommonMark type 7 cannot interrupt an open paragraph.
-    if not paragraph and re.fullmatch(r' {0,3}</?[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[^<>]*)?/?>[ \t]*', line):
+    if not paragraph and COMPLETE_HTML_TAG.fullmatch(line):
         return 'blank'
     return None
 
@@ -567,10 +579,38 @@ class ListContext:
         self.indent = None
         self.after_blank = False
         self.paragraph = False
+        self.raw = None
+        self.fence = None
 
     @staticmethod
     def opaque(line):
         return ''.join(c if c in '\r\n' else ' ' for c in line)
+
+    def content(self, line):
+        """Only paragraph content can authorize a lazy list continuation."""
+        if self.raw is not None:
+            ended = not line.strip() if self.raw == 'blank' else self.raw.search(line)
+            if ended:
+                self.raw = None
+            self.paragraph = False
+            return
+        if self.fence is not None:
+            if re.fullmatch(r' {0,3}' + re.escape(self.fence[0]) + '{' + str(self.fence[1]) + r',}[ \t]*', line):
+                self.fence = None
+            self.paragraph = False
+            return
+        opening = re.match(r' {0,3}(`{3,}|~{3,})(.*)$', line)
+        if opening and (opening[1][0] != '`' or '`' not in opening[2]):
+            self.fence = (opening[1][0], len(opening[1]))
+            self.paragraph = False
+            return
+        raw = html_end(line, paragraph=self.paragraph)
+        if raw is not None:
+            self.raw = raw if raw == 'blank' or not raw.search(line) else None
+            self.paragraph = False
+            return
+        self.paragraph = bool(line.strip()) and not bool(re.match(
+            r'(?: {0,3}(?:#{1,6}(?:[ \t]|$)|>|[-+*] |[0-9]+[.)] )| {4})', line))
 
     def mask(self, line):
         expanded = line.expandtabs(4).rstrip('\r\n')
@@ -581,20 +621,23 @@ class ListContext:
         if self.indent is not None:
             if not expanded.strip():
                 self.after_blank = True
+                self.content('')
                 return line
             if indent >= self.indent:
-                self.paragraph = not bool(re.match(r'(?:#{1,6}(?:[ \t]|$)|>|[-+*] |[0-9]+[.)] |`{3,}|~{3,})', expanded[self.indent:]))
+                self.content(expanded[self.indent:])
                 self.after_blank = False
                 return self.opaque(line)
             if item or block or rule or self.after_blank or not self.paragraph or html_end(expanded, paragraph=self.paragraph):
                 self.indent = None
+                self.raw = self.fence = None
             else:
                 return self.opaque(line)
         if item and not rule:
             spaces = len(item[1])
             self.indent = item.start(1) + (spaces if 1 <= spaces <= 4 else 1)
             content = expanded[item.end():]
-            self.paragraph = spaces <= 4 and bool(content) and not bool(re.match(r'(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|<)', content))
+            self.raw = self.fence = None
+            self.content(content if spaces <= 4 else '    ' + content)
             self.after_blank = False
             return self.opaque(line)
         return line
@@ -728,7 +771,10 @@ def render_decision(report, scoring, choice, *, selection=None):
 def enforce(spec, repository, pr, *, options=None, upstream=None):
     """Only incoming-review occurrences use this gate; standalone review is unchanged."""
     from tasks import Tasks
-    tasks = Tasks(repository, pr)
+    from state import identity
+    context = _EVALUATION.get()
+    tasks = (context['tasks'] if context is not None and context['tasks'].store.subject == identity(repository, pr)
+             else Tasks(repository, pr))
     with evaluation(tasks):
         _enforce(spec, tasks, options=options, upstream=upstream)
 

@@ -844,3 +844,69 @@ def test_successive_own_publications_normalize_original_body_in_fresh_process(ca
                 {'kind': 'edit-pr', 'pr': PR, 'head': spec['git']['head'], 'fields': {'body': updated}}, ['fixture-reconcile'])
     value = read(operation['operation']); value.update(status='verified', receipt={'url': PR}); write(operation['operation'], value)
     assert arch.governing_body(updated, operation['operation'], tasks) == external
+
+
+@pytest.mark.parametrize('tag', ['<span title="a>b">', "<custom-tag title='<'>", '<widget a="<>" b=plain c d=\'value\'>'])
+def test_complete_html_attributes_keep_example_headings_opaque(tag):
+    example = tag + '\n## Decisions\n### Architecture decisions\nExample only.\n</span>\n\n'
+    body = example + '## Tests\nKeep.\n'
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert updated.startswith(body)
+    assert arch.replace_decision(updated, 'Chosen approach: new') == updated
+
+
+@pytest.mark.parametrize('opening,closing', [('<pre>', '</pre>'), ('<!--', '-->'), ('```md', '```'), ('<custom-tag>', '')])
+def test_list_blocks_do_not_hide_following_setext_siblings(opening, closing):
+    block = '- ' + opening + '\n  example\n' + ('  ' + closing + '\n' if closing else '\n')
+    sibling = 'Other section\n-------------\nKeep unrelated.\n\n## Tests\nKeep.\n'
+    body = '## Decisions\n\n### Architecture decisions\n\n' + block + sibling
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert updated.endswith(sibling)
+    assert arch.replace_decision(updated, 'Chosen approach: new') == updated
+
+
+def test_parallel_incoming_siblings_share_two_live_validation_boundaries(case, monkeypatch):
+    from collections import Counter
+    import state
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = aligned(tasks, spec)
+    captures, reads = Counter(), []
+    original_capture = state.capture
+    def capture(assignment, **kwargs):
+        if 'architecture' in assignment.get('options', {}):
+            captures[assignment['task']['id']] += 1
+        return original_capture(assignment, **kwargs)
+    monkeypatch.setattr(state, 'capture', capture)
+    def live(pr):
+        reads.append(pr)
+        return deepcopy(LIVE[pr])
+    monkeypatch.setattr(arch, 'live_pr', live)
+    options = {'tasks': ['dk-workflows:dk-pr-feedback-read'] * 7}
+    group = []
+    for index in range(7):
+        item = ordinary(spec, refs, options)
+        item['index'] = index
+        group.append(item)
+    prepared = tasks.prepare({'tasks': group})['tasks']
+    assert all(task['action'] == 'invoke' for task in prepared)
+    expected = {'architecture-' + stage + '-review': 2 for stage in ('assessment', 'comparison', 'selection', 'alignment')}
+    assert dict(captures) == expected and len(reads) == 2
+    for task in prepared:
+        finish(tasks, task, {'complete': True}, native=False)
+    captures.clear(); reads.clear()
+    resumed = Tasks(REPO, PR).resume(keys=[task['key'] for task in prepared])
+    assert all(task['coverage_complete'] for task in resumed['tasks'])
+    assert dict(captures) == expected and len(reads) == 2
+    # A subsequent command must see changed publication and block every sibling.
+    LIVE[PR]['body'] = '# Summary\nDecision removed\n'
+    captures.clear(); reads.clear()
+    resumed = Tasks(REPO, PR).resume(keys=[task['key'] for task in prepared])
+    assert all(not task['coverage_complete'] for task in resumed['tasks'])
+    assert len(reads) == 1
+
+
+@pytest.mark.parametrize('tag', ['<widget invalid@>', '</widget invalid>', '<widget a=>'])
+def test_invalid_complete_tags_cannot_hide_real_sibling_headings(tag):
+    sibling = '### Other decisions\nKeep unrelated.\n\n## Tests\nKeep.\n'
+    body = '## Decisions\n\n### Architecture decisions\n\n' + tag + '\n' + sibling
+    assert arch.replace_decision(body, 'Chosen approach: new').endswith(sibling)

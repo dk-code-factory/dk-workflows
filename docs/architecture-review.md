@@ -179,7 +179,13 @@ publication input, not a copied analysis snapshot.
 
 The bounded editor recognizes [CommonMark heading and HTML block boundaries](https://spec.commonmark.org/0.31.2/#html-blocks), treating block HTML and list containers as opaque. Complete unknown HTML tags
 start blocks only outside an open paragraph; code-starting list items do not
-create lazy paragraph continuations that hide a root heading.
+create lazy paragraph continuations that hide a root heading. Quoted HTML
+attributes retain their complete-tag grammar, and list-contained HTML/fences
+retain block state so closing them cannot create a false paragraph.
+
+Sibling task preparation and resume share prerequisite validation and one live PR
+read within each construction/capture boundary. A separate boundary and every
+subsequent command recapture live evidence; no readiness result is saved.
 Read body files without newline translation. Public option descriptions are inline
 prose paragraphs so inserting them cannot absorb a following indented sibling
 into a generated alternatives list; full private comparisons retain formatting.

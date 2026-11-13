@@ -128,7 +128,9 @@ class Tasks:
         occurrence = bool(kinds - {'task', 'skill', 'architecture'} or selections == {'finalizers'})
         if occurrence and any(request.get(key) for key in ('retry', 'ci_repair', 'ci_rerun')):
             raise ValueError('Occurrence tasks do not reserve reviewer or CI retry budgets')
-        specs = [self.spec(item) for item in descriptors]
+        from architecture import evaluation
+        with evaluation(self):
+            specs = [self.spec(item) for item in descriptors]
         for spec, item in zip(specs, descriptors):
             if 'instruction_policy' in spec:
                 item['definition']['instruction_policy'] = deepcopy(spec['instruction_policy'])
@@ -145,7 +147,8 @@ class Tasks:
         options = {key: value for key, value in request.items() if key != 'tasks'}
         if occurrence:
             options.pop('cycle', None)
-        result = self.store.start_batch(specs, retained=retained, checklists=checklists, **options)
+        with evaluation(self):
+            result = self.store.start_batch(specs, retained=retained, checklists=checklists, **options)
         # Read committed bindings, including after a lost-response recovery. They
         # describe expectations only; finish still captures live inputs afresh.
         with self.store.locked() as manifest:
@@ -185,28 +188,31 @@ class Tasks:
         if set(keys) - entries.keys():
             raise ValueError('Unknown task key')
         specs, blocked, legacy, contracts = [], [], [], {}
-        for key, entry in entries.items():
-            if keys and key not in keys:
-                continue
-            descriptor = entry.get('managed')
-            if descriptor is None:
-                legacy.append({'key': key, 'task': entry.get('components', {}).get('task', {}).get('id'),
-                               'reason': 'definition_required'})
-                continue
-            occurrence = (descriptor.get('kind', 'task') not in {'task', 'skill', 'architecture'} or
-                          descriptor.get('kind') == 'skill' and descriptor.get('selection') == 'finalizers')
-            if (run is not None and occurrence
-                    and descriptor.get('run') != run):
-                continue
-            try:
-                self._retained_policy(descriptor)
-                spec = self.spec(descriptor)
-                contracts[key] = checklist_contract(spec, descriptor['definition'])
-                specs.append(spec)
-            except (ValueError, KeyError, TypeError, OSError, RuntimeError) as exc:
-                blocked.append({'key': key, 'reusable': False, 'coverage_complete': False,
-                                'reason': 'refresh_required', 'detail': str(exc)})
-        result = self.store.status(specs, compact=True, run=run, explain=explain, tolerate_missing=True)
+        from architecture import evaluation
+        with evaluation(self):
+            for key, entry in entries.items():
+                if keys and key not in keys:
+                    continue
+                descriptor = entry.get('managed')
+                if descriptor is None:
+                    legacy.append({'key': key, 'task': entry.get('components', {}).get('task', {}).get('id'),
+                                   'reason': 'definition_required'})
+                    continue
+                occurrence = (descriptor.get('kind', 'task') not in {'task', 'skill', 'architecture'} or
+                              descriptor.get('kind') == 'skill' and descriptor.get('selection') == 'finalizers')
+                if (run is not None and occurrence
+                        and descriptor.get('run') != run):
+                    continue
+                try:
+                    self._retained_policy(descriptor)
+                    spec = self.spec(descriptor)
+                    contracts[key] = checklist_contract(spec, descriptor['definition'])
+                    specs.append(spec)
+                except (ValueError, KeyError, TypeError, OSError, RuntimeError) as exc:
+                    blocked.append({'key': key, 'reusable': False, 'coverage_complete': False,
+                                    'reason': 'refresh_required', 'detail': str(exc)})
+        with evaluation(self):
+            result = self.store.status(specs, compact=True, run=run, explain=explain, tolerate_missing=True)
         result['tasks'] = [self.compact(task) for task in result['tasks']] + blocked
         pins = {digest({**self.store.subject, 'task': spec['task']['id'], 'skill': spec['skill']['identity']}): spec['git']
                 for spec in specs if 'git' in spec}
