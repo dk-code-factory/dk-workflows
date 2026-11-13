@@ -453,6 +453,11 @@ Request JSON escapes only filesystem surrogates, retaining existing valid-Unicod
 hash bytes and private-store readback. Host ancestor freshness follows the original
 requested checkout before normalizing source discovery to the Git root. These
 boundary corrections add no state or cache and retain the same freshness inputs.
+Literal Unix backslashes remain filename bytes in source references. Handoff
+checks keep exact selected lexical spellings separate from resolved-target
+exclusions, preserving explicit exclusions and rejection of unsafe source links. Safe
+selected directory aliases therefore retain their exact adoption spelling. These
+corrections add no state and preserve existing content bindings and reuse.
 
 The freshness boundary is the current repository identity, saved choice and
 selected source contents. New sources follow the explicit saved mode and

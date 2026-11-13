@@ -101,13 +101,15 @@ def test_raw_git_pathnames_preserve_discovery_and_fresh_process_reuse(case, tmp_
 
 @pytest.mark.parametrize('selection', ['all', 'include', 'exclude'])
 @pytest.mark.parametrize('interrupted', [False, True])
-def test_raw_source_choice_survives_request_admission_and_recovery(case, monkeypatch, selection, interrupted):
+@pytest.mark.parametrize('name', [os.fsdecode(b'raw-\xff/CLAUDE.md'), r'raw\dir/CLAUDE.md'])
+def test_raw_source_choice_survives_request_admission_and_recovery(case, monkeypatch, selection, interrupted, name):
     spec, _ = case
     checkout = Path(spec['git']['checkout'])
-    name = os.fsdecode(b'raw-\xff/CLAUDE.md')
     source = checkout/name
     source.parent.mkdir()
     source.write_text('Original selected instructions')
+    subprocess.run(['git', '-C', str(checkout), 'add', '--', name], check=True)
+    assert sources.read_source(checkout, name, discovery=True, identity=REPO)['text'] == 'Original selected instructions'
     value = policy('all') if selection == 'all' else policy('custom', **{selection: [name]})
     operation = {'domain': 'instruction-sources', 'action': 'set', 'scope': 'repo', 'value': value}
     store = config_requests.Requests()
@@ -141,6 +143,11 @@ def test_raw_source_choice_survives_request_admission_and_recovery(case, monkeyp
     assert sources.load(REPO)['policy'] == value
     assert sources.inspect(checkout, REPO)['sources'] == [
         {'path': name, 'kind': 'automation', 'selected': selection != 'exclude'}]
+    if selection == 'exclude':
+        with pytest.raises(ValueError, match='not adopted'):
+            sources.read_source(checkout, name, identity=REPO)
+    else:
+        assert sources.read_source(checkout, name, identity=REPO)['adopted']
 
 
 @pytest.mark.parametrize('suffix', [' ', '\t', '\n', os.fsdecode(b'-\xff')])
@@ -275,10 +282,19 @@ def test_saved_modes_custom_paths_and_exact_exclusions(case, value, expected):
 
 
 @pytest.mark.parametrize('value', [policy('unknown'), policy(include=['../AGENTS.md']),
-                                 policy(include=['/AGENTS.md']), policy(include=['AGENTS.md'], exclude=['AGENTS.md'])])
+                                 policy(include=['/AGENTS.md']), policy(include=['nested/../AGENTS.md']),
+                                 policy(include=['./AGENTS.md']), policy(include=['AGENTS.md\x00']),
+                                 policy(include=['AGENTS.md'], exclude=['AGENTS.md'])])
 def test_invalid_policy_cannot_be_admitted(value):
     with pytest.raises(ValueError):
         config_adapters.normalize({'domain': 'instruction-sources', 'action': 'set', 'value': value})
+
+
+@pytest.mark.parametrize('name', [r'..\AGENTS.md', r'nested\..\AGENTS.md', r'\AGENTS.md'])
+def test_windows_source_separators_cannot_bypass_relative_validation(monkeypatch, name):
+    monkeypatch.setattr(sources.os, 'sep', '\\')
+    with pytest.raises(ValueError, match='normalized repository-relative'):
+        sources.relative(name)
 
 
 def test_selected_missing_or_escaping_sources_fail_closed(case, tmp_path):
@@ -378,6 +394,39 @@ def test_directory_alias_cannot_adopt_an_explicitly_excluded_source(case):
     before = sources.binding(checkout, REPO)
     (checkout/'AGENTS.md').write_text('Changed excluded guidance through both names')
     assert sources.binding(checkout, REPO) == before
+
+
+@pytest.mark.parametrize('field', ['instructions', 'inputs', 'resources'])
+@pytest.mark.parametrize('directory', ['alias', 'chain'])
+def test_selected_directory_alias_preserves_exact_handoff_adoption(case, tmp_path, field, directory):
+    spec, store = case
+    checkout = Path(spec['git']['checkout'])
+    source = checkout/'AGENTS.md'
+    source.write_text('Selected through an internal directory alias')
+    (checkout/'alias').symlink_to(checkout, target_is_directory=True)
+    (checkout/'chain').symlink_to('alias', target_is_directory=True)
+    name = directory+'/AGENTS.md'
+    save(policy('custom', include=[name]))
+    selected = checkout/name
+    assert sources.read_source(checkout, name, identity=REPO)['adopted']
+    bound = build(spec, **{field: {'selected-guidance': str(selected)}})
+    claim = store.start(bound)['claim']['id']
+    store.record(bound, claim, b'Original directory-alias analysis', {'complete': True}, 'complete')
+    before = store.manifest.read_bytes()
+    saved = tmp_path/'directory-alias-spec.json'
+    saved.write_text(json.dumps(bound))
+    command = [sys.executable, str(ROOT/'scripts/dk.py'), '--repository', REPO, '--pr', PR,
+               'start', '--spec', str(saved)]
+    assert json.loads(subprocess.check_output(command))['action'] == 'reuse'
+    assert store.manifest.read_bytes() == before
+    traversal = checkout/(directory+'/../'+checkout.name+'/AGENTS.md')
+    assert traversal.resolve() == source
+    for unselected in [source, traversal]:
+        with pytest.raises(ValueError, match='Excluded repository instruction.*AGENTS.md'):
+            capture(build(spec, **{field: {'unselected-spelling': str(unselected)}}))
+    source.write_text('Changed selected alias content')
+    with pytest.raises(ValueError, match='rebuild'):
+        capture(bound)
 
 
 @pytest.mark.parametrize('field', ['instructions', 'inputs', 'resources'])

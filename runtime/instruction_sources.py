@@ -29,7 +29,7 @@ def policy_path(identity):
 
 
 def relative(value):
-    if (not isinstance(value, str) or not value or '\\' in value or '\x00' in value
+    if (not isinstance(value, str) or not value or (os.sep == '\\' and '\\' in value) or '\x00' in value
             or PurePosixPath(value).is_absolute() or '..' in PurePosixPath(value).parts
             or str(PurePosixPath(value)) != value or value == '.'):
         raise ValueError('Instruction sources require normalized repository-relative paths')
@@ -170,6 +170,7 @@ def check_paths(checkout, identity, paths):
     context = inspect(checkout, identity)
     checkout = root(checkout)
     selected = {(checkout/item['path']).resolve() for item in context['sources'] if item['selected']}
+    selected_names = {(checkout/item['path']).absolute() for item in context['sources'] if item['selected']}
     unselected = {(checkout/item['path']).parent.resolve()/Path(item['path']).name: item['path']
                   for item in context['sources'] if not item['selected']}
     excluded = {path.resolve(): name for path, name in unselected.items() if path.resolve() not in selected}
@@ -181,7 +182,7 @@ def check_paths(checkout, identity, paths):
         path = item.resolve()
         directory = item.is_dir()
         unselected_name = unselected.get(item.parent.resolve()/item.name)
-        if unselected_name is not None:
+        if unselected_name is not None and item.absolute() not in selected_names:
             raise ValueError('Excluded repository instruction source in handoff: ' + unselected_name)
         found = next((source for source in excluded if source == path or directory and source.is_relative_to(path)), None)
         if found is not None:
