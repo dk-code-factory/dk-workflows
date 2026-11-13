@@ -64,6 +64,133 @@ def test_advanced_rerun_remains_uncertain_without_resend(remote):
     assert remote.state['writes']['ci-rerun']==1
 
 
+@pytest.mark.parametrize('lost_response', [False, True])
+def test_changed_rerun_reason_reuses_exact_attempt_without_duplicate_send(remote, lost_response):
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    if lost_response:
+        remote.state['lose_response'] = ['ci-rerun']
+        with pytest.raises(Diagnostic):
+            publisher.publish(operation)
+    else:
+        publisher.publish(operation)
+    refreshed = publisher.prepare({**request, 'reason': 'DNS outage confirmed from logs'})
+    assert refreshed['operation'] == operation
+    publisher.publish(operation, reconcile=True)
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+def test_automatic_rerun_allowance_survives_new_process_and_does_not_reset(remote, tmp_path):
+    import json
+    import os
+    import subprocess
+    import sys
+    for attempt in range(1, 4):
+        remote.state['run'].update(run_attempt=attempt, status='completed', conclusion='failure')
+        operation = publisher.prepare({**fixture.request('ci-rerun'), 'attempt': attempt})['operation']
+        publisher.publish(operation)
+    remote.state['run'].update(status='completed', conclusion='failure')
+    snapshot = tmp_path/'remote.json'
+    snapshot.write_text(json.dumps(remote.state))
+    script = '''
+import importlib.util, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    value = importlib.util.module_from_spec(spec); spec.loader.exec_module(value)
+    return value
+publisher = load('fresh_publisher', root/'scripts/publish.py')
+fixture = load('fresh_fixture', root/'tests/pr/fixtures/github_remote.py')
+remote = fixture.Remote(json.loads(Path(sys.argv[2]).read_text()))
+for key in ('metadata', 'api', 'run'): setattr(publisher, key, getattr(remote, key))
+try:
+    publisher.prepare({**fixture.request('ci-rerun'), 'attempt': 4})
+except ValueError as exc:
+    assert 'allowance exhausted (3/3)' in str(exc), str(exc)
+else:
+    raise AssertionError('fresh process restored automatic retries')
+'''
+    result = subprocess.run([sys.executable, '-c', script, str(ROOT), str(snapshot)],
+        env={**os.environ, 'PYTHONPATH': str(ROOT/'runtime')}, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    assert remote.state['writes']['ci-rerun'] == 3
+
+
+def test_explicit_user_retry_is_bounded_and_preserves_exhausted_automatic_allowance(remote):
+    request = {**fixture.request('ci-rerun'), 'automatic_limit': 1}
+    operation = publisher.prepare(request)['operation']
+    publisher.publish(operation)
+    remote.state['run'].update(status='completed', conclusion='failure')
+    with pytest.raises(ValueError, match='allowance exhausted'):
+        publisher.prepare({**request, 'attempt': 2, 'automatic_limit': 3})
+    authorization = {'request_id': 'user-turn-22', 'authorization': 'Retry failed test workflow once',
+                     'source': 'conversation:user-turn-22'}
+    explicit = {**request, 'attempt': 2, 'user_retry': authorization}
+    operation = publisher.prepare(explicit)['operation']
+    publisher.publish(operation)
+    assert publisher.prepare({**explicit, 'reason': 'User requested retry'})['operation'] == operation
+    remote.state['run'].update(status='completed', conclusion='failure')
+    with pytest.raises(ValueError, match='different exact attempt'):
+        publisher.prepare({**explicit, 'attempt': 3})
+    with pytest.raises(ValueError, match='allowance exhausted'):
+        publisher.prepare({**request, 'attempt': 3})
+    assert remote.state['writes']['ci-rerun'] == 2
+
+
+def test_uncertain_retry_blocks_new_attempt_and_new_user_authorization(remote):
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    remote.state['lose_response'] = ['ci-rerun']
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    remote.state['run'].update(status='completed', conclusion='failure')
+    for extra in ({}, {'user_retry': {'request_id': 'new', 'authorization': 'Retry once',
+                                     'source': 'conversation:new'}}):
+        with pytest.raises(ValueError, match='requires reconciliation'):
+            publisher.prepare({**request, 'attempt': 2, **extra})
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+def test_prepared_retries_share_allowance_across_independent_workflows(remote, monkeypatch):
+    original_api = remote.api
+    def api(pr, path, **kwargs):
+        if path.endswith('/actions/runs/78'):
+            return {**remote.state['run'], 'id': 78}
+        return original_api(pr, path, **kwargs)
+    monkeypatch.setattr(publisher, 'api', api)
+    request = {**fixture.request('ci-rerun'), 'automatic_limit': 1}
+    first = publisher.prepare(request)['operation']
+    with pytest.raises(ValueError, match='allowance exhausted'):
+        publisher.prepare({**request, 'run_id': 78})
+    assert publisher.prepare({**request, 'reason': 'Reconstructed diagnosis'})['operation'] == first
+    assert remote.state['writes'] == {}
+
+
+def test_changed_head_gets_own_allowance_but_same_explicit_request_does_not_expand(remote):
+    request = {**fixture.request('ci-rerun'), 'automatic_limit': 0,
+        'user_retry': {'request_id': 'user-turn-23', 'authorization': 'Retry this run once',
+                       'source': 'conversation:user-turn-23'}}
+    publisher.publish(publisher.prepare(request)['operation'])
+    remote.state['metadata']['headRefOid'] = 'c'*40
+    remote.state['run'].update(head_sha='c'*40, run_attempt=3, status='completed', conclusion='failure')
+    with pytest.raises(ValueError, match='different exact attempt'):
+        publisher.prepare({**request, 'head': 'c'*40, 'attempt': 3})
+    automatic = {key: value for key, value in request.items() if key != 'user_retry'}
+    operation = publisher.prepare({**automatic, 'head': 'c'*40, 'attempt': 3,
+                                   'automatic_limit': 1})['operation']
+    publisher.publish(operation)
+    assert remote.state['writes']['ci-rerun'] == 2
+
+
+@pytest.mark.parametrize('extra', [{'automatic_limit': -1}, {'automatic_limit': True},
+    {'automatic_limit': 4}, {'user_retry': {}}, {'user_retry': {'request_id': 'unbound'}}])
+def test_rerun_authorization_options_are_validated_before_reserving(remote, extra):
+    with pytest.raises(ValueError):
+        publisher.prepare({**fixture.request('ci-rerun'), **extra})
+    assert remote.state['writes'] == {}
+
+
 def test_thread_answer_is_verified_and_paginated(remote):
     request=fixture.request('resolve-thread')
     remote.state['thread']['comments']=[{'id':str(i),'databaseId':i+1000,'body':'context','author':{'login':'reviewer'},'url':'url'} for i in range(102)]+remote.state['thread']['comments']

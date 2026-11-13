@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'runtime'))
 from shared import publication
 from shared.diagnostics import Diagnostic
-from shared.github_publications import Handler, KINDS
+from shared.github_publications import Handler, KINDS, rerun_options
 from shared.reply_recovery import Recovery
 
 
@@ -198,6 +198,40 @@ def rejected_push(value):
     return len(statuses) == 1
 
 
+def rerun_reservation(request, records, *, operation=None):
+    """Reuse exact attempts and derive reservations from existing intents only."""
+    related = [(path, value) for path, value in records
+               if value['request']['kind'] == 'ci-rerun' and value['status'] != 'not_applied']
+    user = request.get('user_retry')
+    reusable = None
+    for path, value in related:
+        approved = value['request']['approved']
+        prior_user = approved.get('user_retry')
+        if (user and prior_user and user['request_id'] == prior_user['request_id']
+                and request['run_id'] == approved['run_id']
+                and (user != prior_user or any(request.get(key) != approved.get(key)
+                                              for key in ('head', 'attempt')))):
+            raise ValueError('User retry request already binds a different exact attempt or authorization')
+        if all(request.get(key) == approved.get(key) for key in ('head', 'run_id', 'attempt')):
+            if operation is None:
+                reusable = {'operation': str(path), **value, 'reused_intent': True}
+            elif path.resolve() != Path(operation).resolve():
+                raise ValueError('CI attempt already has a retained rerun; reconcile it before dispatch')
+    if reusable:
+        return reusable
+    if user:
+        return None
+    same_head = [value['request']['approved'] for _, value in related
+                 if value['request']['approved'].get('head') == request['head']]
+    automatic = [value for value in same_head if not value.get('user_retry')]
+    limit = min([request['automatic_limit']] + [value.get('automatic_limit', 3) for value in same_head])
+    reserved = len(automatic)
+    if (reserved >= limit if operation is None else reserved > limit):
+        raise ValueError(f'Automatic CI retry allowance exhausted ({reserved}/{limit}); '
+                         'a bounded explicit user retry is required')
+    return None
+
+
 def prepare(request, *, upstream=None, options=None):
     if options is not None:
         import skill_config
@@ -220,14 +254,20 @@ def prepare(request, *, upstream=None, options=None):
     if 'pr' in request:
         endpoint(request['pr'])
         request['pr'] = request['pr'].rstrip('/').lower()
+    if request.get('kind') == 'ci-rerun':
+        rerun_options(request)
     target = request.get('pr') or (request.get('remote','')+'#'+request.get('branch',''))
     scope = base/publication.digest(target)
     scope.mkdir(parents=True,exist_ok=True,mode=0o700)
     payload_hash = publication.digest(request)
     with (scope/'.prepare.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
-        for path in sorted(scope.glob('*/*.json')):
-            retained = publication.load(path)
+        records = [(path, publication.load(path)) for path in sorted(scope.glob('*/*.json'))]
+        if request.get('kind') == 'ci-rerun':
+            reused = rerun_reservation(request, records)
+            if reused:
+                return reused
+        for path, retained in records:
             approved = retained['request']['approved']
             if (request.get('kind') == approved.get('kind') == 'ci-approve'
                     and request.get('run_id') == approved.get('run_id')
@@ -337,6 +377,11 @@ def publish(path, *, reconcile=False):
     with (scope/'.dispatch.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
         retained = publication.load(path, kind)
+        if kind == 'ci-rerun' and retained['status'] == 'prepared' and not reconcile:
+            request = dict(retained['request']['approved'])
+            rerun_options(request)
+            rerun_reservation(request,
+                [(other, publication.load(other)) for other in scope.glob('*/*.json')], operation=path)
         for other in scope.glob('*/*.json') if retained['status']=='prepared' and not reconcile else []:
             if other.resolve()!=Path(path).resolve() and blocks(publication.load(other), retained['request']['approved']):
                 raise ValueError('Reconcile the pending publication before another write: '+str(other))
