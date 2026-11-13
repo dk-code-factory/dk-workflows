@@ -337,7 +337,7 @@ def test_lowered_limit_does_not_prevent_uncertain_retry_reconciliation(remote):
 
 
 @pytest.fixture
-def diagnosed_retry(remote, tmp_path):
+def diagnosed_retry(remote, tmp_path, request):
     import io
     import zipfile
     from types import SimpleNamespace
@@ -361,7 +361,7 @@ def diagnosed_retry(remote, tmp_path):
     snapshot = {'head': fixture.HEAD, 'result': 'failure', 'checks': remote.state['checks']}
     api = SimpleNamespace(repo='github.com/owner/repo',
                           request=lambda path: remote.api(fixture.PR, 'repos/owner/repo/' + path))
-    handoff = capture(api, fixture.PR, fixture.HEAD,
+    handoff = capture(api, getattr(request, 'param', fixture.PR), fixture.HEAD,
                       snapshot | {'evidence_file': evidence_file(registry, evidence)}, snapshot)
     diagnosis = {'capture': handoff['capture'], 'runs': [{'run_id': 77, 'attempt': 1, 'jobs': [{
         'job_id': 770, 'verdict': 'unrelated', 'retryable': True, 'reason': 'Package mirror DNS outage',
@@ -369,6 +369,18 @@ def diagnosed_retry(remote, tmp_path):
         'log_evidence': [{'member': 'install/1_packages.txt',
                           'excerpt': 'Temporary failure resolving archive.ubuntu.com'}]}]}]}
     return requests(handoff, diagnosis)['requests'][0]
+
+
+@pytest.mark.parametrize('diagnosed_retry', [fixture.PR + '/',
+    fixture.PR.replace('/owner/repo/', '/OWNER/REPO/'),
+    fixture.PR.replace('/owner/repo/', '/OWNER/REPO/') + '/'], indirect=True)
+def test_equivalent_pr_url_diagnosis_dispatches_once(remote, diagnosed_retry):
+    operation = publisher.prepare(diagnosed_retry)['operation']
+    assert publisher.publish(operation)['status'] == 'verified'
+    assert publisher.prepare({**diagnosed_retry, 'pr': fixture.PR})['operation'] == operation
+    publisher.publish(operation, reconcile=True)
+    assert publication.load(operation)['request']['approved']['pr'] == fixture.PR
+    assert remote.state['writes'] == {'ci-rerun': 1}
 
 
 @pytest.mark.parametrize('change', ['base', 'diff', 'checks', 'missing_archive', 'corrupt_archive', 'missing_source'])

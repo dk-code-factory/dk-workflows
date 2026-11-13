@@ -94,6 +94,15 @@ def test_fresh_session_unchanged_capture_reuses_native_diagnosis(context):
     assert requests(fresh, restored) == requests(handoff, diagnosis)
 
 
+@pytest.mark.parametrize('pr', [PR + '/', PR.replace('/owner/repo/', '/OWNER/REPO/'),
+                              PR.replace('/owner/repo/', '/OWNER/REPO/') + '/'])
+def test_equivalent_pr_url_reuses_complete_capture_and_native_diagnosis(context, pr):
+    _, decision, snapshot, handoff, diagnosis = context
+    fresh = capture(API(), pr, HEAD, json.loads(json.dumps(decision)), json.loads(json.dumps(snapshot)))
+    assert fresh == handoff
+    assert requests(fresh, json.loads(json.dumps(diagnosis))) == requests(handoff, diagnosis)
+
+
 class RecollectionAPI(FakeAPI):
     """Use the existing Actions transport fixture with current PR reads."""
     def request(self, path, binary=False):

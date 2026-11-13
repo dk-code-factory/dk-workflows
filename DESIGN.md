@@ -210,6 +210,11 @@ PR changes and failure evidence. Existing original captures and preparations
 remain retained; changed governing helper inputs require affected diagnosis to
 be refreshed in the same intent. Native savings remain unmeasured.
 
+Normalize accepted PR URL casing and trailing slashes before capture, matching
+publication identity. Canonical-input fingerprints stay unchanged; equivalent
+spellings reuse diagnosis without new state or history resets. The existing
+revision, checks and evidence boundaries still govern freshness.
+
 Each retained diagnosis uses the existing capture field for its workflow's input
 fingerprint. Dispatch recaptures the PR changes and that workflow's checks and
 validates the original source/archive references before an unsent retry. A sibling

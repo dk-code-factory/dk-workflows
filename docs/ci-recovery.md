@@ -57,6 +57,8 @@ also preserves diagnosis. Original source/evidence JSON references remain intact
 fingerprints use normalized source contents, jobs and log archives rather than
 the changed JSON reference paths. Changed repository/user identities, jobs, logs,
 revisions and checks still require fresh diagnosis.
+Accepted PR URL casing and trailing slashes are normalized before capture to
+match publication, preserving diagnosis reuse for equivalent URL spellings.
 When an unsent operation's original evidence is missing or corrupt, preparing
 again can replace its references with validated equivalent recollection even
 when the semantic capture is unchanged. Healthy original evidence remains in use;

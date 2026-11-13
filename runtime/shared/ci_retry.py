@@ -90,6 +90,7 @@ def run_capture(api, pr, head, pull, files, snapshot, run):
 
 def capture(api, pr, head, decision, snapshot):
     """Read current boundaries, returning a transient native diagnosis handoff."""
+    pr = pr.rstrip('/').lower()
     if (decision.get('result') != 'failure' or decision.get('head') != head
             or snapshot.get('result') != 'failure' or snapshot.get('head') != head
             or fingerprint(decision) != fingerprint(snapshot)):
