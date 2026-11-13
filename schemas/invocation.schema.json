@@ -47,11 +47,8 @@
       "type": "object",
       "properties": {
         "reviewers": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/invocation"
-          },
-          "description": "Ordered reviewer invocations. Each uses this same invocation schema."
+          "$ref": "#/$defs/plan",
+          "description": "Ordered reviewers with explicit parallel groups."
         }
       },
       "additionalProperties": true,
@@ -481,6 +478,25 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-architecture-review/config.schema.json"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "skill": {
+                    "const": "dk-workflows:dk-code-simplify"
+                  }
+                },
+                "required": [
+                  "skill"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "options": {
+                    "$ref": "../codex/skills/dk-code-simplify/config.schema.json"
                   }
                 }
               }

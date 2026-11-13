@@ -75,5 +75,15 @@
       "prompt": "Assess confidence and sensitivity to LOC and complexity estimates. Accept a clear winner only with supported feasibility, adequate score lead and no unresolved material doubts. For a sole feasible option substantiate rejection of every alternative.",
       "min_score_gap": 10
     }
+  },
+  "simplification": {
+    "enabled": true,
+    "priority": "change-first",
+    "allow_untouched_code": false,
+    "reviewer": {
+      "skill": "dk-workflows:dk-code-simplify",
+      "options": {},
+      "required": true
+    }
   }
 }

@@ -23,3 +23,5 @@ Python additionally checks resolved installations, actual model and reasoning av
 The offline test suite validates each schema against its metaschema and exercises the same valid and invalid invocations at every call site. It uses a local resource registry; schema-reference tests never fetch remote resources. Install `jsonschema` with the test dependencies, then run `python3 -m pytest -q tests/test_configuration_schema.py`.
 
 Each bundled skill owns `config.json` and `config.schema.json` beside its `SKILL.md`; see [skill-owned configuration](../docs/skill-configuration.md). Shared schemas reference those option schemas instead of copying their fields. Every skill reference must use `plugin:skill`. Skill defaults are explicit in the bundled files, and new invocation lists support `{"parallel":[...]}` groups. Root process fields remain compatibility interfaces.
+
+PR workflow schemas independently expose the [simplification gate](../docs/simplification.md), priority, untouched-code policy and replaceable invocation. The bundled `dk-code-simplify` owns standalone priority/scope options.

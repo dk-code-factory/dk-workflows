@@ -660,3 +660,52 @@ locates the homogeneous thematic-marker suffix once. It avoids quadratic suffix
 rescanning and copying on long descriptions. Offline scan/copy budgets measure
 deterministic work rather than elapsed time or native API dollar savings. This
 adds no persisted parser output, readiness cache or telemetry.
+
+## Workflow simplification reviewer
+
+The incoming and fix workflows independently own an enabled gate, priority, scope
+and replaceable reviewer invocation. Compose the additional leaf inside existing
+selected reviewer runners, after ordinary groups. Custom task ordering stays
+intact; omitting a runner omits simplification. Standalone runner plans do not
+inject it. Standalone simplification has its own priority/scope defaults. Managed
+workflow instructions govern replacement providers, with explicit option overrides
+for the bundled reviewer. Disabled providers are never resolved or preflighted;
+malformed configuration still fails validation.
+
+Use the existing skill occurrence selector plus a small workflow selector (owner,
+flattened runner index and original invocation-local options). This reference is
+stored only in the existing managed definition and spec binding, not a settings
+snapshot. A fresh session uses it to derive the live runner options and gate at
+prepare, finish and resume. Disabled/removed leaves cannot satisfy stale required
+coverage. Re-select the live required plan before completion; old results remain
+historical evidence. Policy/provider changes refresh simplification work while
+ordinary leaf identities, fingerprints, completed siblings, claims, results and
+budgets retain their existing lifecycle. No new store or budget is needed.
+
+The reference avoids reconstructing the caller's governing assignment and stale
+coverage recovery on fresh-session resume. Its expected avoided native analysis
+and reconstruction cost exceeds serializing and validating that small selector.
+Freshness ends when the owning selection, provider, instructions, effective
+options or consumed PR context change. Existing resource capture and native
+observation contracts remain mandatory; helpers never execute models. Offline
+reuse, partial recovery and isolated invalidation checks establish behavior, not
+measured native API dollar savings.
+
+Simplification returns read-only recommendations with concrete complexity,
+scope, priority tradeoff, behavior preservation and verification evidence. Review
+independently verifies maintainability benefit without a functional-bug condition;
+fix assesses and implements justified recommendations through existing stages.
+Reject or defer weak or out-of-scope suggestions. Changed hunks bound default
+edits; optional surrounding edits must be directly necessary for this PR. Every
+cycle stays anchored to supplied PR changes, preventing cumulative broad cleanup.
+Simplification cannot replace ordinary coverage, publication permission or live
+readiness checks.
+
+The workflow selector also resolves the owning runner prompt and native controls.
+Append that prompt directly to each prepared leaf assignment and bind a digest of
+those governing fields in existing task options. Keep no duplicate prompt or
+settings snapshot in the retained definition. Fresh-session recapture rejects
+changed parent instructions/controls at reuse and completion, avoiding stale
+coverage and repeated reconstruction. Sibling-list and scheduling changes are
+excluded from that digest so unaffected analysis remains reusable. Workflow-bound
+leaf claims inherit the owning workflow limits and permissions.

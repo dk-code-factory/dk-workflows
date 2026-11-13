@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/dk-code-factory/dk-workflows/main/codex/skills/dk-code-simplify/config.schema.json",
+  "title": "dk-workflows:dk-code-simplify options",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "priority": {
+      "type": "string",
+      "enum": [
+        "change-first",
+        "code-first"
+      ],
+      "default": "change-first"
+    },
+    "allow_untouched_code": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "additionalProperties": false
+}

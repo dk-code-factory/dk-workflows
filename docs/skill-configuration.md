@@ -77,3 +77,5 @@ Additional validation commands are argument arrays, supplement relevant checks, 
 Pass `--upstream HOST/OWNER/REPO` and `--options FILE` to `publish.py prepare` when supplied by the publisher invocation. An explicit request method takes precedence; the existing journal retains only the resolved concrete method. Publish and reconcile use that retained intent without rereading default methods.
 
 Preference default modes apply when admitting new records. Changing the default does not reinterpret persisted records or silently change an existing record's modes. Completion prompts, instructions and options cannot weaken evidence requirements, expand permission or restore omitted finalizers.
+
+Workflow-owned [simplification](simplification.md) composes an additional reviewer only inside selected reviewer-run tasks. Use `--workflow SELECTOR.json` for runner plan/preflight reads and `workflow:SELECTOR` for managed reviewer leaves. The retained selector resolves the live owner, task index and original local options at prepare, finish and resume; standalone reviewer lists remain unchanged.

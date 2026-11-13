@@ -243,6 +243,15 @@
               "$ref": "../codex/skills/dk-architecture-review/config.schema.json"
             }
           }
+        },
+        "dk-workflows:dk-code-simplify": {
+          "$ref": "invocation.schema.json#/$defs/settings",
+          "properties": {
+            "options": {
+              "$ref": "../codex/skills/dk-code-simplify/config.schema.json"
+            }
+          },
+          "unevaluatedProperties": false
         }
       }
     },

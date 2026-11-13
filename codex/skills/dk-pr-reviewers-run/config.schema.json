@@ -5,12 +5,9 @@
   "type": "object",
   "properties": {
     "reviewers": {
-      "type": "array",
-      "items": {
-        "$ref": "../../../schemas/invocation.schema.json"
-      },
+      "$ref": "../../../schemas/invocation.schema.json#/$defs/plan",
       "default": [],
-      "description": "Selected reviewer invocations, with original prompts and required/optional status. No reviewers are selected by default."
+      "description": "Ordered reviewer invocations with explicit parallel groups."
     },
     "execution": {
       "type": "string",
