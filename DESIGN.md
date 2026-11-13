@@ -195,6 +195,14 @@ base, checks, attempts or missing/corrupt evidence require affected diagnosis
 again. Native agents assess semantic unrelatedness against the actual diff;
 log strings alone do not establish that boundary.
 
+Each retained diagnosis uses the existing capture field for its workflow's input
+fingerprint. Dispatch recaptures the PR changes and that workflow's checks and
+validates the original source/archive references before an unsent retry. A sibling
+workflow's retry does not stale this diagnosis. No extra input copy or store is
+needed; unchanged fresh-session reuse avoids repeating native diagnosis, while
+changed relevant inputs block dispatch until diagnosis is refreshed in the same
+prepared operation. Earlier preparations remain intact through existing history.
+
 Existing ci-rerun intents reserve automatic slots per PR/head and preserve the
 minimum retained allowance, including incomplete operations. No separate budget
 store is introduced. A new explicit user retry retains only its request identity,
@@ -205,6 +213,13 @@ remain reconciliation-only. These small records avoid repeated diagnosis and
 duplicate external dispatch in this and fresh sessions; live head/attempt and CI
 checks still govern publication and readiness. Offline regressions establish
 reuse, partial recovery and invalidation, not measured native API cost savings.
+
+Lower allowances tighten an existing prepared intent before reservation checks;
+later settings cannot restore its broader limit. Explicit authorization can reuse
+that unsent operation without erasing its automatic reservation, derived from the
+already retained original preparations. Preparation and dispatch share the existing
+dispatch lock. Pending operations keep their original intent and reconcile even
+after limits tighten or diagnosis evidence disappears.
 
 
 Confirmed push rejection reuses the existing operation's `not_applied` state.

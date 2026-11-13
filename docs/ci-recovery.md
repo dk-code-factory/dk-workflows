@@ -43,6 +43,11 @@ Each workflow is eligible only if every failed job has a supported unrelated,
 retryable diagnosis. Independent eligible workflows can proceed while another
 remains blocked. The retained intent contains the diagnosis and evidence
 references; no extra handoff or change snapshot is saved.
+Before an unsent operation dispatches, publication rechecks the PR changes,
+workflow checks and retained source/log evidence. Changed inputs require a fresh
+diagnosis in the same prepared operation. Retrying an independent workflow does
+not invalidate an unchanged sibling diagnosis. Ambiguous job log directories
+remain blocked because citations cannot identify their failed job uniquely.
 
 Publish each operation through `scripts/publish.py publish --operation FILE`.
 The failed-job endpoint reruns only failed jobs and required dependencies,
@@ -51,6 +56,9 @@ PR/head (default three); zero disables them. Lower retained limits and original
 caller counters remain in force across sessions. Preparing an operation reserves
 its slot; resume the same intent instead of consuming another. Changed diagnostic
 wording cannot create another operation for the same run/attempt.
+Lowering the allowance also tightens an existing unsent operation. A later higher
+limit cannot restore it; explicit one-shot user authorization can permit that
+operation without erasing its original automatic reservation.
 
 An uncertain dispatch remains pending. Use `scripts/publish.py reconcile
 --operation FILE`; never resend based on an absent receipt. Reconciliation

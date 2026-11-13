@@ -167,6 +167,235 @@ def test_prepared_retries_share_allowance_across_independent_workflows(remote, m
     assert remote.state['writes'] == {}
 
 
+def test_lowered_limit_is_retained_on_existing_prepared_retry(remote):
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    with pytest.raises(ValueError, match='allowance exhausted'):
+        publisher.prepare({**request, 'automatic_limit': 0})
+    assert publication.load(operation)['request']['approved']['automatic_limit'] == 0
+    with pytest.raises(ValueError, match='allowance exhausted'):
+        publisher.publish(operation)
+    with pytest.raises(ValueError, match='allowance exhausted'):
+        publisher.prepare(request)
+    assert remote.state['writes'] == {}
+
+
+def test_user_can_authorize_disabled_prepared_retry_without_erasing_its_reservation(remote):
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    with pytest.raises(ValueError, match='allowance exhausted'):
+        publisher.prepare({**request, 'automatic_limit': 0})
+    user = {'request_id': 'retry-disabled', 'authorization': 'Retry this workflow once',
+            'source': 'conversation:retry-disabled'}
+    assert publisher.prepare({**request, 'user_retry': user})['operation'] == operation
+    publisher.publish(operation)
+    remote.state['run'].update(status='completed', conclusion='failure')
+    with pytest.raises(ValueError, match=r'allowance exhausted \(1/0\)'):
+        publisher.prepare({**request, 'attempt': 2})
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+def test_lowered_limit_does_not_prevent_uncertain_retry_reconciliation(remote):
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    remote.state['lose_response'] = ['ci-rerun']
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    assert publisher.prepare({**request, 'automatic_limit': 0})['operation'] == operation
+    publisher.publish(operation, reconcile=True)
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+@pytest.fixture
+def diagnosed_retry(remote, tmp_path):
+    import io
+    import zipfile
+    from types import SimpleNamespace
+    from shared.ci_retry import capture, requests
+    from shared.flaky_actions import evidence_file
+
+    remote.state['pull']['changed_files'] = 1
+    remote.state['checks'] = [{'name': 'install', 'bucket': 'fail', 'state': 'FAILURE',
+        'link': 'https://github.com/owner/repo/actions/runs/77/job/770', 'workflow': 'CI'}]
+    registry = SimpleNamespace(path=tmp_path/'registry.json')
+    jobs = [{'id': 770, 'name': 'install', 'status': 'completed', 'conclusion': 'failure',
+             'steps': [{'name': 'packages', 'conclusion': 'failure'}]}]
+    source = evidence_file(registry, {'run': remote.state['run'], 'jobs': jobs})
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, 'w') as bundle:
+        bundle.writestr('install/1_packages.txt', 'Temporary failure resolving archive.ubuntu.com\n')
+    archive = evidence_file(registry, data.getvalue(), '.zip')
+    evidence = {'head': fixture.HEAD, 'repo': 'github.com/owner/repo', 'checks': [{
+        'link': remote.state['checks'][0]['link'], 'attempt': 1, 'source_file': source,
+        'archive_file': archive}]}
+    snapshot = {'head': fixture.HEAD, 'result': 'failure', 'checks': remote.state['checks']}
+    api = SimpleNamespace(repo='github.com/owner/repo',
+                          request=lambda path: remote.api(fixture.PR, 'repos/owner/repo/' + path))
+    handoff = capture(api, fixture.PR, fixture.HEAD,
+                      snapshot | {'evidence_file': evidence_file(registry, evidence)}, snapshot)
+    diagnosis = {'capture': handoff['capture'], 'runs': [{'run_id': 77, 'attempt': 1, 'jobs': [{
+        'job_id': 770, 'verdict': 'unrelated', 'retryable': True, 'reason': 'Package mirror DNS outage',
+        'change_comparison': 'code.py changes leave the mirror and workflow unchanged',
+        'log_evidence': [{'member': 'install/1_packages.txt',
+                          'excerpt': 'Temporary failure resolving archive.ubuntu.com'}]}]}]}
+    return requests(handoff, diagnosis)['requests'][0]
+
+
+@pytest.mark.parametrize('change', ['base', 'diff', 'checks', 'missing_archive', 'corrupt_archive', 'missing_source'])
+def test_prepared_retry_revalidates_diagnosis_before_dispatch(remote, diagnosed_retry, change):
+    operation = publisher.prepare(diagnosed_retry)['operation']
+    if change == 'base':
+        remote.state['pull']['base']['sha'] = 'c'*40
+    elif change == 'diff':
+        remote.state['files'][0]['patch'] += '\n+changed again'
+    elif change == 'checks':
+        remote.state['checks'][0]['state'] = 'TIMED_OUT'
+    else:
+        key = 'source_file' if change == 'missing_source' else 'archive_file'
+        path = Path(diagnosed_retry['diagnosis'][key])
+        if change.startswith('missing'):
+            path.unlink()
+        else:
+            path.write_bytes(b'corrupt evidence')
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    assert remote.state['writes'] == {}
+    assert publication.load(operation)['status'] == 'prepared'
+
+
+def test_unchanged_diagnosis_dispatches_and_missing_evidence_does_not_block_reconciliation(remote, diagnosed_retry):
+    operation = publisher.prepare(diagnosed_retry)['operation']
+    remote.state['lose_response'] = ['ci-rerun']
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    Path(diagnosed_retry['diagnosis']['archive_file']).unlink()
+    publisher.publish(operation, reconcile=True)
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+def test_same_capture_preserves_original_diagnosis_without_another_preparation(remote, diagnosed_retry):
+    import copy
+    operation = publisher.prepare(diagnosed_retry)['operation']
+    reworded = copy.deepcopy(diagnosed_retry)
+    reworded['diagnosis']['jobs'][0]['reason'] = 'Reworded DNS diagnosis'
+    reworded['reason'] = 'Reworded DNS diagnosis'
+    reused = publisher.prepare(reworded)
+    assert reused['operation'] == operation
+    assert not reused.get('preparations')
+    assert reused['request']['approved']['diagnosis'] == diagnosed_retry['diagnosis']
+
+
+def test_refreshed_diagnosis_reuses_prepared_operation_and_retains_original(remote, diagnosed_retry, tmp_path):
+    from types import SimpleNamespace
+    from shared.ci_retry import capture, requests
+    from shared.flaky_actions import evidence_file
+    operation = publisher.prepare(diagnosed_retry)['operation']
+    remote.state['pull']['base']['sha'] = 'c'*40
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    snapshot = {'head': fixture.HEAD, 'result': 'failure', 'checks': remote.state['checks']}
+    evidence = {'head': fixture.HEAD, 'repo': 'github.com/owner/repo', 'checks': [{
+        'link': remote.state['checks'][0]['link'], 'attempt': 1,
+        'source_file': diagnosed_retry['diagnosis']['source_file'],
+        'archive_file': diagnosed_retry['diagnosis']['archive_file']}]}
+    adapter = SimpleNamespace(repo='github.com/owner/repo',
+        request=lambda path: remote.api(fixture.PR, 'repos/owner/repo/' + path))
+    handoff = capture(adapter, fixture.PR, fixture.HEAD, snapshot | {
+        'evidence_file': evidence_file(SimpleNamespace(path=tmp_path/'registry.json'), evidence)}, snapshot)
+    diagnosis = {'capture': handoff['capture'], 'runs': [{'run_id': 77, 'attempt': 1,
+        'jobs': diagnosed_retry['diagnosis']['jobs']}]}
+    refreshed = publisher.prepare(requests(handoff, diagnosis)['requests'][0])
+    assert refreshed['operation'] == operation
+    original = publication.load(refreshed['preparations'][0])
+    assert original['request']['approved']['diagnosis'] == diagnosed_retry['diagnosis']
+    publisher.publish(operation)
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+def test_independent_workflow_retry_preserves_sibling_diagnosis(remote, diagnosed_retry, monkeypatch, tmp_path):
+    import copy
+    import json
+    from types import SimpleNamespace
+    from shared.ci_retry import capture, requests
+    from shared.flaky_actions import evidence_file
+
+    original_api = remote.api
+    sibling_run = {**remote.state['run'], 'id': 78}
+    def api(pr, path, *, payload=None):
+        if path.endswith('/actions/runs/78'):
+            return copy.deepcopy(sibling_run)
+        if path.endswith('/actions/runs/78/rerun-failed-jobs'):
+            sibling_run.update(run_attempt=2, status='queued', conclusion=None)
+            return remote.changed('ci-rerun', '')
+        return original_api(pr, path, payload=payload)
+    monkeypatch.setattr(publisher, 'api', api)
+    monkeypatch.setattr(remote, 'api', api)
+    sibling_check = {**remote.state['checks'][0],
+        'link': 'https://github.com/owner/repo/actions/runs/78/job/780'}
+    remote.state['checks'].append(sibling_check)
+    source = json.loads(Path(diagnosed_retry['diagnosis']['source_file']).read_text())
+    source['run'] = sibling_run
+    source['jobs'][0]['id'] = 780
+    registry = SimpleNamespace(path=tmp_path/'registry.json')
+    sibling_source = evidence_file(registry, source)
+    evidence = {'head': fixture.HEAD, 'repo': 'github.com/owner/repo', 'checks': [
+        {'link': check['link'], 'attempt': 1, 'source_file': source_path,
+         'archive_file': diagnosed_retry['diagnosis']['archive_file']}
+        for check, source_path in zip(remote.state['checks'],
+            [diagnosed_retry['diagnosis']['source_file'], sibling_source])]}
+    snapshot = {'head': fixture.HEAD, 'result': 'failure', 'checks': remote.state['checks']}
+    adapter = SimpleNamespace(repo='github.com/owner/repo',
+                              request=lambda path: api(fixture.PR, 'repos/owner/repo/' + path))
+    handoff = capture(adapter, fixture.PR, fixture.HEAD,
+                      snapshot | {'evidence_file': evidence_file(registry, evidence)}, snapshot)
+    decisions = []
+    for run_id in (77, 78):
+        jobs = copy.deepcopy(diagnosed_retry['diagnosis']['jobs'])
+        jobs[0]['job_id'] = run_id * 10
+        decisions.append({'run_id': run_id, 'attempt': 1, 'jobs': jobs})
+    retries = requests(handoff, {'capture': handoff['capture'], 'runs': decisions})['requests']
+    operations = [publisher.prepare(request)['operation'] for request in retries]
+    publisher.publish(operations[0])
+    remote.state['checks'][0].update(bucket='pending', state='QUEUED')
+    publisher.publish(operations[1])
+    assert remote.state['writes']['ci-rerun'] == 2
+
+
+def test_fresh_process_reuses_unchanged_prepared_diagnosis(remote, diagnosed_retry, tmp_path):
+    import json
+    import os
+    import subprocess
+    import sys
+
+    operation = publisher.prepare(diagnosed_retry)['operation']
+    state = tmp_path/'remote.json'
+    state.write_text(json.dumps(remote.state))
+    request = tmp_path/'request.json'
+    request.write_text(json.dumps(diagnosed_retry))
+    script = '''
+import importlib.util, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    value = importlib.util.module_from_spec(spec); spec.loader.exec_module(value)
+    return value
+publisher = load('fresh_publisher', root/'scripts/publish.py')
+fixture = load('fresh_fixture', root/'tests/pr/fixtures/github_remote.py')
+remote = fixture.Remote(json.loads(Path(sys.argv[2]).read_text()))
+for key in ('metadata', 'api', 'run'): setattr(publisher, key, getattr(remote, key))
+request = json.loads(Path(sys.argv[3]).read_text())
+prepared = publisher.prepare(request)
+assert prepared['operation'] == sys.argv[4]
+assert not prepared.get('preparations')
+assert publisher.publish(prepared['operation'])['status'] == 'verified'
+assert remote.state['writes'] == {'ci-rerun': 1}
+'''
+    result = subprocess.run([sys.executable, '-c', script, str(ROOT), str(state), str(request), operation],
+        env={**os.environ, 'PYTHONPATH': str(ROOT/'runtime')}, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+
+
 def test_changed_head_gets_own_allowance_but_same_explicit_request_does_not_expand(remote):
     request = {**fixture.request('ci-rerun'), 'automatic_limit': 0,
         'user_retry': {'request_id': 'user-turn-23', 'authorization': 'Retry this run once',

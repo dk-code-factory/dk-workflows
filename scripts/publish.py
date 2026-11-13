@@ -16,9 +16,11 @@ from shared.github_publications import Handler, KINDS, rerun_options
 from shared.reply_recovery import Recovery
 
 
-def run(argv, *, payload=None, cwd=None, json_output=True):
+def run(argv, *, payload=None, cwd=None, json_output=True, allowed_codes=(0,)):
     result = subprocess.run(argv, input=json.dumps(payload) if payload is not None else None,
-                            text=True, capture_output=True, check=True, cwd=cwd, timeout=60)
+                            text=True, capture_output=True, check=False, cwd=cwd, timeout=60)
+    if result.returncode not in allowed_codes:
+        result.check_returncode()
     return json.loads(result.stdout) if json_output else result.stdout.strip()
 
 
@@ -217,19 +219,22 @@ def rerun_reservation(request, records, *, operation=None):
                 reusable = {'operation': str(path), **value, 'reused_intent': True}
             elif path.resolve() != Path(operation).resolve():
                 raise ValueError('CI attempt already has a retained rerun; reconcile it before dispatch')
-    if reusable:
+    if reusable and reusable['status'] != 'prepared':
         return reusable
     if user:
-        return None
+        return reusable
     same_head = [value['request']['approved'] for _, value in related
                  if value['request']['approved'].get('head') == request['head']]
-    automatic = [value for value in same_head if not value.get('user_retry')]
+    automatic = [value for _, value in related if value['request']['approved'].get('head') == request['head']
+                 and (not value['request']['approved'].get('user_retry')
+                      or any(not publication.load(prior)['request']['approved'].get('user_retry')
+                             for prior in value.get('preparations', [])))]
     limit = min([request['automatic_limit']] + [value.get('automatic_limit', 3) for value in same_head])
     reserved = len(automatic)
-    if (reserved >= limit if operation is None else reserved > limit):
+    if (reserved >= limit if operation is None and not reusable else reserved > limit):
         raise ValueError(f'Automatic CI retry allowance exhausted ({reserved}/{limit}); '
                          'a bounded explicit user retry is required')
-    return None
+    return reusable
 
 
 def prepare(request, *, upstream=None, options=None):
@@ -260,10 +265,26 @@ def prepare(request, *, upstream=None, options=None):
     scope = base/publication.digest(target)
     scope.mkdir(parents=True,exist_ok=True,mode=0o700)
     payload_hash = publication.digest(request)
-    with (scope/'.prepare.lock').open('a') as lock:
+    with (scope/'.prepare.lock').open('a') as lock, (scope/'.dispatch.lock').open('a') as dispatch_lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
+        fcntl.flock(dispatch_lock,fcntl.LOCK_EX)
         records = [(path, publication.load(path)) for path in sorted(scope.glob('*/*.json'))]
         if request.get('kind') == 'ci-rerun':
+            # Tighten the existing unsent intent before checking reservations, so
+            # a later session cannot recover the older, broader allowance.
+            for path, retained in records:
+                approved = retained['request']['approved']
+                if (retained['request']['kind'] == 'ci-rerun' and retained['status'] == 'prepared'
+                        and all(request.get(key) == approved.get(key) for key in ('head', 'run_id', 'attempt'))):
+                    refreshed = dict(approved)
+                    refreshed['automatic_limit'] = min(request['automatic_limit'], approved.get('automatic_limit', 3))
+                    if request.get('user_retry') and not approved.get('user_retry'):
+                        refreshed['user_retry'] = request['user_retry']
+                    if (request.get('diagnosis') and request['diagnosis'].get('capture')
+                            != approved.get('diagnosis', {}).get('capture')):
+                        refreshed['diagnosis'] = request['diagnosis']
+                    publication.refresh_prepared(path, 'ci-rerun', retained['request']['expected'], refreshed)
+            records = [(path, publication.load(path)) for path, _ in records]
             reused = rerun_reservation(request, records)
             if reused:
                 return reused

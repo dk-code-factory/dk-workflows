@@ -120,6 +120,21 @@ def test_every_failed_job_requires_a_complete_native_decision(context):
         requests(handoff, diagnosis)
 
 
+@pytest.mark.parametrize('other_conclusion', ['failure', 'success'])
+def test_colliding_log_job_directories_block_only_affected_workflow(context, other_conclusion):
+    api, decision, snapshot, _, _ = context
+    evidence = json.loads(Path(decision['evidence_file']).read_text())
+    source = json.loads(Path(evidence['checks'][0]['source_file']).read_text())
+    source['jobs'][0]['name'] = 'install/a'
+    source['jobs'][1].update(name='install:a', conclusion=other_conclusion)
+    registry = type('Registry', (), {'path': Path(decision['evidence_file']).parent.parent / 'registry.json'})()
+    evidence['checks'][0]['source_file'] = evidence_file(registry, source)
+    decision['evidence_file'] = evidence_file(registry, evidence)
+    handoff = capture(api, PR, HEAD, decision, snapshot)
+    assert [run['run_id'] for run in handoff['runs']] == [22]
+    assert 'log job directories are ambiguous' in handoff['blockers'][0]['reason']
+
+
 @pytest.mark.parametrize('change', ['comparison', 'citation', 'wrong_job', 'invented_excerpt'])
 def test_unrelated_verdict_requires_change_comparison_and_real_failed_job_logs(context, change):
     _, _, _, handoff, diagnosis = context

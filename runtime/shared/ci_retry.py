@@ -25,15 +25,8 @@ def retained(path, binary=False):
     return value
 
 
-def capture(api, pr, head, decision, snapshot):
-    """Read current boundaries, returning a transient native diagnosis handoff."""
-    if (decision.get('result') != 'failure' or decision.get('head') != head
-            or snapshot.get('result') != 'failure' or snapshot.get('head') != head
-            or fingerprint(decision) != fingerprint(snapshot)):
-        raise ValueError('CI failure snapshot changed; observe current CI before diagnosis')
-    evidence = retained(decision['evidence_file'])
-    if evidence.get('head') != head or evidence.get('repo') != api.repo:
-        raise ValueError('CI evidence repository or head differs')
+def changes(api, pr, head):
+    """Capture complete PR changes without retaining another copy."""
     number = pr.rstrip('/').rsplit('/', 1)[-1]
     pull = api.request('pulls/' + number)
     if pull.get('head', {}).get('sha') != head:
@@ -52,6 +45,34 @@ def capture(api, pr, head, decision, snapshot):
         page += 1
     if len(files) != pull.get('changed_files') or len({f['filename'] for f in files}) != len(files):
         raise ValueError('PR changes pagination incomplete or changed')
+    return pull, files
+
+
+def run_capture(api, pr, head, pull, files, snapshot, run):
+    checks = []
+    for check in snapshot['checks']:
+        try:
+            run_id, _ = check_job(api.repo, check.get('link'))
+        except ValueError:
+            continue
+        if run_id == run['run_id']:
+            checks.append(check)
+    return digest({'pr': pr, 'head': head, 'base': pull['base'], 'changes': files,
+                   'checks': fingerprint({'head': head, 'checks': checks}),
+                   'run': {k: v for k, v in run.items() if k != 'capture'}})
+
+
+def capture(api, pr, head, decision, snapshot):
+    """Read current boundaries, returning a transient native diagnosis handoff."""
+    if (decision.get('result') != 'failure' or decision.get('head') != head
+            or snapshot.get('result') != 'failure' or snapshot.get('head') != head
+            or fingerprint(decision) != fingerprint(snapshot)):
+        raise ValueError('CI failure snapshot changed; observe current CI before diagnosis')
+    evidence = retained(decision['evidence_file'])
+    if evidence.get('head') != head or evidence.get('repo') != api.repo:
+        raise ValueError('CI evidence repository or head differs')
+    pull, files = changes(api, pr, head)
+    number = pr.rstrip('/').rsplit('/', 1)[-1]
     failures = [c for c in snapshot['checks'] if c.get('bucket') in {'fail', 'cancel'}]
     runs = {}
     blockers = []
@@ -78,6 +99,9 @@ def capture(api, pr, head, decision, snapshot):
                 raise ValueError('Failed workflow jobs are incomplete')
             if len({j['id'] for j in source['jobs']}) != len(source['jobs']):
                 raise ValueError('Failed workflow job identities are ambiguous')
+            directories = [re.sub(r'[<>:"/\\|?*]', '_', j['name']) for j in source['jobs']]
+            if any(directories.count(re.sub(r'[<>:"/\\|?*]', '_', j['name'])) != 1 for j in failed_jobs):
+                raise ValueError('Failed workflow log job directories are ambiguous')
             with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
                 members = bundle.namelist()
             runs[run_id] = {'run_id': run_id, 'attempt': item['attempt'],
@@ -87,6 +111,7 @@ def capture(api, pr, head, decision, snapshot):
                     'failed_steps': [s['name'] for s in j.get('steps', [])
                                      if s.get('conclusion') in {'failure', 'timed_out'}]}
                     for j in failed_jobs]}
+            runs[run_id]['capture'] = run_capture(api, pr, head, pull, files, snapshot, runs[run_id])
         except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
             blockers.append({'link': check.get('link'), 'reason': str(exc)})
     latest_pull = api.request('pulls/' + number)
@@ -100,6 +125,31 @@ def capture(api, pr, head, decision, snapshot):
         'changes': files, 'checks': fingerprint(snapshot), 'evidence': decision['evidence_file'],
         'runs': result['runs'], 'blockers': blockers})
     return result
+
+
+def validate(request, api, snapshot):
+    """Revalidate this workflow's diagnosis immediately before an unsent retry."""
+    diagnosis = request['diagnosis']
+    source = retained(diagnosis['source_file'])
+    retained(diagnosis['archive_file'], binary=True)
+    run_id, attempt = request['run_id'], request['attempt']
+    jobs = source['jobs']
+    run = {'run_id': run_id, 'attempt': attempt, 'workflow': source['run'].get('path'),
+           'source_file': diagnosis['source_file'], 'archive_file': diagnosis['archive_file'],
+           'jobs': [{'job_id': j['id'], 'job': j['name'],
+                     'failed_steps': [s['name'] for s in j.get('steps', [])
+                                      if s.get('conclusion') in {'failure', 'timed_out'}]}
+                    for j in jobs if j.get('conclusion') in {'failure', 'timed_out'}]}
+    with zipfile.ZipFile(diagnosis['archive_file']) as bundle:
+        run['log_members'] = bundle.namelist()
+    pull, files = changes(api, request['pr'], request['head'])
+    if (snapshot.get('head') != request['head']
+            or run_capture(api, request['pr'], request['head'], pull, files, snapshot, run)
+               != diagnosis['capture']):
+        raise ValueError('Retry diagnosis inputs changed; inspect current changes and logs')
+    latest = api.request('pulls/' + request['pr'].rstrip('/').rsplit('/', 1)[-1])
+    if any(latest.get(key) != pull.get(key) for key in ('head', 'base', 'changed_files')):
+        raise ValueError('PR changes moved during retry diagnosis validation')
 
 
 def requests(handoff, diagnosis, *, automatic_limit=3):
@@ -150,6 +200,6 @@ def requests(handoff, diagnosis, *, automatic_limit=3):
             prepared.append({'kind': 'ci-rerun', 'pr': handoff['pr'], 'head': handoff['head'],
                 'run_id': run['run_id'], 'attempt': run['attempt'],
                 'reason': '; '.join(j['reason'] for j in jobs), 'automatic_limit': automatic_limit,
-                'diagnosis': {'capture': handoff['capture'], 'jobs': jobs,
+                'diagnosis': {'capture': run['capture'], 'jobs': jobs,
                               'source_file': run['source_file'], 'archive_file': run['archive_file']}})
     return {'requests': prepared, 'blockers': blockers}

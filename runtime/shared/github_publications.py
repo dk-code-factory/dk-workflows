@@ -252,6 +252,16 @@ class Handler:
                 raise ValueError('Workflow run identity changed')
             if not verified and self.run_snapshot(run) != expected['run']:
                 raise ValueError('Failed workflow attempt changed before rerun')
+            if not verified and request.get('diagnosis'):
+                from types import SimpleNamespace
+                from shared.ci_retry import validate
+                checks = self.run(['gh', 'pr', 'checks', request['pr'], '--json',
+                    'name,bucket,state,link,workflow,startedAt,completedAt'], allowed_codes=(0, 1, 8))
+                if not isinstance(checks, list):
+                    raise ValueError('CI checks are unavailable before retry')
+                api = SimpleNamespace(repo=self.host + '/' + self.root.removeprefix('repos/'),
+                                      request=lambda path: self.get('/' + path))
+                validate(request, api, {'head': request['head'], 'checks': checks})
         elif kind == 'resolve-thread':
             live = self.thread()
             if (not verified and live != expected['thread']) or request['answer'] not in live['comments']:
