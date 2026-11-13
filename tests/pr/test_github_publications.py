@@ -112,7 +112,7 @@ else:
     raise AssertionError('fresh process restored automatic retries')
 '''
     result = subprocess.run([sys.executable, '-c', script, str(ROOT), str(snapshot)],
-        env={**os.environ, 'PYTHONPATH': str(ROOT/'runtime')}, text=True, capture_output=True)
+        env={**os.environ, 'PYTHONPATH': str(ROOT/'runtime')}, text=True, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert remote.state['writes']['ci-rerun'] == 3
 
@@ -149,6 +149,68 @@ def test_uncertain_retry_blocks_new_attempt_and_new_user_authorization(remote):
                                      'source': 'conversation:new'}}):
         with pytest.raises(ValueError, match='requires reconciliation'):
             publisher.prepare({**request, 'attempt': 2, **extra})
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+@pytest.mark.parametrize('explicit', [False, True])
+def test_rejected_user_retry_keeps_prepared_automatic_operation_unchanged(remote, explicit):
+    request = fixture.request('ci-rerun')
+    user = {'request_id': 'original-retry', 'authorization': 'Retry this workflow once',
+            'source': 'conversation:original-retry'}
+    first = publisher.prepare({**request, 'user_retry': user})['operation']
+    publisher.publish(first)
+    remote.state['run'].update(status='completed', conclusion='failure')
+    request = {**request, 'attempt': 2}
+    operation = publisher.prepare(request)['operation']
+    original = Path(operation).read_bytes()
+    with pytest.raises(ValueError, match='different exact attempt'):
+        publisher.prepare({**request, 'user_retry': user, 'automatic_limit': 0})
+    assert Path(operation).read_bytes() == original
+    assert not publication.load(operation).get('preparations')
+    if explicit:
+        corrected = {**user, 'request_id': 'new-retry', 'source': 'conversation:new-retry'}
+        request = {**request, 'user_retry': corrected}
+    assert publisher.prepare(request)['operation'] == operation
+    publisher.publish(operation)
+    assert remote.state['writes']['ci-rerun'] == 2
+
+
+@pytest.mark.parametrize('field', ['title', 'body'])
+@pytest.mark.parametrize('explicit', [False, True])
+def test_prepared_retry_refreshes_changed_pr_metadata_without_replacing_intent(remote, field, explicit):
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    original = publication.load(operation)
+    remote.state['metadata'][field] += ' updated'
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    if explicit:
+        request = {**request, 'user_retry': {
+            'request_id': 'metadata-retry', 'authorization': 'Retry this workflow once',
+            'source': 'conversation:metadata-retry'}}
+    refreshed = publisher.prepare(request)
+    assert refreshed['operation'] == operation
+    assert refreshed['operation_id'] == original['operation_id']
+    assert publication.load(refreshed['preparations'][0]) == original
+    assert refreshed['request']['expected']['metadata'] == remote.state['metadata']
+    assert publisher.prepare(request) == refreshed
+    publisher.publish(operation)
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+def test_metadata_refresh_preserves_pending_retry_for_reconciliation(remote):
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    remote.state['lose_response'] = ['ci-rerun']
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    original = Path(operation).read_bytes()
+    remote.state['metadata']['title'] += ' updated'
+    assert publisher.prepare(request)['operation'] == operation
+    assert Path(operation).read_bytes() == original
+    assert remote.state['writes']['ci-rerun'] == 1
+    remote.state['metadata']['title'] = publication.load(operation)['request']['expected']['metadata']['title']
+    publisher.publish(operation, reconcile=True)
     assert remote.state['writes']['ci-rerun'] == 1
 
 
@@ -361,13 +423,17 @@ def test_independent_workflow_retry_preserves_sibling_diagnosis(remote, diagnose
     assert remote.state['writes']['ci-rerun'] == 2
 
 
-def test_fresh_process_reuses_unchanged_prepared_diagnosis(remote, diagnosed_retry, tmp_path):
+@pytest.mark.parametrize('metadata_refresh', [False, True])
+def test_fresh_process_reuses_unchanged_prepared_diagnosis(remote, diagnosed_retry, tmp_path, metadata_refresh):
     import json
     import os
     import subprocess
     import sys
 
     operation = publisher.prepare(diagnosed_retry)['operation']
+    if metadata_refresh:
+        remote.state['metadata']['title'] += ' updated'
+        assert publisher.prepare(diagnosed_retry)['operation'] == operation
     state = tmp_path/'remote.json'
     state.write_text(json.dumps(remote.state))
     request = tmp_path/'request.json'
@@ -385,13 +451,16 @@ fixture = load('fresh_fixture', root/'tests/pr/fixtures/github_remote.py')
 remote = fixture.Remote(json.loads(Path(sys.argv[2]).read_text()))
 for key in ('metadata', 'api', 'run'): setattr(publisher, key, getattr(remote, key))
 request = json.loads(Path(sys.argv[3]).read_text())
+original = Path(sys.argv[4]).read_bytes()
 prepared = publisher.prepare(request)
 assert prepared['operation'] == sys.argv[4]
-assert not prepared.get('preparations')
+assert len(prepared.get('preparations', [])) == int(sys.argv[5])
+assert Path(sys.argv[4]).read_bytes() == original
 assert publisher.publish(prepared['operation'])['status'] == 'verified'
 assert remote.state['writes'] == {'ci-rerun': 1}
 '''
-    result = subprocess.run([sys.executable, '-c', script, str(ROOT), str(state), str(request), operation],
+    result = subprocess.run([sys.executable, '-c', script, str(ROOT), str(state), str(request), operation,
+        str(int(metadata_refresh))],
         env={**os.environ, 'PYTHONPATH': str(ROOT/'runtime')}, text=True, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
 

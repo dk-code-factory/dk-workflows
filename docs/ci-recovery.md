@@ -59,6 +59,9 @@ wording cannot create another operation for the same run/attempt.
 Lowering the allowance also tightens an existing unsent operation. A later higher
 limit cannot restore it; explicit one-shot user authorization can permit that
 operation without erasing its original automatic reservation.
+An unsent operation can refresh current PR title/body metadata when prepared
+again, retaining its identity and original preparation. Invalid user retry
+identities are rejected before changing that operation or its allowance.
 
 An uncertain dispatch remains pending. Use `scripts/publish.py reconcile
 --operation FILE`; never resend based on an absent receipt. Reconciliation

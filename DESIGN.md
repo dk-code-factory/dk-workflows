@@ -221,6 +221,15 @@ already retained original preparations. Preparation and dispatch share the exist
 dispatch lock. Pending operations keep their original intent and reconcile even
 after limits tighten or diagnosis evidence disappears.
 
+Validate an explicit retry identity before changing an unsent operation, so a
+rejected authorization leaves its evidence and allowance intact. Refresh current
+PR metadata and the failed-attempt snapshot when preparing that same unsent
+operation again. Existing preparation history retains the original evidence;
+unchanged preparation creates no new snapshot. This avoids a fresh session
+reconstructing a replacement after a title or body edit, without another state
+field or store. Head, attempt and diagnosis freshness still gate dispatch;
+pending sends retain their original expectations for reconciliation.
+
 
 Confirmed push rejection reuses the existing operation's `not_applied` state.
 The push publisher validates only the original send failure: positive nonzero

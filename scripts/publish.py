@@ -200,13 +200,12 @@ def rejected_push(value):
     return len(statuses) == 1
 
 
-def rerun_reservation(request, records, *, operation=None):
-    """Reuse exact attempts and derive reservations from existing intents only."""
-    related = [(path, value) for path, value in records
-               if value['request']['kind'] == 'ci-rerun' and value['status'] != 'not_applied']
+def validate_rerun_authorization(request, records):
+    """Reject conflicting user identities before changing a prepared intent."""
     user = request.get('user_retry')
-    reusable = None
-    for path, value in related:
+    for _, value in records:
+        if value['request']['kind'] != 'ci-rerun' or value['status'] == 'not_applied':
+            continue
         approved = value['request']['approved']
         prior_user = approved.get('user_retry')
         if (user and prior_user and user['request_id'] == prior_user['request_id']
@@ -214,6 +213,17 @@ def rerun_reservation(request, records, *, operation=None):
                 and (user != prior_user or any(request.get(key) != approved.get(key)
                                               for key in ('head', 'attempt')))):
             raise ValueError('User retry request already binds a different exact attempt or authorization')
+
+
+def rerun_reservation(request, records, *, operation=None):
+    """Reuse exact attempts and derive reservations from existing intents only."""
+    related = [(path, value) for path, value in records
+               if value['request']['kind'] == 'ci-rerun' and value['status'] != 'not_applied']
+    validate_rerun_authorization(request, related)
+    user = request.get('user_retry')
+    reusable = None
+    for path, value in related:
+        approved = value['request']['approved']
         if all(request.get(key) == approved.get(key) for key in ('head', 'run_id', 'attempt')):
             if operation is None:
                 reusable = {'operation': str(path), **value, 'reused_intent': True}
@@ -270,6 +280,7 @@ def prepare(request, *, upstream=None, options=None):
         fcntl.flock(dispatch_lock,fcntl.LOCK_EX)
         records = [(path, publication.load(path)) for path in sorted(scope.glob('*/*.json'))]
         if request.get('kind') == 'ci-rerun':
+            validate_rerun_authorization(request, records)
             # Tighten the existing unsent intent before checking reservations, so
             # a later session cannot recover the older, broader allowance.
             for path, retained in records:
@@ -283,7 +294,8 @@ def prepare(request, *, upstream=None, options=None):
                     if (request.get('diagnosis') and request['diagnosis'].get('capture')
                             != approved.get('diagnosis', {}).get('capture')):
                         refreshed['diagnosis'] = request['diagnosis']
-                    publication.refresh_prepared(path, 'ci-rerun', retained['request']['expected'], refreshed)
+                    expected = handler(refreshed).prepare()
+                    publication.refresh_prepared(path, 'ci-rerun', expected, refreshed)
             records = [(path, publication.load(path)) for path, _ in records]
             reused = rerun_reservation(request, records)
             if reused:
