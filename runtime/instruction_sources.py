@@ -91,18 +91,21 @@ def discover(checkout, policy=None):
     if policy:
         names.update(policy['include'])
         names.update(policy['exclude'])
+    excluded = {(checkout/name).resolve() for name in policy['exclude']} if policy else set()
     sources = []
     for name in sorted(names):
         source_kind = kind(name)
-        if source_kind is None and not (policy and name in policy['include']):
+        if source_kind is None and not (policy and name in policy['include'] + policy['exclude']):
             continue
         path = checkout/name
         # Never follow repository links into host/global instructions.
-        if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(checkout):
+        safe = not path.is_symlink() and path.is_file() and path.resolve().is_relative_to(checkout)
+        if not safe:
             if policy and name in policy['include']:
                 raise ValueError('Selected instruction source is missing or unsafe: ' + name)
-            continue
-        selected = bool(policy and name not in policy['exclude'] and (
+            if not path.is_symlink() and not (policy and name in policy['exclude']):
+                continue
+        selected = bool(safe and policy and path.resolve() not in excluded and (
             name in policy['include'] or policy['mode'] == 'all' or policy['mode'] == 'human' and source_kind == 'human'))
         sources.append({'path': name, 'kind': source_kind or 'custom', 'selected': selected})
     return sources
@@ -121,10 +124,12 @@ def inspect(checkout, identity=None):
 def read_source(checkout, source, *, discovery=False, identity=None):
     checkout = root(checkout)
     source = relative(source)
+    path = checkout/source
+    if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(checkout):
+        raise ValueError('Instruction source is missing or unsafe: ' + source)
     context = inspect(checkout, identity)
     found = next((item for item in context['sources'] if item['path'] == source), None)
     if found is None and discovery:
-        path = checkout/source
         if path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(checkout):
             found = {'path': source, 'kind': kind(source) or 'custom', 'selected': False}
     if found is None or not (found['selected'] or discovery):
@@ -152,9 +157,17 @@ def check_paths(checkout, identity, paths):
         return
     context = inspect(checkout, identity)
     checkout = root(checkout)
-    excluded = {(checkout/item['path']).resolve() for item in context['sources'] if not item['selected']}
-    for value in paths:
-        path = Path(value).resolve()
-        found = next((source for source in excluded if source == path or path.is_dir() and source.is_relative_to(path)), None)
+    excluded = {(checkout/item['path']).resolve(): item['path'] for item in context['sources'] if not item['selected']}
+    if not excluded:
+        return
+    pending, visited = [Path(value) for value in paths], set()
+    while pending:
+        item = pending.pop()
+        path = item.resolve()
+        directory = item.is_dir()
+        found = next((source for source in excluded if source == path or directory and source.is_relative_to(path)), None)
         if found is not None:
-            raise ValueError('Excluded repository instruction source in handoff: ' + str(found.relative_to(checkout)))
+            raise ValueError('Excluded repository instruction source in handoff: ' + excluded[found])
+        if directory and path not in visited:
+            visited.add(path)
+            pending.extend(child for child in item.iterdir() if child.name not in {'.git', '__pycache__', '.pytest_cache'})

@@ -443,7 +443,8 @@ def capture(spec, *, _context=None):
         raise ValueError('Repository instruction choice or sources changed; rebuild assignment and handoff')
     if policy is not None:
         instruction_sources.check_paths(checkout, spec['repository'], [
-            *spec.get('instructions', {}).values(), *spec.get('inputs', {}).values()])
+            *spec.get('instructions', {}).values(), *spec.get('inputs', {}).values(),
+            *spec.get('skill', {}).get('resources', {}).values()])
     if 'skill_options_configuration' in spec:
         from skill_config import check_options
         check_options(spec)

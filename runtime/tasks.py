@@ -13,11 +13,12 @@ import skill_config
 class Tasks:
     def __init__(self, repository, pr, *, checkout=None):
         self.store = Store(repository, pr, checkout=checkout)
+        self.checkout = Path(checkout).absolute() if checkout is not None else Path.cwd()
 
     def _retained_policy(self, descriptor):
         import instruction_sources
         definition = descriptor['definition']
-        checkout = definition.get('git', {}).get('checkout', definition.get('instruction_policy', {}).get('checkout', Path.cwd()))
+        checkout = definition.get('git', {}).get('checkout', definition.get('instruction_policy', {}).get('checkout', self.checkout))
         if ('instruction_policy' not in definition
                 and instruction_sources.binding(checkout, self.store.subject['repository']) is not None):
             raise ValueError('Legacy repository guidance requires a rebuilt assignment and handoff')
@@ -32,6 +33,11 @@ class Tasks:
         kind = descriptor.get('kind', 'task')
         definition = {key: value for key, value in descriptor['definition'].items()
                       if key not in {'checklist', 'required'}}
+        if 'git' not in definition and 'instruction_policy' not in definition:
+            import instruction_sources
+            policy = instruction_sources.binding(self.checkout, self.store.subject['repository'])
+            if policy is not None:
+                definition['instruction_policy'] = policy
         common = {**self.store.subject, 'definition': definition}
         if kind == 'task':
             if set(descriptor) - {'kind', 'definition'}:

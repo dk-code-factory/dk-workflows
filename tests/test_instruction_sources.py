@@ -148,18 +148,84 @@ def test_changed_sources_choice_reset_reject_old_handoff_without_erasing_analysi
     assert store.manifest.read_bytes() == before
 
 
-def test_excluded_sources_cannot_return_as_instruction_or_input(case):
+def test_excluded_sources_cannot_return_as_governing_artifacts(case):
     spec, _ = case
     checkout = Path(spec['git']['checkout'])
     files(checkout)
     save(policy())
     (checkout/'nested').mkdir()
     (checkout/'alias.md').symlink_to(checkout/'AGENTS.md')
-    for field in ['instructions', 'inputs']:
+    for field in ['instructions', 'inputs', 'resources']:
         for source in [checkout/'AGENTS.md', checkout/'nested/../AGENTS.md', checkout/'alias.md', checkout]:
             bound = build(spec, **{field: {'cached-guidance': str(source)}})
             with pytest.raises(ValueError, match='Excluded repository instruction'):
                 capture(bound)
+
+
+@pytest.mark.parametrize('field', ['instructions', 'inputs', 'resources'])
+def test_custom_excluded_sources_remain_in_handoff_validation(case, field):
+    spec, _ = case
+    checkout = Path(spec['git']['checkout'])
+    files(checkout)
+    save(policy('custom', exclude=['docs/team.md']))
+    source = checkout/'docs/team.md'
+    alias = checkout/'team-alias.md'
+    alias.symlink_to(source)
+    assert {'path': 'docs/team.md', 'kind': 'custom', 'selected': False} in sources.inspect(checkout, REPO)['sources']
+    for path in [source, alias, source.parent]:
+        with pytest.raises(ValueError, match='Excluded repository instruction'):
+            capture(build(spec, **{field: {'old-guidance': str(path)}}))
+
+
+def test_directory_alias_cannot_adopt_an_explicitly_excluded_source(case):
+    spec, _ = case
+    checkout = Path(spec['git']['checkout'])
+    files(checkout)
+    (checkout/'alias').symlink_to(checkout, target_is_directory=True)
+    save(policy('custom', include=['alias/AGENTS.md'], exclude=['AGENTS.md']))
+    context = sources.inspect(checkout, REPO)
+    assert not any(item['selected'] for item in context['sources'])
+    with pytest.raises(ValueError, match='not adopted'):
+        sources.read_source(checkout, 'alias/AGENTS.md', identity=REPO)
+    assert not sources.read_source(checkout, 'alias/AGENTS.md', discovery=True, identity=REPO)['adopted']
+    before = sources.binding(checkout, REPO)
+    (checkout/'AGENTS.md').write_text('Changed excluded guidance through both names')
+    assert sources.binding(checkout, REPO) == before
+
+
+@pytest.mark.parametrize('field', ['instructions', 'inputs', 'resources'])
+def test_nested_resource_links_cannot_reintroduce_excluded_sources(case, tmp_path, field):
+    spec, _ = case
+    checkout = Path(spec['git']['checkout'])
+    files(checkout)
+    save(policy())
+    bundle = tmp_path/'bundle'
+    bundle.mkdir()
+    linked = tmp_path/'linked'
+    linked.mkdir()
+    (bundle/'nested').symlink_to(linked, target_is_directory=True)
+    (linked/'instructions.md').symlink_to(checkout/'AGENTS.md')
+    with pytest.raises(ValueError, match='Excluded repository instruction.*AGENTS.md'):
+        capture(build(spec, **{field: {'cached-guidance': str(bundle)}}))
+
+
+@pytest.mark.parametrize('field', ['instructions', 'inputs', 'resources'])
+@pytest.mark.parametrize('target', ['internal', 'external'])
+def test_excluded_source_symlink_is_never_a_governing_artifact(case, tmp_path, field, target):
+    spec, _ = case
+    checkout = Path(spec['git']['checkout'])
+    source = checkout/'docs/team.md' if target == 'internal' else tmp_path/'external.md'
+    source.parent.mkdir(exist_ok=True)
+    source.write_text('Post automation attribution')
+    (checkout/'AGENTS.md').symlink_to(source)
+    save(policy())
+    assert {'path': 'AGENTS.md', 'kind': 'automation', 'selected': False} in sources.inspect(checkout, REPO)['sources']
+    for path in [checkout/'AGENTS.md', source]:
+        with pytest.raises(ValueError, match='Excluded repository instruction.*AGENTS.md'):
+            capture(build(spec, **{field: {'old-guidance': str(path)}}))
+    for discovery in [False, True]:
+        with pytest.raises(ValueError, match='missing or unsafe'):
+            sources.read_source(checkout, 'AGENTS.md', discovery=discovery, identity=REPO)
 
 
 def test_legacy_managed_handoff_requires_rebuilding_after_first_choice(case):
@@ -287,15 +353,70 @@ def test_managed_hook_binding_survives_resume(case):
 
 
 def test_retained_checkout_without_git_pins_survives_changed_session_cwd(case, monkeypatch, tmp_path):
+    spec, store = case
+    checkout = Path(spec['git']['checkout'])
+    files(checkout)
+    save(policy())
+    task_definition = definition(spec)
+    task_definition.pop('git')
+    monkeypatch.chdir(tmp_path)
+    tasks = Tasks(REPO, PR, checkout=checkout)
+    first = tasks.prepare({'tasks': [{'definition': task_definition}]})['tasks'][0]
+    assert first['assignment']['instruction_policy'] == sources.binding(checkout, REPO)
+    monkeypatch.chdir(ROOT)
+    assert Tasks(REPO, PR).saved_spec(first['key']) == first['assignment']
+    assert capture(first['assignment'])['fingerprint']
+    retained = store.manifest.read_bytes()
+    (checkout/'CONTRIBUTING.md').write_text('Changed selected target repository guidance')
+    with pytest.raises(ValueError, match='rebuild assignment'):
+        capture(first['assignment'])
+    assert Tasks(REPO, PR).resume()['tasks'][0]['reason'] == 'refresh_required'
+    assert store.manifest.read_bytes() == retained
+
+
+def test_no_git_task_honors_explicit_checkout_for_exclusions(case, tmp_path, monkeypatch):
     spec, _ = case
     checkout = Path(spec['git']['checkout'])
     files(checkout)
     save(policy())
     task_definition = definition(spec)
     task_definition.pop('git')
-    monkeypatch.chdir(checkout)
-    tasks = Tasks(REPO, PR, checkout=checkout)
-    first = tasks.prepare({'tasks': [{'definition': task_definition}]})['tasks'][0]
+    task_definition['instructions'] = {'old-guidance': str(checkout/'AGENTS.md')}
     monkeypatch.chdir(tmp_path)
-    assert Tasks(REPO, PR).saved_spec(first['key']) == first['assignment']
-    assert capture(first['assignment'])['fingerprint']
+    with pytest.raises(ValueError, match='Excluded repository instruction'):
+        Tasks(REPO, PR, checkout=checkout).prepare({'tasks': [{'definition': task_definition}]})
+
+
+def test_no_policy_no_git_task_preserves_legacy_fingerprint(case, tmp_path, monkeypatch):
+    spec, _ = case
+    task_definition = definition(spec)
+    task_definition.pop('git')
+    monkeypatch.chdir(tmp_path)
+    legacy = make_spec(repository=REPO, pr=PR, **task_definition)
+    task = Tasks(REPO, PR, checkout=spec['git']['checkout']).prepare(
+        {'tasks': [{'definition': task_definition}]})['tasks'][0]
+    assert 'instruction_policy' not in task['assignment']
+    assert capture(task['assignment'])['fingerprint'] == capture(legacy)['fingerprint']
+
+
+def test_source_contract_changes_stale_configuration_admission(case, monkeypatch):
+    spec, _ = case
+    checkout = Path(spec['git']['checkout'])
+    files(checkout)
+    save(policy())
+    store = config_requests.Requests()
+    request_id = store.start('Use a 42 second CI timeout.', {'checkout': str(checkout), 'repository': REPO})['id']
+    operation = {'domain': 'skill', 'action': 'set', 'scope': 'repo', 'skill': 'dk-workflows:dk-ci',
+                 'value': {'timeout_seconds': 42}}
+    result = store.prepare(request_id, {'operations': [operation]})
+    store.prepare(request_id, {'operations': [operation], 'assessment': {
+        'fingerprint': result['fingerprint'], 'summary': 'Concrete timeout under the current source contract.',
+        'reviewed': [], 'relations': [], 'unresolved': []}})
+    assert config_requests.Requests().resume(request_id)['admission'] == 'reusable'
+    original = config_requests.read_text
+    contract = ROOT/'docs/instruction-sources.md'
+    monkeypatch.setattr(config_requests, 'read_text', lambda path: original(path) + '\nChanged adoption contract.'
+                        if Path(path) == contract else original(path))
+    assert config_requests.Requests().resume(request_id)['admission'] == 'stale'
+    with pytest.raises(ValueError, match='governing inputs changed'):
+        config_requests.Requests().apply(request_id)

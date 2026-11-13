@@ -246,7 +246,7 @@ def input_paths(context, operations):
     paths = {Path(__file__), Path(__file__).with_name('config_requests.py')}
     root = Path(__file__).resolve().parents[1]
     paths.update(root/name for name in ('DESIGN.md', 'AGENTS.md', 'docs/configuration-agent.md',
-                 'docs/configuration-requests.md', 'docs/configuration.md', 'docs/preferences.md',
+                 'docs/configuration-requests.md', 'docs/configuration.md', 'docs/preferences.md', 'docs/instruction-sources.md',
                  'docs/skill-configuration.md', 'docs/pr/configuration.md', 'docs/commit-policy.md',
                  'docs/invocations.md', 'docs/private-reporting.md', 'scripts/config.py', 'scripts/pr_config.py',
                  'scripts/preferences.py', 'scripts/config_requests.py'))

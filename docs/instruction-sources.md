@@ -18,6 +18,8 @@ A value has `mode`, `include` and `exclude` fields, for example:
 
 `human` selects discovered human-facing sources, `all` selects all discovered sources, and `custom` selects only exact included paths. Explicit includes add files; excludes override mode-based selection. The include and exclude lists must be disjoint. Paths are repository-relative references, not shell commands or globs. New discovered sources follow the saved mode and exclusions; a custom selection does not adopt newly discovered files automatically. The choice is specific to the current repository, without user or upstream inheritance. Read the current inventory when resuming; do not ask the same initialization question again while a valid saved choice exists.
 
+Exclusions also apply to resolved aliases of the same source. Unsafe instruction symlinks remain unselected inventory entries so governing handoffs cannot reintroduce them; ordinary and discovery reads reject those links. Handoff validation covers resources, instructions and inputs, including directory references containing excluded sources.
+
 ## Read, change and reset
 
 After initialization, load selected files with `read --source REPO_RELATIVE_PATH`; ordinary reads reject unselected sources. Discovery reads remain available to explain a proposed change, with the same evidence-only boundary. Apply each file only within its documented scope. A saved source choice does not change the host's instruction priority, grant permission, or make every sentence in a selected source a repository-wide rule.

@@ -456,6 +456,12 @@ historical evidence and rebuild affected governing handoffs from selected origin
 references. Missing or malformed evidence blocks applicable reuse. Low-level
 uninitialized captures retain compatibility with existing fingerprints; native
 workflow initialization still requires the source question before source loading.
+Source checks cover governing resources as well as instructions and inputs.
+Explicit custom exclusions and unsafe source links remain visible to admission;
+resolved aliases cannot override an exclusion. Tasks without Git pins use the
+caller's repository checkout for their existing binding, then retain that binding
+for later sessions. Configuration admission also captures the source-selection
+contract. These checks add no durable fields or copies of source content.
 
 Unchanged fresh-session reads reuse the choice and valid results. Configuration
 request intent/receipts supply partial-write recovery without a second journal.
