@@ -324,6 +324,32 @@ def test_configuration_admission_reuses_only_selected_unchanged_sources(case, ch
     assert config_requests.Requests().resume(request_id)['admission'] == expected
 
 
+def test_configuration_admission_tracks_ancestor_instructions_across_processes(case):
+    spec, _ = case
+    checkout = Path(spec['git']['checkout'])
+    files(checkout)
+    save(policy())
+    ancestor = checkout.parent/'AGENTS.md'
+    ancestor.write_text('Host-loaded configuration admission rules.')
+    store = config_requests.Requests()
+    request_id = store.start('Use a 42 second CI timeout.', {'checkout': str(checkout), 'repository': REPO})['id']
+    operation = {'domain': 'skill', 'action': 'set', 'scope': 'repo', 'skill': 'dk-workflows:dk-ci',
+                 'value': {'timeout_seconds': 42}}
+    result = store.prepare(request_id, {'operations': [operation]})
+    store.prepare(request_id, {'operations': [operation], 'assessment': {
+        'fingerprint': result['fingerprint'], 'summary': 'Checked host and selected repository rules.',
+        'reviewed': [], 'relations': [], 'unresolved': []}})
+    command = [sys.executable, str(ROOT/'scripts/config_requests.py')]
+    resume = [*command, 'resume', '--request-id', request_id]
+    assert json.loads(subprocess.check_output(resume))['admission'] == 'reusable'
+    ancestor.write_text('Changed host-loaded configuration admission rules.')
+    assert json.loads(subprocess.check_output(resume))['admission'] == 'stale'
+    applied = subprocess.run([*command, 'apply', '--request-id', request_id], text=True, capture_output=True)
+    assert applied.returncode == 2 and 'governing inputs changed' in applied.stdout
+    assert not config.path(REPO).exists()
+    assert store.resume(request_id)['status'] == 'prepared'
+
+
 def test_repository_only_policy_and_canonical_identity(case):
     spec, _ = case
     save(policy())

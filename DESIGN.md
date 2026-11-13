@@ -461,7 +461,10 @@ Explicit custom exclusions and unsafe source links remain visible to admission;
 resolved aliases cannot override an exclusion. Tasks without Git pins use the
 caller's repository checkout for their existing binding, then retain that binding
 for later sessions. Configuration admission also captures the source-selection
-contract. These checks add no durable fields or copies of source content.
+contract and preserves ancestor `AGENTS.md` freshness checks independently of
+optional in-checkout source selection. Changed ancestor instructions require
+fresh admission under the host's existing instruction precedence. These checks
+add no durable fields or copies of source content.
 
 Unchanged fresh-session reads reuse the choice and valid results. Configuration
 request intent/receipts supply partial-write recovery without a second journal.

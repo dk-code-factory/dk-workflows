@@ -265,8 +265,9 @@ def input_paths(context, operations):
     paths.add(instruction_sources.policy_path(context['repository']))
     paths.add(root/'runtime/instruction_sources.py')
     paths.add(root/'scripts/instruction_sources.py')
+    paths.update(parent/'AGENTS.md' for parent in checkout.parents)
     if saved is None:
-        paths.update(parent/'AGENTS.md' for parent in [checkout, *checkout.parents])
+        paths.add(checkout/'AGENTS.md')
         paths.update(checkout.rglob('AGENTS.md'))
     else:
         paths.update(checkout/item['path'] for item in instruction_sources.discover(checkout, saved['policy'])
