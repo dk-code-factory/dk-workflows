@@ -43,6 +43,7 @@ def main():
             c.add_argument('--kind', choices=['tasks', 'finalizers', 'reviewers'], required=True)
             c.add_argument('--resolved', action='store_true', help='Include inherited invocations and effective leaf options')
         if action == 'skill-preflight':
+            c.add_argument('--stage', choices=['architecture', 'review', 'finalizers'])
             c.add_argument('--available', type=Path, required=True)
             c.add_argument('--capabilities', type=Path)
             c.add_argument('--native-reviews', type=Path, help='Resolved review contracts keyed by occurrence location')
@@ -59,7 +60,7 @@ def main():
                                                   **({'upstream': a.upstream} if a.upstream else {}),
                                                   **({'pr': a.pr} if a.pr else {})})
         if a.action == 'skill-preflight':
-            result = invocation.preflight(list(skill_config.calls(a.skill, a.repository, a.upstream, options=local)),
+            result = invocation.preflight(list(skill_config.calls(a.skill, a.repository, a.upstream, options=local, stage=a.stage)),
                                           read(a.available), read(a.capabilities) if a.capabilities else None,
                                           native_reviews=read(a.native_reviews) if a.native_reviews else None)
         elif a.action == 'skill-plan':

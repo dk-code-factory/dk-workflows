@@ -59,6 +59,21 @@
     "merge_pr": {
       "enabled": false,
       "method": "squash"
+    },
+    "edit_architecture_decisions": true
+  },
+  "architecture": {
+    "enabled": true,
+    "review_skill": "dk-workflows:dk-architecture-review",
+    "scoring": {
+      "profile": "auto",
+      "profile_selection_prompt": "Assess new features, existing behavior, tests, CI and maintenance. Choose a built-in scoring profile and explain why its trade-offs fit these circumstances.",
+      "custom_prompt": null
+    },
+    "auto_pick": {
+      "enabled": true,
+      "prompt": "Assess confidence and sensitivity to LOC and complexity estimates. Accept a clear winner only with supported feasibility, adequate score lead and no unresolved material doubts. For a sole feasible option substantiate rejection of every alternative.",
+      "min_score_gap": 10
     }
   }
 }

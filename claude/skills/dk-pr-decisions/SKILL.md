@@ -18,3 +18,9 @@ Use [shared PR evidence](../../../docs/pr/supplied-evidence.md) for analysis and
 Read the complete PR discussion, user instructions and current Decisions. Distinguish settled choices from suggestions, open questions and generated progress. Save exact sources. Ask the user about important unresolved scope choices. Base proposals on evidence and label them as proposals.
 
 Follow [decision language review](../../../runtime/dk-pr-decisions/references/language.md) for the configured `language_review_passes`, at most three passes. Use the configured `section_heading` when locating and publishing the bounded decision section; consumers read this setting from this skill. When authorized, use `scripts/publish.py` to update only Decisions. Preserve the rest of the title and body. Return structured decisions, open questions, sources and original instruction snapshots.
+
+Decision type `architecture` uses a distinct Architecture decisions subsection under
+the configured heading. Preserve unrelated decisions and PR text. Include the
+chosen approach, rationale, considered alternatives, scores and rejection reasons.
+Follow the [architecture publication boundary](../../../docs/architecture-review.md#publication-and-freshness)
+when invoked by incoming review; this grants no general description editing.

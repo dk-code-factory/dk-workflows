@@ -26,7 +26,7 @@ class Tasks:
     def spec(self, descriptor):
         if (not isinstance(descriptor, dict) or set(descriptor) - {
                 'kind', 'definition', 'run', 'cycle', 'phase', 'index', 'process', 'finalizer', 'upstream',
-                'skill', 'selection', 'options'}):
+                'skill', 'selection', 'options', 'stage', 'dependencies'}):
             raise ValueError('Task requires a definition and optional occurrence selector')
         if not isinstance(descriptor.get('definition'), dict):
             raise ValueError('Task requires an explicit definition')
@@ -43,6 +43,9 @@ class Tasks:
             if set(descriptor) - {'kind', 'definition'}:
                 raise ValueError('Ordinary task identity excludes run and occurrence selectors')
             return make_spec(**self.store.subject, **definition)
+        if kind == 'architecture':
+            from architecture import stage_spec
+            return stage_spec(self, descriptor, definition)
         if kind == 'skill':
             return skill_config.make_spec(**common, skill=descriptor['skill'], kind=descriptor['selection'],
                                           index=descriptor['index'], options=descriptor.get('options'),
@@ -122,7 +125,7 @@ class Tasks:
         selections = {item.get('selection') for item in descriptors} if kinds == {'skill'} else set()
         if len(selections) > 1:
             raise ValueError('Prepare one skill-owned list kind at a time')
-        occurrence = bool(kinds - {'task', 'skill'} or selections == {'finalizers'})
+        occurrence = bool(kinds - {'task', 'skill', 'architecture'} or selections == {'finalizers'})
         if occurrence and any(request.get(key) for key in ('retry', 'ci_repair', 'ci_rerun')):
             raise ValueError('Occurrence tasks do not reserve reviewer or CI retry budgets')
         specs = [self.spec(item) for item in descriptors]
@@ -152,6 +155,11 @@ class Tasks:
                 else:
                     task.pop('assignment', None)
                 task['checklist'] = checklists[task['key']]
+                if task['action'] == 'invoke' and retained[task['key']].get('kind') == 'architecture':
+                    from architecture import scoring_handoff
+                    scores = scoring_handoff(assignments[task['key']])
+                    if scores is not None:
+                        task['architecture_scores'] = scores
                 if task['action'] == 'invoke':
                     entry = manifest['entries'][task['key']]
                     if required(entry['components']):
@@ -185,7 +193,7 @@ class Tasks:
                 legacy.append({'key': key, 'task': entry.get('components', {}).get('task', {}).get('id'),
                                'reason': 'definition_required'})
                 continue
-            occurrence = (descriptor.get('kind', 'task') not in {'task', 'skill'} or
+            occurrence = (descriptor.get('kind', 'task') not in {'task', 'skill', 'architecture'} or
                           descriptor.get('kind') == 'skill' and descriptor.get('selection') == 'finalizers')
             if (run is not None and occurrence
                     and descriptor.get('run') != run):
@@ -234,6 +242,9 @@ class Tasks:
             raise ValueError('Report requires explicit complete boolean')
         spec = self.spec(entry['managed'])
         checklist = checklist_contract(spec, entry['managed']['definition'])
+        if round_id is None:
+            from architecture import validate_report
+            validate_report(spec, report)
         if round_id is not None:
             if status is not None or progress is not None or native_evidence is not None:
                 raise ValueError('Checklist follow-ups retain primary status, progress and native evidence')

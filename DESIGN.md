@@ -574,3 +574,51 @@ and Git receipts. Native dispatch fixtures check handoff and unavailable-tool
 behavior without model/GitHub calls. They establish neither native adherence nor
 measured token savings. No new native execution or token evidence accompanies this
 change; helper/process counts remain proxies only.
+
+## Incoming architecture gate
+
+Incoming review assesses architecture before every configured task or parallel
+review group. Its replaceable prompt supplies examination guidance only. The
+framework supplies stage assignments, mandatory checklist, weighted arithmetic,
+selection gates and publication/recovery rules. Standalone reviewer execution and
+the independent dk-architecture catalog remain separate.
+
+Use existing managed tasks for assessment, comparison, selection, impact,
+alignment and independent mismatch verification. Retain only their definitions,
+original immutable results, native observations and dependency references in the
+existing PR manifest. There is no architecture database, completion flag or saved
+rendered comparison. Completion is derived from accepted task evidence and the
+existing publication journal. Native tools execute the prompts; helpers never
+launch model sessions. Missing execution/verification evidence blocks dependents.
+An architecture-only rejection is a completed, separately named outcome, with
+ordinary review and approval/merge finalizers unperformed.
+
+Comparison binds the requirements, discussion, constraints, preferences, prompt
+and original diff base/head. Selection separately binds scoring/auto-pick policy
+and the comparison reference; changing auto-pick policy repeats selection only.
+After changed live inputs, a native impact task compares the original analysis
+with current evidence. Reuse requires a supported nonmaterial finding and a fresh
+implementation alignment check. Material or uncertain impact reopens affected
+analysis, retaining original results, completed siblings, claims and budgets.
+Selection, alignment and impact reference exactly the analysis they assess. Every
+normal review handoff includes the settled decision as governing context.
+
+Decision edits use the existing exact-body publication journal, constrained to
+Architecture decisions under the configured Decisions heading. Recognize the
+workflow's own edit only by its reconciled journal's exact before/after body;
+external text edits still require impact assessment. Public text contains design
+reasoning and rejected alternatives, never private comparisons, handles or task
+state. Analysis-only and denied decision permission leave publication incomplete
+and private; disabled architecture bypasses all stages and new writes without
+removing retained evidence. An unavailable ordinary reviewer cannot block the
+separately preflighted architecture stage or its verified rejection.
+
+The expected saving is avoiding repeated alternatives analysis, user selection
+and uncertain-publication reconstruction in later sessions. Consumers read compact
+status then only referenced evidence. Small definitions/references reuse the
+existing accepted-result and publication machinery, so their expected avoided
+native analysis and recovery cost exceeds their capture/validation/loading cost.
+Freshness ends at changed governing inputs, material/uncertain impact, changed
+selection policy or damaged/missing evidence; current authorization, publication
+and CI checks are never cached. Offline reuse/recovery tests establish behavior,
+not API dollar savings. Native API cost telemetry is unavailable for this change.

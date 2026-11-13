@@ -200,7 +200,8 @@
         "merge_pr": {
           "enabled": false,
           "method": "squash"
-        }
+        },
+        "edit_architecture_decisions": true
       },
       "hooks": {
         "before_cycle": [],

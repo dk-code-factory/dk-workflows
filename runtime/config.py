@@ -16,7 +16,7 @@ CYCLE_PHASES = ('before_cycle', 'after_cycle')
 _FIX = skill_config.defaults('dk-workflows:dk-pr-fix')
 _REVIEW = skill_config.defaults('dk-workflows:dk-pr-review')
 LIMITS = _FIX['limits']
-PERMISSIONS = tuple(key for key in _FIX['permissions'] if key != 'merge_pr')
+PERMISSIONS = tuple(key for key in dict.fromkeys([*_FIX['permissions'], *_REVIEW['permissions']]) if key != 'merge_pr')
 FINALIZER_DEFAULTS = _FIX['finalizers']
 _LEGACY_TASK_NAMES = ('read_feedback', 'collect_decisions', 'address_feedback', 'split_scope',
                       'review_changes', 'organize_commits', 'draft_commit_message',
