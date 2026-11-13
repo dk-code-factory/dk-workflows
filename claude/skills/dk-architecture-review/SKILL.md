@@ -1,8 +1,15 @@
 ---
 name: dk-architecture-review
-description: Examine architecture alternatives for the incoming PR architecture gate. Supplies examination guidance; the owning workflow controls selection, persistence and publication.
+description: Internal workflow component for prepared architecture assignments. For manual PR reviews use dk-workflows:dk-pr-review-architect.
 license: MIT
+metadata:
+  short-description: Internal only; use dk-pr-review-architect
 ---
+
+This skill consumes prepared architecture assignments from `dk-workflows:dk-pr-review`
+or `dk-workflows:dk-pr-review-architect`. If invoked without one, explain its
+internal role and direct the user to `dk-workflows:dk-pr-review-architect` with
+a PR URL. Do not ask the user to construct an internal workflow assignment.
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
