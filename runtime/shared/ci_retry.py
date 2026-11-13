@@ -133,14 +133,15 @@ def capture(api, pr, head, decision, snapshot):
                 raise ValueError('Failed workflow log job directories are ambiguous')
             with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
                 members = bundle.namelist()
-            runs[run_id] = {'run_id': run_id, 'attempt': item['attempt'],
+            captured_run = {'run_id': run_id, 'attempt': item['attempt'],
                 'workflow': run.get('path'), 'source_file': item['source_file'],
                 'archive_file': item['archive_file'], 'log_members': members,
                 'jobs': [{'job_id': j['id'], 'job': j['name'],
                     'failed_steps': [s['name'] for s in j.get('steps', [])
                                      if s.get('conclusion') in {'failure', 'timed_out'}]}
                     for j in failed_jobs]}
-            runs[run_id]['capture'] = run_capture(api, pr, head, pull, files, snapshot, runs[run_id])
+            captured_run['capture'] = run_capture(api, pr, head, pull, files, snapshot, captured_run)
+            runs[run_id] = captured_run
         except (OSError, ValueError, KeyError, RuntimeError, zipfile.BadZipFile) as exc:
             blockers.append({'link': check.get('link'), 'reason': str(exc)})
     latest_pull = api.request('pulls/' + number)

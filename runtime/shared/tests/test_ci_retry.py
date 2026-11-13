@@ -420,6 +420,38 @@ def test_unavailable_shared_evidence_blocks_all_retry_diagnosis(context, damage)
 
 
 @pytest.mark.parametrize('unavailable_run', [11, 22])
+@pytest.mark.parametrize('damage', ['missing', 'corrupt'])
+def test_source_evidence_loss_during_workflow_read_preserves_independent_retry(
+        context, monkeypatch, unavailable_run, damage):
+    api, decision, snapshot, original_handoff, diagnosis = context
+    original = api.request
+    source = Path(next(run['source_file'] for run in original_handoff['runs']
+                       if run['run_id'] == unavailable_run))
+
+    def damage_source(path):
+        if path == f'actions/runs/{unavailable_run}':
+            if damage == 'missing':
+                source.unlink()
+            else:
+                source.write_text('{}')
+        return original(path)
+
+    monkeypatch.setattr(api, 'request', damage_source)
+    handoff = capture(api, PR, HEAD, decision, snapshot)
+    available = next(run for run in original_handoff['runs'] if run['run_id'] != unavailable_run)
+    assert handoff['runs'] == [available]
+    assert len(handoff['blockers']) == 1
+    assert handoff['blockers'][0]['link'].endswith(f'/job/{unavailable_run * 10}')
+    assert handoff['blockers'][0]['reason']
+    diagnosis['capture'] = handoff['capture']
+    diagnosis['runs'] = [run for run in diagnosis['runs'] if run['run_id'] != unavailable_run]
+    result = requests(handoff, diagnosis)
+    assert [request['run_id'] for request in result['requests']] == [available['run_id']]
+    assert result['blockers'] == handoff['blockers']
+    validate(result['requests'][0], api, snapshot)
+
+
+@pytest.mark.parametrize('unavailable_run', [11, 22])
 def test_unavailable_workflow_metadata_preserves_independent_retry(context, monkeypatch, unavailable_run):
     api, decision, snapshot, original_handoff, diagnosis = context
     original = api.request
