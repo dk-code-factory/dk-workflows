@@ -196,6 +196,45 @@ def test_source_path_encoding_preserves_existing_unicode_hashes():
         assert sources.policy_path(identity).name == hashlib.sha256(sources.key(identity).encode()).hexdigest()[:24] + '-instructions.json'
 
 
+def test_originless_nested_checkout_reuses_implicit_source_identity(case):
+    spec, _ = case
+    checkout = Path(spec['git']['checkout'])
+    files(checkout)
+    nested = checkout/'component'
+    nested.mkdir()
+    store = config_requests.Requests()
+    request_id = store.start('Use human contributor guidance.', {'checkout': str(nested)})['id']
+    identity = store.show(request_id, 'context')['context']['repository']
+    assert identity == 'path:' + str(nested)
+    operation = {'domain': 'instruction-sources', 'action': 'set', 'scope': 'repo', 'value': policy()}
+    result = store.prepare(request_id, {'operations': [operation]})
+    store.prepare(request_id, {'operations': [operation], 'assessment': {
+        'fingerprint': result['fingerprint'], 'summary': 'Human sources selected from the requested directory.',
+        'reviewed': [], 'relations': [], 'unresolved': []}})
+    resume = [sys.executable, str(ROOT/'scripts/config_requests.py'), 'resume', '--request-id', request_id]
+    before = store._path(request_id).read_bytes()
+    assert json.loads(subprocess.check_output(resume))['admission'] == 'reusable'
+    assert store._path(request_id).read_bytes() == before
+    assert config_requests.Requests().apply(request_id)['status'] == 'applied'
+    saved = sources.policy_path(identity).read_bytes()
+    command = [sys.executable, str(ROOT/'scripts/instruction_sources.py'), '--checkout', str(nested)]
+    shown = json.loads(subprocess.check_output([*command, 'show']))
+    assert shown['repository'] == identity and shown['policy'] == policy()
+    assert sources.inspect(nested)['policy'] == policy()
+    read = json.loads(subprocess.check_output([*command, 'read', '--source', 'CONTRIBUTING.md']))
+    assert read['adopted'] and read['text'] == 'Use meaningful tests.'
+    assert sources.read_source(nested, 'CONTRIBUTING.md')['adopted']
+    root_command = [sys.executable, str(ROOT/'scripts/instruction_sources.py'), '--checkout', str(checkout), 'show']
+    root = json.loads(subprocess.check_output(root_command))
+    assert root['repository'] == 'path:' + str(checkout) and root['status'] == 'choice-needed'
+    assert sources.policy_path(identity).read_bytes() == saved
+    assert not sources.policy_path(root['repository']).exists()
+    binding = sources.binding(nested, identity)
+    assert binding['checkout'] == str(checkout)
+    (checkout/'CONTRIBUTING.md').write_text('Changed selected contributor guidance')
+    assert sources.binding(nested, identity)['fingerprint'] != binding['fingerprint']
+
+
 def test_raw_and_literal_escape_repository_identities_have_distinct_policy_addresses(tmp_path):
     raw = tmp_path/os.fsdecode(b'repo-\xff')
     literal = tmp_path/r'repo-\udcff'

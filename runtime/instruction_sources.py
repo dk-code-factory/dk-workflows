@@ -124,8 +124,8 @@ def discover(checkout, policy=None):
 
 
 def inspect(checkout, identity=None):
-    checkout = root(checkout)
     identity = identity or repository(checkout)
+    checkout = root(checkout)
     saved = load(identity)
     policy = saved['policy'] if saved else None
     return {'repository': key(identity), 'initialized': policy is not None,
@@ -134,6 +134,7 @@ def inspect(checkout, identity=None):
 
 
 def read_source(checkout, source, *, discovery=False, identity=None):
+    identity = identity or repository(checkout)
     checkout = root(checkout)
     source = relative(source)
     path = checkout/source
