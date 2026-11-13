@@ -34,6 +34,22 @@ the existing PR, ref and repository checks. Context changes still invalidate
 readiness, and every dispatch rechecks the live reviewed pins. This adds no
 durable state, resets no analysis and preserves publication intent and receipts.
 
+Direct merge requests after standalone review enter a read-only fork-CI bridge
+before waiting for CI or preparing the merge. The helper discovers current gates,
+checks policy/source pins and constructs the native incoming-review or approval
+handoff. The already-running session resumes supported managed work, completes
+current evidence, approves eligible attempts, observes CI and returns to the
+original authorized merge. Unbound standalone outputs never become fabricated
+managed coverage. Pending journal operations are returned for read-only
+reconciliation before discovery or new writes. Existing review definitions,
+results, fingerprints, publication intents and receipts retain their original
+freshness boundaries; changed governing inputs refresh only affected analysis.
+No durable field, summary, snapshot or continuation store is added: the existing
+private merge request and original instruction sources supply the continuation.
+This avoids reconstructing an alternate approval protocol and repeating valid
+managed analysis across sessions. Native API dollar savings are unmeasured;
+offline handoff/recovery tests establish behavior, not measured cost savings.
+
 Fork-CI discovery first enumerates the reviewed head's pull-request runs rather
 than repository-wide history. Verify each listing's stable total count and
 complete pagination before dispatch or a no-op. At GitHub's 1,000-result search

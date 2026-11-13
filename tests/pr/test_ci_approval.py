@@ -180,6 +180,142 @@ def test_ready_finalization_approves_every_page_once_without_pr_approval_or_merg
     assert all(publication.load(op['operation'])['receipt']['execution_permitted'] for op in result['operations'])
 
 
+def merge_request(r, tmp_path, **fields):
+    path = tmp_path/'merge-request.json'
+    write(path, {'kind': 'merge-pr', 'pr': fixture.PR, 'head': r.head, 'base': r.base,
+                 'merge_method': 'squash', 'analysis_only': False, **fields})
+    return path
+
+
+@pytest.mark.parametrize('ci_outcome', ['success', 'failure'])
+def test_standalone_review_bridge_completes_evidence_approval_ci_and_original_merge(reviewed, tmp_path, monkeypatch, ci_outcome):
+    r = reviewed
+    # Standalone review alone has no approval evidence. The native handoff must
+    # obtain supported managed evidence, rather than manufacture review records.
+    path = merge_request(r, tmp_path)
+    reports_before = deepcopy(read(r.store.manifest)['entries'])
+    plan = r.cli.bridge(path)
+    assert plan['action'] == 'review' and plan['skill'] == 'dk-workflows:dk-pr-review'
+    assert plan['request'] == str(path) and plan['ci_success'] is None
+    assert plan['after_approval'] == ['dk-workflows:dk-ci', 'dk-workflows:dk-pr-publish']
+    assert plan['eligible_runs'] == [{'run_id': 101, 'attempt': 1}, {'run_id': 202, 'attempt': 1}]
+    assert not r.remote.calls and not r.remote.state['writes']
+    assert read(r.store.manifest)['entries'] == reports_before
+    # Simulate the native workflow's returned evidence, already generated using
+    # real managed tasks/native-observation fixtures; attaching its reference is
+    # not an import or a replacement result. No reviewer execution is repeated.
+    value = read(path)
+    value['evidence'] = str(r.evidence)
+    write(path, value)
+    resumed = r.cli.bridge(path)
+    assert resumed['action'] == 'approve'
+    assert resumed['evidence'] == str(r.evidence)
+    approved = r.cli.approve(resumed['evidence'])
+    assert approved['ci_success'] is None and r.remote.calls == [101, 202]
+    assert r.cli.bridge(path)['action'] == 'observe-ci'
+    assert read(r.store.manifest)['entries'] == reports_before
+    # Execution permission alone cannot pass the merge gate. Observe queued CI
+    # and its eventual result before resuming the original publication request.
+    r.remote.state['checks'][0].update(bucket='pending', state='QUEUED')
+    observer = load('merge_bridge_ci_observer', ROOT/'runtime/dk-ci/scripts/ci_wait.py')
+    monkeypatch.setattr(observer, 'gh_json', lambda args: r.remote.run(['gh', *args]))
+    assert observer.observe(fixture.PR, r.head)['result'] == 'pending'
+    with pytest.raises(ValueError, match='successful CI'):
+        r.cli.publish.prepare(read(path))
+    r.remote.state['checks'][0].update(bucket='pass' if ci_outcome == 'success' else 'fail',
+                                      state='SUCCESS' if ci_outcome == 'success' else 'FAILURE')
+    for run in r.remote.runs.values():
+        run.update(status='completed', conclusion=ci_outcome)
+    assert observer.observe(fixture.PR, r.head)['result'] == ci_outcome
+    if ci_outcome == 'failure':
+        with pytest.raises(ValueError, match='successful CI'):
+            r.cli.publish.prepare(read(path))
+        assert 'merge-pr' not in r.remote.state['writes']
+    else:
+        operation = r.cli.publish.prepare(read(path))['operation']
+        receipt = r.cli.publish.publish(operation)
+        assert receipt['status'] == 'verified'
+        assert publication.load(operation)['receipt']['merged'] is True
+        assert r.remote.state['writes'] == {'ci-approve': 2, 'merge-pr': 1}
+
+
+@pytest.mark.parametrize('evidence_state', ['missing', 'corrupt', 'incomplete'])
+def test_bridge_returns_supported_review_handoff_for_missing_or_invalid_evidence(reviewed, tmp_path, evidence_state):
+    r = reviewed
+    evidence = tmp_path/'unavailable-evidence.json'
+    if evidence_state == 'corrupt':
+        evidence.write_text('{')
+    elif evidence_state == 'incomplete':
+        value = read(r.evidence)
+        value['discovery'] = []
+        write(evidence, value)
+    path = merge_request(r, tmp_path, evidence=str(evidence))
+    plan = r.cli.bridge(path)
+    assert plan['action'] == 'review' and plan['reason']
+    assert not r.remote.calls and not r.remote.state['writes']
+
+
+@pytest.mark.parametrize('case', ['policy', 'local-policy', 'analysis-only', 'head', 'target', 'draft', 'own-pr'])
+def test_bridge_does_not_turn_real_prerequisite_failures_into_review_or_approval(reviewed, tmp_path, case):
+    r = reviewed
+    fields = {}
+    if case == 'policy':
+        write(config.path('github.com/owner/repo'), config.invocation.merge(r.settings, {
+            'processes': {'pr-review': {'permissions': {'approve_fork_ci': False}}}}))
+    if case == 'local-policy': fields['review_options'] = {'permissions': {'approve_fork_ci': False}}
+    if case == 'analysis-only': fields['analysis_only'] = True
+    if case == 'head': r.remote.state['metadata']['headRefOid'] = 'd'*40
+    if case == 'target': r.remote.state['branches']['main'] = 'd'*40
+    if case == 'draft': r.remote.state['pull']['draft'] = True
+    if case == 'own-pr': r.remote.state['pr_author']['id'] = r.remote.state['actor_id']
+    with pytest.raises(ValueError):
+        r.cli.bridge(merge_request(r, tmp_path, **fields))
+    assert not r.remote.calls and not r.remote.state['writes']
+
+
+def test_bridge_no_gates_observes_ci_without_requiring_fork_execution_permission(reviewed, tmp_path):
+    r = reviewed
+    for run in r.remote.runs.values():
+        run.update(status='completed', conclusion='success')
+    path = merge_request(r, tmp_path, review_options={'permissions': {'approve_fork_ci': False}})
+    assert r.cli.bridge(path)['action'] == 'observe-ci'
+    assert not r.remote.calls
+
+
+def test_bridge_preserves_pending_approval_identity_before_discovery_and_recovers_remaining_runs(reviewed, tmp_path):
+    r = reviewed
+    path = merge_request(r, tmp_path, evidence=str(r.evidence))
+    r.remote.state['lose_response'] = ['ci-approve']
+    with pytest.raises(Diagnostic):
+        r.cli.approve(r.evidence)
+    operation = next(publication.workflow_storage.operations_root().glob('*/*/*.json'))
+    original = operation.read_bytes()
+    reads = r.remote.list_reads
+    plan = r.cli.bridge(path)
+    assert plan['action'] == 'reconcile' and plan['operations'] == [str(operation)]
+    assert r.remote.list_reads == reads and operation.read_bytes() == original
+    r.cli.publish.publish(operation, reconcile=True)
+    assert r.cli.bridge(path)['action'] == 'approve'
+    assert r.cli.approve(r.evidence)['status'] == 'verified'
+    assert r.remote.calls == [101, 202]
+    assert r.cli.bridge(path)['action'] == 'observe-ci'
+
+
+def test_bridge_permission_failure_retains_exact_operation_and_never_resends(reviewed, tmp_path):
+    r = reviewed
+    path = merge_request(r, tmp_path, evidence=str(r.evidence))
+    assert r.cli.bridge(path)['action'] == 'approve'
+    r.remote.deny = 101
+    with pytest.raises(Diagnostic, match='403'):
+        r.cli.approve(r.evidence)
+    plan = r.cli.bridge(path)
+    assert plan['action'] == 'reconcile' and len(plan['operations']) == 1
+    r.remote.deny = None
+    with pytest.raises(Diagnostic):
+        r.cli.publish.publish(plan['operations'][0], reconcile=True)
+    assert r.remote.calls == [101] and 'merge-pr' not in r.remote.state['writes']
+
+
 def test_discovery_lists_only_the_reviewed_head_without_scanning_repository_history(reviewed):
     r = reviewed
     assert r.cli.approve(r.evidence)['status'] == 'verified'

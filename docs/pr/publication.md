@@ -156,6 +156,12 @@ Other actions use the same commands and journal. Requests include canonical `pr`
 
 For `merge-pr`, set `base` to the reviewed target SHA and `merge_method` to `squash` or `merge`. The caller establishes permission and complete review and verification. The publisher independently rechecks target, head, actor, author, repository readiness and successful checks. It calls GitHub's [merge endpoint](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request) with the reviewed head SHA. It never bypasses protections.
 
+Before waiting for CI or preparing a direct merge after standalone review, follow
+the [standalone-to-merge bridge](ci-approval.md#standalone-review-followed-by-a-merge-request).
+The native caller completes the supported review-evidence and fork-execution
+approval handoffs, observes actual CI and resumes the original authorized merge.
+Keep execution approval separate from PR approval, deployment gates and CI success.
+
 An explicit user request to merge the exact PR supplies merge permission even with the default `processes.pr-review.permissions.merge_pr.enabled:false`. That setting disables automatic incoming-review merges; it does not veto a direct instruction. Merging your own PR is permitted when separately authorized; the self-approval prohibition applies to posting `APPROVE`. A current `reviewDecision` of `APPROVED`, empty string or null is accepted only with REST `mergeable_state:clean` and GraphQL `mergeStateStatus:CLEAN`. Required reviews, requested changes, missing or unknown decisions and other readiness failures block dispatch. Do not post an approval solely to make merging possible.
 
 The endpoint binds the head but cannot atomically bind the base. Reconciliation checks merge-commit parents against the reviewed base and method. A changed target or another actor's merge remains a blocker even if the remote PR merged. An uncertain outcome permits reads only. Never repeat the merge. Invoking `dk-workflows:dk-pr-fix` alone does not authorize merging; carry a separate explicit merge request through finalization to this handler after current review, verification and CI gates pass.
