@@ -95,3 +95,7 @@ governing-assignment digest. Reviewer-list and scheduling edits remain leaf-loca
 policy changes do not invalidate unchanged ordinary reviewer results. Do not copy
 the generated parent prompt into the retained leaf definition. Workflow-bound
 leaf claims use the owning workflow limits and permissions.
+
+Resolve shared provider prompts under normal scope/occurrence precedence before
+adding governing simplification instructions. Workflow-bound runner preflight
+checks the live occurrence controls, including overrides of shared runner models.

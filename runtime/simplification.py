@@ -28,13 +28,15 @@ def governing(policy):
             ' Simplification does not substitute for ordinary review coverage.')
 
 
-def compose(loaded, policy):
+def compose(loaded, policy, repository=None, upstream=None):
     import invocation
+    import skill_config
     result = deepcopy(loaded)
     if policy['enabled']:
         call = invocation.normalize(policy['reviewer'])
-        call['instructions'] = (invocation.additional_instructions(governing(policy), call['instructions'])
-                                if 'instructions' in call else governing(policy))
+        provider = skill_config.configured_call(call, repository, upstream)
+        call['instructions'] = (invocation.additional_instructions(governing(policy), provider['instructions'])
+                                if 'instructions' in provider else governing(policy))
         if call['skill'] == REVIEWER:
             call['options'] = {**call.get('options', {}),
                                **{key: policy[key] for key in ('priority', 'allow_untouched_code')}}
@@ -57,14 +59,14 @@ def runner_configuration(workflow, repository, upstream=None):
     loaded['workflow_permissions'] = owner['options']['permissions']
     # Parent prompts and native controls govern all leaves; reviewer lists and
     # scheduling remain leaf-local so unrelated siblings keep their results.
-    loaded['workflow_assignment'] = {key: deepcopy(call[key]) for key in ('instructions', 'agent') if key in call}
-    return compose(loaded, owner['options']['simplification'])
+    loaded['workflow_assignment'] = {key: deepcopy(value) for key, value in call.items() if key != 'options'}
+    return compose(loaded, owner['options']['simplification'], repository, upstream)
 
 
 def selection(skill, kind, repository, upstream, options, workflow):
     import skill_config
     if workflow is None:
         return skill_config.effective(skill, repository, upstream, options=options)
-    if skill != RUNNER or kind != 'reviewers' or options:
+    if skill != RUNNER or kind != 'reviewers' or options is not None and options != {}:
         raise ValueError('Workflow-bound reviewers derive options from their live owning task')
     return runner_configuration(workflow, repository, upstream)

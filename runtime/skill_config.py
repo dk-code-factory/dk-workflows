@@ -384,9 +384,11 @@ def calls(skill, repository=None, upstream=None, *, options=None, stage=None, wo
         identity = call.get('skill')
         settings = effective(identity, repository, upstream, options=call.get('options', {}))['options'] if identity else call.get('options', {})
         if root and workflow is not None:
-            settings = selection(identity, 'reviewers', repository, upstream, options, workflow)['options']
+            loaded = selection(identity, 'reviewers', repository, upstream, options, workflow)
+            settings = loaded['options']
+            call = deepcopy(loaded['workflow_assignment'])
         elif identity == RUNNER and policy is not None:
-            settings = compose({'options': settings}, policy)['options']
+            settings = compose({'options': settings}, policy, repository, upstream)['options']
         signature = json.dumps([identity, settings], sort_keys=True)
         if signature in ancestors:
             raise ValueError('Recursive skill configuration at ' + location)
@@ -429,7 +431,7 @@ def make_spec(*, repository, pr, skill, kind, index, definition, upstream=None, 
     configured = effective(runner, repository, upstream, options=call.get('options', {})) if 'skill' in call else {'options': call.get('options', {})}
     from simplification import OWNERS, RUNNER, compose
     if skill in OWNERS and kind == 'tasks' and runner == RUNNER:
-        configured = compose(configured, owner['options']['simplification'])
+        configured = compose(configured, owner['options']['simplification'], repository, upstream)
     composed = skill in OWNERS and kind == 'tasks' and runner == RUNNER
     assigned = execution.get('assigned_instructions', '')
     parent = owner.get('workflow_assignment', {})
@@ -519,7 +521,7 @@ def check_selection(spec):
     actual = effective(call['skill'], selection['repository'], selection['upstream'], options=call.get('options', {}))['options'] if 'skill' in call else call.get('options', {})
     from simplification import OWNERS, RUNNER, compose
     if selection['skill'] in OWNERS and selection['kind'] == 'tasks' and call.get('skill') == RUNNER:
-        actual = compose({'options': actual}, owner['options']['simplification'])['options']
+        actual = compose({'options': actual}, owner['options']['simplification'], selection['repository'], selection['upstream'])['options']
     if selection['skill'] == 'dk-workflows:dk-pr-review':
         from architecture import enforce
         enforce(spec, selection['repository'], spec['pr'], options=selection['options'], upstream=selection['upstream'])

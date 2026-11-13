@@ -329,3 +329,45 @@ def test_parent_prompt_and_native_controls_invalidate_retained_and_inflight_leav
     assert tasks.store.manifest.read_bytes() == before
     # Prior immutable evidence remains available in the retained original result.
     assert original['original']
+
+
+@pytest.mark.parametrize('provider', ['custom:simplify', REVIEWER])
+@pytest.mark.parametrize('inline', [False, True])
+def test_scoped_provider_prompts_survive_governing_contract_composition(provider, inline):
+    upstream = 'github.com/upstream/project'
+    write(config.path(), {'skill_defaults': {provider: {'instructions': 'Global prompt.\n'}}})
+    write(config.path(upstream), {'skill_defaults': {provider: {'instructions': 'Upstream prompt.\n'}}})
+    chosen = {'skill': provider, **({'instructions': 'Exact inline prompt.\n'} if inline else {})}
+    write(config.path(REPO), {'skill_defaults': {
+        provider: {'instructions': 'Exact repository prompt.\n'},
+        FIX: {'options': {'tasks': [RUNNER], 'simplification': {'reviewer': chosen}}}}})
+    expected = 'Exact inline prompt.\n' if inline else 'Exact repository prompt.\n'
+    plan = skill_config.plan(RUNNER, 'reviewers', REPO, upstream, workflow=selector(), resolved=True)
+    call = plan['resolved_groups'][0][0]['invocation']
+    assert call['instructions'].endswith(expected)
+    assert 'Governing simplification contract:' in call['instructions']
+    calls = list(skill_config.calls(FIX, REPO, upstream, stage='review'))
+    assert next(call for _, call in calls if call.get('skill') == provider)['instructions'].endswith(expected)
+
+
+@pytest.mark.parametrize('occurrence_model,ready', [('available', True), ('unavailable', False)])
+def test_workflow_bound_preflight_uses_occurrence_controls_over_shared_runner_controls(occurrence_model, ready):
+    write(config.path(REPO), {'skill_defaults': {
+        RUNNER: {'agent': {'model': 'unavailable'}, 'options': {'reviewers': ['custom:ordinary']}},
+        FIX: {'options': {'tasks': [{'skill': RUNNER, 'agent': {'model': occurrence_model}}],
+                          'simplification': {'enabled': False}}}}})
+    calls = list(skill_config.calls(RUNNER, REPO, workflow=selector()))
+    assert calls[0][1]['agent']['model'] == occurrence_model
+    capabilities = {**PREFLIGHT_CAPABILITIES, 'models': {'available': []}}
+    requirements = {loc: CONTRACT for loc, call in calls if call.get('skill') == 'custom:ordinary'}
+    result = invocation.preflight(calls, [*skill_config.catalog(), 'custom:ordinary'],
+                                  capabilities, native_reviews=requirements)
+    assert result['ready'] is ready
+    assert bool(result['unsupported_agents']) is not ready
+
+
+@pytest.mark.parametrize('invalid', [[], False, 0, '', {'reviewers': []}])
+def test_workflow_bound_selection_rejects_invalid_or_copied_local_options(invalid):
+    save()
+    with pytest.raises(ValueError, match='derive options'):
+        skill_config.plan(RUNNER, 'reviewers', REPO, workflow=selector(), options=invalid)
