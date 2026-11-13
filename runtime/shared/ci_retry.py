@@ -138,7 +138,7 @@ def capture(api, pr, head, decision, snapshot):
                                      if s.get('conclusion') in {'failure', 'timed_out'}]}
                     for j in failed_jobs]}
             runs[run_id]['capture'] = run_capture(api, pr, head, pull, files, snapshot, runs[run_id])
-        except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+        except (OSError, ValueError, KeyError, RuntimeError, zipfile.BadZipFile) as exc:
             blockers.append({'link': check.get('link'), 'reason': str(exc)})
     latest_pull = api.request('pulls/' + number)
     if (revisions(latest_pull) != revisions(pull)

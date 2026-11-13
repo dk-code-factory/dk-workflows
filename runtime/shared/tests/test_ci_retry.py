@@ -342,3 +342,43 @@ def test_missing_archive_leaves_only_affected_workflow_blocked(context):
     result = requests(handoff, diagnosis)
     assert [r['run_id'] for r in result['requests']] == [22]
     assert result['blockers']
+
+
+@pytest.mark.parametrize('unavailable_run', [11, 22])
+def test_unavailable_workflow_metadata_preserves_independent_retry(context, monkeypatch, unavailable_run):
+    api, decision, snapshot, original_handoff, diagnosis = context
+    original = api.request
+    reason = f'GitHub request unavailable: actions/runs/{unavailable_run}'
+
+    def unavailable_metadata(path):
+        if path == f'actions/runs/{unavailable_run}':
+            raise RuntimeError(reason)
+        return original(path)
+
+    monkeypatch.setattr(api, 'request', unavailable_metadata)
+    handoff = capture(api, PR, HEAD, decision, snapshot)
+    available = next(run for run in original_handoff['runs'] if run['run_id'] != unavailable_run)
+    assert handoff['runs'] == [available]
+    assert handoff['blockers'] == [{'link': next(check['link'] for check in snapshot['checks']
+        if check['link'].endswith(f'/job/{unavailable_run * 10}')), 'reason': reason}]
+    diagnosis['capture'] = handoff['capture']
+    diagnosis['runs'] = [run for run in diagnosis['runs'] if run['run_id'] != unavailable_run]
+    result = requests(handoff, diagnosis)
+    assert [request['run_id'] for request in result['requests']] == [available['run_id']]
+    assert result['blockers'] == handoff['blockers']
+    validate(result['requests'][0], api, snapshot)
+
+
+@pytest.mark.parametrize('endpoint', ['pulls/7', 'pulls/7/files?per_page=100&page=1'])
+def test_unavailable_shared_pr_inputs_block_all_retry_diagnosis(context, monkeypatch, endpoint):
+    api, decision, snapshot, _, _ = context
+    original = api.request
+
+    def unavailable_changes(path):
+        if path == endpoint:
+            raise RuntimeError('GitHub request unavailable: ' + endpoint)
+        return original(path)
+
+    monkeypatch.setattr(api, 'request', unavailable_changes)
+    with pytest.raises(RuntimeError, match='GitHub request unavailable'):
+        capture(api, PR, HEAD, decision, snapshot)
