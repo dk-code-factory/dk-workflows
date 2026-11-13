@@ -44,7 +44,9 @@ Stages run in this order:
    unchanged alternatives analysis.
 4. Publish the settled typed `architecture` decision using the existing Decisions
    publisher and journal. This permission covers only Architecture decisions
-   under the configured Decisions heading. Preserve other decisions and PR text.
+   under the configured Decisions heading. Preserve other decisions and PR text. Bounded edits exclude fenced/HTML
+   examples and reject an unfinished example; unchanged insertion is idempotent.
+   The restricted journal may contain only a body edit, never a title edit.
 5. `alignment`: depends on comparison and selection. Compare the current pinned
    implementation; return `alignment:aligned|mismatch|uncertain`, `reason`,
    `evidence` and substantive `required_changes` for mismatch.

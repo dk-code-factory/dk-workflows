@@ -372,10 +372,12 @@ def test_skill_owned_review_occurrences_verification_and_active_approval_claim(r
     original = r.store.status([first_spec])['tasks'][0]['result']
     verifier = {**definition, 'skill_identity': 'dk-workflows:dk-pr-review',
                 'responsibility': 'finding-verification', 'inputs': {'candidate': original}}
-    verification, _, _ = managed('dk-workflows:dk-pr-review', 'tasks', 2, verifier, {}, {
+    # This fixture isolates ordinary CI approval after architecture is disabled.
+    owner_options = {'architecture': {'enabled': False}}
+    verification, _, _ = managed('dk-workflows:dk-pr-review', 'tasks', 2, verifier, owner_options, {
         'complete': True, 'findings': [], 'dispositions': [
             {'task': capture(first_spec)['key'], 'index': 0, 'status': 'rejected', 'evidence': 'Verified source behavior'}]})
-    r.edit(lambda value: value.update(configuration='skill-owned', options={}, reviewer_options=reviewer_options,
+    r.edit(lambda value: value.update(configuration='skill-owned', options=owner_options, reviewer_options=reviewer_options,
                                        discovery=[first, second], verification=verification), snapshot=True)
     snapshotted = read(r.evidence)
     assert 'skill_settings' not in snapshotted
@@ -383,7 +385,7 @@ def test_skill_owned_review_occurrences_verification_and_active_approval_claim(r
                for value in snapshotted['skill_settings_fingerprints'].values())
     approval_definition = {**definition, 'skill_identity': 'dk-workflows:dk-ci-approve'}
     approval_definition.pop('native_review')
-    approval_path, _, started = managed('dk-workflows:dk-pr-review', 'finalizers', 0, approval_definition, {})
+    approval_path, _, started = managed('dk-workflows:dk-pr-review', 'finalizers', 0, approval_definition, owner_options)
     with pytest.raises(ValueError, match='Unfinished review tasks'):
         r.cli.approve(r.evidence)
     r.edit(lambda value: value.update(approval_task={'key': started['key'], 'claim': started['claim']['id']}))

@@ -342,12 +342,16 @@ def gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
     if not isinstance(refs, dict) or 'assessment' not in refs:
         raise ValueError('Incoming review requires architecture applicability evidence')
     assessment = accepted(tasks, refs['assessment'])
+    if assessment['spec']['skill']['identity'] != loaded['architecture']['review_skill']:
+        raise ValueError('Architecture review skill changed; refresh affected applicability and comparison')
     if assessment['stage'] != 'assessment':
         raise ValueError('Architecture assessment stage required')
     if not assessment['report']['required']:
         return {'outcome': 'skipped', 'release_reviewers': True, 'reason': assessment['report']['reason']}
     impact = accepted(tasks, refs['impact']) if refs.get('impact') else None
     compared = accepted(tasks, refs['comparison'], historical=impact is not None)
+    if compared['spec']['skill']['identity'] != loaded['architecture']['review_skill']:
+        raise ValueError('Architecture review skill changed; refresh affected comparison')
     if compared['stage'] != 'comparison':
         raise ValueError('Architecture comparison required')
     if compared['policy']['scoring'] != scoring_policy(loaded['architecture']['scoring']):
@@ -382,7 +386,10 @@ def gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
     if analysis_only or not loaded['permissions']['edit_architecture_decisions']:
         return {'outcome': 'publication_blocked', 'release_reviewers': False}
     decision = journal(refs['decision_operation'], tasks, kind='edit-pr', head=None)
-    body = decision['request']['approved']['fields'].get('body')
+    fields = decision['request']['approved']['fields']
+    if set(fields) != {'body'}:
+        raise ValueError('Architecture publication may edit only the bounded body subsection')
+    body = fields['body']
     before = decision['request']['expected']['body']
     rendered = render_decision(compared['report'], compared['policy']['scoring'], choice, selection=selection['report'])
     heading = skill_config.effective('dk-workflows:dk-pr-decisions', tasks.store.subject['repository'], upstream)['options']['section_heading']
@@ -414,19 +421,65 @@ def gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
     return {'outcome': 'alignment_blocked', 'release_reviewers': False}
 
 
+def heading_view(body):
+    """Mask Markdown examples without moving document character offsets."""
+    masked, fence, raw = [], None, None
+    for line in body.splitlines(keepends=True):
+        stripped = line.rstrip('\r\n')
+        if raw is not None:
+            end = ('-->' if raw == 'comment' else '</' + raw + '>')
+            if end in line.lower():
+                raw = None
+        elif fence is not None:
+            if re.fullmatch(r' {0,3}' + re.escape(fence[0]) + '{' + str(fence[1]) + r',}[ \t]*', stripped):
+                fence = None
+        else:
+            opening = re.match(r' {0,3}(`{3,}|~{3,})(.*)$', stripped)
+            html = re.match(r' {0,3}(<!--|<(pre|script|style|textarea)(?:[ >]))', stripped, re.I)
+            if opening and (opening[1][0] != '`' or '`' not in opening[2]):
+                fence = (opening[1][0], len(opening[1]))
+            elif html:
+                tag = 'comment' if html[1] == '<!--' else html[2].lower()
+                end = '-->' if tag == 'comment' else '</' + tag + '>'
+                raw = None if end in stripped.lower() else tag
+            else:
+                masked.append(line)
+                continue
+        masked.append(''.join(c if c in '\r\n' else ' ' for c in line))
+    if fence is not None or raw is not None:
+        raise ValueError('Unclosed Markdown example blocks a bounded Decisions edit')
+    return ''.join(masked)
+
+
 def decision_section(body, heading):
-    """Locate exact configured heading and its bounded subsection."""
+    """Locate the configured real heading, excluding fenced/HTML examples."""
     title = heading.strip().lstrip('#').strip()
-    matches = list(re.finditer(r'(?m)^(#{1,6}) ' + re.escape(title) + r'\s*$', body))
+    view = heading_view(body)
+    matches = list(re.finditer(r'(?m)^(#{1,6}) ' + re.escape(title) + r'[ \t]*$', view))
     if len(matches) > 1:
         raise ValueError('Ambiguous Decisions heading')
     if not matches:
         return None
     start = matches[0]
     level = len(start[1])
-    tail = re.search(r'(?m)^#{1,' + str(level) + r'} ', body[start.end():])
+    tail = re.search(r'(?m)^#{1,' + str(level) + r'} ', view[start.end():])
     end = start.end() + tail.start() if tail else len(body)
     return start, end, level
+
+
+def architecture_bounds(body, section):
+    start, end, level = section
+    marker = '#' * (level + 1) + ' Architecture decisions'
+    view = heading_view(body)[start.end():end]
+    matches = list(re.finditer(r'(?m)^' + re.escape(marker) + r'[ \t]*$', view))
+    if len(matches) > 1:
+        raise ValueError('Ambiguous Architecture decisions subsection')
+    if not matches:
+        return None
+    existing = matches[0]
+    tail = re.search(r'(?m)^#{1,' + str(level + 1) + r'} ', view[existing.end():])
+    stop = existing.end() + tail.start() if tail else len(view)
+    return start.end() + existing.end(), start.end() + stop
 
 
 def replace_decision(body, rendered, *, heading='## Decisions'):
@@ -436,21 +489,20 @@ def replace_decision(body, rendered, *, heading='## Decisions'):
         title = heading.strip()
         if not title.startswith('#'):
             title = '## ' + title
-        return body + ('\n\n' if body and not body.endswith('\n\n') else '') + title + '\n\n### Architecture decisions\n\n' + rendered + '\n'
+        level = len(title) - len(title.lstrip('#'))
+        if not 1 <= level < 6 or not re.fullmatch(r'#{1,5} [^\r\n]+', title):
+            raise ValueError('Decisions heading needs an available subsection depth')
+        marker = '#' * (level + 1) + ' Architecture decisions'
+        return body + ('\n\n' if body and not body.endswith('\n\n') else '') + title + '\n\n' + marker + '\n\n' + rendered + '\n\n'
     start, end, level = section
     if level >= 6:
         raise ValueError('Decisions heading has no available subsection depth')
-    part = body[start.end():end]
-    marker = '#' * (level + 1) + ' Architecture decisions'
-    matches = list(re.finditer(r'(?m)^' + re.escape(marker) + r'[ \t]*$', part))
-    if len(matches) > 1:
-        raise ValueError('Ambiguous Architecture decisions subsection')
-    if not matches:
+    bounds = architecture_bounds(body, section)
+    if bounds is None:
+        marker = '#' * (level + 1) + ' Architecture decisions'
         return body[:end] + ('\n' if body[:end].endswith('\n') else '\n\n') + marker + '\n\n' + rendered + '\n\n' + body[end:]
-    existing = matches[0]
-    tail = re.search(r'(?m)^#{1,' + str(level + 1) + r'} ', part[existing.end():])
-    stop = existing.end() + tail.start() if tail else len(part)
-    return body[:start.end()] + part[:existing.end()] + '\n\n' + rendered + '\n\n' + part[stop:] + body[end:]
+    first, stop = bounds
+    return body[:first] + '\n\n' + rendered + '\n\n' + body[stop:]
 
 
 def render_decision(report, scoring, choice, *, selection=None):
@@ -498,7 +550,15 @@ def governing_body(body, operation, tasks):
     if (value['status'] != 'verified' or not value.get('receipt')
             or request['target'].lower() != tasks.store.subject['pr'].lower()):
         raise ValueError('Own Decisions normalization requires a reconciled operation')
-    approved = request['approved']['fields'].get('body')
+    fields = request['approved']['fields']
+    if set(fields) != {'body'}:
+        raise ValueError('Own Decisions normalization cannot cover unrelated fields')
+    approved = fields['body']
+    heading = skill_config.effective('dk-workflows:dk-pr-decisions', tasks.store.subject['repository'])['options']['section_heading']
+    section = decision_section(approved, heading)
+    bounds = architecture_bounds(approved, section) if section else None
+    if not bounds or replace_decision(request['expected']['body'], approved[bounds[0]:bounds[1]].strip('\n'), heading=heading) != approved:
+        raise ValueError('Own Decisions normalization requires a bounded architecture edit')
     return request['expected']['body'] if body == approved else body
 
 

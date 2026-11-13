@@ -409,3 +409,107 @@ def test_stage_dependencies_reject_cycles_before_claims(case):
     with pytest.raises(ValueError, match='dependencies'):
         tasks.prepare({'tasks': [descriptor(spec, 'assessment', {'assessment': 'self'})]})
     assert not store.manifest.exists()
+
+
+@pytest.mark.parametrize('required', [False, True])
+def test_changed_invocation_local_review_skill_cannot_reuse_old_gate(case, required):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = initial(tasks, spec, required=required)
+    options = {'architecture': {'review_skill': 'team:architect'}}
+    with pytest.raises(ValueError, match='skill changed'):
+        arch.gate(tasks, refs, options=options)
+    with pytest.raises(ValueError, match='skill changed'):
+        tasks.prepare({'tasks': [ordinary(spec, refs, options)]})
+
+
+@pytest.mark.parametrize('body,heading', [('', 'Decisions'), ('Summary', 'Decisions'),
+                                         ('Summary\n', '## Decisions'), ('Summary\n\n', '# Decisions'),
+                                         ('## Decisions', 'Decisions'), ('## Decisions\n\nOther choice.\n', 'Decisions'),
+                                         ('Summary\n', '### Custom choices')])
+def test_first_decision_insertion_is_idempotent(body, heading):
+    first = arch.replace_decision(body, 'Chosen approach: example', heading=heading)
+    assert arch.replace_decision(first, 'Chosen approach: example', heading=heading) == first
+
+
+@pytest.mark.parametrize('opener,closer', [('```markdown', '```'), ('~~~~md', '~~~~'),
+                                         ('   ```', '   ````'), ('<pre>', '</pre>'), ('<!--', '-->')])
+def test_decision_edit_preserves_fenced_and_html_examples(opener, closer):
+    example = 'Example:\n' + opener + '\n## Decisions\n### Architecture decisions\nExample text.\n' + closer + '\n\n'
+    body = example + '## Tests\nKeep.\n'
+    updated = arch.replace_decision(body, 'Chosen approach: example')
+    assert updated.startswith(body)
+    assert arch.replace_decision(updated, 'Chosen approach: example') == updated
+    # A real section following an example is edited without consuming the example.
+    body = example + '## Decisions\n\nExisting scope.\n\n## Tests\nKeep.\n'
+    updated = arch.replace_decision(body, 'Chosen approach: example')
+    assert updated.startswith(example + '## Decisions\n\nExisting scope.')
+    assert updated.endswith('## Tests\nKeep.\n')
+
+
+def test_fenced_subsection_and_boundaries_do_not_replace_real_decision_content():
+    body = '## Decisions\n\n```md\n### Architecture decisions\nExample only.\n```\n\n### Other\nKeep.\n\n## Tests\nKeep tests.\n'
+    updated = arch.replace_decision(body, 'Chosen approach: example')
+    assert '```md\n### Architecture decisions\nExample only.\n```' in updated
+    assert '### Other\nKeep.' in updated
+    assert updated.endswith('## Tests\nKeep tests.\n')
+    assert arch.replace_decision(updated, 'Chosen approach: example') == updated
+
+
+def test_unclosed_example_blocks_decisions_edit_without_deleting_text():
+    with pytest.raises(ValueError, match='Unclosed'):
+        arch.replace_decision('Summary\n```md\n## Decisions\n', 'Chosen approach: example')
+
+
+def test_restricted_decision_receipt_cannot_include_title_edit(case):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = aligned(tasks, spec)
+    body = read(refs['decision_operation'])['request']['approved']['fields']['body']
+    refs['decision_operation'] = verified_journal(tasks, spec, kind='edit-pr', fields={'body': body, 'title': 'Unrelated title edit'})
+    with pytest.raises(ValueError, match='only the bounded body'):
+        arch.gate(tasks, refs)
+    with pytest.raises(ValueError, match='unrelated fields'):
+        arch.governing_body(body, refs['decision_operation'], tasks)
+
+
+def test_changed_author_recovery_can_draft_new_decision_without_reanalysis(case, tmp_path):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = initial(tasks, spec)
+    original = Path(arch.accepted(tasks, refs['comparison'])['reference']).read_bytes()
+    checkout = Path(spec['git']['checkout']); (checkout/'code').write_text('author implementation fix\n')
+    git(checkout, 'commit', '-qam', 'Author update')
+    spec = deepcopy(spec); spec['git']['head'] = git(checkout, 'rev-parse', 'HEAD')
+    refs['assessment'] = complete(tasks, spec, 'assessment', {'required': True, 'reason': 'Same state boundary', 'evidence': ['diff']})
+    refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'Only implementation detail', 'evidence': ['diff']}, {'comparison': refs['comparison']})
+    refs['selection'] = complete(tasks, spec, 'selection', selection(reason='Reconfirmed choice after author update'), {k: refs[k] for k in ('comparison', 'impact')})
+    body = tmp_path/'body.md'; body.write_text('Summary\n')
+    command = [sys.executable, str(ROOT/'scripts/architecture.py'), '--repository', REPO, '--pr', PR,
+               'decision', '--comparison', refs['comparison'], '--selection', refs['selection'], '--body', str(body)]
+    result = json.loads(subprocess.check_output(command, text=True, timeout=60))
+    assert result['decision_type'] == 'architecture'
+    assert 'Reconfirmed choice after author update' in result['body']
+    accepted = arch.accepted(tasks, refs['comparison'], historical=True)
+    assert Path(accepted['reference']).read_bytes() == original
+    assert len(read(store.manifest)['entries'][refs['comparison']]['attempts']) == 1
+
+
+def test_published_invocation_schema_uses_architecture_options_contract():
+    from test_configuration_schema import validator
+    value = {'skill': arch.REVIEW_SKILL, 'options': {'timeout_seconds': 60}}
+    assert not validator('invocation').is_valid(value)
+    with pytest.raises(ValueError):
+        invocation.validate(value)
+    value['options'] = {}
+    validator('invocation').validate(value)
+    assert invocation.validate(value) == value
+
+
+def test_mismatch_verification_must_use_a_different_native_agent(case):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = aligned(tasks, spec, alignment='mismatch')
+    handle = arch.accepted(tasks, refs['alignment'])['native_handle']
+    task = tasks.prepare({'tasks': [descriptor(spec, 'verification', {'alignment': refs['alignment']})]})['tasks'][0]
+    finish(tasks, task, {'disposition': 'confirmed', 'reason': 'State owner differs',
+                         'required_changes': 'Use the selected state owner', 'evidence': ['code:1']}, handle=handle)
+    refs['verification'] = task['key']
+    with pytest.raises(ValueError, match='independent native agent'):
+        arch.gate(tasks, refs)

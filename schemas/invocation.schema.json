@@ -480,7 +480,7 @@
               "then": {
                 "properties": {
                   "options": {
-                    "$ref": "../codex/skills/dk-ci/config.schema.json"
+                    "$ref": "../codex/skills/dk-architecture-review/config.schema.json"
                   }
                 }
               }

@@ -36,8 +36,14 @@ def main():
     elif args.command == 'governing-body':
         result = {'body': architecture.governing_body(args.body.read_text(), args.operation, tasks)}
     else:
-        accepted = architecture.accepted(tasks, args.comparison)
         selected = architecture.accepted(tasks, args.selection)
+        impact_key = selected['dependencies'].get('impact')
+        accepted = architecture.accepted(tasks, args.comparison, historical=impact_key is not None)
+        if impact_key:
+            impact = architecture.accepted(tasks, impact_key)
+            architecture.linked(impact, 'comparison', accepted)
+            if impact['report']['impact'] != 'nonmaterial':
+                raise ValueError('Changed architecture analysis requires refresh')
         architecture.linked(selected, 'comparison', accepted)
         if not selected['report'].get('choice'):
             raise ValueError('Architecture choice remains pending')
