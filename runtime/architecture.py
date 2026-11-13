@@ -317,7 +317,8 @@ def stage_spec(tasks, descriptor, definition):
         resources['architecture_prompt'] = str(target/'SKILL.md')
     execution.setdefault('inputs', {}).update({'architecture_' + name: value['reference']
                                                for name, value in retained.items()})
-    execution.setdefault('options', {})['architecture'] = {
+    execution.setdefault('options', {})['process_limits'] = loaded['options']['limits']
+    execution['options']['architecture'] = {
         'stage': stage, 'policy': policy, 'dependencies': dependencies,
         **({'comparison_scoring': retained['comparison']['policy']['scoring']} if stage == 'selection' else {}),
     }
@@ -482,6 +483,39 @@ def html_end(line):
     return None
 
 
+def mask_list_containers(view, original):
+    """Keep list examples opaque while retaining document-level heading offsets."""
+    result, content_indent, after_blank, paragraph = [], None, False, False
+    for line, source in zip(view.splitlines(keepends=True), original.splitlines(keepends=True)):
+        expanded = line.expandtabs(4).rstrip('\r\n')
+        indent = len(expanded) - len(expanded.lstrip(' '))
+        item = re.match(r' {0,3}(?:[-+*]|[0-9]{1,9}[.)])([ \t]+)', expanded)
+        heading = re.match(r' {0,3}#{1,6}(?:[ \t]|$)', expanded)
+        rule = re.fullmatch(r' {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})', expanded)
+        if content_indent is not None:
+            original_indent = len(source.expandtabs(4)) - len(source.expandtabs(4).lstrip(' '))
+            if not expanded.strip():
+                if source.strip() and original_indent < content_indent:
+                    content_indent = None  # A masked document-level fence/HTML block ends the list.
+                after_blank = True
+            elif indent >= content_indent:
+                paragraph = not bool(re.match(r'(?:#{1,6}(?:[ \t]|$)|>|[-+*] |[0-9]+[.)] )', expanded[content_indent:]))
+                after_blank = False
+                result.append(''.join(c if c in '\r\n' else ' ' for c in line))
+                continue
+            elif item or heading or rule or after_blank or not paragraph:
+                content_indent = None
+            else:
+                result.append(''.join(c if c in '\r\n' else ' ' for c in line))
+                continue
+        if content_indent is None and item and not rule:
+            spaces = len(item[1])
+            content_indent = item.start(1) + (spaces if spaces <= 4 else 1)
+            paragraph, after_blank = True, False
+        result.append(line)
+    return ''.join(result)
+
+
 def heading_view(body):
     """Mask Markdown examples without moving document character offsets."""
     masked, fence, raw = [], None, None
@@ -508,16 +542,25 @@ def heading_view(body):
         masked.append(''.join(c if c in '\r\n' else ' ' for c in line))
     if fence is not None or raw not in (None, 'blank'):
         raise ValueError('Unclosed Markdown example blocks a bounded Decisions edit')
-    return ''.join(masked)
+    return mask_list_containers(''.join(masked), body)
 
 
 def next_section(view, start, level):
     """Recognize ATX and Setext boundaries without consuming sibling content."""
     candidates = [m.start() for m in re.finditer(
-        r'(?m)^ {0,3}#{1,' + str(level) + r'}(?:[ \t]|$)', view[start:])]
+        r'(?m)^ {0,3}#{1,' + str(level) + r'}(?:[ \t]|\r?$)', view[start:])]
     for match in re.finditer(r'(?m)^ {0,3}[^ \t\r\n][^\r\n]*\r?\n {0,3}(=+|-+)[ \t]*(?=\r?$)', view[start:]):
         if (1 if match[1][0] == '=' else 2) <= level:
-            candidates.append(match.start())
+            first = start + match.start()
+            # A Setext heading consumes its entire preceding paragraph.
+            while first > start:
+                previous_end = first - 1
+                previous_start = max(start, view.rfind('\n', start, previous_end) + 1)
+                previous = view[previous_start:first].rstrip('\r\n')
+                if (not previous.strip() or re.match(r' {0,3}(?:#{1,6}(?:[ \t]|$)|>|[-+*] |[0-9]+[.)] )', previous)):
+                    break
+                first = previous_start
+            candidates.append(first - start)
     return start + min(candidates) if candidates else len(view)
 
 
@@ -575,15 +618,18 @@ def replace_decision(body, rendered, *, heading='## Decisions'):
 def render_decision(report, scoring, choice, *, selection=None):
     compared = comparison(report, scoring)
     selected = next(s for s in compared['solutions'] if s['id'] == choice and s['feasible'])
-    rationale = selection['reason'] if selection else selected['recommendation_reason']
-    lines = ['Chosen approach: ' + selected['approach'], '', 'Rationale: ' + rationale, '',
+    def inline(value):
+        return ' '.join(value.splitlines())
+    rationale = inline(selection['reason'] if selection else selected['recommendation_reason'])
+    lines = ['Chosen approach: ' + inline(selected['approach']), '', 'Rationale: ' + rationale, '',
              'Considered alternatives (scores out of 100):', '']
     for option in compared['solutions']:
         reason = (rationale if option['id'] == choice else selection['rejection_reasons'][option['id']]
                   if selection else option['recommendation_reason'])
-        lines.append('- ' + option['approach'] + ' — ' + str(option['total']) + '/100. '
-                     + ('Chosen. ' if option['id'] == choice else 'Rejected. ') + reason)
-    return '\n'.join(lines)
+        lines.append('Approach: ' + inline(option['approach']) + ' — ' + str(option['total']) + '/100. '
+                     + ('Chosen. ' if option['id'] == choice else 'Rejected. ') + inline(reason))
+        lines.append('')
+    return '\n'.join(lines).rstrip('\n')
 
 
 def enforce(spec, repository, pr, *, options=None, upstream=None):

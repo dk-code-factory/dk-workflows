@@ -19,7 +19,9 @@ Codex or Claude Code, including for recovery.
 Use `dk.py prepare` and `finish`, with descriptor `kind:"architecture"`,
 `stage`, `dependencies` (stage name to accepted task key), optional owner
 invocation `options` and `upstream`, and the ordinary explicit `definition`.
-The helper constructs assignments, input references and mandatory checklists.
+The helper constructs assignments, input references and mandatory checklists,
+including the owning workflow's retained limits. Architecture analysis is read-only;
+publication permissions are checked live rather than copied into each stage.
 Selection invocations also receive transient `architecture_scores` calculated by
 the helper; pass these with the assignment for confidence assessment. These
 derived totals are never saved as a second report.
@@ -164,7 +166,10 @@ that exact self-produced body deterministically. Capture normalized governing co
 without the recognized self-produced subsection; retain the live body as a
 publication input, not a copied analysis snapshot.
 
-The bounded editor follows [CommonMark heading and HTML block boundaries](https://spec.commonmark.org/0.31.2/#html-blocks), conservatively treating complete unknown HTML tags as opaque blocks.
+The bounded editor recognizes [CommonMark heading and HTML block boundaries](https://spec.commonmark.org/0.31.2/#html-blocks), conservatively treating complete unknown HTML tags and list containers as opaque.
+Read body files without newline translation. Public option descriptions are inline
+prose paragraphs so inserting them cannot absorb a following indented sibling
+into a generated alternatives list; full private comparisons retain formatting.
 
 Offline acceptance establishes reuse, invalidation and recovery behavior. Native
 API dollar savings remain unmeasured; see the [design](../DESIGN.md#incoming-architecture-gate).

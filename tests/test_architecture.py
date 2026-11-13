@@ -632,3 +632,84 @@ def test_crlf_headings_preserve_existing_unrelated_sections():
     assert updated.endswith('### Other\r\nKeep this.\r\n\r\n## Tests\r\nKeep tests.\r\n')
     assert 'Old.' not in updated
     assert arch.replace_decision(updated, 'Chosen approach: new') == updated
+
+
+@pytest.mark.parametrize('underline', ['-------', '======='])
+@pytest.mark.parametrize('newline', ['\n', '\r\n'])
+def test_multiline_setext_heading_is_preserved_in_full(underline, newline):
+    sibling = newline.join(['Release', 'notes', underline, '', 'Keep unrelated.', ''])
+    body = newline.join(['## Decisions', '', '### Architecture decisions', '', 'Old design.', '', '']) + sibling
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert updated.endswith(sibling)
+    assert 'Old design.' not in updated
+    assert arch.replace_decision(updated, 'Chosen approach: new') == updated
+
+
+@pytest.mark.parametrize('marker', ['-', '*', '+', '1.', '12)'])
+def test_list_contained_architecture_heading_is_an_example(marker):
+    indent = ' ' * (len(marker)+1)
+    example = marker + ' Documentation example:\n\n' + indent + '### Architecture decisions\n\n' + indent + 'Keep this example.\n\n'
+    body = '## Decisions\n\n' + example + '### Other decisions\n\nKeep this decision.\n'
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert example in updated and '### Other decisions\n\nKeep this decision.' in updated
+    assert updated.count('### Architecture decisions') == 2
+    assert arch.replace_decision(updated, 'Chosen approach: new') == updated
+
+
+@pytest.mark.parametrize('newline', ['\n', '\r\n'])
+def test_empty_heading_stops_decision_edit(newline):
+    sibling = newline.join(['##', 'Unrelated section content.', ''])
+    body = newline.join(['## Decisions', '', '### Architecture decisions', '', 'Old design.', '', '']) + sibling
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert updated.endswith(sibling)
+    assert 'Old design.' not in updated
+
+
+def test_cli_preserves_crlf_and_recognizes_exact_own_publication(case, tmp_path):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = initial(tasks, spec)
+    body = '# Summary\r\n\r\nKeep exact.\r\n\r\n## Decisions\r\n\r\nScope unchanged.\r\n\r\n## Tests\r\nKeep tests.\r\n'
+    body_file = tmp_path/'crlf-body.md'; body_file.write_bytes(body.encode())
+    command = [sys.executable, str(ROOT/'scripts/architecture.py'), '--repository', REPO, '--pr', PR]
+    result = json.loads(subprocess.check_output([*command, 'decision', '--comparison', refs['comparison'],
+                        '--selection', refs['selection'], '--body', str(body_file)], text=True, timeout=60))
+    assert result['body'].startswith('# Summary\r\n\r\nKeep exact.\r\n\r\n')
+    assert result['body'].endswith('## Tests\r\nKeep tests.\r\n')
+    prepared = publication.prepare('edit-pr', PR, {'body': body},
+                                   {'kind': 'edit-pr', 'pr': PR, 'head': spec['git']['head'], 'fields': {'body': result['body']}},
+                                   ['fixture-reconcile'])
+    journal = read(prepared['operation']); journal.update(status='verified', receipt={'url': PR})
+    write(prepared['operation'], journal)
+    body_file.write_bytes(result['body'].encode())
+    normalized = json.loads(subprocess.check_output([*command, 'governing-body', '--body', str(body_file),
+                                                      '--operation', prepared['operation']], text=True, timeout=60))
+    assert normalized['body'] == body
+
+
+def test_architecture_run_limits_apply_before_any_ordinary_task(case):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    options = {'limits': {'review_cycles': 1, 'retries_per_task': 0}}
+    d = descriptor(spec, 'assessment', options=options)
+    request = {'run': 'limited', 'cycle': 'cycle-1', 'tasks': [d]}
+    task = tasks.prepare(request)['tasks'][0]
+    assert task['assignment']['options']['process_limits']['review_cycles'] == 1
+    assert task['assignment']['options']['process_limits']['retries_per_task'] == 0
+    output = b'Architecture evidence unavailable'
+    tasks.finish(task['key'], task['claim']['id'], output, {'complete': False, 'findings': []}, status='failed',
+                 native_evidence=observations(task['assignment'], task['claim'], output))
+    before = store.manifest.read_bytes()
+    with pytest.raises(ValueError, match='retries are disabled'):
+        tasks.prepare({**request, 'retry': True})
+    with pytest.raises(ValueError, match='cycle limit reached'):
+        tasks.prepare({**request, 'cycle': 'cycle-2'})
+    assert store.manifest.read_bytes() == before
+    assert read(store.manifest)['runs']['limited']['cycles'] == ['cycle-1']
+
+
+def test_public_alternatives_do_not_absorb_indented_siblings():
+    rendered = arch.render_decision(compared(), policy()['scoring'], 'implemented', selection=selection())
+    sibling = '  ### Other decisions\nKeep unrelated.\n'
+    body = '## Decisions\n\n### Architecture decisions\n\nOld design.\n\n' + sibling
+    updated = arch.replace_decision(body, rendered)
+    assert updated.endswith(sibling)
+    assert arch.replace_decision(updated, rendered) == updated

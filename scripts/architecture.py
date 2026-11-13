@@ -10,6 +10,11 @@ from state import read
 from tasks import Tasks
 
 
+def body_text(path):
+    with path.open(encoding='utf-8', newline='') as stream:
+        return stream.read()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repository', required=True)
@@ -34,7 +39,7 @@ def main():
         result = architecture.gate(tasks, read(args.file), options=read(args.options) if args.options else None,
                                    upstream=args.upstream, analysis_only=args.analysis_only)
     elif args.command == 'governing-body':
-        result = {'body': architecture.governing_body(args.body.read_text(), args.operation, tasks)}
+        result = {'body': architecture.governing_body(body_text(args.body), args.operation, tasks)}
     else:
         selected = architecture.accepted(tasks, args.selection)
         impact_key = selected['dependencies'].get('impact')
@@ -51,7 +56,7 @@ def main():
                                                selected['report']['choice'], selection=selected['report'])
         heading = architecture.skill_config.effective('dk-workflows:dk-pr-decisions', args.repository,
                                                       args.upstream)['options']['section_heading']
-        result = {'body': architecture.replace_decision(args.body.read_text(), rendered, heading=heading),
+        result = {'body': architecture.replace_decision(body_text(args.body), rendered, heading=heading),
                   'decision_type': 'architecture'}
     print(json.dumps(result, sort_keys=True))
 
