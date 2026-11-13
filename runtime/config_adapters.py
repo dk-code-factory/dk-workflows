@@ -8,6 +8,7 @@ from pathlib import Path
 import config
 import commit_policy
 import invocation
+import instruction_sources
 import preferences
 import settings
 import skill_config
@@ -15,7 +16,7 @@ from shared import ci_exceptions, pr_partition_policy, pr_size
 from shared.repository_scope import identities, repository
 
 DOMAINS = {'workflow', 'skill', 'preferences', *settings.DOMAINS,
-           'pr-size', 'ci-exceptions', 'pr-partition'}
+           'pr-size', 'ci-exceptions', 'pr-partition', 'instruction-sources'}
 
 
 def normalize(operation):
@@ -37,6 +38,8 @@ def normalize(operation):
     scope = op.setdefault('scope', 'catalog' if domain == 'preferences' else 'pr' if domain == 'pr-partition' else 'repo')
     if scope not in ({'catalog'} if domain == 'preferences' else {'pr'} if domain == 'pr-partition' else {'user', 'repo'}):
         raise ValueError('Mutations require an owned user, repository or PR scope')
+    if domain == 'instruction-sources' and scope != 'repo':
+        raise ValueError('Instruction choices are repository-only')
     required = {'commit': 'proposal', 'set': 'value', 'add': 'value', 'remove': 'id'}.get(op['action'])
     if required and required not in op:
         raise ValueError('Missing operation ' + required)
@@ -53,6 +56,8 @@ def normalize(operation):
             raise ValueError('Only installed dk-workflows skill options are owned here')
     if domain == 'workflow' and op['action'] == 'set':
         op['value'] = config.validate(op['value'])
+    if domain == 'instruction-sources' and op['action'] == 'set':
+        op['value'] = instruction_sources.validate(op['value'])
     if domain == 'pr-size' and op['action'] == 'reset':
         op.setdefault('keys', [])
     if domain == 'pr-partition':
@@ -96,6 +101,8 @@ def destination(context, op):
     domain, scope = op['domain'], op['scope']
     if domain in {'workflow', 'skill'}:
         target = config.path(context['repository'] if scope == 'repo' else None)
+    elif domain == 'instruction-sources':
+        target = instruction_sources.policy_path(context['repository'])
     elif domain == 'preferences':
         target = preferences.catalog_path(context['checkout'])
     elif domain == 'pr-partition':
@@ -123,13 +130,19 @@ def policy_chain(context, domain):
 
 
 def encode(value):
-    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + '\n'
+    rendered = json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False)
+    # Match atomic_text's escaping of filesystem surrogates without changing valid Unicode.
+    return rendered.encode(errors='backslashreplace').decode() + '\n'
 
 
 def project(context, op, raw):
     """Validate current evidence and return exact desired text (or deletion)."""
     domain, action = op['domain'], op['action']
     value = deepcopy(op.get('value'))
+    if domain == 'instruction-sources':
+        if action == 'set':
+            instruction_sources.discover(context['checkout'], value)
+        return encode(instruction_sources.envelope(context['repository'], value if action == 'set' else None))
     if domain == 'workflow':
         if action == 'set' and 'binding' in op:
             value = op['replacement'] if 'replacement' in op else _patched(raw, op['patch'])
@@ -235,7 +248,7 @@ def input_paths(context, operations):
     paths = {Path(__file__), Path(__file__).with_name('config_requests.py')}
     root = Path(__file__).resolve().parents[1]
     paths.update(root/name for name in ('DESIGN.md', 'AGENTS.md', 'docs/configuration-agent.md',
-                 'docs/configuration-requests.md', 'docs/configuration.md', 'docs/preferences.md',
+                 'docs/configuration-requests.md', 'docs/configuration.md', 'docs/preferences.md', 'docs/instruction-sources.md',
                  'docs/skill-configuration.md', 'docs/pr/configuration.md', 'docs/commit-policy.md',
                  'docs/invocations.md', 'docs/private-reporting.md', 'scripts/config.py', 'scripts/pr_config.py',
                  'scripts/preferences.py', 'scripts/config_requests.py'))
@@ -247,9 +260,21 @@ def input_paths(context, operations):
     for folder in (root/'codex/skills').iterdir():
         paths.update([folder/'config.json', folder/'config.schema.json'])
     paths.update(config.path(key) for key in [None, context.get('upstream'), context['repository']])
-    checkout = Path(context['checkout'])
-    paths.update(parent/'AGENTS.md' for parent in [checkout, *checkout.parents])
-    paths.update(checkout.rglob('AGENTS.md'))
+    requested_checkout = Path(context['checkout']).resolve()
+    checkout = instruction_sources.root(requested_checkout)
+    selection = next((op for op in operations if op['domain'] == 'instruction-sources'), None)
+    saved = (instruction_sources.envelope(context['repository'], selection.get('value')) if selection else
+             instruction_sources.load(context['repository']))
+    paths.add(instruction_sources.policy_path(context['repository']))
+    paths.add(root/'runtime/instruction_sources.py')
+    paths.add(root/'scripts/instruction_sources.py')
+    paths.update(parent/'AGENTS.md' for parent in requested_checkout.parents)
+    if saved is None:
+        paths.add(checkout/'AGENTS.md')
+        paths.update(checkout.rglob('AGENTS.md'))
+    else:
+        paths.update(checkout/item['path'] for item in instruction_sources.discover(checkout, saved['policy'])
+                     if item['selected'])
     if any(op['domain'] == 'preferences' for op in operations):
         paths.add(preferences.catalog_path(checkout))
     for op in operations:
@@ -269,7 +294,9 @@ def validate_observed(context, op, raw):
         return
     domain = op['domain']
     value = json.loads(raw) if domain != 'completion' else raw
-    if domain in {'workflow', 'skill'}:
+    if domain == 'instruction-sources':
+        instruction_sources.load(context['repository'])
+    elif domain in {'workflow', 'skill'}:
         config.validate(value)
     elif domain == 'preferences':
         preferences._catalog(value)

@@ -1,5 +1,7 @@
 # Task state contract v2
 
+Follow [repository instruction sources](instruction-sources.md) before repository guidance reads or handoffs. Use the saved choice, selected original sources and current content; excluded files and stale copied guidance remain evidence rather than active rules. Refresh affected work when selection changes while retaining original results and unaffected siblings.
+
 Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 
 Native agents resolve and invoke skills. Python manages bookkeeping. Follow [state admission](../DESIGN.md#objective-and-state-admission): persist something only when it reduces expected total API dollar cost, including the next run in a new session. Retain reusable analysis and minimum recovery records; avoid derived summaries, duplicate context and speculative telemetry. State and input artifacts stay outside repositories under `${XDG_STATE_HOME:-~/.local/state}/dk-workflows/v2/`. Save the manifest reference.

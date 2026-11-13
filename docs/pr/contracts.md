@@ -1,5 +1,7 @@
 # Bundled PR task contract
 
+Apply [repository instruction sources](../instruction-sources.md) before reading or passing repository guidance. Include only currently selected sources as governing instructions; copied artifacts and cached summaries do not bypass selection. Recapture affected handoffs after a source-choice change, preserving original evidence and unaffected work.
+
 Follow [private workflow reporting](../private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 
 Invoke bundled skills through native skill tools, directly or through a coordinator that manages task state. Each skill owns its procedure and completion report. Helpers perform deterministic reads and storage.

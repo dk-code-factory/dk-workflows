@@ -503,7 +503,9 @@ def test_relative_xdg_config_home_declines_capture_sharing(case, monkeypatch):
     spec, store = case
     monkeypatch.setenv('XDG_CONFIG_HOME', 'relative-config')
     assert state._git_context(spec['git']) is None
-    assert not store.status([spec])['tasks'][0]['reusable']
+    # Source policy lookup must fail closed rather than lose a saved exclusion.
+    with pytest.raises(ValueError, match='XDG_CONFIG_HOME must be absolute'):
+        store.status([spec])
 
 
 @pytest.mark.parametrize('history,head_sensitive', [(False, False), (True, False), (False, True), (True, True)])

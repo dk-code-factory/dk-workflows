@@ -1,5 +1,7 @@
 # Fix a PR
 
+Before repository guidance reads, follow [repository instruction sources](../docs/instruction-sources.md). Reuse the saved source choice, or initialize it through `dk-workflows:dk-config`; pass only selected source references as current rules, retaining excluded historical material as evidence. Refresh affected guidance and analysis when that choice changes.
+
 Follow [private workflow reporting](../docs/private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 
 Read `dk-workflows:dk-pr-fix` through [skill-owned configuration](../docs/skill-configuration.md). Its resolved `tasks` and `finalizers` select native invocations and their order; explicit parallel groups preserve boundaries. The stages below define assignments, applicability, freshness and completion obligations, not a second hidden invocation plan. Never restore a removed default through a stage description. Missing required evidence blocks readiness rather than silently selecting another skill. Execute the task list for an iteration, refresh affected context after changes, and repeat within the retained budget when required review is stale or actionable work remains. Duties already satisfied receive a reasoned no-op assessment. Recipe-defined inapplicability, such as verification without candidates, must be recorded with its evidence and never represented as execution coverage.

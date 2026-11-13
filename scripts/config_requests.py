@@ -50,7 +50,7 @@ def main(arguments=None):
 if __name__ == '__main__':
     os.umask(0o077)
     try:
-        print(json.dumps(main(), sort_keys=True, ensure_ascii=False))
+        print(json.dumps(main(), sort_keys=True))
     except (ValueError, KeyError, TypeError, OSError, RuntimeError, subprocess.CalledProcessError) as exc:
         print(json.dumps({'status': 'blocked', 'reason': str(exc)}))
         sys.exit(2)

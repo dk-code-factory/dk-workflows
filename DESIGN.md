@@ -420,6 +420,81 @@ retained limits still govern recovery; changing settings cannot replenish them.
 Review-cycle allowances remain positive and keep their explicit continuation
 contract. These changes add no durable store or claim of measured token savings.
 
+## Repository instruction source selection
+
+Repository guidance is discovered before adoption. At first native workflow
+initialization, `dk-config` presents relevant rules and provenance and obtains a
+repository-specific human, all-source or custom choice, with exact includes and
+exclusions. Discovery reads are evidence-only; ordinary source reads enforce the
+saved selection. The current inventory is reconstructed deterministically, not
+stored. All skills and referenced handoff/admission guidance use this boundary.
+Hosts may already have loaded repository or ancestor rules; this policy controls
+optional dk-workflows adoption and cannot unload context or override host priority.
+A conflicting host rule is disclosed and affected behavior remains incomplete
+when the requested exclusion cannot be honored.
+
+Only the mode and exact source references, or a minimal reset-pending marker,
+are saved in private repository configuration. The pending marker prevents a
+reset from falling back to pre-feature cached guidance. The choice avoids repeated
+source discovery interpretation and asking the same question in subsequent skills and fresh sessions. The existing
+configuration-request history retains the user's choice and write recovery;
+there is no new source-content snapshot, rendered rules summary, effective
+settings cache or transcript. The expected avoided native cost of repeated
+source-choice explanation and clarification exceeds reading and validating this
+small record for repeated repository use; actual API dollar savings are unmeasured.
+Inventory discovery and targeted content reads remain live costs in both sessions.
+Discovery preserves Git's raw pathname bytes and supplements its ordinary ignored
+directory pruning with guidance-specific ignored-path queries. Ignored automation
+and contributor sources therefore remain subject to the same choice and handoff
+checks without enumerating every ignored dependency file. This adds no stored
+inventory; selected ignored sources share the existing content freshness binding.
+Filesystem decoding also preserves checkout-root whitespace and raw bytes.
+Request JSON escapes only filesystem surrogates, retaining existing valid-Unicode
+hash bytes and private-store readback. Host ancestor freshness follows the original
+requested checkout before normalizing source discovery to the Git root. These
+boundary corrections add no state or cache and retain the same freshness inputs.
+Implicit source-policy identities retain the requested checkout directory before
+Git-root discovery, matching configuration requests for originless repositories.
+This keeps existing private addresses and content freshness bindings unchanged.
+Literal Unix backslashes remain filename bytes in source references. Handoff
+checks keep exact selected lexical spellings separate from resolved-target
+exclusions, preserving explicit exclusions and rejection of unsafe source links. Safe
+selected directory aliases therefore retain their exact adoption spelling. These
+corrections add no state and preserve existing content bindings and reuse.
+Directory handoff checks visit each lexical spelling independently and bound link
+cycles by resolved ancestors on that branch. An adopted alias cannot hide an
+unselected canonical source in a sibling input or enclosing resource bundle.
+
+The freshness boundary is the current repository identity, saved choice and
+selected source contents. New sources follow the explicit saved mode and
+exclusions. Changed/reset choices or selected content require affected governing
+inputs and analysis to be refreshed. Task definitions retain only the checkout
+and selection/content binding digest; existing capture validates that binding and requires rebuilding stale assignments
+and handoffs. This preserves task keys without deleting original outputs,
+resetting budgets or discarding unaffected siblings. Old summaries and copied
+handoffs cannot promote excluded sources back into rules; retain them only as
+historical evidence and rebuild affected governing handoffs from selected original
+references. Missing or malformed evidence blocks applicable reuse. Low-level
+uninitialized captures retain compatibility with existing fingerprints; native
+workflow initialization still requires the source question before source loading.
+Source checks cover governing resources as well as instructions and inputs.
+Explicit custom exclusions and unsafe source links remain visible to admission;
+resolved aliases cannot override an exclusion. Unsafe aliases remain rejected
+when their regular target is independently selected; the alias does not exclude
+that adopted target without an explicit exclusion. Tasks without Git pins use the
+caller's repository checkout for their existing binding, then retain that binding
+for later sessions. Configuration admission also captures the source-selection
+contract and preserves ancestor `AGENTS.md` freshness checks independently of
+optional in-checkout source selection. Changed ancestor instructions require
+fresh admission under the host's existing instruction precedence. These checks
+add no durable fields or copies of source content.
+
+Unchanged fresh-session reads reuse the choice and valid results. Configuration
+request intent/receipts supply partial-write recovery without a second journal.
+Offline acceptance covers initialization, reuse, change/reset, excluded cached
+guidance and relevant-input invalidation; it establishes behavior, not measured
+native savings or host enforcement of source exclusions.
+
 ## Dedicated configuration admission
 
 Saved dk-workflows changes enter through `dk-config`, which hands a stable request

@@ -1,5 +1,7 @@
 # Scoped preferences
 
+Follow [repository instruction sources](instruction-sources.md) before repository guidance reads or handoffs. Use the saved choice, selected original sources and current content; excluded files and stale copied guidance remain evidence rather than active rules. Refresh affected work when selection changes while retaining original results and unaffected siblings.
+
 Saved mutations use the [dedicated configuration agent](configuration-agent.md) and [request history](configuration-requests.md). Every saved-write command requires `--request-id ID` bound to its exact prepared operation; read commands are unchanged.
 
 Use `dk-workflows:dk-preferences` to add, update, list, inspect or remove personal and repository preferences. Mutations route through the configuration agent, which executes preference admission directly without recursive delegation. Preferences are concrete instructions admitted against existing records and repository instructions. Conflicts are settled with the user before saving. Clear requests need no additional approval.

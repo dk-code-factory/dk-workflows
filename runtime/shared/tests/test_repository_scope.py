@@ -74,7 +74,7 @@ def test_private_storage_protects_linked_worktree_common_directory(tmp_path):
 
 
 def test_repository_lookup_failure_does_not_disable_storage_guard(tmp_path):
-    failed = subprocess.CompletedProcess([], 128, '', 'fatal: detected dubious ownership')
+    failed = subprocess.CompletedProcess([], 128, b'', b'fatal: detected dubious ownership')
     with patch.object(scope.subprocess, 'run', return_value=failed):
         with pytest.raises(RuntimeError, match='dubious ownership'):
             scope.inside_checkout(tmp_path / 'private', tmp_path)
