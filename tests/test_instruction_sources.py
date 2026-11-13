@@ -195,21 +195,28 @@ def test_request_application_and_uncertain_write_recovery_keep_choice_and_siblin
     store = config_requests.Requests()
     request_id = store.start('Use human contributor rules for this repository.', context)['id']
     operation = {'domain': 'instruction-sources', 'action': 'set', 'scope': 'repo', 'value': policy()}
-    result = store.prepare(request_id, {'operations': [operation]})
+    sibling = {'domain': 'skill', 'action': 'set', 'scope': 'repo', 'skill': 'dk-workflows:dk-ci',
+               'value': {'timeout_seconds': 42}}
+    operations = [sibling, operation]
+    result = store.prepare(request_id, {'operations': operations})
     assessment = {'fingerprint': result['fingerprint'], 'summary': 'User selected human rules; inspected source provenance.',
                   'reviewed': [], 'relations': [], 'unresolved': []}
-    store.prepare(request_id, {'operations': [operation], 'assessment': assessment})
+    store.prepare(request_id, {'operations': operations, 'assessment': assessment})
     original = config_requests.atomic_text
     def interrupted(path, content):
         original(path, content)
-        raise OSError('Lost response after write')
+        if path == sources.policy_path(REPO):
+            raise OSError('Lost response after write')
     monkeypatch.setattr(config_requests, 'atomic_text', interrupted)
     with pytest.raises(OSError, match='Lost response'):
         store.apply(request_id)
+    completed_sibling = store.show(request_id, 'progress')['progress'][0]
+    assert completed_sibling['receipt']
     monkeypatch.setattr(config_requests, 'atomic_text', lambda *_: pytest.fail('Repeated uncertain write'))
     recovered = config_requests.Requests()
     assert recovered.resume(request_id)['admission'] == 'reusable'
     assert recovered.apply(request_id)['status'] == 'applied'
+    assert recovered.show(request_id, 'progress')['progress'][0] == completed_sibling
     assert sources.inspect(checkout, REPO)['policy'] == policy()
     assert recovered.apply(request_id)['status'] == 'applied'
 
