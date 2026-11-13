@@ -285,6 +285,59 @@
           "min_score_gap": 10
         }
       }
+    },
+    "simplification": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "priority": {
+          "type": "string",
+          "enum": [
+            "change-first",
+            "code-first"
+          ],
+          "default": "change-first"
+        },
+        "allow_untouched_code": {
+          "type": "boolean",
+          "default": false
+        },
+        "reviewer": {
+          "description": "Fully qualified replaceable simplification reviewer; workflow priority and scope govern.",
+          "default": {
+            "skill": "dk-workflows:dk-code-simplify",
+            "options": {},
+            "required": true
+          },
+          "anyOf": [
+            {
+              "type": "string",
+              "$ref": "../../../schemas/invocation.schema.json"
+            },
+            {
+              "type": "object",
+              "required": [
+                "skill"
+              ],
+              "$ref": "../../../schemas/invocation.schema.json"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "enabled": true,
+        "priority": "change-first",
+        "allow_untouched_code": false,
+        "reviewer": {
+          "skill": "dk-workflows:dk-code-simplify",
+          "options": {},
+          "required": true
+        }
+      }
     }
   },
   "additionalProperties": false

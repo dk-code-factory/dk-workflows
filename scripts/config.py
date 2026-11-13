@@ -34,6 +34,8 @@ def main():
         c = sub.add_parser(action)
         c.add_argument('--skill', required=True, help='Fully qualified plugin:skill')
         c.add_argument('--options', type=Path, help='Invocation-local options; never saved by a read')
+        if action in {'skill-plan', 'skill-preflight'}:
+            c.add_argument('--workflow', type=Path, help='Live owning workflow skill, task index and invocation options')
         if action in {'skill-set', 'skill-reset'}:
             c.add_argument('--scope', choices=['repo', 'user'], default='repo')
             c.add_argument('--request-id')
@@ -60,12 +62,13 @@ def main():
                                                   **({'upstream': a.upstream} if a.upstream else {}),
                                                   **({'pr': a.pr} if a.pr else {})})
         if a.action == 'skill-preflight':
-            result = invocation.preflight(list(skill_config.calls(a.skill, a.repository, a.upstream, options=local, stage=a.stage)),
+            result = invocation.preflight(list(skill_config.calls(a.skill, a.repository, a.upstream, options=local, stage=a.stage,
+                                                                  workflow=read(a.workflow) if a.workflow else None)),
                                           read(a.available), read(a.capabilities) if a.capabilities else None,
                                           native_reviews=read(a.native_reviews) if a.native_reviews else None)
         elif a.action == 'skill-plan':
             result = skill_config.plan(a.skill, a.kind, a.repository, a.upstream,
-                                       options=local, resolved=a.resolved)
+                                       options=local, resolved=a.resolved, workflow=read(a.workflow) if a.workflow else None)
         else:
             result = skill_config.effective(a.skill, a.repository, a.upstream, options=local)
         print(json.dumps(result, sort_keys=True))

@@ -51,6 +51,7 @@ def main():
     p.add_argument('--index', type=int, required=True)
     p.add_argument('--definition', type=Path, required=True)
     p.add_argument('--options', type=Path, help='Owning invocation-local options')
+    p.add_argument('--workflow', type=Path, help='Live owning workflow skill, task index and invocation options')
     p.add_argument('--upstream')
     p.add_argument('--run', help='Retained run id; required for finalizers')
     p = sub.add_parser('hook-spec', help='Define one configured cycle hook; agents execute it')
@@ -180,7 +181,8 @@ def main():
         result = skill_config.make_spec(repository=args.repository, pr=args.pr, skill=args.skill,
                                         kind=args.kind, index=args.index, definition=read(args.definition),
                                         upstream=args.upstream, run=args.run,
-                                        options=read(args.options) if args.options else None)
+                                        options=read(args.options) if args.options else None,
+                                        workflow=read(args.workflow) if args.workflow else None)
         print(json.dumps(result, sort_keys=True))
         return
     store = Store(args.repository, args.pr, checkout=args.checkout)

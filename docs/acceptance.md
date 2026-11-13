@@ -53,3 +53,7 @@ exercise](native-private-reporting-exercise.md) checks public payloads and priva
 user reports for failed/missing reviewers, inaccessible sources, incomplete
 verification, exhausted budgets and publication uncertainty. Ordinary tests do
 not invoke a model or establish native adherence.
+
+[Simplification review](simplification.md) acceptance covers independent workflow gates, standalone defaults, governing priority/scope inheritance, provider replacement, malformed options, disabled-provider preflight, native evidence, custom groups, fresh-process reuse, interrupted recovery and isolated live-policy invalidation in `tests/test_simplification.py`. Native semantic interpretation remains separate from those offline fixtures.
+
+The [focused native simplification exercise](native-simplification-exercise.md) documents the synthetic recommendation, independent verification and bounded implementation procedure separately from offline event fixtures.

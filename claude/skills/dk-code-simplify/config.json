@@ -1,0 +1,5 @@
+{
+  "$schema": "./config.schema.json",
+  "priority": "change-first",
+  "allow_untouched_code": false
+}

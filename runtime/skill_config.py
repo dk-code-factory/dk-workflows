@@ -55,6 +55,7 @@ def _validate(value, schema, location='options'):
                 invocation.validate(value)
         else:
             raise ValueError('Unsupported skill schema reference: ' + reference)
+        _validate(value, {key: item for key, item in schema.items() if key != '$ref'}, location)
         return
     if 'anyOf' in schema:
         for candidate in schema['anyOf']:
@@ -234,6 +235,9 @@ def effective(skill, repository=None, upstream=None, *, options=None, domain=Tru
     result = merge_options(result, options)
     provenance.update({key: 'invocation' for key in options})
     validate(skill, result)
+    from simplification import OWNERS, validate_policy
+    if skill in OWNERS:
+        validate_policy(result['simplification'])
     if skill == 'dk-workflows:dk-pr-review':
         scoring = result['architecture']['scoring']
         if scoring['profile'] == 'custom' and not invocation.text(scoring['custom_prompt']):
@@ -332,22 +336,24 @@ def configured_call(value, repository=None, upstream=None):
     return invocation.validate(invocation.configured(call, {skill: shared} if skill else {}))
 
 
-def select(skill, kind, index, repository=None, upstream=None, *, options=None):
+def select(skill, kind, index, repository=None, upstream=None, *, options=None, workflow=None):
     if kind not in {'tasks', 'finalizers', 'reviewers'}:
         raise ValueError('Selection must be tasks, finalizers or reviewers')
-    loaded = effective(skill, repository, upstream, options=options)
+    from simplification import selection
+    loaded = selection(skill, kind, repository, upstream, options, workflow)
     values = [item for group in groups(loaded['options'].get(kind, [])) for item in group]
     if type(index) is not int or not 0 <= index < len(values):
         raise ValueError('No configured invocation at this index')
     return configured_call(values[index], repository, upstream), loaded
 
 
-def plan(skill, kind, repository=None, upstream=None, *, options=None, resolved=False):
+def plan(skill, kind, repository=None, upstream=None, *, options=None, resolved=False, workflow=None):
     """Read a live plan, optionally resolving each occurrence without saving it."""
     import invocation
     if kind not in {'tasks', 'finalizers', 'reviewers'}:
         raise ValueError('Selection must be tasks, finalizers or reviewers')
-    loaded = effective(skill, repository, upstream, options=options)
+    from simplification import selection
+    loaded = selection(skill, kind, repository, upstream, options, workflow)
     loaded['groups'] = groups(loaded['options'].get(kind, []))
     if resolved:
         index = 0
@@ -367,15 +373,20 @@ def plan(skill, kind, repository=None, upstream=None, *, options=None, resolved=
     return loaded
 
 
-def calls(skill, repository=None, upstream=None, *, options=None, stage=None):
+def calls(skill, repository=None, upstream=None, *, options=None, stage=None, workflow=None):
     """Enumerate selected native calls for availability checks, without launching."""
     import invocation
     if stage not in {None, 'architecture', 'review', 'finalizers'}:
         raise ValueError('Unknown preflight stage')
-    def visit(call, location, ancestors=()):
+    from simplification import OWNERS, RUNNER, compose, selection
+    def visit(call, location, ancestors=(), policy=None, root=False):
         call = configured_call(call, repository, upstream)
         identity = call.get('skill')
         settings = effective(identity, repository, upstream, options=call.get('options', {}))['options'] if identity else call.get('options', {})
+        if root and workflow is not None:
+            settings = selection(identity, 'reviewers', repository, upstream, options, workflow)['options']
+        elif identity == RUNNER and policy is not None:
+            settings = compose({'options': settings}, policy)['options']
         signature = json.dumps([identity, settings], sort_keys=True)
         if signature in ancestors:
             raise ValueError('Recursive skill configuration at ' + location)
@@ -388,10 +399,14 @@ def calls(skill, repository=None, upstream=None, *, options=None, stage=None):
                                  location + '/architecture', nested)
             keys = (() if stage == 'architecture' else ('tasks',) if stage == 'review'
                     else ('finalizers',) if stage == 'finalizers' else keys)
+        elif identity == 'dk-workflows:dk-pr-fix':
+            keys = (() if stage == 'architecture' else ('tasks',) if stage == 'review'
+                    else ('finalizers',) if stage == 'finalizers' else keys)
         for key in keys:
             for group_index, group in enumerate(groups(settings.get(key, []))):
                 for index, child in enumerate(group):
-                    yield from visit(child, location + '/' + key + '/' + str(group_index) + '/' + str(index), nested)
+                    yield from visit(child, location + '/' + key + '/' + str(group_index) + '/' + str(index), nested,
+                                     settings['simplification'] if identity in OWNERS and key == 'tasks' else None)
         if identity == 'dk-workflows:dk-pr-iter':
             for route, child in settings['routes'].items():
                 yield from visit(child, location + '/routes/' + route, nested)
@@ -399,19 +414,23 @@ def calls(skill, repository=None, upstream=None, *, options=None, stage=None):
             policy = settings['policy']
             if not (isinstance(policy, dict) and set(policy) == {'prompt'}):
                 yield from visit(policy, location + '/policy', nested)
-    yield from visit({'skill': skill, 'options': {} if options is None else options, 'required': True}, skill)
+    yield from visit({'skill': skill, 'options': {} if options is None else options, 'required': True}, skill, root=True)
 
 
-def make_spec(*, repository, pr, skill, kind, index, definition, upstream=None, run=None, options=None):
+def make_spec(*, repository, pr, skill, kind, index, definition, upstream=None, run=None, options=None, workflow=None):
     import invocation
     from state import make_spec as task_spec, digest
-    selected, owner = select(skill, kind, index, repository, upstream, options=options)
+    selected, owner = select(skill, kind, index, repository, upstream, options=options, workflow=workflow)
     call = invocation.normalize(selected)
     runner = call.get('skill', skill)
     if not isinstance(definition, dict) or definition.get('skill_identity') != runner:
         raise ValueError('Definition must resolve the exact configured skill identity')
     execution = deepcopy(definition)
     configured = effective(runner, repository, upstream, options=call.get('options', {})) if 'skill' in call else {'options': call.get('options', {})}
+    from simplification import OWNERS, RUNNER, compose
+    if skill in OWNERS and kind == 'tasks' and runner == RUNNER:
+        configured = compose(configured, owner['options']['simplification'])
+    composed = skill in OWNERS and kind == 'tasks' and runner == RUNNER
     assigned = execution.get('assigned_instructions', '')
     if 'instructions' in call:
         execution['assigned_instructions'] = invocation.additional_instructions(assigned, call['instructions'])
@@ -421,6 +440,13 @@ def make_spec(*, repository, pr, skill, kind, index, definition, upstream=None, 
         earlier = [item for group in groups(owner['options'][kind]) for item in group][:index]
         repeat = sum(configured_call(item, repository, upstream) == call for item in earlier)
         occurrence = {'call': call, 'repeat': repeat}
+        if workflow is not None and index == len([item for group in groups(owner['options'][kind]) for item in group]) - 1:
+            # Keep the composed leaf's claim/recovery identity through policy
+            # changes. Its call and policy still govern the input fingerprint.
+            live_owner = effective(workflow['skill'], repository, upstream, options=workflow.get('options'))
+            if live_owner['options']['simplification']['enabled']:
+                occurrence = {'simplification': True}
+                composed = True
         responsibility = execution.get('responsibility', 'content-review')
     else:
         occurrence = {'owner': skill, 'kind': kind, 'index': index}
@@ -431,6 +457,10 @@ def make_spec(*, repository, pr, skill, kind, index, definition, upstream=None, 
         responsibility = execution.get('responsibility', 'skill-task')
     execution['responsibility'] = responsibility + ':' + digest(occurrence)
     resources = execution.setdefault('resources', {})
+    if composed:
+        if 'simplification_runtime' in resources:
+            raise ValueError('Reserved simplification resource label')
+        resources['simplification_runtime'] = str(Path(__file__).with_name('simplification.py'))
     for label, path in {'skill_config_runtime': Path(__file__),
                         'invocation_contract': Path(__file__).with_name('invocation.py'),
                         'invocation_schema': ROOT/'schemas/invocation.schema.json'}.items():
@@ -447,16 +477,20 @@ def make_spec(*, repository, pr, skill, kind, index, definition, upstream=None, 
             resources[prefix + '_skill_contract'] = str(target/'SKILL.md')
     execution['options'] = {'invocation': call, 'configured': configured['options'],
                             'execution': execution.get('options', {}),
-                            'process_limits': owner['options'].get('limits', {}),
-                            'process_permissions': owner['options'].get('permissions', {})}
+                            'process_limits': owner.get('workflow_limits', owner['options'].get('limits', {})),
+                            'process_permissions': owner.get('workflow_permissions', owner['options'].get('permissions', {}))}
+    if skill in OWNERS and kind == 'tasks' and runner == RUNNER:
+        execution['options']['workflow'] = {'skill': skill, 'index': index, 'options': options or {}}
     spec = task_spec(repository=repository, pr=pr, **execution)
     if skill == 'dk-workflows:dk-pr-review':
         from architecture import enforce
         enforce(spec, repository, pr, options=options, upstream=upstream)
     spec['skill_configuration'] = {'skill': skill, 'kind': kind, 'index': index,
                                    'repository': repository, 'upstream': upstream,
-                                   'options': options or {}, 'owner_limits': owner['options'].get('limits', {}),
-                                   'owner_permissions': owner['options'].get('permissions', {})}
+                                   'options': options or {}, 'owner_limits': execution['options']['process_limits'],
+                                   'owner_permissions': execution['options']['process_permissions']}
+    if workflow is not None:
+        spec['skill_configuration']['workflow'] = deepcopy(workflow)
     return spec
 
 
@@ -466,20 +500,23 @@ def check_selection(spec):
     if selection is None:
         return
     expected = {'skill', 'kind', 'index', 'repository', 'upstream', 'options', 'owner_limits', 'owner_permissions'}
-    if not isinstance(selection, dict) or set(selection) != expected:
+    if not isinstance(selection, dict) or set(selection) - {'workflow'} != expected:
         raise ValueError('Malformed skill configuration selection')
     if (not isinstance(selection['repository'], str)
             or selection['repository'].lower() != spec['repository'].lower()
             or selection['upstream'] is not None and not isinstance(selection['upstream'], str)):
         raise ValueError('Skill configuration must retain its original repository scope')
     value, owner = select(selection['skill'], selection['kind'], selection['index'], selection['repository'],
-                          selection['upstream'], options=selection['options'])
+                          selection['upstream'], options=selection['options'], workflow=selection.get('workflow'))
     call = invocation.normalize(value)
     actual = effective(call['skill'], selection['repository'], selection['upstream'], options=call.get('options', {}))['options'] if 'skill' in call else call.get('options', {})
+    from simplification import OWNERS, RUNNER, compose
+    if selection['skill'] in OWNERS and selection['kind'] == 'tasks' and call.get('skill') == RUNNER:
+        actual = compose({'options': actual}, owner['options']['simplification'])['options']
     if selection['skill'] == 'dk-workflows:dk-pr-review':
         from architecture import enforce
         enforce(spec, selection['repository'], spec['pr'], options=selection['options'], upstream=selection['upstream'])
     if (call != spec['options'].get('invocation') or actual != spec['options'].get('configured')
-            or owner['options'].get('limits', {}) != selection['owner_limits']
-            or owner['options'].get('permissions', {}) != selection['owner_permissions']):
+            or owner.get('workflow_limits', owner['options'].get('limits', {})) != selection['owner_limits']
+            or owner.get('workflow_permissions', owner['options'].get('permissions', {})) != selection['owner_permissions']):
         raise ValueError('Inputs changed: skill configuration, assignment or policy changed')

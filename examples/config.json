@@ -24,6 +24,34 @@
         "pending_extension_seconds": 1800,
         "max_pending_extensions": 1
       }
+    },
+    "dk-workflows:dk-pr-review": {
+      "options": {
+        "simplification": {
+          "enabled": true,
+          "priority": "change-first",
+          "allow_untouched_code": false,
+          "reviewer": {
+            "skill": "dk-workflows:dk-code-simplify",
+            "options": {},
+            "required": true
+          }
+        }
+      }
+    },
+    "dk-workflows:dk-pr-fix": {
+      "options": {
+        "simplification": {
+          "enabled": true,
+          "priority": "change-first",
+          "allow_untouched_code": false,
+          "reviewer": {
+            "skill": "dk-workflows:dk-code-simplify",
+            "options": {},
+            "required": true
+          }
+        }
+      }
     }
   }
 }

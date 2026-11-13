@@ -26,7 +26,7 @@ class Tasks:
     def spec(self, descriptor, *, replay=False):
         if (not isinstance(descriptor, dict) or set(descriptor) - {
                 'kind', 'definition', 'run', 'cycle', 'phase', 'index', 'process', 'finalizer', 'upstream',
-                'skill', 'selection', 'options', 'stage', 'dependencies'}):
+                'skill', 'selection', 'options', 'stage', 'dependencies', 'workflow'}):
             raise ValueError('Task requires a definition and optional occurrence selector')
         if not isinstance(descriptor.get('definition'), dict):
             raise ValueError('Task requires an explicit definition')
@@ -49,7 +49,8 @@ class Tasks:
         if kind == 'skill':
             return skill_config.make_spec(**common, skill=descriptor['skill'], kind=descriptor['selection'],
                                           index=descriptor['index'], options=descriptor.get('options'),
-                                          upstream=descriptor.get('upstream'), run=descriptor.get('run'))
+                                          upstream=descriptor.get('upstream'), run=descriptor.get('run'),
+                                          workflow=descriptor.get('workflow'))
         common.update(run=descriptor['run'], upstream=descriptor.get('upstream'))
         if kind == 'hook':
             return make_hook_spec(**common, cycle=descriptor['cycle'], phase=descriptor['phase'],

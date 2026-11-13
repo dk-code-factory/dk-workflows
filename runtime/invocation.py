@@ -31,11 +31,8 @@ def validate_settings(value):
     if not isinstance(value.get('options', {}), dict):
         raise ValueError('Invocation options must be an object')
     if 'reviewers' in value.get('options', {}):
-        reviewers = value['options']['reviewers']
-        if not isinstance(reviewers, list):
-            raise ValueError('Reviewers must be an ordered invocation list')
-        for reviewer in reviewers:
-            validate(reviewer)
+        from skill_config import groups
+        groups(value['options']['reviewers'])
     if type(value.get('required', True)) is not bool:
         raise ValueError('Invocation required must be boolean')
     if 'agent' in value:

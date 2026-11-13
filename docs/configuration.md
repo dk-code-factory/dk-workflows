@@ -36,7 +36,7 @@ Each bundled skill owns `config.json` and `config.schema.json` beside `SKILL.md`
 }
 ```
 
-`skill_defaults` values can also contain exact additional `instructions`, native `agent` settings and `required`. Skill-specific fields belong in `options`, validated by the selected skill's schema. Bundled files show every default explicitly. An external skill owns its own options contract. There is no default reviewer.
+`skill_defaults` values can also contain exact additional `instructions`, native `agent` settings and `required`. Skill-specific fields belong in `options`, validated by the selected skill's schema. Bundled files show every default explicitly. An external skill owns its own options contract. There is no default ordinary reviewer; each PR workflow additionally enables the bundled simplification reviewer.
 
 Private overrides retain `${XDG_CONFIG_HOME:-~/.config}/dk-workflows/v2/user.json` and repository digest files. Existing domain policy records remain in their original stores. Scope precedence is defaults, user, optional upstream, repository, then invocation-local options. Objects merge by key, lists replace and commit policies replace as a whole. Empty lists disable inherited selections. New skill-specific settings are never added to a central responsibility map.
 
@@ -53,3 +53,5 @@ Use `dk-workflows:dk-config` for repository instruction-source initialization an
 The existing `show`, `set`, `reset`, process preflight, named task selectors and cycle hook helpers remain available for older process records. Their compatibility views derive defaults from the owning skills. See [legacy process compatibility](legacy-configuration.md). New configurations use skill-owned invocation lists and do not need a configured coordinator, responsibility registry or declarative control-flow language.
 
 Reads never reset, move or silently rewrite saved records. Resolve and update any unqualified skill identities explicitly before saving; installation ambiguity is never guessed. Preserve original prompts, options, opt-outs, policies, scope files and retained execution state. A renamed skill does not complete its unfinished work. Reconcile outstanding claims and uncertain effects before changing active plans.
+
+Both PR workflows independently configure [simplification](simplification.md), enabled by default. Change `simplification.enabled`, `priority`, `allow_untouched_code` or its fully qualified `reviewer` invocation through skill-owned options. Ordinary reviewers remain separately configured.
