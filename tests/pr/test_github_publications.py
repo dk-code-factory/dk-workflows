@@ -242,6 +242,74 @@ def test_lowered_limit_is_retained_on_existing_prepared_retry(remote):
     assert remote.state['writes'] == {}
 
 
+@pytest.mark.parametrize('failed_read', ['metadata', 'run'])
+@pytest.mark.parametrize('failure', [OSError, KeyboardInterrupt])
+def test_lowered_limit_survives_refresh_failure_and_fresh_process(remote, monkeypatch, tmp_path, failed_read, failure):
+    import json
+    import os
+    import subprocess
+    import sys
+
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    original = publication.load(operation)
+    with monkeypatch.context() as patch:
+        def fail(*args, **kwargs):
+            assert publication.load(operation)['request']['approved']['automatic_limit'] == 0
+            raise failure('refresh interrupted')
+        if failed_read == 'metadata':
+            patch.setattr(publisher, 'metadata', fail)
+        else:
+            original_api = publisher.api
+            def api(pr, path, **kwargs):
+                if path.endswith('/actions/runs/77'):
+                    return fail()
+                return original_api(pr, path, **kwargs)
+            patch.setattr(publisher, 'api', api)
+        with pytest.raises(failure, match='refresh interrupted'):
+            publisher.prepare({**request, 'automatic_limit': 0})
+    tightened = publication.load(operation)
+    assert tightened['operation_id'] == original['operation_id']
+    assert tightened['request']['approved'] == {**original['request']['approved'], 'automatic_limit': 0}
+    assert tightened['request']['expected'] == original['request']['expected']
+    assert len(tightened['preparations']) == 1
+    assert publication.load(tightened['preparations'][0]) == original
+    snapshot = tmp_path/'remote.json'
+    snapshot.write_text(json.dumps(remote.state))
+    script = '''
+import importlib.util, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    value = importlib.util.module_from_spec(spec); spec.loader.exec_module(value)
+    return value
+publisher = load('fresh_publisher', root/'scripts/publish.py')
+fixture = load('fresh_fixture', root/'tests/pr/fixtures/github_remote.py')
+remote = fixture.Remote(json.loads(Path(sys.argv[2]).read_text()))
+for key in ('metadata', 'api', 'run'): setattr(publisher, key, getattr(remote, key))
+from shared import publication
+operation = sys.argv[3]
+original = Path(operation).read_bytes()
+for action in (lambda: publisher.prepare(fixture.request('ci-rerun')),
+               lambda: publisher.publish(operation)):
+    try:
+        action()
+    except ValueError as exc:
+        assert 'allowance exhausted (1/0)' in str(exc), str(exc)
+    else:
+        raise AssertionError('fresh process restored the disabled retry')
+assert Path(operation).read_bytes() == original
+assert publication.load(operation)['status'] == 'prepared'
+assert remote.state['writes'] == {}
+'''
+    result = subprocess.run([sys.executable, '-c', script, str(ROOT), str(snapshot), operation],
+        env={**os.environ, 'PYTHONPATH': str(ROOT/'runtime')}, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert publication.load(operation) == tightened
+    assert remote.state['writes'] == {}
+
+
 def test_user_can_authorize_disabled_prepared_retry_without_erasing_its_reservation(remote):
     request = fixture.request('ci-rerun')
     operation = publisher.prepare(request)['operation']

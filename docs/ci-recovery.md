@@ -63,6 +63,11 @@ when the semantic capture is unchanged. Healthy original evidence remains in use
 replaced references and diagnosis remain in existing preparation history.
 Existing diagnosis evidence and preparation history remain retained when changed
 governing inputs require a fresh diagnosis in the same operation.
+Before reusing a retained diagnosis or unsent intent, verify current original
+guidance, permissions and applicable settings under the [shared PR contract](pr/contracts.md).
+Managed work must also refresh its [governing inputs](task-state.md#governing-inputs-and-freshness).
+The CI evidence fingerprint does not replace those caller checks. Reassess any
+diagnosis affected by changed governing inputs while preserving its earlier evidence.
 
 Publish each operation through `scripts/publish.py publish --operation FILE`.
 The failed-job endpoint reruns only failed jobs and required dependencies,
@@ -74,6 +79,8 @@ wording cannot create another operation for the same run/attempt.
 Lowering the allowance also tightens an existing unsent operation. A later higher
 limit cannot restore it; explicit one-shot user authorization can permit that
 operation without erasing its original automatic reservation.
+The tighter limit is saved before refreshing GitHub metadata or attempt evidence,
+including when that refresh fails or is interrupted; resume the same operation.
 An unsent operation can refresh current PR title/body metadata when prepared
 again, retaining its identity and original preparation. Invalid user retry
 identities are rejected before changing that operation or its allowance.

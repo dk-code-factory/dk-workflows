@@ -235,6 +235,10 @@ that unsent operation without erasing its automatic reservation, derived from th
 already retained original preparations. Preparation and dispatch share the existing
 dispatch lock. Pending operations keep their original intent and reconcile even
 after limits tighten or diagnosis evidence disappears.
+Persist a tighter allowance before refreshing GitHub metadata or attempt evidence,
+so a failed read or interrupted refresh cannot restore the earlier limit on a
+fresh-session resume. The existing intent and preparation history retain this
+minimum without new fields or stores; unchanged limits add no preparation.
 
 Validate an explicit retry identity before changing an unsent operation, so a
 rejected authorization leaves its evidence and allowance intact. Refresh current

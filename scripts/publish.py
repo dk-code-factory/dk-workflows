@@ -287,8 +287,12 @@ def prepare(request, *, upstream=None, options=None):
                 approved = retained['request']['approved']
                 if (retained['request']['kind'] == 'ci-rerun' and retained['status'] == 'prepared'
                         and all(request.get(key) == approved.get(key) for key in ('head', 'run_id', 'attempt'))):
+                    limit = min(request['automatic_limit'], approved.get('automatic_limit', 3))
+                    if limit < approved.get('automatic_limit', 3):
+                        approved = {**approved, 'automatic_limit': limit}
+                        publication.refresh_prepared(path, 'ci-rerun', retained['request']['expected'], approved)
                     refreshed = dict(approved)
-                    refreshed['automatic_limit'] = min(request['automatic_limit'], approved.get('automatic_limit', 3))
+                    refreshed['automatic_limit'] = limit
                     if request.get('user_retry') and not approved.get('user_retry'):
                         refreshed['user_retry'] = request['user_retry']
                     if request.get('diagnosis'):
