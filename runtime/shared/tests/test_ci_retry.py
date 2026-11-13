@@ -345,6 +345,81 @@ def test_missing_archive_leaves_only_affected_workflow_blocked(context):
 
 
 @pytest.mark.parametrize('unavailable_run', [11, 22])
+def test_failed_log_collection_preserves_independent_retry(context, monkeypatch, unavailable_run):
+    from shared.flaky_actions import collect_snapshot
+    from shared.flaky_tests import Registry
+
+    api, _, snapshot, original_handoff, diagnosis = context
+    original = api.request
+    archives, jobs = {}, {}
+    for run in original_handoff['runs']:
+        run_id = run['run_id']
+        archives[run_id] = Path(run['archive_file']).read_bytes()
+        jobs[run_id] = json.loads(Path(run['source_file']).read_text())['jobs']
+        for job in jobs[run_id]:
+            job.update(run_id=run_id, head_sha=HEAD,
+                html_url=f'https://github.com/owner/repo/actions/runs/{run_id}/job/{job["id"]}')
+            for number, step in enumerate(job.get('steps', []), 1):
+                step['number'] = number
+
+    def collect_request(path, binary=False):
+        if '/attempts/' in path:
+            run_id = int(path.split('/')[2])
+            if binary:
+                if run_id == unavailable_run:
+                    raise RuntimeError('Workflow logs are unavailable')
+                return archives[run_id]
+            return original(f'actions/runs/{run_id}')
+        return original(path)
+
+    monkeypatch.setattr(api, 'request', collect_request)
+    monkeypatch.setattr(api, 'jobs', lambda run_id, attempt: copy.deepcopy(jobs[run_id]), raising=False)
+    evidence = collect_snapshot(api, Registry(api.repo), snapshot)
+    unavailable = next(item for item in evidence['checks'] if item['run_id'] == unavailable_run)
+    assert unavailable['archive_file'] is None and unavailable['error'] is None
+    handoff = capture(api, PR, HEAD, snapshot | {'evidence_file': evidence['evidence_file']}, snapshot)
+    available_run = next(run['run_id'] for run in original_handoff['runs'] if run['run_id'] != unavailable_run)
+    assert [run['run_id'] for run in handoff['runs']] == [available_run]
+    assert handoff['blockers'] == [{'link': unavailable['link'],
+        'reason': 'Failed workflow logs are unavailable; collect current failure evidence again'}]
+    diagnosis['capture'] = handoff['capture']
+    diagnosis['runs'] = [run for run in diagnosis['runs'] if run['run_id'] == available_run]
+    result = requests(handoff, diagnosis)
+    assert [request['run_id'] for request in result['requests']] == [available_run]
+    assert result['blockers'] == handoff['blockers']
+    validate(result['requests'][0], api, snapshot)
+
+
+@pytest.mark.parametrize('field,label', [('source_file', 'source evidence is'), ('archive_file', 'logs are')])
+@pytest.mark.parametrize('missing', ['absent', None, ''])
+def test_unavailable_evidence_reference_blocks_only_affected_workflow(context, field, label, missing):
+    api, decision, snapshot, _, _ = context
+    evidence = json.loads(Path(decision['evidence_file']).read_text())
+    if missing == 'absent':
+        del evidence['checks'][0][field]
+    else:
+        evidence['checks'][0][field] = missing
+    registry = type('Registry', (), {'path': Path(decision['evidence_file']).parent.parent / 'registry.json'})()
+    decision['evidence_file'] = evidence_file(registry, evidence)
+    handoff = capture(api, PR, HEAD, decision, snapshot)
+    assert [run['run_id'] for run in handoff['runs']] == [22]
+    assert handoff['blockers'] == [{'link': evidence['checks'][0]['link'],
+        'reason': f'Failed workflow {label} unavailable; collect current failure evidence again'}]
+
+
+@pytest.mark.parametrize('damage', ['missing', 'corrupt'])
+def test_unavailable_shared_evidence_blocks_all_retry_diagnosis(context, damage):
+    api, decision, snapshot, _, _ = context
+    path = Path(decision['evidence_file'])
+    if damage == 'missing':
+        path.unlink()
+    else:
+        path.write_text('{}')
+    with pytest.raises((OSError, ValueError)):
+        capture(api, PR, HEAD, decision, snapshot)
+
+
+@pytest.mark.parametrize('unavailable_run', [11, 22])
 def test_unavailable_workflow_metadata_preserves_independent_retry(context, monkeypatch, unavailable_run):
     api, decision, snapshot, original_handoff, diagnosis = context
     original = api.request

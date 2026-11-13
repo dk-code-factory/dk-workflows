@@ -110,6 +110,9 @@ def capture(api, pr, head, decision, snapshot):
         item = matching[0]
         try:
             run_id, job_id = check_job(api.repo, check.get('link'))
+            for field, label in (('source_file', 'source evidence is'), ('archive_file', 'logs are')):
+                if not isinstance(item.get(field), str) or not item[field]:
+                    raise ValueError(f'Failed workflow {label} unavailable; collect current failure evidence again')
             source = retained(item['source_file'])
             archive = retained(item['archive_file'], binary=True)
             run = source['run']

@@ -41,9 +41,10 @@ The helper recaptures inputs, validates the report and returns existing or new
 publication operation paths plus unresolved blockers. It does not send requests.
 Each workflow is eligible only if every failed job has a supported unrelated,
 retryable diagnosis. Independent eligible workflows can proceed while another
-remains blocked, including when that workflow's metadata is unavailable. Shared
-PR input failures still block the entire diagnosis. The retained intent contains
-the diagnosis and evidence references; no extra handoff or change snapshot is saved.
+remains blocked, including when that workflow's metadata or log download is
+unavailable. Shared PR input failures still block the entire diagnosis. The
+retained intent contains the diagnosis and evidence references; no extra handoff
+or change snapshot is saved.
 Before an unsent operation dispatches, publication rechecks the PR changes,
 workflow checks and retained source/log evidence. Changed inputs require a fresh
 diagnosis in the same prepared operation. Retrying an independent workflow does
