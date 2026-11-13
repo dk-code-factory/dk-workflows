@@ -611,7 +611,9 @@ selection claim. That source is historical context, never current coverage. This
 lets selection refresh after policy or user-choice changes without creating a
 claim cycle, copying a contract or repeating impact analysis. The new selection
 remains independently subject to native/checklist acceptance. Missing or damaged
-original sources block recovery. Every normal review handoff includes the settled
+original sources block recovery. Selection/impact linkage compares exact captured
+result bindings, so another attempt under the same task key cannot upgrade old
+coverage. Every normal review handoff includes the settled
 decision as governing context.
 
 Decision edits use the existing exact-body publication journal, constrained to

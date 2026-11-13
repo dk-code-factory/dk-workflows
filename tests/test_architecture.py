@@ -965,3 +965,42 @@ def test_selection_refresh_finishes_after_impact_bound_old_selection(case, tmp_p
     assert len(read(store.manifest)['entries'][refs['selection']]['attempts']) == 2
     if not manual:
         assert arch.gate(tasks, refs, options=options)['outcome'] == 'choice_pending'
+
+
+@pytest.mark.parametrize('content', ['***', '* * *', '___', '- - -', 'Title\n  ===', 'Title\n  ---', '*'])
+def test_list_nonparagraph_blocks_preserve_root_setext_siblings(content):
+    sibling = 'Other section\n-------------\nKeep unrelated.\n\n## Tests\nKeep tests.\n'
+    body = '## Decisions\n\n### Architecture decisions\n\nOld design.\n\n- ' + content + '\n' + sibling
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert updated.endswith(sibling)
+    assert arch.replace_decision(updated, 'Chosen approach: new') == updated
+
+
+@pytest.mark.parametrize('ending', ['\r', '\r\n', '\n'])
+def test_mixed_line_endings_preserve_unrelated_sections(ending):
+    sibling = '## Tests' + ending + 'Keep.' + ending
+    body = '## Decisions\n\n### Architecture decisions\n\nOld.' + ending * 2 + sibling
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert updated.endswith(sibling)
+    assert arch.replace_decision(updated, 'Chosen approach: new') == updated
+
+
+def test_unicode_paragraph_separators_do_not_create_markdown_line_boundaries():
+    body = 'Paragraph\u2028```md\n## Decisions\n\n### Architecture decisions\n\nOld.\n\n## Tests\nKeep.\n'
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert updated.startswith('Paragraph\u2028```md\n')
+    assert updated.endswith('## Tests\nKeep.\n')
+
+
+
+def test_new_impact_key_alias_does_not_imply_selection_consumed_new_result(case):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = initial(tasks, spec)
+    refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'Original choice remains valid', 'evidence': ['discussion']}, {k: refs[k] for k in ('comparison', 'selection')})
+    refs['selection'] = complete(tasks, spec, 'selection', selection(), {k: refs[k] for k in ('comparison', 'impact')})
+    prior_impact = arch.accepted(tasks, refs['impact'])['reference']
+    # A later impact uses the same stable key but did not assess the selection.
+    refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'Comparison still fits changed discussion', 'evidence': ['discussion:2']}, {'comparison': refs['comparison']})
+    assert arch.accepted(tasks, refs['impact'])['reference'] != prior_impact
+    with pytest.raises(ValueError, match='different selection'):
+        tasks.prepare({'tasks': [descriptor(spec, 'alignment', {k: refs[k] for k in ('comparison', 'selection', 'impact')})]})

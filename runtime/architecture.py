@@ -342,6 +342,8 @@ def _stage_spec(tasks, descriptor, definition, *, replay=False):
         raise ValueError('Skipped applicability cannot start comparison')
     if 'impact' in retained and retained['impact']['report']['impact'] != 'nonmaterial':
         raise ValueError('Material or uncertain impact requires refreshed architecture analysis')
+    if stage == 'alignment' and 'impact' in retained:
+        validate_selection_impact(retained['impact'], retained['selection'])
     if stage == 'alignment' and not retained['selection']['report'].get('choice'):
         raise ValueError('Architecture choice remains pending')
     if stage == 'verification' and retained['alignment']['report']['alignment'] != 'mismatch':
@@ -431,6 +433,20 @@ def linked(value, name, other):
         raise ValueError('Architecture evidence refers to a different ' + name)
 
 
+def validate_selection_impact(impact, selection):
+    """Stable task keys alone do not identify the impact a choice consumed."""
+    from state import resource
+    def bound(value, label):
+        source = value['spec']['inputs'].get(label)
+        return resource(source) if isinstance(source, str) else source
+    if (selection['dependencies'].get('impact') == impact['key']
+            and bound(selection, 'architecture_impact') == resource(impact['reference'])):
+        return
+    linked(impact, 'selection', selection)
+    if bound(impact, 'architecture_selection') != resource(selection['reference']):
+        raise ValueError('Impact assessed a different selection result; refresh affected evidence')
+
+
 def journal(path, tasks, *, kind, head):
     from shared import publication
     value = publication.load(path, kind)
@@ -496,11 +512,8 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
             return {'outcome': 'analysis_required', 'release_reviewers': False}
     linked(compared, 'assessment', assessment)
     selection = accepted(tasks, refs['selection'], historical=impact is not None)
-    if impact and selection['dependencies'].get('impact') != impact['key']:
-        from state import resource
-        linked(impact, 'selection', selection)
-        if resource(impact['spec']['inputs']['architecture_selection']) != resource(selection['reference']):
-            raise ValueError('Impact assessed a different selection result; refresh affected evidence')
+    if impact:
+        validate_selection_impact(impact, selection)
     linked(selection, 'comparison', compared)
     if selection['policy']['auto_pick'] != loaded['architecture']['auto_pick']:
         raise ValueError('Architecture selection policy changed; refresh selection only')
@@ -646,8 +659,10 @@ class ListContext:
             self.raw = raw if raw == 'blank' or not raw.search(line) else None
             self.paragraph = False
             return
-        self.paragraph = bool(line.strip()) and not bool(re.match(
-            r'(?: {0,3}(?:#{1,6}(?:[ \t]|$)|>|[-+*] |[0-9]+[.)] )| {4})', line))
+        rule = re.fullmatch(r' {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})', line)
+        setext = self.paragraph and re.fullmatch(r' {0,3}(?:=+|-+)[ \t]*', line)
+        self.paragraph = bool(line.strip()) and not (rule or setext or re.match(
+            r'(?: {0,3}(?:#{1,6}(?:[ \t]|$)|>|[-+*](?:[ \t]|$)|[0-9]+[.)](?:[ \t]|$))| {4})', line))
 
     def mask(self, line, *, paragraph=False):
         expanded = line.expandtabs(4).rstrip('\r\n')
@@ -687,7 +702,7 @@ def heading_view(body):
     """Mask Markdown examples without moving document character offsets."""
     masked, fence, raw, paragraph = [], None, None, False
     lists = ListContext()
-    for line in body.splitlines(keepends=True):
+    for line in re.findall(r'[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+$', body):
         stripped = line.rstrip('\r\n')
         if raw is not None:
             ended = not stripped.strip() if raw == 'blank' else raw.search(stripped)
@@ -718,7 +733,9 @@ def heading_view(body):
         masked.append(''.join(c if c in '\r\n' else ' ' for c in line))
     if fence is not None or raw not in (None, 'blank'):
         raise ValueError('Unclosed Markdown example blocks a bounded Decisions edit')
-    return ''.join(masked)
+    # Normalize lone CR only in the search view, preserving every offset and
+    # leaving the original body bytes available for the bounded replacement.
+    return re.sub(r'\r(?!\n)', '\n', ''.join(masked))
 
 
 def next_section(view, start, level):

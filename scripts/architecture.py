@@ -48,8 +48,7 @@ def main():
         if impact_key:
             impact = architecture.accepted(tasks, impact_key)
             architecture.linked(impact, 'comparison', accepted)
-            if selected['dependencies'].get('impact') != impact_key:
-                architecture.linked(impact, 'selection', selected)
+            architecture.validate_selection_impact(impact, selected)
             if impact['report']['impact'] != 'nonmaterial':
                 raise ValueError('Changed architecture analysis requires refresh')
         architecture.linked(selected, 'comparison', accepted)

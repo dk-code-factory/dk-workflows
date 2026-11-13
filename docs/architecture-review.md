@@ -166,7 +166,9 @@ changes depend on comparison and impact. All stages use original immutable resul
 references, without rebinding unchanged analysis through another invocation.
 The helper keeps impact bound to the exact selection it originally assessed when
 that selection is later refreshed; it does not treat historical context as current
-selection coverage. Missing original sources block recovery.
+selection coverage. Missing original sources block recovery. Exact result
+bindings distinguish a new impact attempt from an older result under the same
+task key; alignment cannot start with an unassessed retained selection.
 Always run current implementation alignment after author changes. Changed scoring
 or review guidance refreshes comparison, including changed prompt contents under
 the same skill identity; historical reuse recaptures that guidance. Changed auto-pick policy refreshes only
