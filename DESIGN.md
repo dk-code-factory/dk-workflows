@@ -577,6 +577,28 @@ change; helper/process counts remain proxies only.
 
 ## Incoming architecture gate
 
+`dk-pr-review-architect` is a manual architecture-only entrypoint sharing these
+managed stages, reviewer policy and restricted publisher. A new explicit request
+requires fresh assessment/comparison even for unchanged code; resuming that
+request reuses its completed stages. The assessment references the original
+request's stable message identity, source and exact instruction in the existing
+input map. Helpers propagate the reference into comparison and require comparison
+instead of a simple-change skip. Dependencies refresh selection and alignment
+through immutable result references. Existing automatic task definitions remain
+unchanged; task keys, original attempts, completed siblings and budgets survive.
+Manual invocation enables only this invocation's architecture policy and stops
+before ordinary tasks and finalizers. No model launcher or separate runner exists.
+
+This adds no store, manifest field, completion marker or rendered report. The
+minimal request excerpt, when no original input artifact exists, avoids confusing
+a fresh review with an interrupted one and repeating paid analysis after a new
+session. Its expected avoided reconstruction/review cost exceeds capture and
+targeted loading of that source reference. Freshness requires the same request
+and all ordinary governing inputs; a different actual request deliberately
+refreshes comparison. Replays never mint another request identity or reset limits.
+Offline tests establish rerun, recovery and invalidation behavior; native API
+dollar savings have not been measured.
+
 Incoming review assesses architecture before every configured task or parallel
 review group. Its replaceable prompt supplies examination guidance only. The
 framework supplies stage assignments, mandatory checklist, weighted arithmetic,

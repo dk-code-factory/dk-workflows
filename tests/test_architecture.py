@@ -310,6 +310,87 @@ def test_unchanged_fresh_process_reuse_and_partial_claim_recovery(case, tmp_path
     assert tasks.prepare({'tasks': [descriptor(spec, 'comparison', {'assessment': refs['assessment']})]})['tasks'][0]['action'] == 'reuse'
 
 
+def test_explicit_architecture_request_reruns_completed_analysis_and_preserves_history(case, tmp_path):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = initial(tasks, spec)
+    originals = {name: Path(arch.accepted(tasks, key)['reference']) for name, key in refs.items()}
+    original_bytes = {name: path.read_bytes() for name, path in originals.items()}
+    # Ordinary coverage is an independent sibling, not part of this manual run.
+    sibling = deepcopy(spec); sibling['task']['id'] = 'ordinary-sibling'
+    claim = store.start(sibling)['claim']
+    store.record(sibling, claim['id'], b'Ordinary review', {'complete': True, 'findings': []}, 'complete')
+    request_text = 'Use dk-workflows:dk-pr-review-architect on ' + PR
+    for number in (1, 2):
+        source = tmp_path/f'architecture-request-{number}.json'
+        write(source, {'id': f'message-{number}', 'source': f'conversation:user:{number}',
+                       'instruction': request_text})
+        d = descriptor(spec, 'assessment', options={'architecture': {'enabled': True}})
+        d['definition'] = deepcopy(d['definition'])
+        d['definition']['inputs']['architecture_request'] = str(source)
+        assessment = tasks.prepare({'tasks': [d]})['tasks'][0]
+        assert assessment['action'] == 'invoke' and assessment['key'] == refs['assessment']
+        with pytest.raises(ValueError, match='cannot skip'):
+            finish(tasks, assessment, {'required': False, 'reason': 'Simple PR', 'evidence': ['diff']})
+        finish(tasks, assessment, {'required': True, 'reason': 'Explicit architecture review', 'evidence': [str(source)]})
+        comparison = tasks.prepare({'tasks': [descriptor(spec, 'comparison', {'assessment': refs['assessment']})]})['tasks'][0]
+        assert comparison['action'] == 'invoke' and comparison['key'] == refs['comparison']
+        assert comparison['assignment']['inputs']['architecture_request'] == str(source)
+        finish(tasks, comparison, compared())
+        assert arch.accepted(tasks, comparison['key'], historical=True)['report']['solutions']
+        selected = tasks.prepare({'tasks': [descriptor(spec, 'selection', {'comparison': refs['comparison']})]})['tasks'][0]
+        assert selected['action'] == 'invoke' and selected['key'] == refs['selection']
+        finish(tasks, selected, selection())
+        assert store.start(sibling)['action'] == 'reuse'
+        for name, path in originals.items():
+            assert path.read_bytes() == original_bytes[name]
+            assert len(read(store.manifest)['entries'][refs[name]]['attempts']) == number + 1
+
+
+def test_manual_architecture_fresh_session_reuses_completed_stages_and_recovers_pending(case, tmp_path):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    source = tmp_path/'request.json'
+    write(source, {'id': 'message-1', 'source': 'conversation:user:1', 'instruction': 'Review architecture on ' + PR})
+    d = descriptor(spec, 'assessment')
+    d['definition']['inputs'] = {**d['definition']['inputs'], 'architecture_request': str(source)}
+    assessment = tasks.prepare({'run': 'manual', 'cycle': 'initial', 'tasks': [d]})['tasks'][0]
+    finish(tasks, assessment, {'required': True, 'reason': 'Explicit request', 'evidence': [str(source)]})
+    comparison_d = descriptor(spec, 'comparison', {'assessment': assessment['key']})
+    comparison = tasks.prepare({'run': 'manual', 'cycle': 'initial', 'tasks': [comparison_d]})['tasks'][0]
+    command = [sys.executable, str(ROOT/'scripts/dk.py'), '--repository', REPO, '--pr', PR, 'resume', '--run', 'manual']
+    resumed = json.loads(subprocess.check_output(command, text=True, timeout=60))
+    assert next(t for t in resumed['tasks'] if t['key'] == assessment['key'])['reusable']
+    assert resumed['unfinished'][0]['id'] == comparison['claim']['id']
+    before = store.manifest.read_bytes()
+    request = tmp_path/'prepare.json'
+    write(request, {'run': 'manual', 'cycle': 'initial', 'tasks': [{'key': assessment['key']}]})
+    prepare_command = [*command[:command.index('resume')], 'prepare', '--file', str(request)]
+    assert json.loads(subprocess.check_output(prepare_command, text=True, timeout=60))['tasks'][0]['action'] == 'reuse'
+    assert store.manifest.read_bytes() == before
+    recovered = tasks.prepare({'run': 'manual', 'cycle': 'initial',
+                               'recover': {comparison['key']: comparison['claim']['id']},
+                               'tasks': [{'key': comparison['key']}]})['tasks'][0]
+    assert recovered['action'] == 'invoke'
+    finish(tasks, recovered, compared())
+    assert tasks.prepare({'run': 'manual', 'cycle': 'initial', 'tasks': [comparison_d]})['tasks'][0]['action'] == 'reuse'
+    # Scoring changes refresh comparison while assessment remains reusable.
+    changed = deepcopy(comparison_d)
+    changed['options'] = {'architecture': {'scoring': {'profile': 'quality'}}}
+    assert tasks.prepare({'run': 'manual', 'cycle': 'changed-policy', 'tasks': [changed]})['tasks'][0]['action'] == 'invoke'
+    assert tasks.prepare({'run': 'manual', 'cycle': 'changed-policy', 'tasks': [d]})['tasks'][0]['action'] == 'reuse'
+
+
+@pytest.mark.parametrize('value', [None, [], {}, {'id': 'message'},
+                                        {'id': 'message', 'source': 'user:1', 'instruction': ''}])
+def test_manual_architecture_requires_original_request_identity_before_claims(case, tmp_path, value):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    source = tmp_path/'request.json'; write(source, value)
+    d = descriptor(spec, 'assessment')
+    d['definition']['inputs'] = {**d['definition']['inputs'], 'architecture_request': str(source)}
+    with pytest.raises(ValueError, match='stable id'):
+        tasks.prepare({'tasks': [d]})
+    assert not store.manifest.exists()
+
+
 def test_autopick_policy_refresh_preserves_alternatives(case):
     spec, store = case; tasks = Tasks(REPO, PR)
     refs = initial(tasks, spec)

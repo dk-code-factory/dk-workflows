@@ -51,7 +51,7 @@ def package(root):
                             'dk-config', 'dk-issue', 'dk-pr-decisions',
                             'dk-pr-description', 'dk-pr-feedback-address',
                             'dk-pr-feedback-read', 'dk-pr-feedback-reply', 'dk-pr-fix',
-                            'dk-pr-iter', 'dk-pr-publish', 'dk-pr-review', 'dk-pr-review-post',
+                            'dk-pr-iter', 'dk-pr-publish', 'dk-pr-review', 'dk-pr-review-architect', 'dk-pr-review-post',
                             'dk-pr-reviewers-run', 'dk-pr-split', 'dk-preferences']
     for name in ('.agents/plugins/marketplace.json','.claude-plugin/marketplace.json'):
         catalog=json.loads((root/name).read_text())
