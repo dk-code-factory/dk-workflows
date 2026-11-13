@@ -17,6 +17,19 @@ def sha(value):
     return value
 
 
+def rerun_options(request):
+    """One explicit retry is separate from the retained automatic allowance."""
+    limit = request.setdefault('automatic_limit', 3)
+    if type(limit) is not int or not 0 <= limit <= 3:
+        raise ValueError('automatic_limit must be an integer from zero to three')
+    user = request.get('user_retry')
+    if user is not None and (not isinstance(user, dict)
+            or set(user) != {'request_id', 'authorization', 'source'}
+            or any(not isinstance(value, str) or not value.strip() for value in user.values())):
+        raise ValueError('user_retry requires a stable request_id, exact user authorization and source')
+    return request
+
+
 class Handler:
     def __init__(self, request, *, api, metadata, run, endpoint):
         self.request = request
@@ -158,6 +171,7 @@ class Handler:
             raise ValueError('PR identity or head changed')
         kind = request['kind']
         if kind == 'ci-rerun':
+            rerun_options(request)
             positive(request.get('run_id'), 'run_id')
             positive(request.get('attempt'), 'attempt')
             if not isinstance(request.get('reason'), str) or not request['reason'].strip():
@@ -238,6 +252,16 @@ class Handler:
                 raise ValueError('Workflow run identity changed')
             if not verified and self.run_snapshot(run) != expected['run']:
                 raise ValueError('Failed workflow attempt changed before rerun')
+            if not verified and request.get('diagnosis'):
+                from types import SimpleNamespace
+                from shared.ci_retry import validate
+                checks = self.run(['gh', 'pr', 'checks', request['pr'], '--json',
+                    'name,bucket,state,link,workflow,startedAt,completedAt'], allowed_codes=(0, 1, 8))
+                if not isinstance(checks, list):
+                    raise ValueError('CI checks are unavailable before retry')
+                api = SimpleNamespace(repo=self.host + '/' + self.root.removeprefix('repos/'),
+                                      request=lambda path: self.get('/' + path))
+                validate(request, api, {'head': request['head'], 'checks': checks})
         elif kind == 'resolve-thread':
             live = self.thread()
             if (not verified and live != expected['thread']) or request['answer'] not in live['comments']:

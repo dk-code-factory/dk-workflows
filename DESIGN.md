@@ -185,6 +185,84 @@ unrelated catalog changes must not invalidate it.
 
 ## Settings and storage
 
+CI infrastructure recovery keeps native diagnosis in the existing failed-attempt
+publication intent, with references to the already retained job/log evidence and
+a fingerprint of the PR changes, checks and attempts. The deterministic helper
+returns its discovery handoff transiently; it never saves a second failure index,
+PR diff, rendered summary or effective settings. A fresh session can reuse the
+original diagnosis when recaptured inputs are unchanged. Changed PR content,
+base, checks, attempts or missing/corrupt evidence require affected diagnosis
+again. Native agents assess semantic unrelatedness against the actual diff;
+log strings alone do not establish that boundary.
+
+Diagnosis fingerprints and their live start/end comparisons use head/base SHAs,
+refs and repository identities, excluding repository activity counts, timestamps
+and profile metadata. Unrelated repository activity therefore preserves valid
+analysis across sessions; changed revision identities still refresh diagnosis.
+Attempt-source fingerprints likewise retain repository/user identities without
+their descriptions or profile fields. Recollected source and evidence JSON
+paths remain evidence references, while semantic fingerprints bind normalized
+source contents, jobs and log archives rather than those JSON paths. This avoids
+repeating diagnosis after unrelated metadata changes on a fresh CI observation;
+changed source identity, jobs, logs, PR revisions or checks still refresh it.
+This adds no durable state and avoids repeated native diagnosis for unchanged
+PR changes and failure evidence. Existing original captures and preparations
+remain retained; changed governing helper inputs require affected diagnosis to
+be refreshed in the same intent. Native savings remain unmeasured.
+
+Normalize accepted PR URL casing and trailing slashes before capture, matching
+publication identity. Canonical-input fingerprints stay unchanged; equivalent
+spellings reuse diagnosis without new state or history resets. The existing
+revision, checks and evidence boundaries still govern freshness.
+
+Each retained diagnosis uses the existing capture field for its workflow's input
+fingerprint. Dispatch recaptures the PR changes and that workflow's checks and
+validates the original source/archive references before an unsent retry. A sibling
+workflow's retry does not stale this diagnosis. No extra input copy or store is
+needed; unchanged fresh-session reuse avoids repeating native diagnosis, while
+changed relevant inputs block dispatch until diagnosis is refreshed in the same
+prepared operation. Earlier preparations remain intact through existing history.
+
+Existing ci-rerun intents reserve automatic slots per PR/head and preserve the
+minimum retained allowance, including incomplete operations. No separate budget
+store is introduced. A new explicit user retry retains only its request identity,
+authorization source and exact run/attempt in that intent; it permits one retry
+of each specified workflow without clearing automatic reservations. Same-attempt
+preparation returns the original intent even when wording changes. Pending sends
+remain reconciliation-only. These small records avoid repeated diagnosis and
+duplicate external dispatch in this and fresh sessions; live head/attempt and CI
+checks still govern publication and readiness. Offline regressions establish
+reuse, partial recovery and invalidation, not measured native API cost savings.
+
+Lower allowances tighten an existing prepared intent before reservation checks;
+later settings cannot restore its broader limit. Explicit authorization can reuse
+that unsent operation without erasing its automatic reservation, derived from the
+already retained original preparations. Preparation and dispatch share the existing
+dispatch lock. Pending operations keep their original intent and reconcile even
+after limits tighten or diagnosis evidence disappears.
+Persist a tighter allowance before refreshing GitHub metadata or attempt evidence,
+so a failed read or interrupted refresh cannot restore the earlier limit on a
+fresh-session resume. The existing intent and preparation history retain this
+minimum without new fields or stores; unchanged limits add no preparation.
+
+Validate an explicit retry identity before changing an unsent operation, so a
+rejected authorization leaves its evidence and allowance intact. Refresh current
+PR metadata and the failed-attempt snapshot when preparing that same unsent
+operation again. Existing preparation history retains the original evidence;
+unchanged preparation creates no new snapshot. This avoids a fresh session
+reconstructing a replacement after a title or body edit, without another state
+field or store. Head, attempt and diagnosis freshness still gate dispatch;
+pending sends retain their original expectations for reconciliation.
+
+Equivalent recollection can replace missing or corrupt evidence references on an
+unsent retry without changing its semantic capture. Keep healthy original
+references and diagnosis unchanged; retain replaced evidence in the existing
+preparation history. This adds no state fields or stores and avoids reconstructing
+a replacement operation after evidence loss in a fresh session. Current inputs
+and replacement evidence still require dispatch validation, and pending operations
+only reconcile.
+
+
 Confirmed push rejection reuses the existing operation's `not_applied` state.
 The push publisher validates only the original send failure: positive nonzero
 exit status and one unambiguous exact-ref rejection in porcelain or conclusive

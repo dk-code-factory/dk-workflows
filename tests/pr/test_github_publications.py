@@ -64,6 +64,617 @@ def test_advanced_rerun_remains_uncertain_without_resend(remote):
     assert remote.state['writes']['ci-rerun']==1
 
 
+@pytest.mark.parametrize('lost_response', [False, True])
+def test_changed_rerun_reason_reuses_exact_attempt_without_duplicate_send(remote, lost_response):
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    if lost_response:
+        remote.state['lose_response'] = ['ci-rerun']
+        with pytest.raises(Diagnostic):
+            publisher.publish(operation)
+    else:
+        publisher.publish(operation)
+    refreshed = publisher.prepare({**request, 'reason': 'DNS outage confirmed from logs'})
+    assert refreshed['operation'] == operation
+    publisher.publish(operation, reconcile=True)
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+def test_automatic_rerun_allowance_survives_new_process_and_does_not_reset(remote, tmp_path):
+    import json
+    import os
+    import subprocess
+    import sys
+    for attempt in range(1, 4):
+        remote.state['run'].update(run_attempt=attempt, status='completed', conclusion='failure')
+        operation = publisher.prepare({**fixture.request('ci-rerun'), 'attempt': attempt})['operation']
+        publisher.publish(operation)
+    remote.state['run'].update(status='completed', conclusion='failure')
+    snapshot = tmp_path/'remote.json'
+    snapshot.write_text(json.dumps(remote.state))
+    script = '''
+import importlib.util, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    value = importlib.util.module_from_spec(spec); spec.loader.exec_module(value)
+    return value
+publisher = load('fresh_publisher', root/'scripts/publish.py')
+fixture = load('fresh_fixture', root/'tests/pr/fixtures/github_remote.py')
+remote = fixture.Remote(json.loads(Path(sys.argv[2]).read_text()))
+for key in ('metadata', 'api', 'run'): setattr(publisher, key, getattr(remote, key))
+try:
+    publisher.prepare({**fixture.request('ci-rerun'), 'attempt': 4})
+except ValueError as exc:
+    assert 'allowance exhausted (3/3)' in str(exc), str(exc)
+else:
+    raise AssertionError('fresh process restored automatic retries')
+'''
+    result = subprocess.run([sys.executable, '-c', script, str(ROOT), str(snapshot)],
+        env={**os.environ, 'PYTHONPATH': str(ROOT/'runtime')}, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert remote.state['writes']['ci-rerun'] == 3
+
+
+def test_explicit_user_retry_is_bounded_and_preserves_exhausted_automatic_allowance(remote):
+    request = {**fixture.request('ci-rerun'), 'automatic_limit': 1}
+    operation = publisher.prepare(request)['operation']
+    publisher.publish(operation)
+    remote.state['run'].update(status='completed', conclusion='failure')
+    with pytest.raises(ValueError, match='allowance exhausted'):
+        publisher.prepare({**request, 'attempt': 2, 'automatic_limit': 3})
+    authorization = {'request_id': 'user-turn-22', 'authorization': 'Retry failed test workflow once',
+                     'source': 'conversation:user-turn-22'}
+    explicit = {**request, 'attempt': 2, 'user_retry': authorization}
+    operation = publisher.prepare(explicit)['operation']
+    publisher.publish(operation)
+    assert publisher.prepare({**explicit, 'reason': 'User requested retry'})['operation'] == operation
+    remote.state['run'].update(status='completed', conclusion='failure')
+    with pytest.raises(ValueError, match='different exact attempt'):
+        publisher.prepare({**explicit, 'attempt': 3})
+    with pytest.raises(ValueError, match='allowance exhausted'):
+        publisher.prepare({**request, 'attempt': 3})
+    assert remote.state['writes']['ci-rerun'] == 2
+
+
+def test_uncertain_retry_blocks_new_attempt_and_new_user_authorization(remote):
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    remote.state['lose_response'] = ['ci-rerun']
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    remote.state['run'].update(status='completed', conclusion='failure')
+    for extra in ({}, {'user_retry': {'request_id': 'new', 'authorization': 'Retry once',
+                                     'source': 'conversation:new'}}):
+        with pytest.raises(ValueError, match='requires reconciliation'):
+            publisher.prepare({**request, 'attempt': 2, **extra})
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+@pytest.mark.parametrize('explicit', [False, True])
+def test_rejected_user_retry_keeps_prepared_automatic_operation_unchanged(remote, explicit):
+    request = fixture.request('ci-rerun')
+    user = {'request_id': 'original-retry', 'authorization': 'Retry this workflow once',
+            'source': 'conversation:original-retry'}
+    first = publisher.prepare({**request, 'user_retry': user})['operation']
+    publisher.publish(first)
+    remote.state['run'].update(status='completed', conclusion='failure')
+    request = {**request, 'attempt': 2}
+    operation = publisher.prepare(request)['operation']
+    original = Path(operation).read_bytes()
+    with pytest.raises(ValueError, match='different exact attempt'):
+        publisher.prepare({**request, 'user_retry': user, 'automatic_limit': 0})
+    assert Path(operation).read_bytes() == original
+    assert not publication.load(operation).get('preparations')
+    if explicit:
+        corrected = {**user, 'request_id': 'new-retry', 'source': 'conversation:new-retry'}
+        request = {**request, 'user_retry': corrected}
+    assert publisher.prepare(request)['operation'] == operation
+    publisher.publish(operation)
+    assert remote.state['writes']['ci-rerun'] == 2
+
+
+@pytest.mark.parametrize('field', ['title', 'body'])
+@pytest.mark.parametrize('explicit', [False, True])
+def test_prepared_retry_refreshes_changed_pr_metadata_without_replacing_intent(remote, field, explicit):
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    original = publication.load(operation)
+    remote.state['metadata'][field] += ' updated'
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    if explicit:
+        request = {**request, 'user_retry': {
+            'request_id': 'metadata-retry', 'authorization': 'Retry this workflow once',
+            'source': 'conversation:metadata-retry'}}
+    refreshed = publisher.prepare(request)
+    assert refreshed['operation'] == operation
+    assert refreshed['operation_id'] == original['operation_id']
+    assert publication.load(refreshed['preparations'][0]) == original
+    assert refreshed['request']['expected']['metadata'] == remote.state['metadata']
+    assert publisher.prepare(request) == refreshed
+    publisher.publish(operation)
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+def test_metadata_refresh_preserves_pending_retry_for_reconciliation(remote):
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    remote.state['lose_response'] = ['ci-rerun']
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    original = Path(operation).read_bytes()
+    remote.state['metadata']['title'] += ' updated'
+    assert publisher.prepare(request)['operation'] == operation
+    assert Path(operation).read_bytes() == original
+    assert remote.state['writes']['ci-rerun'] == 1
+    remote.state['metadata']['title'] = publication.load(operation)['request']['expected']['metadata']['title']
+    publisher.publish(operation, reconcile=True)
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+def test_prepared_retries_share_allowance_across_independent_workflows(remote, monkeypatch):
+    original_api = remote.api
+    def api(pr, path, **kwargs):
+        if path.endswith('/actions/runs/78'):
+            return {**remote.state['run'], 'id': 78}
+        return original_api(pr, path, **kwargs)
+    monkeypatch.setattr(publisher, 'api', api)
+    request = {**fixture.request('ci-rerun'), 'automatic_limit': 1}
+    first = publisher.prepare(request)['operation']
+    with pytest.raises(ValueError, match='allowance exhausted'):
+        publisher.prepare({**request, 'run_id': 78})
+    assert publisher.prepare({**request, 'reason': 'Reconstructed diagnosis'})['operation'] == first
+    assert remote.state['writes'] == {}
+
+
+def test_lowered_limit_is_retained_on_existing_prepared_retry(remote):
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    with pytest.raises(ValueError, match='allowance exhausted'):
+        publisher.prepare({**request, 'automatic_limit': 0})
+    assert publication.load(operation)['request']['approved']['automatic_limit'] == 0
+    with pytest.raises(ValueError, match='allowance exhausted'):
+        publisher.publish(operation)
+    with pytest.raises(ValueError, match='allowance exhausted'):
+        publisher.prepare(request)
+    assert remote.state['writes'] == {}
+
+
+@pytest.mark.parametrize('failed_read', ['metadata', 'run'])
+@pytest.mark.parametrize('failure', [OSError, KeyboardInterrupt])
+def test_lowered_limit_survives_refresh_failure_and_fresh_process(remote, monkeypatch, tmp_path, failed_read, failure):
+    import json
+    import os
+    import subprocess
+    import sys
+
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    original = publication.load(operation)
+    with monkeypatch.context() as patch:
+        def fail(*args, **kwargs):
+            assert publication.load(operation)['request']['approved']['automatic_limit'] == 0
+            raise failure('refresh interrupted')
+        if failed_read == 'metadata':
+            patch.setattr(publisher, 'metadata', fail)
+        else:
+            original_api = publisher.api
+            def api(pr, path, **kwargs):
+                if path.endswith('/actions/runs/77'):
+                    return fail()
+                return original_api(pr, path, **kwargs)
+            patch.setattr(publisher, 'api', api)
+        with pytest.raises(failure, match='refresh interrupted'):
+            publisher.prepare({**request, 'automatic_limit': 0})
+    tightened = publication.load(operation)
+    assert tightened['operation_id'] == original['operation_id']
+    assert tightened['request']['approved'] == {**original['request']['approved'], 'automatic_limit': 0}
+    assert tightened['request']['expected'] == original['request']['expected']
+    assert len(tightened['preparations']) == 1
+    assert publication.load(tightened['preparations'][0]) == original
+    snapshot = tmp_path/'remote.json'
+    snapshot.write_text(json.dumps(remote.state))
+    script = '''
+import importlib.util, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    value = importlib.util.module_from_spec(spec); spec.loader.exec_module(value)
+    return value
+publisher = load('fresh_publisher', root/'scripts/publish.py')
+fixture = load('fresh_fixture', root/'tests/pr/fixtures/github_remote.py')
+remote = fixture.Remote(json.loads(Path(sys.argv[2]).read_text()))
+for key in ('metadata', 'api', 'run'): setattr(publisher, key, getattr(remote, key))
+from shared import publication
+operation = sys.argv[3]
+original = Path(operation).read_bytes()
+for action in (lambda: publisher.prepare(fixture.request('ci-rerun')),
+               lambda: publisher.publish(operation)):
+    try:
+        action()
+    except ValueError as exc:
+        assert 'allowance exhausted (1/0)' in str(exc), str(exc)
+    else:
+        raise AssertionError('fresh process restored the disabled retry')
+assert Path(operation).read_bytes() == original
+assert publication.load(operation)['status'] == 'prepared'
+assert remote.state['writes'] == {}
+'''
+    result = subprocess.run([sys.executable, '-c', script, str(ROOT), str(snapshot), operation],
+        env={**os.environ, 'PYTHONPATH': str(ROOT/'runtime')}, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert publication.load(operation) == tightened
+    assert remote.state['writes'] == {}
+
+
+def test_user_can_authorize_disabled_prepared_retry_without_erasing_its_reservation(remote):
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    with pytest.raises(ValueError, match='allowance exhausted'):
+        publisher.prepare({**request, 'automatic_limit': 0})
+    user = {'request_id': 'retry-disabled', 'authorization': 'Retry this workflow once',
+            'source': 'conversation:retry-disabled'}
+    assert publisher.prepare({**request, 'user_retry': user})['operation'] == operation
+    publisher.publish(operation)
+    remote.state['run'].update(status='completed', conclusion='failure')
+    with pytest.raises(ValueError, match=r'allowance exhausted \(1/0\)'):
+        publisher.prepare({**request, 'attempt': 2})
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+def test_lowered_limit_does_not_prevent_uncertain_retry_reconciliation(remote):
+    request = fixture.request('ci-rerun')
+    operation = publisher.prepare(request)['operation']
+    remote.state['lose_response'] = ['ci-rerun']
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    assert publisher.prepare({**request, 'automatic_limit': 0})['operation'] == operation
+    publisher.publish(operation, reconcile=True)
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+@pytest.fixture
+def diagnosed_retry(remote, tmp_path, request):
+    import io
+    import zipfile
+    from types import SimpleNamespace
+    from shared.ci_retry import capture, requests
+    from shared.flaky_actions import evidence_file
+
+    remote.state['pull']['changed_files'] = 1
+    remote.state['checks'] = [{'name': 'install', 'bucket': 'fail', 'state': 'FAILURE',
+        'link': 'https://github.com/owner/repo/actions/runs/77/job/770', 'workflow': 'CI'}]
+    registry = SimpleNamespace(path=tmp_path/'registry.json')
+    jobs = [{'id': 770, 'name': 'install', 'status': 'completed', 'conclusion': 'failure',
+             'steps': [{'name': 'packages', 'conclusion': 'failure'}]}]
+    source = evidence_file(registry, {'run': remote.state['run'], 'jobs': jobs})
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, 'w') as bundle:
+        bundle.writestr('install/1_packages.txt', 'Temporary failure resolving archive.ubuntu.com\n')
+    archive = evidence_file(registry, data.getvalue(), '.zip')
+    evidence = {'head': fixture.HEAD, 'repo': 'github.com/owner/repo', 'checks': [{
+        'link': remote.state['checks'][0]['link'], 'attempt': 1, 'source_file': source,
+        'archive_file': archive}]}
+    snapshot = {'head': fixture.HEAD, 'result': 'failure', 'checks': remote.state['checks']}
+    api = SimpleNamespace(repo='github.com/owner/repo',
+                          request=lambda path: remote.api(fixture.PR, 'repos/owner/repo/' + path))
+    handoff = capture(api, getattr(request, 'param', fixture.PR), fixture.HEAD,
+                      snapshot | {'evidence_file': evidence_file(registry, evidence)}, snapshot)
+    diagnosis = {'capture': handoff['capture'], 'runs': [{'run_id': 77, 'attempt': 1, 'jobs': [{
+        'job_id': 770, 'verdict': 'unrelated', 'retryable': True, 'reason': 'Package mirror DNS outage',
+        'change_comparison': 'code.py changes leave the mirror and workflow unchanged',
+        'log_evidence': [{'member': 'install/1_packages.txt',
+                          'excerpt': 'Temporary failure resolving archive.ubuntu.com'}]}]}]}
+    return requests(handoff, diagnosis)['requests'][0]
+
+
+@pytest.mark.parametrize('diagnosed_retry', [fixture.PR + '/',
+    fixture.PR.replace('/owner/repo/', '/OWNER/REPO/'),
+    fixture.PR.replace('/owner/repo/', '/OWNER/REPO/') + '/'], indirect=True)
+def test_equivalent_pr_url_diagnosis_dispatches_once(remote, diagnosed_retry):
+    operation = publisher.prepare(diagnosed_retry)['operation']
+    assert publisher.publish(operation)['status'] == 'verified'
+    assert publisher.prepare({**diagnosed_retry, 'pr': fixture.PR})['operation'] == operation
+    publisher.publish(operation, reconcile=True)
+    assert publication.load(operation)['request']['approved']['pr'] == fixture.PR
+    assert remote.state['writes'] == {'ci-rerun': 1}
+
+
+@pytest.mark.parametrize('change', ['base', 'diff', 'checks', 'missing_archive', 'corrupt_archive', 'missing_source'])
+def test_prepared_retry_revalidates_diagnosis_before_dispatch(remote, diagnosed_retry, change):
+    operation = publisher.prepare(diagnosed_retry)['operation']
+    if change == 'base':
+        remote.state['pull']['base']['sha'] = 'c'*40
+    elif change == 'diff':
+        remote.state['files'][0]['patch'] += '\n+changed again'
+    elif change == 'checks':
+        remote.state['checks'][0]['state'] = 'TIMED_OUT'
+    else:
+        key = 'source_file' if change == 'missing_source' else 'archive_file'
+        path = Path(diagnosed_retry['diagnosis'][key])
+        if change.startswith('missing'):
+            path.unlink()
+        else:
+            path.write_bytes(b'corrupt evidence')
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    assert remote.state['writes'] == {}
+    assert publication.load(operation)['status'] == 'prepared'
+
+
+def test_unchanged_diagnosis_dispatches_and_missing_evidence_does_not_block_reconciliation(remote, diagnosed_retry):
+    operation = publisher.prepare(diagnosed_retry)['operation']
+    remote.state['lose_response'] = ['ci-rerun']
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    Path(diagnosed_retry['diagnosis']['archive_file']).unlink()
+    publisher.publish(operation, reconcile=True)
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+def test_same_capture_preserves_original_diagnosis_without_another_preparation(remote, diagnosed_retry):
+    import copy
+    operation = publisher.prepare(diagnosed_retry)['operation']
+    reworded = copy.deepcopy(diagnosed_retry)
+    reworded['diagnosis']['jobs'][0]['reason'] = 'Reworded DNS diagnosis'
+    reworded['reason'] = 'Reworded DNS diagnosis'
+    reused = publisher.prepare(reworded)
+    assert reused['operation'] == operation
+    assert not reused.get('preparations')
+    assert reused['request']['approved']['diagnosis'] == diagnosed_retry['diagnosis']
+
+
+@pytest.mark.parametrize('original_state', ['healthy', 'missing', 'corrupt'])
+def test_fresh_process_recovers_equivalent_recollected_evidence(remote, diagnosed_retry, tmp_path,
+                                                               original_state):
+    import copy
+    import json
+    import os
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+    from shared.ci_retry import capture, requests
+    from shared.flaky_actions import collect_snapshot
+    from shared.flaky_tests import Registry
+
+    source = json.loads(Path(diagnosed_retry['diagnosis']['source_file']).read_text())
+    logs = Path(diagnosed_retry['diagnosis']['archive_file']).read_bytes()
+    remote.state['run'].update(path='.github/workflows/ci.yml', actor={'id': 1, 'login': 'author',
+                                                                  'avatar_url': 'old'})
+    jobs = source['jobs']
+    for job in jobs:
+        job.update(run_id=77, head_sha=fixture.HEAD, run_attempt=1,
+                   html_url=remote.state['checks'][0]['link'])
+        job['steps'][0]['number'] = 1
+
+    def read(path, binary=False):
+        if path == 'actions/runs/77/attempts/1':
+            return copy.deepcopy(remote.state['run'])
+        if path == 'actions/runs/77/attempts/1/logs':
+            return logs
+        return remote.api(fixture.PR, 'repos/owner/repo/' + path)
+
+    api = SimpleNamespace(repo='github.com/owner/repo', request=read,
+                          jobs=lambda run_id, attempt: copy.deepcopy(jobs))
+    registry = Registry(api.repo)
+    snapshot = {'head': fixture.HEAD, 'result': 'failure', 'checks': remote.state['checks']}
+
+    def recollect():
+        evidence = collect_snapshot(api, registry, snapshot)
+        handoff = capture(api, fixture.PR, fixture.HEAD,
+                          snapshot | {'evidence_file': evidence['evidence_file']}, snapshot)
+        report = {'capture': handoff['capture'], 'runs': [{'run_id': 77, 'attempt': 1,
+                  'jobs': diagnosed_retry['diagnosis']['jobs']}]}
+        return requests(handoff, report)['requests'][0]
+
+    original_request = recollect()
+    operation = publisher.prepare(original_request)['operation']
+    original_source = Path(original_request['diagnosis']['source_file'])
+    if original_state == 'missing':
+        original_source.unlink()
+    elif original_state == 'corrupt':
+        original_source.write_text('{}')
+    if original_state != 'healthy':
+        with pytest.raises(Diagnostic):
+            publisher.publish(operation)
+        assert remote.state['writes'] == {}
+    original = publication.load(operation)
+    remote.state['run']['actor']['avatar_url'] = 'new'
+    replacement = recollect()
+    assert replacement['diagnosis']['capture'] == original_request['diagnosis']['capture']
+    assert replacement['diagnosis']['source_file'] != str(original_source)
+    state = tmp_path/'remote.json'
+    state.write_text(json.dumps(remote.state))
+    request = tmp_path/'request.json'
+    request.write_text(json.dumps(replacement))
+    script = '''
+import importlib.util, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    value = importlib.util.module_from_spec(spec); spec.loader.exec_module(value)
+    return value
+publisher = load('fresh_publisher', root/'scripts/publish.py')
+fixture = load('fresh_fixture', root/'tests/pr/fixtures/github_remote.py')
+from shared import publication
+remote = fixture.Remote(json.loads(Path(sys.argv[2]).read_text()))
+for key in ('metadata', 'api', 'run'): setattr(publisher, key, getattr(remote, key))
+request = json.loads(Path(sys.argv[3]).read_text())
+operation, damaged = sys.argv[4], sys.argv[5] != 'healthy'
+original = publication.load(operation)
+prepared = publisher.prepare(request)
+assert prepared['operation'] == operation
+assert len(prepared.get('preparations', [])) == int(damaged)
+if damaged:
+    assert publication.load(prepared['preparations'][0]) == original
+    assert prepared['request']['approved']['diagnosis'] == request['diagnosis']
+else:
+    assert publication.load(operation) == original
+before = Path(operation).read_bytes()
+assert publisher.prepare(request)['operation'] == operation
+assert Path(operation).read_bytes() == before
+assert publisher.publish(operation)['status'] == 'verified'
+assert remote.state['writes'] == {'ci-rerun': 1}
+'''
+    result = subprocess.run([sys.executable, '-c', script, str(ROOT), str(state), str(request),
+        operation, original_state], env={**os.environ, 'PYTHONPATH': str(ROOT/'runtime')},
+        text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    if original_state != 'healthy':
+        assert publication.load(publication.load(operation)['preparations'][0]) == original
+
+
+def test_refreshed_diagnosis_reuses_prepared_operation_and_retains_original(remote, diagnosed_retry, tmp_path):
+    from types import SimpleNamespace
+    from shared.ci_retry import capture, requests
+    from shared.flaky_actions import evidence_file
+    operation = publisher.prepare(diagnosed_retry)['operation']
+    remote.state['pull']['base']['sha'] = 'c'*40
+    with pytest.raises(Diagnostic):
+        publisher.publish(operation)
+    snapshot = {'head': fixture.HEAD, 'result': 'failure', 'checks': remote.state['checks']}
+    evidence = {'head': fixture.HEAD, 'repo': 'github.com/owner/repo', 'checks': [{
+        'link': remote.state['checks'][0]['link'], 'attempt': 1,
+        'source_file': diagnosed_retry['diagnosis']['source_file'],
+        'archive_file': diagnosed_retry['diagnosis']['archive_file']}]}
+    adapter = SimpleNamespace(repo='github.com/owner/repo',
+        request=lambda path: remote.api(fixture.PR, 'repos/owner/repo/' + path))
+    handoff = capture(adapter, fixture.PR, fixture.HEAD, snapshot | {
+        'evidence_file': evidence_file(SimpleNamespace(path=tmp_path/'registry.json'), evidence)}, snapshot)
+    diagnosis = {'capture': handoff['capture'], 'runs': [{'run_id': 77, 'attempt': 1,
+        'jobs': diagnosed_retry['diagnosis']['jobs']}]}
+    refreshed = publisher.prepare(requests(handoff, diagnosis)['requests'][0])
+    assert refreshed['operation'] == operation
+    original = publication.load(refreshed['preparations'][0])
+    assert original['request']['approved']['diagnosis'] == diagnosed_retry['diagnosis']
+    publisher.publish(operation)
+    assert remote.state['writes']['ci-rerun'] == 1
+
+
+def test_independent_workflow_retry_preserves_sibling_diagnosis(remote, diagnosed_retry, monkeypatch, tmp_path):
+    import copy
+    import json
+    from types import SimpleNamespace
+    from shared.ci_retry import capture, requests
+    from shared.flaky_actions import evidence_file
+
+    original_api = remote.api
+    sibling_run = {**remote.state['run'], 'id': 78}
+    def api(pr, path, *, payload=None):
+        if path.endswith('/actions/runs/78'):
+            return copy.deepcopy(sibling_run)
+        if path.endswith('/actions/runs/78/rerun-failed-jobs'):
+            sibling_run.update(run_attempt=2, status='queued', conclusion=None)
+            return remote.changed('ci-rerun', '')
+        return original_api(pr, path, payload=payload)
+    monkeypatch.setattr(publisher, 'api', api)
+    monkeypatch.setattr(remote, 'api', api)
+    sibling_check = {**remote.state['checks'][0],
+        'link': 'https://github.com/owner/repo/actions/runs/78/job/780'}
+    remote.state['checks'].append(sibling_check)
+    source = json.loads(Path(diagnosed_retry['diagnosis']['source_file']).read_text())
+    source['run'] = sibling_run
+    source['jobs'][0]['id'] = 780
+    registry = SimpleNamespace(path=tmp_path/'registry.json')
+    sibling_source = evidence_file(registry, source)
+    evidence = {'head': fixture.HEAD, 'repo': 'github.com/owner/repo', 'checks': [
+        {'link': check['link'], 'attempt': 1, 'source_file': source_path,
+         'archive_file': diagnosed_retry['diagnosis']['archive_file']}
+        for check, source_path in zip(remote.state['checks'],
+            [diagnosed_retry['diagnosis']['source_file'], sibling_source])]}
+    snapshot = {'head': fixture.HEAD, 'result': 'failure', 'checks': remote.state['checks']}
+    adapter = SimpleNamespace(repo='github.com/owner/repo',
+                              request=lambda path: api(fixture.PR, 'repos/owner/repo/' + path))
+    handoff = capture(adapter, fixture.PR, fixture.HEAD,
+                      snapshot | {'evidence_file': evidence_file(registry, evidence)}, snapshot)
+    decisions = []
+    for run_id in (77, 78):
+        jobs = copy.deepcopy(diagnosed_retry['diagnosis']['jobs'])
+        jobs[0]['job_id'] = run_id * 10
+        decisions.append({'run_id': run_id, 'attempt': 1, 'jobs': jobs})
+    retries = requests(handoff, {'capture': handoff['capture'], 'runs': decisions})['requests']
+    operations = [publisher.prepare(request)['operation'] for request in retries]
+    publisher.publish(operations[0])
+    remote.state['checks'][0].update(bucket='pending', state='QUEUED')
+    publisher.publish(operations[1])
+    assert remote.state['writes']['ci-rerun'] == 2
+
+
+@pytest.mark.parametrize('metadata_refresh', [False, True])
+@pytest.mark.parametrize('repository_activity', [False, True])
+def test_fresh_process_reuses_unchanged_prepared_diagnosis(remote, diagnosed_retry, tmp_path,
+                                                        metadata_refresh, repository_activity):
+    import json
+    import os
+    import subprocess
+    import sys
+
+    operation = publisher.prepare(diagnosed_retry)['operation']
+    if repository_activity:
+        remote.state['pull']['base']['repo'] = {'stargazers_count': 3, 'open_issues_count': 8,
+            'updated_at': '2026-11-14T00:00:00Z', 'pushed_at': '2026-11-14T00:00:00Z'}
+    if metadata_refresh:
+        remote.state['metadata']['title'] += ' updated'
+        assert publisher.prepare(diagnosed_retry)['operation'] == operation
+    state = tmp_path/'remote.json'
+    state.write_text(json.dumps(remote.state))
+    request = tmp_path/'request.json'
+    request.write_text(json.dumps(diagnosed_retry))
+    script = '''
+import importlib.util, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    value = importlib.util.module_from_spec(spec); spec.loader.exec_module(value)
+    return value
+publisher = load('fresh_publisher', root/'scripts/publish.py')
+fixture = load('fresh_fixture', root/'tests/pr/fixtures/github_remote.py')
+remote = fixture.Remote(json.loads(Path(sys.argv[2]).read_text()))
+for key in ('metadata', 'api', 'run'): setattr(publisher, key, getattr(remote, key))
+request = json.loads(Path(sys.argv[3]).read_text())
+original = Path(sys.argv[4]).read_bytes()
+prepared = publisher.prepare(request)
+assert prepared['operation'] == sys.argv[4]
+assert len(prepared.get('preparations', [])) == int(sys.argv[5])
+assert Path(sys.argv[4]).read_bytes() == original
+assert publisher.publish(prepared['operation'])['status'] == 'verified'
+assert remote.state['writes'] == {'ci-rerun': 1}
+'''
+    result = subprocess.run([sys.executable, '-c', script, str(ROOT), str(state), str(request), operation,
+        str(int(metadata_refresh))],
+        env={**os.environ, 'PYTHONPATH': str(ROOT/'runtime')}, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+
+
+def test_changed_head_gets_own_allowance_but_same_explicit_request_does_not_expand(remote):
+    request = {**fixture.request('ci-rerun'), 'automatic_limit': 0,
+        'user_retry': {'request_id': 'user-turn-23', 'authorization': 'Retry this run once',
+                       'source': 'conversation:user-turn-23'}}
+    publisher.publish(publisher.prepare(request)['operation'])
+    remote.state['metadata']['headRefOid'] = 'c'*40
+    remote.state['run'].update(head_sha='c'*40, run_attempt=3, status='completed', conclusion='failure')
+    with pytest.raises(ValueError, match='different exact attempt'):
+        publisher.prepare({**request, 'head': 'c'*40, 'attempt': 3})
+    automatic = {key: value for key, value in request.items() if key != 'user_retry'}
+    operation = publisher.prepare({**automatic, 'head': 'c'*40, 'attempt': 3,
+                                   'automatic_limit': 1})['operation']
+    publisher.publish(operation)
+    assert remote.state['writes']['ci-rerun'] == 2
+
+
+@pytest.mark.parametrize('extra', [{'automatic_limit': -1}, {'automatic_limit': True},
+    {'automatic_limit': 4}, {'user_retry': {}}, {'user_retry': {'request_id': 'unbound'}}])
+def test_rerun_authorization_options_are_validated_before_reserving(remote, extra):
+    with pytest.raises(ValueError):
+        publisher.prepare({**fixture.request('ci-rerun'), **extra})
+    assert remote.state['writes'] == {}
+
+
 def test_thread_answer_is_verified_and_paginated(remote):
     request=fixture.request('resolve-thread')
     remote.state['thread']['comments']=[{'id':str(i),'databaseId':i+1000,'body':'context','author':{'login':'reviewer'},'url':'url'} for i in range(102)]+remote.state['thread']['comments']

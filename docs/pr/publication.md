@@ -147,7 +147,7 @@ Other actions use the same commands and journal. Requests include canonical `pr`
 | kind | Additional request fields | Fresh validation and receipt |
 | --- | --- | --- |
 | ci-approve | base, run_id, attempt, evidence | Require [current incoming-review evidence](ci-approval.md) and the exact fork gate. Recheck before dispatch; observe execution permission for the same attempt. Never resend uncertain writes. |
-| ci-rerun | run_id, attempt, reason | Require the current completed failed attempt at this head. Rerun only failed jobs. Observe exactly attempt + 1. |
+| ci-rerun | run_id, attempt, reason; optional automatic_limit and user_retry | Require the current completed failed attempt at this head. Rerun only failed jobs. Observe exactly attempt + 1. Existing intents reserve bounded automatic slots; explicit user retries bind one exact attempt. |
 | resolve-thread | thread_id, reply_id | Read every thread page. Require this PR and head and your verified posted answer. Observe resolved state and unchanged answer. |
 | request-review | reviewers, team_reviewers | Use login and team-slug arrays with at least one entry. Observe the requested set. Already satisfied requests send nothing. |
 | create-draft-pr | head_branch, branch_sha, base_branch, base_sha, title, body | Require unchanged candidate and default target refs, and no PR for the branch. Observe exactly one matching draft by the actor and its full payload. |
@@ -168,7 +168,7 @@ Example CI rerun request:
 {"kind":"ci-rerun","pr":"https://github.com/owner/repo/pull/7","head":"FULL_HEAD_SHA","run_id":123,"attempt":1,"reason":"Verified transient infrastructure failure"}
 ```
 
-Reserve the caller's rerun budget before publication. Pass the verified operation to `ci_wait.py --rerun-operation FILE`. It opens one new attempt window and preserves it on resume. A lost response, delayed or advanced attempt, or ambiguous receipt permits read-only reconciliation only. Do not send again. [GitHub's failed-job endpoint](https://docs.github.com/en/rest/actions/workflow-runs#re-run-failed-jobs-from-a-workflow-run) reruns only failed jobs and dependencies.
+Follow [CI recovery](../ci-recovery.md) for native diagnosis, multiple failed workflows and bounded explicit user retries. Preserve the caller's rerun budget; publication also reserves automatic slots from existing intents. Pass the verified operation to `ci_wait.py --rerun-operation FILE`. It opens one new attempt window and preserves it on resume. A lost response, delayed or advanced attempt, or ambiguous receipt permits read-only reconciliation only. Do not send again. [GitHub's failed-job endpoint](https://docs.github.com/en/rest/actions/workflow-runs#re-run-failed-jobs-from-a-workflow-run) reruns only failed jobs and dependencies.
 
 For a new branch, use `kind:push`, `create_branch:true` and `expected_head:null`. The lease requires the remote branch to be absent, preventing overwrites. Capture and verify the candidate tree as for an existing branch.
 
