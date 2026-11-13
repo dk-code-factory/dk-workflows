@@ -59,12 +59,12 @@ def identity(repository, pr):
 
 def make_spec(*, repository, pr, skill_identity, resources, responsibility,
               assigned_instructions, instructions, inputs, options, git=None,
-              governing_inputs_complete=False, cacheable=None, native_review=None):
-    """Build an ordinary task spec from explicit inputs, without capturing them.
+              governing_inputs_complete=False, cacheable=None, native_review=None, instruction_policy=None):
+    """Build a task spec and bind any adopted repository instruction sources.
 
-    Callers supply the complete governing resource/input maps. Generation does
-    not discover resources, resolve Git refs, or add invocation/progress data.
-    The normal command boundaries still capture and validate live resources.
+    Callers supply the complete governing resource/input maps. Apart from the
+    instruction policy binding, generation does not capture those resources or
+    resolve Git refs. Command boundaries still validate all live inputs.
     """
     subject = identity(repository, pr)
     invocation.skill_name(skill_identity)
@@ -116,6 +116,13 @@ def make_spec(*, repository, pr, skill_identity, resources, responsibility,
     if native_review is not None:
         from native_review import contract
         spec['native_review'] = deepcopy(contract(native_review))
+    import instruction_sources
+    checkout = git['checkout'] if git is not None else (instruction_policy or {}).get('checkout', Path.cwd())
+    live_policy = instruction_sources.binding(checkout, subject['repository'])
+    if instruction_policy is not None and instruction_policy != live_policy:
+        raise ValueError('Repository instruction choice or sources changed; rebuild assignment and handoff')
+    if live_policy is not None:
+        spec['instruction_policy'] = live_policy
     digest(spec)  # Reject values that cannot survive the JSON task-spec contract.
     return spec
 
@@ -428,6 +435,15 @@ class _CaptureContext:
 
 
 def capture(spec, *, _context=None):
+    import instruction_sources
+    policy = spec.get('instruction_policy')
+    checkout = spec.get('git', {}).get('checkout', policy['checkout'] if policy else Path.cwd())
+    live_policy = instruction_sources.binding(checkout, spec['repository'])
+    if policy != live_policy:
+        raise ValueError('Repository instruction choice or sources changed; rebuild assignment and handoff')
+    if policy is not None:
+        instruction_sources.check_paths(checkout, spec['repository'], [
+            *spec.get('instructions', {}).values(), *spec.get('inputs', {}).values()])
     if 'skill_options_configuration' in spec:
         from skill_config import check_options
         check_options(spec)
@@ -470,6 +486,8 @@ def capture(spec, *, _context=None):
         'identity': skill['identity'], 'resources': resources}, 'instructions': governing,
         'inputs': inputs, 'options': {key: value for key, value in spec.get('options', {}).items()
                                       if key != 'hook_phase'}}
+    if policy is not None:
+        fingerprint_inputs['instruction_policy'] = policy['fingerprint']
     if 'native_review' in spec:
         from native_review import contract
         fingerprint_inputs['native_review'] = deepcopy(contract(spec['native_review']))

@@ -11,7 +11,7 @@ from shared.storage_paths import location
 
 
 DOMAINS = ('rules', 'drafting', 'completion', 'commit-policy')
-SECTIONS = ('workflow', *DOMAINS, 'pr-size', 'ci-exceptions', 'pr-partition', 'preferences')
+SECTIONS = ('workflow', *DOMAINS, 'pr-size', 'ci-exceptions', 'pr-partition', 'preferences', 'instruction-sources')
 
 
 def domain_path(domain, key):
@@ -68,6 +68,9 @@ def load_sections(repository, *, checkout='.', pr=None, upstream=None, sections=
     for section in sections:
         if section == 'workflow':
             result[section] = config.effective(repository, upstream)
+        elif section == 'instruction-sources':
+            import instruction_sources
+            result[section] = instruction_sources.inspect(checkout, repository)
         elif section in DOMAINS:
             result[section] = domain_load(section, chain)
         elif section == 'pr-size':

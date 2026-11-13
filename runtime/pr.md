@@ -1,5 +1,7 @@
 # Route a PR
 
+Before repository guidance reads, follow [repository instruction sources](../docs/instruction-sources.md). Reuse the saved source choice, or initialize it through `dk-workflows:dk-config`; pass only selected source references as current rules, retaining excluded historical material as evidence. Refresh affected guidance and analysis when that choice changes.
+
 Read `dk-workflows:dk-pr-iter` through [skill-owned configuration](../docs/skill-configuration.md). `personal_accounts` uses verified host-scoped numeric IDs. `routes.own_pr` and `routes.other_pr` are fully qualified invocation objects with optional additional instructions, native controls and skill options. Pass invocation-local `--options FILE` to the router when supplied. Legacy process route names remain supported for existing saved records.
 
 When effective configuration uses `--upstream HOST/OWNER/REPO`, pass the same option to `pr_route.py`. Otherwise routing reads only user and canonical PR repository settings. The result includes `pr`, `repository`, `head`, `host`, `author`, `actor`, `ownership` (`mine` or `others`), selected `process`, `skill` and complete `invocation`. Its default routes select `pr-fix` and `pr-review`; explicit configured routes select other process names. Resolve the invocation's skill through native tools, preflight requested agent controls and follow the shared [invocation contract](../docs/invocations.md). Identity failures return blocked JSON and exit 2.

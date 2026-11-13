@@ -417,7 +417,7 @@ def make_hook_spec(*, repository, pr, run, cycle, phase, index, definition,
         raise ValueError('Hook specs require a phase and retained run and cycle ids')
     if not isinstance(definition, dict) or set(definition) - {
             'skill_identity', 'resources', 'instructions', 'inputs', 'options', 'git',
-            'governing_inputs_complete', 'cacheable', 'native_review'}:
+            'governing_inputs_complete', 'cacheable', 'native_review', 'instruction_policy'}:
         raise ValueError('Hook definitions supply execution resources and inputs')
     loaded = effective(repository, upstream)
     call = select(loaded['settings'], process, 'hook', index, phase)

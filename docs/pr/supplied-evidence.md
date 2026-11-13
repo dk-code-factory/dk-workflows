@@ -1,5 +1,7 @@
 # Shared PR evidence
 
+Apply [repository instruction sources](../instruction-sources.md) before reading or passing repository guidance. Include only currently selected sources as governing instructions; copied artifacts and cached summaries do not bypass selection. Recapture affected handoffs after a source-choice change, preserving original evidence and unaffected work.
+
 When two or more bundled feedback, Decisions or feedback read tasks share an analysis stage, use one complete handoff collected by the coordinator. Pass its compact receipt to each task. Use its analysis view instead of collecting separate initial snapshots. Tasks at different analysis stages need fresh evidence. Standalone tasks without a handoff collect complete, stable snapshots with `fetch_unresolved_review_threads.py` and `fetch_pr_conversation.py` under `runtime/dk-pr-feedback-address/scripts/`.
 
 ## Collect

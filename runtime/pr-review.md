@@ -1,5 +1,7 @@
 # Review another person's PR
 
+Before repository guidance reads, follow [repository instruction sources](../docs/instruction-sources.md). Reuse the saved source choice, or initialize it through `dk-workflows:dk-config`; pass only selected source references as current rules, retaining excluded historical material as evidence. Refresh affected guidance and analysis when that choice changes.
+
 Follow [private workflow reporting](../docs/private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 
 Read `dk-workflows:dk-pr-review` through [skill-owned configuration](../docs/skill-configuration.md). Its resolved `tasks`, `finalizers`, `limits` and `permissions` govern selected invocations; follow list order and explicit parallel groups. Use `skill-plan` and managed `prepare`/`finish` for these lists. The stages below supply applicability and acceptance rules, not hidden fallback invocations. Preserve evidence when selected work cannot satisfy a mandatory readiness requirement. Skip verification only when complete discovery has no candidates, recording that applicability decision; never claim an unperformed verification pass completed. Place custom work before or after discovery and verification directly in the task list; repeat the selected tasks when a new pass is needed within retained limits.

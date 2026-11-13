@@ -14,6 +14,14 @@ class Tasks:
     def __init__(self, repository, pr, *, checkout=None):
         self.store = Store(repository, pr, checkout=checkout)
 
+    def _retained_policy(self, descriptor):
+        import instruction_sources
+        definition = descriptor['definition']
+        checkout = definition.get('git', {}).get('checkout', definition.get('instruction_policy', {}).get('checkout', Path.cwd()))
+        if ('instruction_policy' not in definition
+                and instruction_sources.binding(checkout, self.store.subject['repository']) is not None):
+            raise ValueError('Legacy repository guidance requires a rebuilt assignment and handoff')
+
     def spec(self, descriptor):
         if (not isinstance(descriptor, dict) or set(descriptor) - {
                 'kind', 'definition', 'run', 'cycle', 'phase', 'index', 'process', 'finalizer', 'upstream',
@@ -74,6 +82,7 @@ class Tasks:
                 if saved is None:
                     raise ValueError('Task has no retained definition')
                 saved = deepcopy(saved)
+                self._retained_policy(saved)
                 if 'git' in item:
                     if (not isinstance(item['git'], dict) or set(item['git']) - {'target', 'base', 'head'}
                             or 'git' not in saved['definition']):
@@ -111,6 +120,9 @@ class Tasks:
         if occurrence and any(request.get(key) for key in ('retry', 'ci_repair', 'ci_rerun')):
             raise ValueError('Occurrence tasks do not reserve reviewer or CI retry budgets')
         specs = [self.spec(item) for item in descriptors]
+        for spec, item in zip(specs, descriptors):
+            if 'instruction_policy' in spec:
+                item['definition']['instruction_policy'] = deepcopy(spec['instruction_policy'])
         for spec in specs:
             if required(spec) and 'native_review' not in spec:
                 raise ValueError('Reviewer tasks require their native execution contract before preparation')
@@ -151,6 +163,7 @@ class Tasks:
         entry = self._entries().get(key, {})
         if 'managed' not in entry:
             raise ValueError('Task has no retained definition')
+        self._retained_policy(entry['managed'])
         return self.spec(entry['managed'])
 
     def resume(self, *, keys=(), run=None, explain=False):
@@ -172,6 +185,7 @@ class Tasks:
                     and descriptor.get('run') != run):
                 continue
             try:
+                self._retained_policy(descriptor)
                 spec = self.spec(descriptor)
                 contracts[key] = checklist_contract(spec, descriptor['definition'])
                 specs.append(spec)

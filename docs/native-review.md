@@ -1,5 +1,7 @@
 # Native reviewer handoffs
 
+Follow [repository instruction sources](instruction-sources.md) before repository guidance reads or handoffs. Use the saved choice, selected original sources and current content; excluded files and stale copied guidance remain evidence rather than active rules. Refresh affected work when selection changes while retaining original results and unaffected siblings.
+
 Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 
 Use the host's native agent tools to invoke selected reviewer skills. A complete review requires successful host execution, a complete skill report, and coordinator-captured host observations establishing the selected skill's required independent passes. Deeper-look commands require successful host observations when available, or exact completion reports in each original child terminal output when command transport is unavailable. Exit success, aggregate `complete:true`, valid findings JSON, and an empty findings list do not establish execution coverage.

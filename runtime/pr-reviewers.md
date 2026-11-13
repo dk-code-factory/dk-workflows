@@ -1,5 +1,7 @@
 # Coordinate PR review
 
+Before repository guidance reads, follow [repository instruction sources](../docs/instruction-sources.md). Reuse the saved source choice, or initialize it through `dk-workflows:dk-config`; pass only selected source references as current rules, retaining excluded historical material as evidence. Refresh affected guidance and analysis when that choice changes.
+
 Follow [private workflow reporting](../docs/private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 
 Resolve `reviewers`, `execution` and `max_parallel` from `dk-workflows:dk-pr-reviewers-run` through [skill-owned configuration](../docs/skill-configuration.md), including invocation-local options from the caller. If none are selected, report that reviewers must be configured. Preserve order, exact prompts and required/optional status. Preflight selected identities, native controls and [required evidence transport](../docs/native-review.md#evidence-capability-preflight) before claiming work or consuming a review cycle. Resolve each installed reviewer’s complete applicable pass/driver contract and require `ready:true`; unavailable or unknown host observation support blocks new review work while preserving retained results, claims and budgets. Legacy process-specific reviewer selection remains supported by compatibility helpers.

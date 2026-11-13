@@ -5,6 +5,8 @@ description: Add, update, list, inspect or remove personal and repository prefer
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
+Before repository guidance reads or handoffs, follow [repository instruction sources](../../../docs/instruction-sources.md). Reuse the saved repository choice or initialize it through `dk-workflows:dk-config` before adoption; preserve host instruction priority.
+
 Persist workflow state only when it reduces total API dollar cost, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
 
 Set PLUGIN_ROOT to this plugin's root directory. Read [the preference contract and commands](../../../docs/preferences.md). Use `scripts/preferences.py` for private catalog access. Existing saved PR rules are separate; do not convert them automatically.
