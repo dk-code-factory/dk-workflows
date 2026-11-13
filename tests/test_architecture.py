@@ -20,6 +20,16 @@ from native_review_observations import CONTRACT, observations, PREFLIGHT_CAPABIL
 from shared import publication
 
 
+LIVE = {}
+REAL_LIVE_PR = arch.live_pr
+
+
+@pytest.fixture(autouse=True)
+def offline_live_architecture(monkeypatch):
+    LIVE.clear()
+    monkeypatch.setattr(arch, 'live_pr', lambda pr: deepcopy(LIVE[pr]))
+
+
 def compared():
     options = []
     for name, kind, rating in [('implemented', 'pr', 90), ('smaller', 'smallest', 70)]:
@@ -136,7 +146,12 @@ def finish(tasks, task, value, *, native=True, handle=None):
 
 
 def complete(tasks, spec, stage, value, deps=None, options=None):
-    task = tasks.prepare({'tasks': [descriptor(spec, stage, deps, options)]})['tasks'][0]
+    d = descriptor(spec, stage, deps, options)
+    if stage == 'impact':
+        metadata = Path(spec['git']['checkout']).parent/'current-pr.json'
+        write(metadata, {**LIVE.get(PR, {'url': PR, 'body': 'Initial PR body'}), 'headRefOid': spec['git']['head']})
+        d['definition']['inputs']['architecture_current_pr'] = str(metadata)
+    task = tasks.prepare({'tasks': [d]})['tasks'][0]
     assert task['action'] == 'invoke'
     assert finish(tasks, task, value)['checklist_complete']
     return task['key']
@@ -166,6 +181,7 @@ def aligned(tasks, spec, refs=None, *, alignment='aligned', dependencies=None):
     c = arch.accepted(tasks, refs['comparison'], historical='impact' in refs)
     body = arch.replace_decision('# Summary\n\nText\n', arch.render_decision(c['report'], c['policy']['scoring'], 'implemented', selection=selection()), heading='Decisions')
     refs['decision_operation'] = verified_journal(tasks, spec, kind='edit-pr', fields={'body': body})
+    LIVE[PR] = {'url': PR, 'headRefOid': spec['git']['head'], 'body': body}
     return refs
 
 
@@ -323,6 +339,7 @@ def test_changed_author_code_uses_targeted_impact_and_current_alignment(case):
     decision_operation = refs['decision_operation']
     refs['alignment'] = complete(tasks, spec, 'alignment', {'alignment': 'aligned', 'reason': 'Current code still uses the selected state owner', 'evidence': ['code:1']}, {k: refs[k] for k in ('comparison', 'selection', 'impact')})
     refs['decision_operation'] = decision_operation
+    LIVE[PR]['headRefOid'] = spec['git']['head']
     assert arch.gate(tasks, refs)['outcome'] == 'aligned'
     assert Path(reference).read_bytes() == original
     assert len(read(store.manifest)['entries'][refs['comparison']]['attempts']) == 1
@@ -513,3 +530,105 @@ def test_mismatch_verification_must_use_a_different_native_agent(case):
     refs['verification'] = task['key']
     with pytest.raises(ValueError, match='independent native agent'):
         arch.gate(tasks, refs)
+
+
+@pytest.mark.parametrize('indent', [' ', '  ', '   '])
+@pytest.mark.parametrize('spacing,closing', [(' ', ''), ('\t', ' ###')])
+def test_indented_sibling_heading_preserves_unrelated_decision(indent, spacing, closing):
+    other = indent + '###' + spacing + 'Other decisions' + closing + '\nKeep unrelated.\n\n'
+    tests = indent + '##' + spacing + 'Tests' + closing + '\nKeep tests.\n'
+    body = '## Decisions\n\n### Architecture decisions\n\nOld architecture.\n\n' + other + tests
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert updated.endswith(other + tests)
+    assert 'Old architecture.' not in updated
+    assert arch.replace_decision(updated, 'Chosen approach: new') == updated
+
+
+@pytest.mark.parametrize('opener,closer', [('<div>', '</div>'), ('<table><tr><td>', '</td></tr></table>'),
+                                         ('<div\tclass="example">', '</div>'), ('<pre\tclass="example">', '</pre>'),
+                                         ('<custom-tag>', '</custom-tag>'), ('<?processing', '?>'),
+                                         ('<![CDATA[', ']]>'), ('<!DECLARATION', '>')])
+def test_raw_html_blocks_preserve_apparent_decisions(opener, closer):
+    example = opener + '\n## Decisions\n### Architecture decisions\nExample text.\n' + closer + '\n\n'
+    body = example + '## Tests\nKeep.\n'
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert updated.startswith(body)
+    assert arch.replace_decision(updated, 'Chosen approach: new') == updated
+    body = '## Decisions\n\n' + example + '### Other\nKeep this choice.\n\n## Tests\nKeep.\n'
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert example in updated and '### Other\nKeep this choice.' in updated
+
+
+def test_historical_receipt_cannot_release_after_decision_is_removed(case):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = aligned(tasks, spec)
+    LIVE[PR]['body'] = 'Author removed Architecture decisions.\n'
+    Path(spec['inputs']['context']).write_text('Current discussion: same design; author removed public decision')
+    refs['assessment'] = complete(tasks, spec, 'assessment', {'required': True, 'reason': 'Same state boundary', 'evidence': ['discussion']})
+    refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'No solution changes; public decision was removed', 'evidence': ['discussion']}, {'comparison': refs['comparison']})
+    refs['selection'] = complete(tasks, spec, 'selection', selection(), {k: refs[k] for k in ('comparison', 'impact')})
+    refs['alignment'] = complete(tasks, spec, 'alignment', {'alignment': 'aligned', 'reason': 'Same state owner', 'evidence': ['code']}, {k: refs[k] for k in ('comparison', 'selection', 'impact')})
+    assert arch.gate(tasks, refs) == {'outcome': 'publication_required', 'release_reviewers': False}
+    with pytest.raises(ValueError, match='publication_required'):
+        tasks.prepare({'tasks': [ordinary(spec, refs)]})
+
+
+def test_unrelated_external_body_change_needs_current_impact_but_reuses_receipt(case):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = aligned(tasks, spec)
+    operation = refs['decision_operation']
+    LIVE[PR]['body'] = 'Updated description.\n\n' + LIVE[PR]['body']
+    assert arch.gate(tasks, refs)['outcome'] == 'impact_required'
+    Path(spec['inputs']['context']).write_text('Current discussion: typo in unrelated description fixed')
+    refs['assessment'] = complete(tasks, spec, 'assessment', {'required': True, 'reason': 'Same architecture', 'evidence': ['discussion']})
+    refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'Only unrelated description typo', 'evidence': ['discussion']}, {'comparison': refs['comparison']})
+    refs['selection'] = complete(tasks, spec, 'selection', selection(), {k: refs[k] for k in ('comparison', 'impact')})
+    refs['alignment'] = complete(tasks, spec, 'alignment', {'alignment': 'aligned', 'reason': 'Same implementation', 'evidence': ['code']}, {k: refs[k] for k in ('comparison', 'selection', 'impact')})
+    assert arch.gate(tasks, refs)['outcome'] == 'aligned'
+    assert refs['decision_operation'] == operation
+    LIVE[PR]['body'] = 'Another external edit.\n\n' + LIVE[PR]['body']
+    assert arch.gate(tasks, refs)['outcome'] == 'impact_required'
+
+
+def test_live_head_change_blocks_completed_alignment(case):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = aligned(tasks, spec)
+    LIVE[PR]['headRefOid'] = 'a'*40
+    with pytest.raises(ValueError, match='head changed'):
+        arch.gate(tasks, refs)
+
+
+@pytest.mark.parametrize('failure', ['timeout', 'identity', 'missing-body', 'malformed'])
+def test_live_publication_read_fails_closed_without_authenticated_calls(monkeypatch, failure):
+    from shared import github_reads
+    value = {'url': PR, 'body': 'Published decision', 'headRefOid': 'a'*40}
+    if failure == 'identity': value['url'] = PR + '0'
+    if failure == 'missing-body': value.pop('body')
+    def run(argv, **kwargs):
+        assert argv == ['gh', 'pr', 'view', PR, '--json', 'url,headRefOid,body']
+        assert kwargs['timeout'] == 60 and kwargs['check']
+        if failure == 'timeout': raise subprocess.TimeoutExpired(argv, 60)
+        output = '{invalid' if failure == 'malformed' else json.dumps(value)
+        return subprocess.CompletedProcess(argv, 0, stdout=output)
+    monkeypatch.setattr(github_reads, 'run', run)
+    with pytest.raises(ValueError):
+        REAL_LIVE_PR(PR)
+
+
+@pytest.mark.parametrize('underline', ['=======', '-------'])
+def test_setext_section_boundary_preserves_unrelated_pr_text(underline):
+    other = 'Other section\n' + underline + '\n\nKeep unrelated.\n'
+    body = '## Decisions\n\n### Architecture decisions\n\nOld design.\n\n' + other
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert updated.endswith(other)
+    assert 'Old design.' not in updated
+    assert arch.replace_decision(updated, 'Chosen approach: new') == updated
+
+
+def test_crlf_headings_preserve_existing_unrelated_sections():
+    body = '# Summary\r\n\r\nKeep.\r\n\r\n## Decisions\r\n\r\n### Architecture decisions\r\n\r\nOld.\r\n\r\n### Other\r\nKeep this.\r\n\r\n## Tests\r\nKeep tests.\r\n'
+    updated = arch.replace_decision(body, 'Chosen approach: new')
+    assert updated.startswith('# Summary\r\n\r\nKeep.\r\n\r\n## Decisions\r\n')
+    assert updated.endswith('### Other\r\nKeep this.\r\n\r\n## Tests\r\nKeep tests.\r\n')
+    assert 'Old.' not in updated
+    assert arch.replace_decision(updated, 'Chosen approach: new') == updated

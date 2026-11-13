@@ -45,7 +45,7 @@ Stages run in this order:
 4. Publish the settled typed `architecture` decision using the existing Decisions
    publisher and journal. This permission covers only Architecture decisions
    under the configured Decisions heading. Preserve other decisions and PR text. Bounded edits exclude fenced/HTML
-   examples and reject an unfinished example; unchanged insertion is idempotent.
+   examples and recognize indented ATX sibling boundaries; reject an unfinished example; unchanged insertion is idempotent.
    The restricted journal may contain only a body edit, never a title edit.
 5. `alignment`: depends on comparison and selection. Compare the current pinned
    implementation; return `alignment:aligned|mismatch|uncertain`, `reason`,
@@ -140,11 +140,17 @@ The helper returns `decision_type:architecture`; decision entries distinguish
 these from scope/behavior decisions. Publish chosen approach, rationale,
 considered alternatives, scores and rejection reasons. Keep full comparison
 reports, workflow handles, receipts and blockers private. Gate verification checks
-the exact bounded transformation and the reconciled receipt. Reuse journal paths
+the exact bounded transformation and the reconciled receipt, then reads the
+live PR head and current selected subsection. Removal or changes block reviewer
+release pending publication. An unrelated body edit preserves an intact decision
+only after current nonmaterial impact bound to that metadata evidence; later
+external edits require assessment again. Reuse journal paths
 for read-only recovery and duplicate prevention.
 
 After a change, prepare `impact` against the retained comparison and current
-sources. Only evidence-backed `impact:nonmaterial` permits historical alternatives
+sources. Supply `definition.inputs.architecture_current_pr` as a reference to the existing
+current PR metadata evidence (including `body` and `headRefOid`); no second body
+snapshot is needed. Only evidence-backed `impact:nonmaterial` permits historical alternatives
 reuse; material or uncertain impact requires refreshed affected analysis. Include
 `impact` as a dependency of new selection/alignment tasks and in gate refs.
 Selection/alignment still use the original immutable comparison reference.
@@ -157,6 +163,8 @@ still require current impact assessment. Use `architecture.py governing-body --b
 that exact self-produced body deterministically. Capture normalized governing context
 without the recognized self-produced subsection; retain the live body as a
 publication input, not a copied analysis snapshot.
+
+The bounded editor follows [CommonMark heading and HTML block boundaries](https://spec.commonmark.org/0.31.2/#html-blocks), conservatively treating complete unknown HTML tags as opaque blocks.
 
 Offline acceptance establishes reuse, invalidation and recovery behavior. Native
 API dollar savings remain unmeasured; see the [design](../DESIGN.md#incoming-architecture-gate).

@@ -606,7 +606,12 @@ normal review handoff includes the settled decision as governing context.
 Decision edits use the existing exact-body publication journal, constrained to
 Architecture decisions under the configured Decisions heading. Recognize the
 workflow's own edit only by its reconciled journal's exact before/after body;
-external text edits still require impact assessment. Public text contains design
+external text edits still require impact assessment. The gate reads the live
+PR head and selected decision subsection before releasing reviewers; a historical
+receipt alone cannot establish that the decision remains published. Unrelated
+body edits require impact bound to the existing current PR metadata source.
+Code-only head updates preserve the receipt when the selected
+subsection remains exact and current analysis/alignment are accepted. Public text contains design
 reasoning and rejected alternatives, never private comparisons, handles or task
 state. Analysis-only and denied decision permission leave publication incomplete
 and private; disabled architecture bypasses all stages and new writes without

@@ -7,6 +7,7 @@ import json
 from copy import deepcopy
 from decimal import Decimal
 import re
+import subprocess
 from pathlib import Path
 
 from state import make_spec, read
@@ -281,6 +282,10 @@ def stage_spec(tasks, descriptor, definition):
     if stage == 'verification' and retained['alignment']['report']['alignment'] != 'mismatch':
         raise ValueError('Only material mismatches require independent verification')
     execution = deepcopy(definition)
+    if stage == 'impact':
+        source = execution.get('inputs', {}).get('architecture_current_pr')
+        if not source or not isinstance(read(source).get('body'), str):
+            raise ValueError('Impact requires the existing current PR metadata input architecture_current_pr')
     if 'git' not in execution:
         raise ValueError('Architecture stages require pinned Git inputs')
     if 'native_review' not in execution:
@@ -334,6 +339,22 @@ def journal(path, tasks, *, kind, head):
         raise ValueError('Architecture publication needs a reconciled receipt for this PR/head')
     return value
 
+
+
+def live_pr(pr):
+    """Current publication boundary, never a retained readiness cache."""
+    from shared.github_reads import run
+    try:
+        result = run(['gh', 'pr', 'view', pr, '--json', 'url,headRefOid,body'],
+                     capture_output=True, text=True, check=True, timeout=60)
+        value = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        raise ValueError('Live architecture publication evidence is unavailable') from exc
+    if (not isinstance(value, dict) or value.get('url', '').lower() != pr.lower()
+            or not isinstance(value.get('body'), str)
+            or not isinstance(value.get('headRefOid'), str)):
+        raise ValueError('Live architecture publication identity is incomplete')
+    return value
 
 def gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
     loaded = skill_config.effective(OWNER, tasks.store.subject['repository'], upstream, options=options)['options']
@@ -395,6 +416,19 @@ def gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
     heading = skill_config.effective('dk-workflows:dk-pr-decisions', tasks.store.subject['repository'], upstream)['options']['section_heading']
     if body != replace_decision(before, rendered, heading=heading):
         raise ValueError('Architecture publication changed unrelated PR text or lacks the settled decision')
+    live = live_pr(tasks.store.subject['pr'])
+    if live['headRefOid'] != head:
+        raise ValueError('PR head changed after architecture alignment')
+    current_section = decision_section(live['body'], heading)
+    bounds = architecture_bounds(live['body'], current_section) if current_section else None
+    if not bounds or live['body'][bounds[0]:bounds[1]].strip('\r\n') != rendered:
+        return {'outcome': 'publication_required', 'release_reviewers': False}
+    if live['body'] != body:
+        if impact is None:
+            return {'outcome': 'impact_required', 'release_reviewers': False}
+        current_pr = read(impact['spec']['inputs']['architecture_current_pr'])
+        if current_pr['body'] != live['body'] or current_pr.get('headRefOid') != head:
+            return {'outcome': 'impact_required', 'release_reviewers': False}
     result = alignment['report']['alignment']
     if result == 'aligned':
         return {'outcome': 'aligned', 'release_reviewers': True, 'decision': rendered,
@@ -421,64 +455,97 @@ def gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
     return {'outcome': 'alignment_blocked', 'release_reviewers': False}
 
 
+# CommonMark HTML block starts; this scanner only locates safe edit boundaries.
+HTML_BLOCK_TAGS = (
+    'address article aside base basefont blockquote body caption center col colgroup dd details '
+    'dialog dir div dl dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 '
+    'head header hr html iframe legend li link main menu menuitem nav noframes ol optgroup option '
+    'p param search section summary table tbody td tfoot th thead title tr track ul'
+).split()
+
+
+def html_end(line):
+    """Return the raw-block terminator, or None for ordinary Markdown."""
+    if re.match(r' {0,3}<(?:pre|script|style|textarea)(?:[ \t>]|$)', line, re.I):
+        return re.compile(r'</(?:pre|script|style|textarea)>', re.I)
+    for start, end in [('<!--', '-->'), ('<?', '?>'), ('<![CDATA[', ']]>')]:
+        if re.match(r' {0,3}' + re.escape(start), line):
+            return re.compile(re.escape(end))
+    if re.match(r' {0,3}<![A-Za-z]', line):
+        return re.compile('>')
+    if re.match(r' {0,3}</?(?:' + '|'.join(HTML_BLOCK_TAGS) + r')(?:[ \t>]|/>|$)', line, re.I):
+        return 'blank'
+    # Unknown complete tags are conservatively kept opaque until a blank line.
+    # This also avoids guessing at attribute grammar in user-supplied HTML.
+    if re.fullmatch(r' {0,3}</?[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[^<>]*)?/?>[ \t]*', line):
+        return 'blank'
+    return None
+
+
 def heading_view(body):
     """Mask Markdown examples without moving document character offsets."""
     masked, fence, raw = [], None, None
     for line in body.splitlines(keepends=True):
         stripped = line.rstrip('\r\n')
         if raw is not None:
-            end = ('-->' if raw == 'comment' else '</' + raw + '>')
-            if end in line.lower():
+            ended = not stripped.strip() if raw == 'blank' else raw.search(stripped)
+            if ended:
                 raw = None
         elif fence is not None:
             if re.fullmatch(r' {0,3}' + re.escape(fence[0]) + '{' + str(fence[1]) + r',}[ \t]*', stripped):
                 fence = None
         else:
             opening = re.match(r' {0,3}(`{3,}|~{3,})(.*)$', stripped)
-            html = re.match(r' {0,3}(<!--|<(pre|script|style|textarea)(?:[ >]))', stripped, re.I)
             if opening and (opening[1][0] != '`' or '`' not in opening[2]):
                 fence = (opening[1][0], len(opening[1]))
-            elif html:
-                tag = 'comment' if html[1] == '<!--' else html[2].lower()
-                end = '-->' if tag == 'comment' else '</' + tag + '>'
-                raw = None if end in stripped.lower() else tag
             else:
-                masked.append(line)
-                continue
+                raw = html_end(stripped)
+                if raw is None:
+                    masked.append(line)
+                    continue
+                if raw != 'blank' and raw.search(stripped):
+                    raw = None
         masked.append(''.join(c if c in '\r\n' else ' ' for c in line))
-    if fence is not None or raw is not None:
+    if fence is not None or raw not in (None, 'blank'):
         raise ValueError('Unclosed Markdown example blocks a bounded Decisions edit')
     return ''.join(masked)
+
+
+def next_section(view, start, level):
+    """Recognize ATX and Setext boundaries without consuming sibling content."""
+    candidates = [m.start() for m in re.finditer(
+        r'(?m)^ {0,3}#{1,' + str(level) + r'}(?:[ \t]|$)', view[start:])]
+    for match in re.finditer(r'(?m)^ {0,3}[^ \t\r\n][^\r\n]*\r?\n {0,3}(=+|-+)[ \t]*(?=\r?$)', view[start:]):
+        if (1 if match[1][0] == '=' else 2) <= level:
+            candidates.append(match.start())
+    return start + min(candidates) if candidates else len(view)
 
 
 def decision_section(body, heading):
     """Locate the configured real heading, excluding fenced/HTML examples."""
     title = heading.strip().lstrip('#').strip()
     view = heading_view(body)
-    matches = list(re.finditer(r'(?m)^(#{1,6}) ' + re.escape(title) + r'[ \t]*$', view))
+    matches = list(re.finditer(r'(?m)^ {0,3}(#{1,6})[ \t]+' + re.escape(title) + r'(?:[ \t]+#+)?[ \t]*(?=\r?$)', view))
     if len(matches) > 1:
         raise ValueError('Ambiguous Decisions heading')
     if not matches:
         return None
     start = matches[0]
     level = len(start[1])
-    tail = re.search(r'(?m)^#{1,' + str(level) + r'} ', view[start.end():])
-    end = start.end() + tail.start() if tail else len(body)
+    end = next_section(view, start.end(), level)
     return start, end, level
 
 
 def architecture_bounds(body, section):
     start, end, level = section
-    marker = '#' * (level + 1) + ' Architecture decisions'
     view = heading_view(body)[start.end():end]
-    matches = list(re.finditer(r'(?m)^' + re.escape(marker) + r'[ \t]*$', view))
+    matches = list(re.finditer(r'(?m)^ {0,3}#{' + str(level + 1) + r'}[ \t]+Architecture[ \t]+decisions(?:[ \t]+#+)?[ \t]*(?=\r?$)', view))
     if len(matches) > 1:
         raise ValueError('Ambiguous Architecture decisions subsection')
     if not matches:
         return None
     existing = matches[0]
-    tail = re.search(r'(?m)^#{1,' + str(level + 1) + r'} ', view[existing.end():])
-    stop = existing.end() + tail.start() if tail else len(view)
+    stop = next_section(view, existing.end(), level + 1)
     return start.end() + existing.end(), start.end() + stop
 
 
