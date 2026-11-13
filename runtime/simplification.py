@@ -55,6 +55,9 @@ def runner_configuration(workflow, repository, upstream=None):
     loaded = skill_config.effective(RUNNER, repository, upstream, options=call.get('options'))
     loaded['workflow_limits'] = owner['options']['limits']
     loaded['workflow_permissions'] = owner['options']['permissions']
+    # Parent prompts and native controls govern all leaves; reviewer lists and
+    # scheduling remain leaf-local so unrelated siblings keep their results.
+    loaded['workflow_assignment'] = {key: deepcopy(call[key]) for key in ('instructions', 'agent') if key in call}
     return compose(loaded, owner['options']['simplification'])
 
 

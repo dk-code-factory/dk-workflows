@@ -700,3 +700,12 @@ edits; optional surrounding edits must be directly necessary for this PR. Every
 cycle stays anchored to supplied PR changes, preventing cumulative broad cleanup.
 Simplification cannot replace ordinary coverage, publication permission or live
 readiness checks.
+
+The workflow selector also resolves the owning runner prompt and native controls.
+Append that prompt directly to each prepared leaf assignment and bind a digest of
+those governing fields in existing task options. Keep no duplicate prompt or
+settings snapshot in the retained definition. Fresh-session recapture rejects
+changed parent instructions/controls at reuse and completion, avoiding stale
+coverage and repeated reconstruction. Sibling-list and scheduling changes are
+excluded from that digest so unaffected analysis remains reusable. Workflow-bound
+leaf claims inherit the owning workflow limits and permissions.

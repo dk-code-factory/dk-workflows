@@ -88,3 +88,10 @@ without changing ordinary reviewer identities or completed siblings. Interrupted
 claims, original reports, checklists, native evidence, dispositions and existing
 run/cycle budgets retain their normal lifecycle. No extra task store or allowance
 is introduced. Select the live plan again before assessing completion.
+
+Owning runner instructions reach every leaf directly, alongside the leaf prompt.
+Parent prompt/native-control changes invalidate those leaves through a compact
+governing-assignment digest. Reviewer-list and scheduling edits remain leaf-local;
+policy changes do not invalidate unchanged ordinary reviewer results. Do not copy
+the generated parent prompt into the retained leaf definition. Workflow-bound
+leaf claims use the owning workflow limits and permissions.

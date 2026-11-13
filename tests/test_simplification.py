@@ -200,13 +200,21 @@ def test_live_policy_gate_and_provider_changes_refresh_only_simplification(case)
 def test_interrupted_recovery_preserves_completed_sibling_and_cycle_budget(case):
     spec, _ = case
     save()
+    saved = json.loads(config.path(REPO).read_text())
+    saved['skill_defaults'][RUNNER] = {'options': {'reviewers': ['custom:ordinary']}}
+    write(config.path(REPO), saved)
     tasks = Tasks(REPO, PR)
-    simple = descriptor(spec)
-    launched = tasks.prepare({'run': 'retained', 'cycle': 'c1', 'tasks': [simple]})['tasks'][0]
+    ordinary = descriptor(spec, identity='custom:ordinary')
+    simple = descriptor(spec, index=1)
+    sibling, launched = tasks.prepare({'run': 'retained', 'cycle': 'c1', 'tasks': [ordinary, simple]})['tasks']
+    assert finish(tasks, sibling)['checklist_complete']
+    original = tasks.result(sibling['key'], 'original')
     second_session = Tasks(REPO, PR)
     again = second_session.prepare({'run': 'retained', 'cycle': 'c1', 'tasks': [simple]})['tasks'][0]
     assert again['action'] == 'recover_required'
     assert again['unfinished'] == launched['claim']
+    assert second_session.prepare({'run': 'retained', 'cycle': 'c1', 'tasks': [ordinary]})['tasks'][0]['action'] == 'reuse'
+    assert second_session.result(sibling['key'], 'original') == original
     assert finish(second_session, launched)['checklist_complete']
     assert second_session.prepare({'run': 'retained', 'cycle': 'c1', 'tasks': [simple]})['tasks'][0]['action'] == 'reuse'
     assert tasks.store.status([])['runs']['retained']['cycles'] == ['c1']
@@ -284,3 +292,40 @@ def test_workflow_review_limits_govern_leaf_claims_without_resetting_retained_bu
     with pytest.raises(ValueError, match='cycle'):
         tasks.prepare({'run': 'bounded', 'cycle': 'c2', 'tasks': [descriptor(spec)]})
     assert tasks.store.status([])['runs']['bounded']['cycles'] == ['c1']
+
+
+@pytest.mark.parametrize('field,initial,changed', [
+    ('instructions', 'Review local behavior.', 'Also inspect compatibility callers.'),
+    ('agent', {'model': 'initial'}, {'model': 'changed'}),
+])
+def test_parent_prompt_and_native_controls_invalidate_retained_and_inflight_leaves(case, field, initial, changed):
+    spec, _ = case
+    save()
+    saved = json.loads(config.path(REPO).read_text())
+    runner = saved['skill_defaults'][FIX]['options']['tasks'][0]
+    runner[field] = initial
+    write(config.path(REPO), saved)
+    tasks = Tasks(REPO, PR)
+    request = descriptor(spec)
+    first = tasks.prepare({'run': 'same', 'cycle': 'c1', 'tasks': [request]})['tasks'][0]
+    assert finish(tasks, first)['checklist_complete']
+    original = tasks.result(first['key'], 'original')
+    stale = deepcopy(first['assignment'])
+    runner[field] = changed
+    write(config.path(REPO), saved)
+    with pytest.raises(ValueError, match='changed'):
+        capture(stale)
+    assert not tasks.resume(keys=[first['key']])['tasks'][0]['reusable']
+    second = tasks.prepare({'run': 'same', 'cycle': 'c2', 'tasks': [{'key': first['key']}]})['tasks'][0]
+    assert second['action'] == 'invoke' and second['key'] == first['key']
+    if field == 'instructions':
+        assert changed in second['assignment']['task']['instructions']
+        assert initial not in second['assignment']['task']['instructions']
+    runner[field] = initial
+    write(config.path(REPO), saved)
+    before = tasks.store.manifest.read_bytes()
+    with pytest.raises(ValueError, match='changed'):
+        finish(tasks, second)
+    assert tasks.store.manifest.read_bytes() == before
+    # Prior immutable evidence remains available in the retained original result.
+    assert original['original']

@@ -432,6 +432,10 @@ def make_spec(*, repository, pr, skill, kind, index, definition, upstream=None, 
         configured = compose(configured, owner['options']['simplification'])
     composed = skill in OWNERS and kind == 'tasks' and runner == RUNNER
     assigned = execution.get('assigned_instructions', '')
+    parent = owner.get('workflow_assignment', {})
+    if 'instructions' in parent:
+        assigned = invocation.additional_instructions(assigned, parent['instructions'])
+        execution['assigned_instructions'] = assigned
     if 'instructions' in call:
         execution['assigned_instructions'] = invocation.additional_instructions(assigned, call['instructions'])
     if kind == 'reviewers':
@@ -481,6 +485,8 @@ def make_spec(*, repository, pr, skill, kind, index, definition, upstream=None, 
                             'process_permissions': owner.get('workflow_permissions', owner['options'].get('permissions', {}))}
     if skill in OWNERS and kind == 'tasks' and runner == RUNNER:
         execution['options']['workflow'] = {'skill': skill, 'index': index, 'options': options or {}}
+    if workflow is not None:
+        execution['options']['workflow_assignment'] = digest(parent)
     spec = task_spec(repository=repository, pr=pr, **execution)
     if skill == 'dk-workflows:dk-pr-review':
         from architecture import enforce
@@ -496,6 +502,7 @@ def make_spec(*, repository, pr, skill, kind, index, definition, upstream=None, 
 
 def check_selection(spec):
     import invocation
+    from state import digest
     selection = spec.get('skill_configuration')
     if selection is None:
         return
@@ -517,6 +524,8 @@ def check_selection(spec):
         from architecture import enforce
         enforce(spec, selection['repository'], spec['pr'], options=selection['options'], upstream=selection['upstream'])
     if (call != spec['options'].get('invocation') or actual != spec['options'].get('configured')
+            or selection.get('workflow') is not None
+            and digest(owner['workflow_assignment']) != spec['options'].get('workflow_assignment')
             or owner.get('workflow_limits', owner['options'].get('limits', {})) != selection['owner_limits']
             or owner.get('workflow_permissions', owner['options'].get('permissions', {})) != selection['owner_permissions']):
         raise ValueError('Inputs changed: skill configuration, assignment or policy changed')
