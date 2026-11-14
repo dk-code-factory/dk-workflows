@@ -847,3 +847,41 @@ current scope, exclusions, HEAD, index and worktree content; live changes requir
 fresh assessment and affected review coverage. Offline Git tests establish capture
 and preservation behavior, not native API dollar savings; cost evidence is
 unavailable.
+
+## Historical finding follow-ups
+
+Complete discussion and retained original findings feed discovery and independent
+current-head verification even when a report already exists. Native agents group
+equivalent requests per finding, distinguish substantive requests from formatting
+edits, choose the latest request and preserve fixed/rejected/uncertain and explicit
+accepted/deferred dispositions. Age governs reminders only; unresolved findings
+retain their ordinary approval/CI/merge gates and posting permissions remain live.
+
+The read-only follow-up helper verifies existing complete evidence, captures a
+stable paginated PR commit list with its total and constructs source routes and
+reply payloads. Review commit IDs or native-validated source-head links supply
+anchors; unsupported or rewritten latest anchors stay uncertain. Beyond the REST
+250-commit cap, full local objects supplement the capped list: pin the captured
+head and live target tip, require count/list agreement, prove anchor ancestry and
+exclude target-only commits. Changed pins, shallow/missing objects or incomplete
+GitHub evidence require restoration and recapture. Timestamps never substitute
+for PR membership. Formatting-only bot edits require semantic reassessment of the
+changed discussion, while retaining each unchanged finding's original anchor.
+
+Inspection returns compact source and publication references; native decisions
+stay in existing original task results. Planning recaptures discussion, commits
+and original intents and checks its transient input fingerprint. Existing
+verified equivalent replies suppress recent reminders even during discussion
+visibility lag; pending or undispatched equivalent intents require their existing
+recovery rather than regenerated wording. The publisher retains original source,
+root parent, payload, head, receipts and uncertain-write reconciliation.
+
+No durable follow-up registry, commit-list cache, copied result, rendered plan or
+new counter is admitted. Existing fingerprints, budgets, original results and
+completed siblings retain their lifecycle. Reusing valid original analysis and
+publication evidence avoids repeated semantic discovery and duplicate uncertain
+writes in a fresh session without a new state's creation, validation, loading or
+explanation cost. Freshness ends at changed governing instructions, relevant code,
+discussion, request meaning, source pins or publication evidence; only affected
+work refreshes. Offline call counts and reuse tests are proxies; native API dollar
+savings across current and subsequent sessions have not been measured.
