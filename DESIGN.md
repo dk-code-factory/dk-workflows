@@ -785,3 +785,30 @@ changed parent instructions/controls at reuse and completion, avoiding stale
 coverage and repeated reconstruction. Sibling-list and scheduling changes are
 excluded from that digest so unaffected analysis remains reusable. Workflow-bound
 leaf claims inherit the owning workflow limits and permissions.
+
+## Local commit preparation
+
+Direct commit/message preparation and PR fix/finalization share one semantic
+scope assessment before commit cleanup. A read-only helper captures HEAD, staged
+and unstaged patches and untracked paths without interpreting relevance, writing
+Git state or retaining an inventory. Capture disables filesystem-monitor hooks
+and configured clean/process filters, including initialized submodules, so Git
+inspection cannot populate filter-managed caches. Content patches disable external
+diff/textconv; submodules always use short gitlink summaries to avoid child diffs
+that re-enable those drivers. Submodule paths, revisions and dirty markers stay
+visible; initialized submodule content can be captured separately with the same
+helper. It reports bypassed driver names alongside the evidence: staged content
+stays index-normalized while the worktree comparison bypasses external
+normalization. Such differences still need native assessment; capture neither hides candidate edits nor runs filters to
+resolve them. Native assessment includes suitable existing edits under current
+commit authorization and preserves unrelated/excluded hunks
+and their staging state. Commit, rewrite and push permissions stay separate;
+cleanup retains its clean-worktree and reviewed-tree guards.
+
+No durable state, cache keys or result schemas change. Managed callers use their
+existing result for scope evidence, avoiding a second selection protocol and
+reconstruction of omitted relevant edits on a later run. Reuse remains bounded by
+current scope, exclusions, HEAD, index and worktree content; live changes require
+fresh assessment and affected review coverage. Offline Git tests establish capture
+and preservation behavior, not native API dollar savings; cost evidence is
+unavailable.
