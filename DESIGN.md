@@ -793,10 +793,13 @@ scope assessment before commit cleanup. A read-only helper captures HEAD, staged
 and unstaged patches and untracked paths without interpreting relevance, writing
 Git state or retaining an inventory. Capture disables filesystem-monitor hooks
 and configured clean/process filters, including initialized submodules, so Git
-inspection cannot populate filter-managed caches. It reports bypassed driver
-names alongside the evidence: staged content stays index-normalized while the
-worktree comparison bypasses external normalization. Such differences still need
-native assessment; capture neither hides candidate edits nor runs filters to
+inspection cannot populate filter-managed caches. Content patches disable external
+diff/textconv; submodules always use short gitlink summaries to avoid child diffs
+that re-enable those drivers. Submodule paths, revisions and dirty markers stay
+visible; initialized submodule content can be captured separately with the same
+helper. It reports bypassed driver names alongside the evidence: staged content
+stays index-normalized while the worktree comparison bypasses external
+normalization. Such differences still need native assessment; capture neither hides candidate edits nor runs filters to
 resolve them. Native assessment includes suitable existing edits under current
 commit authorization and preserves unrelated/excluded hunks
 and their staging state. Commit, rewrite and push permissions stay separate;

@@ -300,6 +300,64 @@ def test_submodule_local_filter_cannot_execute_during_parent_capture(repository)
     assert '-dirty' in value['unstaged_patch']
 
 
+@pytest.mark.parametrize('driver', ['textconv', 'command', 'external', 'environment'])
+@pytest.mark.parametrize('depth', [1, 2])
+def test_inline_submodule_diff_drivers_cannot_execute_during_capture(repository, driver, depth):
+    p = repository
+    parent = p
+    modules = []
+    for _ in range(depth):
+        sub = parent/'sub'
+        sub.mkdir()
+        git(sub, 'init', '-q', '-b', 'main')
+        git(sub, 'config', 'user.name', 'Fixture Author')
+        git(sub, 'config', 'user.email', 'fixture@example.test')
+        git(sub, 'config', 'commit.gpgsign', 'false')
+        (sub/'code').write_text('original\n')
+        (sub/'.gitattributes').write_text('code diff=fixture\n')
+        git(sub, 'add', '.')
+        git(sub, 'commit', '-qm', 'Initial submodule')
+        modules.append(sub)
+        parent = sub
+    for sub in reversed(modules):
+        git(sub.parent, 'add', 'sub')
+        git(sub.parent, 'commit', '-qm', 'Record submodule')
+
+    # Both staged gitlink changes and dirty contents must remain candidates.
+    (modules[0]/'code').write_text('new submodule commit\n')
+    git(modules[0], 'commit', '-qam', 'Advance submodule')
+    git(p, 'add', 'sub')
+    (modules[-1]/'code').write_text('dirty submodule candidate\n')
+    marker = p/'diff-driver-executed'
+    hook = p/'diff-driver-hook'
+    hook.write_text('#!/bin/sh\ntouch "'+str(marker)+'"\nprintf "driver output\\n"\n')
+    hook.chmod(0o755)
+    env = dict(os.environ)
+    for repo in [p, *modules]:
+        git(repo, 'config', 'diff.submodule', 'diff')
+        git(repo, 'config', 'status.submoduleSummary', 'true')
+        git(repo, 'config', 'core.fsmonitor', str(hook))
+        if driver in ('textconv', 'command'):
+            git(repo, 'config', 'diff.fixture.'+driver, str(hook))
+        elif driver == 'external':
+            git(repo, 'config', 'diff.external', str(hook))
+    if driver == 'environment':
+        env['GIT_EXTERNAL_DIFF'] = str(hook)
+    before = snapshot(p)
+    value = inspect(p, env=env)
+    assert not marker.exists()
+    assert snapshot(p) == before
+    assert 'MM sub' in value['status']
+    assert 'diff --git a/sub b/sub' in value['staged_patch']
+    assert '+Subproject commit ' in value['staged_patch']
+    assert '-dirty' in value['unstaged_patch']
+    assert inspect(p, env=env) == value
+    content = inspect(modules[-1], env=env)
+    assert '+dirty submodule candidate' in content['unstaged_patch']
+    assert not marker.exists()
+    assert snapshot(p) == before
+
+
 def test_fsmonitor_hook_cannot_execute_during_capture(repository):
     p = repository
     marker = p/'monitor-executed'

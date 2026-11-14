@@ -12,10 +12,12 @@ read-only capture of HEAD, status, staged and unstaged patches, and untracked
 paths across the whole repository, including when REPO is a subdirectory or
 `diff.relative` is enabled. HEAD is null on an unborn branch; initial staged
 changes are compared against the empty tree. The helper requires Git 2.45 or
-newer, disables external diff/textconv, filesystem-monitor hooks, configured
-clean/process filters (including initialized submodules), and lazy fetching, and
-rejects unresolved index conflicts or changes observed during capture. The helper
-returns evidence on stdout without storing an inventory or persistent record.
+newer. Content patches disable external diff/textconv; submodules use short
+gitlink summaries regardless of `diff.submodule`, avoiding inline child diffs
+that can re-enable those drivers. Capture also disables filesystem-monitor hooks,
+configured clean/process filters (including initialized submodules), and lazy
+fetching. It rejects unresolved index conflicts or changes observed during
+capture and returns evidence on stdout without storing a persistent inventory.
 
 `disabled_filter_drivers` lists bypassed configured drivers. The staged patch
 shows the exact index content; the unstaged patch compares that content with the
@@ -26,8 +28,10 @@ indexed pointer; these differences are candidates, not proof of an edit suitable
 for committing. Assess the actual worktree content and filter attributes before
 selecting hunks. Do not run filters merely to draft a message. Read relevant
 untracked files and binary/submodule changes separately; paths and binary patches
-alone do not establish relevance or correctness. Recheck live changes before
-staging or commit.
+alone do not establish relevance or correctness. For initialized submodule content,
+run this same helper with that submodule as REPO; parent summaries retain the
+candidate path, gitlink revisions and dirty marker without rendering its content.
+Recheck live changes before staging or commit.
 
 Assess every existing staged and unstaged hunk against the PR or requested
 commit's scope and current code, including comments and functional edits. An

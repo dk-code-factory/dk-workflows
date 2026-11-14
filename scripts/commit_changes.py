@@ -70,8 +70,10 @@ def inspect_changes(checkout):
             head = head.strip()
         if git('ls-files', '--unmerged', '-z'):
             raise ValueError('Resolve index conflicts before commit preparation')
-        flags = ['--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--binary',
-                 '--full-index', '--ignore-submodules=none', '--no-relative']
+        # Inline submodule diffs spawn child Git commands that drop our driver flags.
+        # Gitlink summaries keep candidates visible without invoking those diffs.
+        flags = ['--submodule=short', '--no-color', '--no-ext-diff', '--no-textconv',
+                 '--no-renames', '--binary', '--full-index', '--ignore-submodules=none', '--no-relative']
         return {'head': head, 'disabled_filter_drivers': disabled_filter_drivers,
                 'status': git('-c', 'status.renames=false', 'status', '--porcelain=v1',
                               '-z', '--untracked-files=all').split('\0')[:-1],
