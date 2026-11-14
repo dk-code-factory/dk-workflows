@@ -267,11 +267,15 @@ class Approval:
                 raise ValueError('Review publications require reconciled receipts at the reviewed head')
         # Also detect uncertain writes omitted from the evidence document.
         from shared.workflow_storage import operations_root
+        from shared.review_request_recovery import Recovery
+        from shared.github_publications import Handler
+        recovery = Recovery(lambda approved: Handler(approved, api=h.api, metadata=h.metadata,
+                                                     run=h.run, endpoint=h.endpoint))
         scope = operations_root(repository=request.get('checkout')) / publication.digest(request['pr'])
         for path in scope.glob('*/*.json'):
-            if publication.load(path)['status'] == 'pending':
+            operation = publication.load(path)
+            if recovery.blocks(operation, {**request, 'kind': 'ci-approve'}):
                 # The current operation is pending while checking its own receipt.
-                operation = publication.load(path)
                 if operation['request']['approved'].get('_payload_hash') != request.get('_payload_hash'):
                     raise ValueError('Uncertain publication requires read-only reconciliation')
         return {'evidence': digest(value), 'results': {key: result['original_sha256'] for key, result in results.items()},

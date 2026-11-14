@@ -25,7 +25,11 @@ Execute the returned action and continue the same original request:
 
 - `reconcile`: reconcile every returned retained publication operation read-only
   through `publish.py`; uncertain outcomes cannot be resent. Rerun the bridge
-  only once reconciliation settles the pending actions.
+  only once reconciliation settles the pending actions. An uncertain review
+  request with a current explicit `no_resend` disposition remains pending as a
+  duplicate barrier for review requests, while allowing independent CI approval
+  and merge. Changed review-request observations require inspection and
+  reassessment before continuation; other uncertain actions still reconcile.
 - `review`: invoke `dk-workflows:dk-pr-review` natively for the same PR and pinned
   source, original instructions and original merge authorization, using the
   returned review options and original upstream scope. Resume compact managed
@@ -56,6 +60,9 @@ need their exact diagnostic and supported recovery step. Reassess affected input
 through the owning workflow, retaining original results and operations. Do not
 silently recapture a different target to make a pending request pass. Already
 approved runs require no new approval; their CI results still need observation.
+Malformed retained options produce a review handoff and diagnostic with valid
+explicit request options or current defaults; damaged evidence cannot supply
+approval coverage. Invalid explicit request options still block continuation.
 This bridge also works when no eligible fork gates exist, without injecting a
 new review or requiring fork approval permission for an unrelated merge.
 
@@ -103,7 +110,7 @@ When discovery has candidates, supply the independent verification occurrence ge
 
 Only evidenced `rejected` or `resolved` candidates satisfy readiness. `confirmed`, `uncertain`, missing or duplicate dispositions block approval. Record actual unresolved verification findings in `findings`; they also block approval. A resolution must establish why the issue no longer requires action at the current reviewed inputs. Save original verification output unchanged.
 
-Skill-owned lists place custom work directly before and after review; they do not inherit hidden process hooks. Keep `hooks:[]` for this mode. Complete required selected tasks before finalization. List the journal paths of all review publications in `publications`; they must have verified receipts at this head. Pending publications anywhere in this PR journal block new writes until reconciled.
+Skill-owned lists place custom work directly before and after review; they do not inherit hidden process hooks. Keep `hooks:[]` for this mode. Complete required selected tasks before finalization. List the journal paths of all review publications in `publications`; they must have verified receipts at this head. Pending publications anywhere in this PR journal block new writes until reconciled, except an uncertain review request with a live-validated `no_resend` disposition.
 
 Evidence without `configuration` retains the legacy process API: its selected reviewer and named verifier settings and complete configured hook occurrences remain required. Legacy noncacheable hook results use the retained run and their generated occurrence; hook claims omit the reviewer cycle flag. Discovery and verification attempts require the current review cycle in both modes.
 

@@ -10,6 +10,18 @@ class Recovery:
     def __init__(self, handler):
         self.handler = handler
 
+    def blocks(self, retained, request):
+        if retained['status'] != 'pending':
+            return False
+        if retained['request']['kind'] == 'request-review':
+            # Replies cannot request another review or conceal its uncertain outcome.
+            if request.get('kind') in {'reply-inline', 'reply-comment'}:
+                return False
+            if request.get('kind') != 'request-review' and retained.get('review_request_disposition'):
+                self.current(retained)
+                return False
+        return True
+
     def load(self, path):
         value = publication.load(path, 'request-review')
         if value['status'] != 'pending':

@@ -56,7 +56,7 @@ def bridge(path):
     # uncertain intent first, without refreshing or replacing its original bytes.
     pending = [str(operation) for operation in sorted(
         (operations_root() / publication.digest(bound['pr'])).glob('*/*.json'))
-        if publication.load(operation)['status'] == 'pending']
+        if publish.blocks(publication.load(operation), bound)]
     if pending:
         return {**continuation, 'action': 'reconcile', 'operations': pending}
     context = approval.context()
@@ -68,7 +68,9 @@ def bridge(path):
     if not eligible:
         return {**continuation, 'action': 'observe-ci', 'eligible_runs': []}
     repository = approval.handler.host + '/' + approval.handler.root.removeprefix('repos/')
-    options = bound.get('review_options', {})
+    options = (skill_config.validate('dk-workflows:dk-pr-review', bound['review_options'])
+               if 'review_options' in bound else {})
+    evidence_options_error = None
     if bound.get('evidence'):
         try:
             evidence = read(Path(bound['evidence']))
@@ -77,7 +79,10 @@ def bridge(path):
         if (isinstance(evidence, dict) and evidence.get('configuration') == 'skill-owned'
                 and all(evidence.get(key) == bound[key] for key in ('pr', 'head', 'base'))
                 and 'review_options' not in bound):
-            options = evidence.get('options', {})
+            try:
+                options = skill_config.validate('dk-workflows:dk-pr-review', evidence.get('options', {}))
+            except ValueError as exc:
+                evidence_options_error = str(exc)
     policy = skill_config.effective('dk-workflows:dk-pr-review', repository, bound.get('upstream'),
                                     options=options)['options']['permissions']
     if not policy['approve_fork_ci']:
@@ -91,6 +96,8 @@ def bridge(path):
         {'run_id': run['id'], 'attempt': run['run_attempt']} for run in eligible]}
     if bound.get('evidence'):
         try:
+            if evidence_options_error:
+                raise ValueError('Malformed retained incoming-review options: ' + evidence_options_error)
             if isinstance(evidence, dict) and (
                     evidence.get('upstream') != bound.get('upstream')
                     or 'review_options' in bound and (
@@ -119,7 +126,7 @@ def approve(path):
     receipts = []
     for operation in sorted(scope.glob('*/*.json')):
         retained = publication.load(operation)
-        if retained['status'] == 'pending':
+        if publish.blocks(retained, {**bound, 'kind': 'ci-approve'}):
             if retained['request']['kind'] != 'ci-approve':
                 raise ValueError('Reconcile the pending publication first: ' + str(operation))
             receipts.append(publish.publish(operation, reconcile=True))

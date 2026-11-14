@@ -41,7 +41,13 @@ handoff. The already-running session resumes supported managed work, completes
 current evidence, approves eligible attempts, observes CI and returns to the
 original authorized merge. Unbound standalone outputs never become fabricated
 managed coverage. Pending journal operations are returned for read-only
-reconciliation before discovery or new writes. Existing review definitions,
+reconciliation before discovery or new writes, except an uncertain review
+request with a current explicit `no_resend` disposition. The bridge, approval
+and publication boundaries share that existing live disposition check; changed
+review-request evidence blocks continuation without rewriting the pending intent.
+Malformed retained review options return the incoming-review recovery handoff
+under current policy rather than supplying approval coverage or usable overrides.
+Explicit invocation options still require validation. Existing review definitions,
 results, fingerprints, publication intents and receipts retain their original
 freshness boundaries; changed governing inputs refresh only affected analysis.
 No durable field, summary, snapshot or continuation store is added: the existing

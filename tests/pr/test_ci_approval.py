@@ -239,7 +239,8 @@ def test_standalone_review_bridge_completes_evidence_approval_ci_and_original_me
         assert r.remote.state['writes'] == {'ci-approve': 2, 'merge-pr': 1}
 
 
-@pytest.mark.parametrize('evidence_state', ['missing', 'corrupt', 'incomplete'])
+@pytest.mark.parametrize('evidence_state', ['missing', 'corrupt', 'incomplete', 'array', 'null',
+                                          'options-array', 'options-null', 'options-policy', 'options-unknown'])
 def test_bridge_returns_supported_review_handoff_for_missing_or_invalid_evidence(reviewed, tmp_path, evidence_state):
     r = reviewed
     evidence = tmp_path/'unavailable-evidence.json'
@@ -249,9 +250,22 @@ def test_bridge_returns_supported_review_handoff_for_missing_or_invalid_evidence
         value = read(r.evidence)
         value['discovery'] = []
         write(evidence, value)
+    elif evidence_state in {'array', 'null'}:
+        evidence.write_text('[]' if evidence_state == 'array' else 'null')
+    elif evidence_state.startswith('options-'):
+        value = read(r.evidence)
+        value.update(configuration='skill-owned', options={
+            'options-array': [], 'options-null': None,
+            'options-policy': {'permissions': []}, 'options-unknown': {'unknown': True}}[evidence_state])
+        write(evidence, value)
+    original = evidence.read_bytes() if evidence.exists() else None
+    reports = deepcopy(read(r.store.manifest)['entries'])
     path = merge_request(r, tmp_path, evidence=str(evidence))
     plan = r.cli.bridge(path)
     assert plan['action'] == 'review' and plan['reason']
+    assert plan['review_options'] == {}
+    assert (evidence.read_bytes() if evidence.exists() else None) == original
+    assert read(r.store.manifest)['entries'] == reports
     assert not r.remote.calls and not r.remote.state['writes']
 
 
@@ -280,6 +294,15 @@ def test_bridge_no_gates_observes_ci_without_requiring_fork_execution_permission
     path = merge_request(r, tmp_path, review_options={'permissions': {'approve_fork_ci': False}})
     assert r.cli.bridge(path)['action'] == 'observe-ci'
     assert not r.remote.calls
+
+
+@pytest.mark.parametrize('options', [[], None, {'permissions': []}, {'unknown': True}])
+def test_bridge_invalid_explicit_options_still_block_instead_of_using_defaults(reviewed, tmp_path, options):
+    r = reviewed
+    path = merge_request(r, tmp_path, evidence=str(r.evidence), review_options=options)
+    with pytest.raises(ValueError):
+        r.cli.bridge(path)
+    assert not r.remote.calls and not r.remote.state['writes']
 
 
 @pytest.mark.parametrize('fields', [
@@ -328,6 +351,65 @@ def test_bridge_permission_failure_retains_exact_operation_and_never_resends(rev
     with pytest.raises(Diagnostic):
         r.cli.publish.publish(plan['operations'][0], reconcile=True)
     assert r.remote.calls == [101] and 'merge-pr' not in r.remote.state['writes']
+
+
+@pytest.mark.parametrize('disposition', ['current', 'missing', 'changed-requested', 'changed-history', 'other-pending'])
+def test_bridge_review_request_disposition_retains_freshness_and_uncertain_write_guards(reviewed, tmp_path, disposition):
+    r = reviewed
+    path = merge_request(r, tmp_path, evidence=str(r.evidence))
+    request = {**fixture.request('request-review'), 'head': r.head}
+    operation = r.cli.publish.prepare(request)['operation']
+    r.remote.state['lose_response'] = ['request-review']
+    with pytest.raises(Diagnostic):
+        r.cli.publish.publish(operation)
+    r.remote.state['requested'] = {'users': [], 'teams': []}
+    if disposition != 'missing':
+        inspected = r.cli.publish.review_recovery().inspect(operation)
+        r.cli.publish.review_recovery().dispose(operation, {
+            'decision': 'no_resend', 'reason': 'No further review request is needed.',
+            'observation': inspected['fingerprint']})
+        assert r.cli.publish.publish(operation, reconcile=True)['status'] == 'disposed'
+    original = Path(operation).read_bytes()
+    reports = deepcopy(read(r.store.manifest)['entries'])
+    if disposition == 'changed-requested':
+        r.remote.state['requested']['users'] = [{'login': 'reviewer'}]
+    elif disposition == 'changed-history':
+        r.remote.state['timeline'] = [{'id': 1, 'event': 'review_request_removed',
+                                      'requested_reviewer': {'login': 'reviewer'}}]
+    elif disposition == 'other-pending':
+        other = r.cli.publish.prepare({'kind': 'edit-pr', 'pr': fixture.PR, 'head': r.head,
+                                      'fields': {'title': 'Changed title'}})['operation']
+        r.remote.state['lose_response'] = ['edit-pr']
+        with pytest.raises(Diagnostic):
+            r.cli.publish.publish(other)
+    # A fresh coordinator reads the existing disposition, never rewriting it or
+    # treating pending as a synthetic receipt. All later boundaries recheck it.
+    fresh = load('fresh_ci_approve_disposition', ROOT/'scripts/ci_approve.py')
+    reads = r.remote.list_reads
+    if disposition.startswith('changed-'):
+        with pytest.raises(ValueError, match='Inspect and reassess'):
+            fresh.bridge(path)
+        with pytest.raises(ValueError, match='Inspect and reassess'):
+            fresh.approve(r.evidence)
+        assert r.remote.list_reads == reads
+    elif disposition in {'missing', 'other-pending'}:
+        assert fresh.bridge(path)['operations'] == [str(operation if disposition == 'missing' else other)]
+        assert fresh.bridge(path)['action'] == 'reconcile'
+        with pytest.raises(ValueError, match='pending publication'):
+            fresh.approve(r.evidence)
+        assert r.remote.list_reads == reads
+    else:
+        assert fresh.bridge(path)['action'] == 'approve'
+        assert fresh.approve(r.evidence)['status'] == 'verified'
+        assert fresh.bridge(path)['action'] == 'observe-ci'
+        for run in r.remote.runs.values():
+            run.update(status='completed', conclusion='success')
+        merge = fresh.publish.prepare(read(path))['operation']
+        assert fresh.publish.publish(merge)['status'] == 'verified'
+        assert r.remote.calls == [101, 202]
+    assert Path(operation).read_bytes() == original
+    assert read(r.store.manifest)['entries'] == reports
+    assert r.remote.state['writes']['request-review'] == 1
 
 
 def test_discovery_lists_only_the_reviewed_head_without_scanning_repository_history(reviewed):
