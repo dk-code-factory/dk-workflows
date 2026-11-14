@@ -52,7 +52,7 @@ def package(root):
                             'dk-pr-description', 'dk-pr-feedback-address',
                             'dk-pr-feedback-read', 'dk-pr-feedback-reply', 'dk-pr-fix',
                             'dk-pr-iter', 'dk-pr-publish', 'dk-pr-review', 'dk-pr-review-architect', 'dk-pr-review-post',
-                            'dk-pr-reviewers-run', 'dk-pr-split', 'dk-preferences']
+                            'dk-pr-reviewers-run', 'dk-pr-split', 'dk-preferences', 'dk-repo-onboard']
     for name in ('.agents/plugins/marketplace.json','.claude-plugin/marketplace.json'):
         catalog=json.loads((root/name).read_text())
         assert catalog['name']==manifests[0]['name']
