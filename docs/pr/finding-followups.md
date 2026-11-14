@@ -35,7 +35,11 @@ python3 PACKAGE_ROOT/runtime/dk-pr-feedback-address/scripts/finding_followups.py
 This read-only helper verifies the handoff against live sources, captures stable,
 complete PR commit membership and returns compact source/anchor candidates,
 original publication references and a `context` fingerprint. It writes no state
-and runs no agents. Read original discussion through the existing handoff and
+and runs no agents. Default output includes membership count, captured target pins
+when local proof is needed, and ages for source/operation anchor candidates;
+complete commit membership stays internal to the fingerprint and plan validation.
+Use `inspect --full-commits` with the same arguments only when the full proof is
+needed. Both presentations return the same fingerprint. Read original discussion through the existing handoff and
 only relevant journal operations by their returned paths. Native semantics must
 identify every equivalent substantive request and the latest one for each
 finding, including requests in review bodies, top-level comments and prior runs.
@@ -52,8 +56,8 @@ or leave that latest request's anchor unknown. Formatting-only edits retain the
 unchanged finding's original review/link anchor, even though changed discussion
 requires semantic reassessment.
 
-Missing/rewritten anchors are uncertain. A later evidenced substantive request
-can supersede an unanchored original report when the verifier establishes that
+Missing/rewritten latest anchors are uncertain. A later evidenced substantive request
+can supersede an unanchored original report or verified receipt when the verifier establishes that
 ordering. Incomplete/unstable commit lists or changed heads block calculation. Beyond the
 endpoint's 250-commit cap, the helper supplements its stable 250-entry list and
 GitHub total with full local Git objects at the captured PR head and live target
@@ -67,7 +71,11 @@ truncated list. Local inspection does not fetch, change refs or start agents.
 
 Inspect existing relevant intents even when their comments are absent from a
 discussion read. A verified equivalent request's captured head supplies its
-anchor. Pending writes require read-only reconciliation; undispatched equivalent
+anchor. PR identity matching uses the publisher's lowercase, trailing-slash-free
+scope while retaining exact original source URLs and publication evidence.
+Pending equivalent writes and other pending publication kinds require read-only
+reconciliation; an unrelated pending review request permits independent replies
+under the publisher's existing policy. Undispatched equivalent
 intents require recovery of the existing operation rather than fresh wording or
 a second intent. Verify unavailable/edited historical replies through
 [reply recovery](publication.md#recover-a-previously-verified-reply) before deciding

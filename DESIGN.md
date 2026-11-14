@@ -869,12 +869,24 @@ for PR membership. Formatting-only bot edits require semantic reassessment of th
 changed discussion, while retaining each unchanged finding's original anchor.
 
 Inspection returns compact source and publication references; native decisions
-stay in existing original task results. Planning recaptures discussion, commits
+stay in existing original task results. Default inspection exposes counts, pins
+and candidate ages, with complete commit membership available through an explicit
+full-evidence option. Both presentations share the complete internal fingerprint;
+planning still recaptures and validates the whole proof. This avoids repeated
+model consumption of large histories in this and fresh sessions without storing
+derived summaries; changed source pins still invalidate affected work.
+Planning recaptures discussion, commits
 and original intents and checks its transient input fingerprint. Existing
 verified equivalent replies suppress recent reminders even during discussion
 visibility lag; pending or undispatched equivalent intents require their existing
 recovery rather than regenerated wording. The publisher retains original source,
 root parent, payload, head, receipts and uncertain-write reconciliation.
+Journal discovery matches the publisher's canonical PR scope, preserving exact
+original source URLs and journals. A verified superseded unavailable anchor no
+longer blocks age when the native verifier establishes a later substantive
+request; unknown latest anchors and uncertain equivalent writes still block.
+Pending publication barriers share the publisher's independent-reply exception
+for unrelated review requests; other pending kinds retain their barriers.
 
 No durable follow-up registry, commit-list cache, copied result, rendered plan or
 new counter is admitted. Existing fingerprints, budgets, original results and

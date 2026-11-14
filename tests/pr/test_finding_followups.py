@@ -188,6 +188,83 @@ def test_two_commits_after_latest_verified_receipt_can_be_reassessed():
     assert result['status'] == 'eligible' and result['newCommits'] == 2
 
 
+@pytest.mark.parametrize('local', [False, True])
+@pytest.mark.parametrize('latest,expected', [('C99', 'eligible'),
+                         ('/old/operation.json', 'uncertain_age')])
+def test_only_latest_verified_unavailable_receipt_blocks_age(local, latest, expected):
+    saved = {'/old/operation.json': retained('verified', D)}
+    history = {'commits': [A, B, C], 'mode': 'local', 'target': 'e' * 40,
+               'newCommits': {A: 2}} if local else [A, B, C]
+    value = context(history, saved)
+    original = deepcopy(saved)
+    native = assessment(value, operations=list(saved), latestRequest=latest)
+    assert followups.plan(value, native, saved)['findings'][0]['status'] == expected
+    assert saved == original
+
+
+@pytest.mark.parametrize('source', ['C99', 'pullrequestreview-789', 'issuecomment-901'])
+def test_source_repository_casing_preserves_exact_publication_url(source):
+    inline, top = inputs()
+    items = [*inline['threads'][0]['comments'], *top['items']]
+    for item in items:
+        item['url'] = item['url'].replace('/owner/repo/', '/Owner/Repo/')
+    value = followups.inspect(inline, top, [A, B, C], {})
+    result = outcome(value, source=source)
+    url = value['sources'][source]['url']
+    assert result['request']['source']['url'] == url
+    assert url in result['request']['body']
+
+
+@pytest.mark.parametrize('url', [PR.replace('/owner/', '/other/') + '#discussion_r99',
+             PR + '0#discussion_r99', PR + '?other=1#discussion_r99',
+             PR.replace('github.com', 'other.test') + '#discussion_r99'])
+def test_source_url_rejects_different_identity(url):
+    value = context()
+    value['sources']['C99']['url'] = url
+    with pytest.raises(ValueError, match='source URL'):
+        outcome(value)
+
+
+@pytest.mark.parametrize('source', ['C99', 'pullrequestreview-789', 'issuecomment-901'])
+@pytest.mark.parametrize('kind,equivalent,expected', [
+    ('request-review', False, 'eligible'), ('request-review', True, 'recover_required'),
+    ('reply-inline', False, 'recover_required'), ('reply-comment', False, 'recover_required'),
+    ('edit-pr', False, 'recover_required')])
+def test_pending_operations_follow_publisher_independent_reply_policy(source, kind, equivalent, expected):
+    saved = {'/pending/operation.json': retained('pending', B)}
+    saved['/pending/operation.json']['request']['kind'] = kind
+    value = context(retained=saved)
+    original = deepcopy(saved)
+    native = assessment(value, source=source, operations=list(saved) if equivalent else [])
+    result = followups.plan(value, native, saved)['findings'][0]
+    assert result['status'] == expected
+    assert saved == original
+
+
+def test_default_inspection_bounds_membership_without_weakening_fingerprint():
+    members = [A, B, *[f'{index:040x}' for index in range(10000)], C]
+    value = context({'commits': members, 'mode': 'local', 'target': D,
+                     'targetRef': 'main', 'newCommits': {A: 10002}})
+    before = deepcopy(value)
+    compact = followups.inspection_output(value)
+    full = followups.inspection_output(value, full_commits=True)
+    assert 'commits' not in compact and 'commits' not in compact['commitEvidence']
+    assert compact['commitEvidence'] == {'mode': 'local', 'count': len(members),
+             'target': D, 'targetRef': 'main', 'newCommits': {A: 10002}}
+    assert compact['context'] == full['context'] == evidence.digest(value)
+    assert len(json.dumps(compact)) < 4000
+    assert full['commits'] == members and value == before
+    assert followups.plan(value, assessment(value), {})['findings'][0]['newCommits'] == 10002
+
+
+def test_default_inspection_lists_candidate_ages_and_preserves_missing_anchors():
+    saved = {'/original/operation.json': retained('verified', B)}
+    value = context(retained=saved)
+    compact = followups.inspection_output(value)
+    assert compact['commitEvidence']['newCommits'] == {A: 2, B: 1}
+    assert compact['context'] == evidence.digest(value)
+
+
 @pytest.mark.parametrize('change', ['head', 'body', 'intent'])
 def test_changed_inputs_reject_only_plan_without_modifying_originals(change):
     saved = {'/original/operation.json': retained('verified', A)}
@@ -336,6 +413,20 @@ def test_plan_cli_rechecks_live_evidence_before_age_or_payload(monkeypatch, caps
     assert 'PR evidence changed' in capsys.readouterr().err
 
 
+@pytest.mark.parametrize('full', [False, True])
+def test_inspect_cli_defaults_to_compact_with_full_evidence_opt_in(monkeypatch, capsys, full):
+    argv = ['finding_followups.py', 'inspect', '--handoff', '/evidence',
+            '--sha256', 'digest', '--pr', PR, '--head', C]
+    monkeypatch.setattr(sys, 'argv', argv + (['--full-commits'] if full else []))
+    with patch.object(evidence, 'load_handoff', return_value=({}, *inputs())), \
+         patch.object(evidence, 'verify'), patch.object(followups, 'operations', return_value={}), \
+         patch.object(followups, 'commits', return_value=[A, B, C]):
+        assert followups.main() == 0
+    result = json.loads(capsys.readouterr().out)
+    assert ('commits' in result) is full
+    assert result['context'] == evidence.digest(context())
+
+
 def load_exercise():
     spec = importlib.util.spec_from_file_location('finding_followup_exercise',
             Path(__file__).with_name('fixtures') / 'feedback_reply_exercise.py')
@@ -366,6 +457,67 @@ def test_followup_payload_uses_existing_single_dispatch_journal(tmp_path, monkey
     value = context(retained=discovered)
     result = followups.plan(value, assessment(value, source=source, operations=list(discovered)), discovered)
     assert result['findings'][0]['status'] == 'recent_request'
+
+
+@pytest.mark.parametrize('caller', ['https://github.com/Owner/Repo/pull/7', PR + '/',
+                                    'https://GitHub.com/Owner/Repo/pull/7/'])
+def test_equivalent_caller_identity_finds_recent_receipt_during_discussion_lag(tmp_path, monkeypatch, caller):
+    exercise = load_exercise()
+    root = tmp_path / 'fixture'
+    exercise.initialize(root)
+    monkeypatch.setenv('XDG_STATE_HOME', str(root / 'state'))
+    request = outcome()['request']
+    # Remote was at B when this request was published, but the complete
+    # discussion fixture still only exposes the older report at A.
+    state = json.loads((root / 'remote.json').read_text())
+    state['metadata']['headRefOid'] = B
+    (root / 'remote.json').write_text(json.dumps(state))
+    request['head'] = B
+    published = exercise.operate(root, 'submit', request)
+    path = published['operation']
+    before = Path(path).read_bytes()
+    discovered = followups.operations(caller, root)
+    assert str(Path(path).resolve()) in discovered
+    value = context(retained=discovered)
+    result = followups.plan(value, assessment(value, operations=list(discovered)), discovered)
+    assert result['findings'][0]['status'] == 'recent_request'
+    assert result['findings'][0]['newCommits'] == 1
+    assert Path(path).read_bytes() == before
+
+
+def test_real_superseded_receipt_and_pending_review_allow_one_independent_followup(tmp_path, monkeypatch):
+    exercise = load_exercise()
+    root = tmp_path / 'fixture'
+    exercise.initialize(root)
+    monkeypatch.setenv('XDG_STATE_HOME', str(root / 'state'))
+    state = json.loads((root / 'remote.json').read_text())
+    state['metadata']['headRefOid'] = D
+    (root / 'remote.json').write_text(json.dumps(state))
+    old = outcome()['request']
+    old['head'] = D
+    old['body'] = old['body'].replace(C, D).replace(C[:12], D[:12])
+    published = exercise.operate(root, 'submit', old)
+    path = published['operation']
+    original = Path(path).read_bytes()
+    state = json.loads((root / 'remote.json').read_text())
+    state['metadata']['headRefOid'] = C
+    (root / 'remote.json').write_text(json.dumps(state))
+    pending = exercise.operate(root, 'submit', {'kind': 'request-review', 'pr': PR,
+               'head': C, 'reviewers': ['reviewer'], 'team_reviewers': []}, lose_response=True)
+    pending_path = pending['operation']
+    assert publication.load(pending_path)['status'] == 'pending'
+    pending_original = Path(pending_path).read_bytes()
+    saved = followups.operations(PR, root)
+    value = context(retained=saved)
+    native = assessment(value, operations=[str(Path(path).resolve())], latestRequest='C99')
+    result = followups.plan(value, native, saved)['findings'][0]
+    assert result['status'] == 'eligible'
+    # Both follow-up planning and actual publisher dispatch permit this reply.
+    sent = exercise.operate(root, 'submit', result['request'])
+    assert publication.load(sent['operation'])['status'] == 'verified'
+    assert exercise.operate(root, 'inspect')['writes'] == {'reply-inline': 2, 'request-review': 1}
+    assert Path(path).read_bytes() == original
+    assert Path(pending_path).read_bytes() == pending_original
 
 
 def test_native_assessment_round_trip_in_new_process_preserves_results(tmp_path):

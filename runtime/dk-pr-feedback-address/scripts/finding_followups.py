@@ -15,6 +15,7 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 
 import pr_evidence as evidence
 import fetch_pr_conversation as conversation
 from shared import publication
+from shared.review_request_recovery import Recovery
 from shared.workflow_storage import operations_root
 
 
@@ -132,11 +133,13 @@ def sources(inline, top):
 
 def operations(pr, cwd):
     """Discover original intents, including writes absent from discussion reads."""
+    # Match publisher preparation's scope without changing original intents.
+    pr = pr.rstrip('/').lower()
     directory = operations_root(repository=cwd) / publication.digest(pr)
     result = {}
     for path in sorted(directory.glob('*/*.json')):
         value = publication.load(path)
-        if value['request']['target'] != pr:
+        if value['request']['target'].rstrip('/').lower() != pr:
             raise ValueError('publication target disagrees with retained scope')
         result[str(path.resolve())] = value
     return result
@@ -155,6 +158,27 @@ def inspect(inline, top, history, retained):
                             'sha256': evidence.digest(value)}
                            for path, value in retained.items()],
             'publicationAuthority': False}
+
+
+def inspection_output(context, *, full_commits=False):
+    """Keep complete proof internal; expose only candidate ages by default."""
+    result = {**context, 'context': evidence.digest(context)}
+    if full_commits:
+        return result
+    members = result.pop('commits')
+    proof = result.pop('commitEvidence', {})
+    anchors = {sha for source in context['sources'].values()
+               for sha in [source['reviewCommit'], *source['linkedCommits']] if sha}
+    anchors.update(item['head'] for item in context['operations'] if item['head'])
+    ages = proof.get('newCommits')
+    if ages is None:
+        positions = {sha: index for index, sha in enumerate(members)}
+        ages = {sha: len(members) - 1 - positions[sha] for sha in anchors if sha in positions}
+    result['commitEvidence'] = {
+        'mode': proof.get('mode', 'github'), 'count': len(members),
+        **{key: proof[key] for key in ('target', 'targetRef') if key in proof},
+        'newCommits': ages}
+    return result
 
 
 def plan(context, assessments, retained):
@@ -225,12 +249,16 @@ def plan(context, assessments, retained):
                 age = (context['commitEvidence']['newCommits'].get(approved['head'])
                        if 'commitEvidence' in context else len(context['commits']) - 1 - context['commits'].index(approved['head']))
                 if age is None:
-                    uncertain = True
+                    uncertain = uncertain or path == latest
                 else:
                     anchors.append(age)
             else:
-                uncertain = True
-        pending = [path for path, value in retained.items() if value['status'] == 'pending']
+                uncertain = uncertain or path == latest
+        reply_kind = 'reply-inline' if source['kind'] == 'inline_comment' else 'reply-comment'
+        pending = [path for path, value in retained.items()
+                   if value['status'] == 'pending' and
+                   (path in finding.get('operations', []) or
+                    Recovery(None).blocks(value, {'kind': reply_kind}))]
         if pending:
             result.append({**outcome, 'status': 'recover_required', 'operations': pending})
             continue
@@ -245,7 +273,8 @@ def plan(context, assessments, retained):
         if not isinstance(correction, str) or not correction.strip():
             raise ValueError('a targeted correction for the author at the current head is required')
         url = source['url']
-        if not isinstance(url, str) or not url.startswith(context['pr'] + '#'):
+        if (not isinstance(url, str) or '#' not in url or
+                url.partition('#')[0].rstrip('/').lower() != context['pr'].rstrip('/').lower()):
             raise ValueError('original source URL must belong to this PR')
         body = (f'Still actionable at [{context["head"][:12]}]'
                 f'({context["pr"]}/commits/{context["head"]}): {correction.strip()}\n\n'
@@ -272,6 +301,8 @@ def main():
     for name in ('handoff', 'sha256', 'pr', 'head'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--assessment', type=Path)
+    parser.add_argument('--full-commits', action='store_true',
+                        help='Include complete commit membership for targeted evidence inspection')
     args = parser.parse_args()
     cwd = Path(args.cwd).resolve()
     try:
@@ -290,7 +321,7 @@ def main():
                 raise ValueError('--assessment required for plan')
             result = plan(context, json.loads(args.assessment.read_bytes()), retained)
         else:
-            result = {**context, 'context': evidence.digest(context)}
+            result = inspection_output(context, full_commits=args.full_commits)
         print(evidence.encoded(result).decode())
     except (ValueError, OSError, KeyError, TypeError, AttributeError,
             subprocess.SubprocessError, conversation.FetchError, evidence.threads.FetchError) as error:
