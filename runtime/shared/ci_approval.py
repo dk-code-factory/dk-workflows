@@ -6,7 +6,27 @@ import config
 import skill_config
 from state import capture, digest, read, resource
 from shared import publication
+from shared.diagnostics import Diagnostic
 from shared.pr_ownership import classify
+
+
+def _retained(label, operation, *args, **kwargs):
+    """Normalize local source failures without consuming live API diagnostics."""
+    try:
+        return operation(*args, **kwargs)
+    except Diagnostic:
+        raise
+    except (OSError, RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        if isinstance(exc, (subprocess.CalledProcessError, subprocess.TimeoutExpired)):
+            command = exc.cmd
+            if not isinstance(command, (list, tuple)) or not command or Path(command[0]).name != 'git':
+                raise
+        detail = str(exc)
+        stderr = getattr(exc, 'stderr', None)
+        if stderr:
+            detail += '\n' + (stderr.decode(errors='replace') if isinstance(stderr, bytes) else stderr)
+        raise ValueError('Retained ' + label + ' is unavailable: ' + detail
+                         + '\nRestore this prerequisite, then resume incoming review at the original source pins.') from exc
 
 
 class ApprovalFailure(ValueError):
@@ -112,7 +132,8 @@ class Approval:
         instructions = value.get('instructions')
         if not isinstance(instructions, dict) or not instructions:
             raise ValueError('Original governing instructions are required')
-        if {key: resource(path) for key, path in instructions.items()} != value.get('instruction_fingerprints'):
+        if {key: _retained('instruction source ' + str(path), resource, path)
+                for key, path in instructions.items()} != value.get('instruction_fingerprints'):
             raise ValueError('Original governing instructions changed')
         context = self.context()
         if context != value.get('context'):
@@ -125,7 +146,8 @@ class Approval:
         if classify(h.host, context['user'], actor, settings['settings']['accounts']['personal'])['ownership'] != 'others':
             raise ValueError('CI approval requires another author\'s PR')
         from tasks import Tasks
-        managed = Tasks(repository, request['pr'], checkout=value['checkout'])
+        managed = _retained('review checkout ' + value['checkout'], Tasks,
+                            repository, request['pr'], checkout=value['checkout'])
         store = managed.store
         results, specs = {}, {}
         approval_key, approval_claim, approval_fingerprint = None, None, None
@@ -134,7 +156,8 @@ class Approval:
             if (not isinstance(active, dict) or set(active) not in ({'spec', 'claim'}, {'key', 'claim'})
                     or not isinstance(active['claim'], str)):
                 raise ValueError('Malformed current approval task binding')
-            current = managed.saved_spec(active['key']) if 'key' in active else read(Path(active['spec']))
+            current = (_retained('approval task ' + str(active['key']), managed.saved_spec, active['key'])
+                       if 'key' in active else read(Path(active['spec'])))
             if not isinstance(current, dict):
                 raise ValueError('Current approval task spec must be an object')
             selection = current.get('skill_configuration', {})
@@ -143,7 +166,7 @@ class Approval:
                     or selection.get('kind') != 'finalizers' or selection.get('options') != value.get('options', {})
                     or selection.get('upstream') != value.get('upstream')):
                 raise ValueError('Current approval task must be the selected incoming-review finalizer')
-            captured = capture(current)
+            captured = _retained('approval task source capture', capture, current)
             if captured['subject'] != store.subject:
                 raise ValueError('Current approval task belongs to another PR')
             approval_key, approval_claim = captured['key'], active['claim']
@@ -151,7 +174,7 @@ class Approval:
 
         def completed(reference, *, source_required=True, cycle=value['cycle']):
             if isinstance(reference, dict) and set(reference) == {'key'} and isinstance(reference['key'], str):
-                spec = managed.saved_spec(reference['key'])
+                spec = _retained('review task ' + reference['key'], managed.saved_spec, reference['key'])
             elif isinstance(reference, str):
                 spec = read(Path(reference))
             else:
@@ -160,12 +183,12 @@ class Approval:
                 raise ValueError('Review task spec must be an object')
             if any(spec.get('instructions', {}).get(key) != path for key, path in instructions.items()):
                 raise ValueError('Review tasks must capture the original governing instructions')
-            current = capture(spec)
-            if current['subject'] != store.subject:
-                raise ValueError('Review task belongs to another PR')
             source = spec.get('git', {})
             if source_required and (source.get('head') != request['head'] or source.get('target') != request['base']):
                 raise ValueError('Review task source pins changed')
+            current = _retained('review task source capture ' + str(reference), capture, spec)
+            if current['subject'] != store.subject:
+                raise ValueError('Review task belongs to another PR')
             with store.locked() as manifest:
                 entry = manifest['entries'].get(current['key'], {})
                 if any(e.get('claim') and not (

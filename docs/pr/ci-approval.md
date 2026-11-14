@@ -62,7 +62,15 @@ silently recapture a different target to make a pending request pass. Already
 approved runs require no new approval; their CI results still need observation.
 Malformed retained evidence, including legacy task specs and nested reports,
 produces a review handoff and diagnostic with valid explicit request options or
-current defaults. Rejected evidence cannot supply invocation overrides or approval
+current defaults. Missing retained checkouts, unavailable pinned Git objects and
+local source-capture failures produce the same handoff with the original failure
+and prerequisite restoration step. Restore the referenced sources and access at
+the original pins before resuming incoming review; unchanged completed results
+remain reusable without refreshing evidence snapshots or rewriting retained state.
+Local recovery does not consume non-Git process failures or typed publication
+diagnostics: permission and uncertain-write failures retain their own recovery
+paths. Never blindly retry a failed source read or a publication.
+Rejected evidence cannot supply invocation overrides or approval
 coverage, including when its upstream scope differs. Validate the full merged
 effective options, including cross-field constraints, before every handoff;
 invalid explicit request options or current defaults block reconciliation and CI

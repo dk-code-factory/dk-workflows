@@ -50,7 +50,13 @@ returns the incoming-review recovery handoff with a diagnostic under current pol
 rather than supplying approval coverage or usable overrides. Explicit invocation
 options and current defaults require complete effective-option validation before
 every handoff, including reconciliation and CI observation without remaining
-gates. Retained overrides govern only fully accepted evidence; rejected evidence
+gates. Unavailable retained checkouts, pinned Git objects and local capture sources
+also return that handoff with the underlying failure and prerequisite restoration
+step. Normalize failures only while reading/reconstructing local retained evidence;
+non-Git process failures and typed publication diagnostics retain their own blocked
+or reconciliation paths. Restoring the original sources permits unchanged analysis
+reuse without refreshing snapshots, rewriting results or retrying publication.
+Retained overrides govern only fully accepted evidence; rejected evidence
 recovers under the current explicit invocation or defaults. Listed and unlisted
 pending review requests share the live no-resend check, preserving their original
 head binding and intent rather than requiring a fabricated verified receipt.

@@ -457,6 +457,139 @@ def test_bridge_cli_malformed_legacy_approval_spec_returns_native_handoff(review
     assert not r.remote.calls and not r.remote.state['writes']
 
 
+@pytest.mark.parametrize('missing', ['checkout', 'git-directory', 'head-object', 'resource',
+                                     'resource-cycle', 'instructions'])
+def test_bridge_recovers_unavailable_retained_sources_and_reuses_restored_results(
+        reviewed, tmp_path, monkeypatch, capsys, missing):
+    r = reviewed
+    evidence = read(r.evidence)
+    checkout = Path(evidence['checkout'])
+    spec = read(Path(evidence['discovery'][0]))
+    source = {'checkout': checkout, 'git-directory': checkout/'.git',
+              'head-object': checkout/'.git/objects'/r.head[:2]/r.head[2:],
+              'resource': Path(spec['skill']['resources']['skill']),
+              'resource-cycle': Path(spec['skill']['resources']['skill']),
+              'instructions': r.instructions}[missing]
+    displaced = tmp_path/('restorable-' + missing)
+    original = r.evidence.read_bytes(), r.store.manifest.read_bytes()
+    path = merge_request(r, tmp_path, evidence=str(r.evidence))
+    source.rename(displaced)
+    if missing == 'resource-cycle':
+        source.symlink_to(source.name)
+    try:
+        # Exercise the CLI entrypoint too: recovery must be a native handoff,
+        # rather than a traceback or the generic blocked exception envelope.
+        monkeypatch.setattr(sys, 'argv', ['ci_approve.py', 'bridge', '--request', str(path)])
+        runpy.run_path(str(ROOT/'scripts/ci_approve.py'), run_name='__main__')
+        plan = json.loads(capsys.readouterr().out)
+        assert plan['action'] == 'review' and plan['skill'] == 'dk-workflows:dk-pr-review'
+        assert 'unavailable' in plan['reason'] and 'Restore this prerequisite' in plan['reason']
+        assert 'original source pins' in plan['reason'] and plan['review_options'] == {}
+        if missing == 'checkout':
+            assert str(checkout) in plan['reason']
+        elif missing == 'head-object':
+            assert r.head in plan['reason'] and 'fatal:' in plan['reason']
+        with pytest.raises(ValueError, match='unavailable'):
+            r.cli.approve(r.evidence)
+        assert (r.evidence.read_bytes(), r.store.manifest.read_bytes()) == original
+        assert not r.remote.calls and not r.remote.state['writes']
+    finally:
+        if missing == 'resource-cycle':
+            source.unlink()
+        displaced.rename(source)
+    # A new helper module must reuse unchanged completed analysis after source
+    # restoration, with no snapshot refresh, new records or reviewer invocation.
+    fresh = load('fresh_restored_source_bridge', ROOT/'scripts/ci_approve.py')
+    assert fresh.bridge(path)['action'] == 'approve'
+    assert (r.evidence.read_bytes(), r.store.manifest.read_bytes()) == original
+
+
+@pytest.mark.parametrize('stage', ['checkout', 'capture'])
+def test_bridge_recovers_local_git_timeout_with_exact_prerequisite(reviewed, tmp_path, monkeypatch, stage):
+    from shared import ci_approval, repository_scope
+    r = reviewed
+    original = r.evidence.read_bytes(), r.store.manifest.read_bytes()
+    checkout = read(r.evidence)['checkout']
+    checkout_roots = repository_scope.checkout_roots
+
+    def timeout(*args, **kwargs):
+        if stage == 'checkout' and str(args[0]) != checkout:
+            return checkout_roots(*args, **kwargs)
+        raise subprocess.TimeoutExpired(['git', '-C', checkout, 'rev-parse'], 15, stderr=b'fixture Git stalled')
+
+    path = merge_request(r, tmp_path, evidence=str(r.evidence))
+    with monkeypatch.context() as patch:
+        patch.setattr(repository_scope if stage == 'checkout' else ci_approval,
+                      'checkout_roots' if stage == 'checkout' else 'capture', timeout)
+        plan = r.cli.bridge(path)
+        assert plan['action'] == 'review' and 'fixture Git stalled' in plan['reason']
+        assert '15 seconds' in plan['reason'] and 'Restore this prerequisite' in plan['reason']
+        with pytest.raises(ValueError, match='fixture Git stalled'):
+            r.cli.approve(r.evidence)
+    assert r.cli.bridge(path)['action'] == 'approve'
+    assert (r.evidence.read_bytes(), r.store.manifest.read_bytes()) == original
+    assert not r.remote.calls and not r.remote.state['writes']
+
+
+@pytest.mark.parametrize('failure', ['api-permission', 'publication-diagnostic'])
+def test_bridge_does_not_reclassify_nonlocal_capture_failures_as_review_recovery(
+        reviewed, tmp_path, monkeypatch, failure):
+    from shared import ci_approval
+    r = reviewed
+    error = (subprocess.CalledProcessError(1, ['gh', 'api'], stderr='HTTP 403: read permission required')
+             if failure == 'api-permission' else Diagnostic(
+                 'publication_pending', 'Reconcile retained intent', {'kind': 'agent_task'}))
+
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(ci_approval, 'capture', fail)
+    with pytest.raises(type(error)) as raised:
+        r.cli.bridge(merge_request(r, tmp_path, evidence=str(r.evidence)))
+    assert raised.value is error
+    assert not r.remote.calls and not r.remote.state['writes']
+
+
+def test_bridge_rejects_changed_legacy_pins_before_git_capture(reviewed, tmp_path, monkeypatch):
+    from shared import ci_approval
+    r = reviewed
+    spec_path = Path(read(r.evidence)['discovery'][0])
+    spec = read(spec_path)
+    spec['git']['head'] = 'f'*40
+    write(spec_path, spec)
+
+    def unexpected_capture(*args, **kwargs):
+        pytest.fail('Changed retained source pins must be rejected before capture')
+
+    monkeypatch.setattr(ci_approval, 'capture', unexpected_capture)
+    plan = r.cli.bridge(merge_request(r, tmp_path, evidence=str(r.evidence)))
+    assert plan['action'] == 'review' and plan['reason'] == 'Review task source pins changed'
+    assert not r.remote.calls and not r.remote.state['writes']
+
+
+def test_unavailable_checkout_preserves_pending_approval_reconciliation_priority(reviewed, tmp_path):
+    r = reviewed
+    path = merge_request(r, tmp_path, evidence=str(r.evidence))
+    r.remote.state['lose_response'] = ['ci-approve']
+    with pytest.raises(Diagnostic):
+        r.cli.approve(r.evidence)
+    operation = next(publication.workflow_storage.operations_root().glob('*/*/*.json'))
+    original = operation.read_bytes(), r.evidence.read_bytes(), r.store.manifest.read_bytes()
+    checkout = Path(read(r.evidence)['checkout'])
+    displaced = tmp_path/'retained-checkout'
+    checkout.rename(displaced)
+    try:
+        plan = r.cli.bridge(path)
+        assert plan['action'] == 'reconcile' and plan['operations'] == [str(operation)]
+        assert (operation.read_bytes(), r.evidence.read_bytes(), r.store.manifest.read_bytes()) == original
+        assert r.remote.calls == [101]
+    finally:
+        displaced.rename(checkout)
+    r.cli.publish.publish(operation, reconcile=True)
+    assert r.cli.bridge(path)['action'] == 'approve'
+    assert r.remote.calls == [101]
+
+
 @pytest.mark.parametrize('fields', [
     {'review_options': {'architecture': {'enabled': False}}},
     {'upstream': 'github.com/upstream/repo'},
