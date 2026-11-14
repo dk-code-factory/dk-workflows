@@ -20,7 +20,7 @@ from shared.workflow_storage import operations_root
 
 
 def local_history(pr, metadata, listed, anchors, cwd):
-    """Prove capped membership and anchor distances from pinned local objects."""
+    """Prove membership and anchor distances from pinned local objects."""
     parsed = urlsplit(pr)
     owner, repo, _, _ = parsed.path.strip('/').split('/')
     base = metadata.get('base', {})
@@ -63,8 +63,44 @@ def local_history(pr, metadata, listed, anchors, cwd):
     return {'mode': 'local', 'commits': members, 'target': tip, 'targetRef': base['ref'], 'newCommits': ages}
 
 
+def github_history(items, head, anchors):
+    """Count new reachable PR commits, independent of REST chronological order."""
+    members = {item['sha'] for item in items}
+    parents = {}
+    for item in items:
+        values = item.get('parents')
+        if (not isinstance(values, list) or any(not isinstance(value, dict) or
+                not isinstance(value.get('sha'), str) or
+                not re.fullmatch(r'[0-9a-f]{40}', value['sha']) for value in values)):
+            return None
+        parents[item['sha']] = {value['sha'] for value in values} & members
+
+    def ancestors(commit):
+        found, visiting = set(), set()
+
+        def visit(sha):
+            if sha in visiting:
+                raise ValueError('cyclic PR commit parent evidence; restore complete history')
+            if sha not in found:
+                visiting.add(sha)
+                for parent in parents[sha]:
+                    visit(parent)
+                visiting.remove(sha)
+                found.add(sha)
+        visit(commit)
+        return found
+
+    # Complete PR membership excludes target ancestors. An outside parent cannot
+    # lead back into this set; all member paths must therefore be present here.
+    if head not in members or ancestors(head) != members:
+        return None
+    return {'mode': 'github', 'commits': [item['sha'] for item in items],
+            'newCommits': {anchor: len(members - ancestors(anchor))
+                           for anchor in sorted(set(anchors) & members)}}
+
+
 def commits(pr, head, cwd, anchors=()):
-    """Read stable PR membership; supplement capped API lists with pinned Git."""
+    """Prove stable PR membership and ancestry with API parents or pinned Git."""
     parsed = urlsplit(pr)
     owner, repo, _, number = parsed.path.strip('/').split('/')
     route = f'repos/{owner}/{repo}/pulls/{number}'
@@ -80,13 +116,15 @@ def commits(pr, head, cwd, anchors=()):
                                      '-F', 'per_page=100'], cwd)
         if not isinstance(pages, list) or any(not isinstance(page, list) for page in pages):
             raise ValueError('incomplete PR commit pagination')
-        values = [item.get('sha') if isinstance(item, dict) else None
-                  for page in pages for item in page]
+        items = [item for page in pages for item in page]
+        values = [item.get('sha') if isinstance(item, dict) else None for item in items]
         if (len(values) != min(count, 250) or any(not isinstance(sha, str) or
                 not re.fullmatch(r'[0-9a-f]{40}', sha) for sha in values)
-                or len(set(values)) != len(values) or count <= 250 and values[-1] != head):
+                or len(set(values)) != len(values) or count <= 250 and head not in values):
             raise ValueError('PR commit membership incomplete or inconsistent; age is uncertain')
-        captured = local_history(pr, metadata, values, anchors, cwd) if count > 250 else values
+        captured = github_history(items, head, anchors) if count <= 250 else None
+        if captured is None:
+            captured = local_history(pr, metadata, values, anchors, cwd)
         live = conversation.gh_json(['pr', 'view', pr, '--json', 'headRefOid'], cwd)
         if not isinstance(live, dict) or live.get('headRefOid') != head:
             raise ValueError('PR head changed during commit capture')
@@ -147,8 +185,7 @@ def operations(pr, cwd):
 
 def inspect(inline, top, history, retained):
     subject = evidence.identity(inline)
-    return {**subject, 'commits': history['commits'] if isinstance(history, dict) else history,
-            **({'commitEvidence': history} if isinstance(history, dict) else {}),
+    return {**subject, 'commits': history['commits'], 'commitEvidence': history,
             'sources': sources(inline, top),
             'discussion': evidence.digest([inline, top]),
             'operations': [{'path': path, 'status': value['status'],
@@ -170,10 +207,7 @@ def inspection_output(context, *, full_commits=False):
     anchors = {sha for source in context['sources'].values()
                for sha in [source['reviewCommit'], *source['linkedCommits']] if sha}
     anchors.update(item['head'] for item in context['operations'] if item['head'])
-    ages = proof.get('newCommits')
-    if ages is None:
-        positions = {sha: index for index, sha in enumerate(members)}
-        ages = {sha: len(members) - 1 - positions[sha] for sha in anchors if sha in positions}
+    ages = {sha: age for sha, age in proof.get('newCommits', {}).items() if sha in anchors}
     result['commitEvidence'] = {
         'mode': proof.get('mode', 'github'), 'count': len(members),
         **{key: proof[key] for key in ('target', 'targetRef') if key in proof},
@@ -230,8 +264,7 @@ def plan(context, assessments, retained):
                 # latest; an unanchored latest request always blocks age.
                 uncertain = uncertain or request['reference'] == latest
             else:
-                age = (context['commitEvidence']['newCommits'].get(anchor)
-                       if 'commitEvidence' in context else len(context['commits']) - 1 - context['commits'].index(anchor))
+                age = context.get('commitEvidence', {}).get('newCommits', {}).get(anchor)
                 if age is None:
                     uncertain = uncertain or request['reference'] == latest
                 else:
@@ -246,8 +279,7 @@ def plan(context, assessments, retained):
             if value['status'] != 'verified':
                 uncertain = True
             elif approved.get('head') in context['commits']:
-                age = (context['commitEvidence']['newCommits'].get(approved['head'])
-                       if 'commitEvidence' in context else len(context['commits']) - 1 - context['commits'].index(approved['head']))
+                age = context.get('commitEvidence', {}).get('newCommits', {}).get(approved['head'])
                 if age is None:
                     uncertain = uncertain or path == latest
                 else:

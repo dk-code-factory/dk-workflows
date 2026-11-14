@@ -38,8 +38,16 @@ def inputs():
     return inline, top
 
 
+def linear_history(members):
+    items = [{'sha': sha, 'parents': [{'sha': members[index - 1]}] if index else []}
+             for index, sha in enumerate(members)]
+    return followups.github_history(items, members[-1], members)
+
+
 def context(history=None, retained=None):
-    return followups.inspect(*inputs(), [A, B, C] if history is None else history, retained or {})
+    history = [A, B, C] if history is None else history
+    return followups.inspect(*inputs(), linear_history(history) if isinstance(history, list) else history,
+                             retained or {})
 
 
 def assessment(value, source='C99', **changes):
@@ -94,7 +102,7 @@ def test_nonactionable_dispositions_never_remind(disposition):
 def test_resolved_thread_never_reminds():
     inline, top = inputs()
     inline['threads'][0]['isResolved'] = True
-    value = followups.inspect(inline, top, [A, B, C], {})
+    value = followups.inspect(inline, top, linear_history([A, B, C]), {})
     assert outcome(value)['status'] == 'excluded'
 
 
@@ -105,7 +113,7 @@ def test_recent_equivalent_request_resets_age_for_every_author(author):
               'url': PR + '#issuecomment-902', 'author': author,
               'text': f'Please handle empty input at [head]({PR}/commits/{B}).'}
     top['items'].append(recent)
-    value = followups.inspect(inline, top, [A, B, C], {})
+    value = followups.inspect(inline, top, linear_history([A, B, C]), {})
     requests = [{'reference': 'C99'}, {'reference': recent['reference'], 'commit': B,
                                      'anchorEvidence': 'Equivalent substantive author request at B.'}]
     assert outcome(value, requests=requests, latestRequest=recent['reference'])['newCommits'] == 1
@@ -130,10 +138,10 @@ def test_later_evidenced_request_can_supersede_an_unanchored_original():
 
 def test_formatting_only_bot_summary_edit_keeps_each_findings_anchor():
     inline, top = inputs()
-    before = followups.inspect(inline, top, [A, B, C], {})
+    before = followups.inspect(inline, top, linear_history([A, B, C]), {})
     top['comments'][0].update(author='robot[bot]', updatedAt='2026-11-13T23:59:59Z')
     top['comments'][0]['text'] = '**Summary**\n\n' + top['comments'][0]['text']
-    after = followups.inspect(inline, top, [A, B, C], {})
+    after = followups.inspect(inline, top, linear_history([A, B, C]), {})
     assert before['discussion'] != after['discussion']  # semantic reassessment is required
     assert outcome(after, source='issuecomment-901')['newCommits'] == 2
     with pytest.raises(ValueError, match='inputs changed'):
@@ -144,7 +152,7 @@ def test_one_summary_edit_does_not_reset_every_findings_substantive_age():
     inline, top = inputs()
     top['comments'][0]['text'] += f'\nNew request about generators at [head]({PR}/commits/{B}).'
     top['comments'][0]['updatedAt'] = '2026-11-13T23:59:59Z'
-    value = followups.inspect(inline, top, [A, B, C], {})
+    value = followups.inspect(inline, top, linear_history([A, B, C]), {})
     native = assessment(value, source='issuecomment-901')
     second = deepcopy(native['findings'][0])
     second.update(key='generator-consumption', correction='Please materialize the generator only once.')
@@ -194,7 +202,7 @@ def test_two_commits_after_latest_verified_receipt_can_be_reassessed():
 def test_only_latest_verified_unavailable_receipt_blocks_age(local, latest, expected):
     saved = {'/old/operation.json': retained('verified', D)}
     history = {'commits': [A, B, C], 'mode': 'local', 'target': 'e' * 40,
-               'newCommits': {A: 2}} if local else [A, B, C]
+               'newCommits': {A: 2}} if local else linear_history([A, B, C])
     value = context(history, saved)
     original = deepcopy(saved)
     native = assessment(value, operations=list(saved), latestRequest=latest)
@@ -208,7 +216,7 @@ def test_source_repository_casing_preserves_exact_publication_url(source):
     items = [*inline['threads'][0]['comments'], *top['items']]
     for item in items:
         item['url'] = item['url'].replace('/owner/repo/', '/Owner/Repo/')
-    value = followups.inspect(inline, top, [A, B, C], {})
+    value = followups.inspect(inline, top, linear_history([A, B, C]), {})
     result = outcome(value, source=source)
     url = value['sources'][source]['url']
     assert result['request']['source']['url'] == url
@@ -269,7 +277,7 @@ def test_default_inspection_lists_candidate_ages_and_preserves_missing_anchors()
 def test_changed_inputs_reject_only_plan_without_modifying_originals(change):
     saved = {'/original/operation.json': retained('verified', A)}
     inline, top = inputs()
-    old = followups.inspect(inline, top, [A, B, C], saved)
+    old = followups.inspect(inline, top, linear_history([A, B, C]), saved)
     native = assessment(old, operations=list(saved))
     if change == 'head':
         inline['pullRequest']['headRefOid'] = D
@@ -277,7 +285,7 @@ def test_changed_inputs_reject_only_plan_without_modifying_originals(change):
         top['items'][0]['text'] += ' Actually, preserve the exception.'
     else:
         saved['/original/operation.json']['status'] = 'pending'
-    new = followups.inspect(inline, top, [A, B, C], saved)
+    new = followups.inspect(inline, top, linear_history([A, B, C]), saved)
     with pytest.raises(ValueError, match='changed'):
         followups.plan(new, native, saved)
 
@@ -285,9 +293,11 @@ def test_changed_inputs_reject_only_plan_without_modifying_originals(change):
 def test_commit_capture_requires_stable_complete_pr_list():
     history = [A, B, C]
     metadata = {'commits': 3, 'head': {'sha': C}}
-    responses = [metadata, [[{'sha': sha} for sha in history]], {'headRefOid': C}] * 2
+    items = [{'sha': sha, 'parents': [{'sha': history[index - 1]}] if index else []}
+             for index, sha in enumerate(history)]
+    responses = [metadata, [items], {'headRefOid': C}] * 2
     with patch.object(followups.conversation, 'gh_json', side_effect=responses) as read:
-        assert followups.commits(PR, C, Path('.')) == history
+        assert followups.commits(PR, C, Path('.'), anchors=history) == linear_history(history)
     assert read.call_count == 6
     assert '--paginate' in read.call_args_list[1].args[0]
 
@@ -382,7 +392,8 @@ def test_local_fallback_requires_consistent_full_objects_and_live_target(large_h
 @pytest.mark.parametrize('failure', ['cap', 'missing', 'duplicate', 'head', 'pages', 'unstable'])
 def test_incomplete_or_unstable_commit_capture_never_produces_age(failure):
     metadata = {'commits': 3, 'head': {'sha': C}}
-    pages = [[{'sha': sha} for sha in [A, B, C]]]
+    pages = [[{'sha': sha, 'parents': [{'sha': parent}] if parent else []}
+              for sha, parent in [(A, None), (B, A), (C, B)]]]
     if failure == 'cap':
         metadata['commits'] = 251
     elif failure == 'missing':
@@ -395,7 +406,7 @@ def test_incomplete_or_unstable_commit_capture_never_produces_age(failure):
         pages = {'incomplete': True}
     responses = [metadata, pages, {'headRefOid': C}]
     if failure == 'unstable':
-        responses += [metadata, [[{'sha': sha} for sha in [B, A, C]]], {'headRefOid': C}]
+        responses += [metadata, [[pages[0][1], pages[0][0], pages[0][2]]], {'headRefOid': C}]
         responses += [metadata, pages, {'headRefOid': C}]
     with patch.object(followups.conversation, 'gh_json', side_effect=responses):
         with pytest.raises(ValueError):
@@ -420,7 +431,7 @@ def test_inspect_cli_defaults_to_compact_with_full_evidence_opt_in(monkeypatch, 
     monkeypatch.setattr(sys, 'argv', argv + (['--full-commits'] if full else []))
     with patch.object(evidence, 'load_handoff', return_value=({}, *inputs())), \
          patch.object(evidence, 'verify'), patch.object(followups, 'operations', return_value={}), \
-         patch.object(followups, 'commits', return_value=[A, B, C]):
+         patch.object(followups, 'commits', return_value=linear_history([A, B, C])):
         assert followups.main() == 0
     result = json.loads(capsys.readouterr().out)
     assert ('commits' in result) is full
@@ -530,3 +541,145 @@ def test_native_assessment_round_trip_in_new_process_preserves_results(tmp_path)
     outputs = [subprocess.check_output([sys.executable, '-c', code, str(path)], text=True) for _ in range(2)]
     assert outputs[0] == outputs[1]
     assert path.read_bytes() == before
+
+
+@pytest.fixture(scope='module')
+def branched_history(tmp_path_factory):
+    root = tmp_path_factory.mktemp('finding-branched-history')
+    env = {**os.environ, 'GIT_AUTHOR_NAME': 'Fixture', 'GIT_AUTHOR_EMAIL': 'fixture@example.test',
+           'GIT_COMMITTER_NAME': 'Fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.test'}
+
+    def git(*args, data=None, date=None):
+        dated = {**env, 'GIT_AUTHOR_DATE': date, 'GIT_COMMITTER_DATE': date} if date else env
+        return subprocess.check_output(['git', *args], cwd=root, env=dated, input=data, text=True).strip()
+
+    git('init', '-q')
+    tree = git('mktree', data='')
+
+    def commit(label, day, *parents):
+        return git('commit-tree', tree, *[arg for parent in parents for arg in ('-p', parent)],
+                   data=label, date=f'2026-01-{day:02d}T00:00:00Z')
+
+    base = commit('base', 1)
+    original = commit('original PR work', 2, base)
+    side = commit('side branch created before request', 3, original)
+    request_head = commit('head when request was posted', 4, original)
+    target = commit('target only 2', 3, commit('target only 1', 2, base))
+    target_merge = commit('merge only target', 5, request_head, target)
+    side_merge = commit('merge old side branch and target', 6, request_head, side, target)
+    histories = {}
+    for head in (target_merge, side_merge):
+        members = git('rev-list', head, '^' + target).splitlines()
+        items = []
+        for sha in sorted(members, key=lambda sha: int(git('show', '-s', '--format=%ct', sha))):
+            parents = git('show', '-s', '--format=%P', sha).split()
+            items.append({'sha': sha, 'parents': [{'sha': parent} for parent in parents]})
+        expected = int(git('rev-list', '--count', head, '^' + request_head, '^' + target))
+        histories[head] = (items, expected)
+    return root, target, original, side, request_head, target_merge, side_merge, histories
+
+
+def capture_small_history(fixture, head, *, items=None, cwd=None):
+    root, target, original, side, request_head, _, _, histories = fixture
+    actual, _ = histories[head]
+    items = actual if items is None else items
+    metadata = {'commits': len(actual), 'head': {'sha': head},
+                'base': {'ref': 'main', 'repo': {'full_name': 'owner/repo'}}}
+
+    def read(args, directory):
+        if '/git/ref/heads/' in args[-1]:
+            return {'object': {'type': 'commit', 'sha': target}}
+        if args[:2] == ['pr', 'view']:
+            return {'headRefOid': head}
+        if '--paginate' in args:
+            return [items]
+        return deepcopy(metadata)
+
+    with patch.object(followups.conversation, 'gh_json', side_effect=read):
+        return followups.commits(PR, head, cwd or root, anchors=[original, side, request_head, head, D])
+
+
+@pytest.mark.parametrize('source', ['report', 'discussion', 'receipt'])
+@pytest.mark.parametrize('side_branch', [False, True])
+def test_small_api_graph_counts_new_commits_since_each_request_not_timestamp_or_list_suffix(
+        branched_history, tmp_path, source, side_branch):
+    _, target, original, side, request_head, target_merge, side_merge, histories = branched_history
+    head = side_merge if side_branch else target_merge
+    items, expected = histories[head]
+    if side_branch:
+        assert [item['sha'] for item in items] == [original, side, request_head, head]
+        assert expected == 2  # The older-dated side commit was absent from request_head.
+    else:
+        assert expected == 1  # Target-only commits never contribute to reminder age.
+    # No checkout exists here: complete short API parent evidence is sufficient.
+    with patch.object(followups, 'local_history', side_effect=AssertionError('needless local fallback')):
+        captured = capture_small_history(branched_history, head, cwd=tmp_path)
+    assert captured['mode'] == 'github'
+    assert captured['newCommits'][request_head] == expected
+    assert target not in captured['commits'] and D not in captured['newCommits']
+    inline, top = inputs()
+    inline['pullRequest']['headRefOid'] = head
+    top['reviews'][0]['commitId'] = request_head if source == 'report' else original
+    requests = [{'reference': 'C99'}]
+    saved = {}
+    latest = 'C99'
+    if source == 'discussion':
+        recent = {**top['comments'][0], 'reference': 'issuecomment-902', 'id': 902,
+                  'url': PR + '#issuecomment-902',
+                  'text': f'Please fix this at [head]({PR}/commits/{request_head}).'}
+        top['items'].append(recent)
+        requests.append({'reference': recent['reference'], 'commit': request_head,
+                         'anchorEvidence': 'Latest substantive request explicitly binds this head.'})
+        latest = recent['reference']
+    elif source == 'receipt':
+        saved = {'/original/operation.json': retained('verified', request_head)}
+        latest = next(iter(saved))
+    value = followups.inspect(inline, top, captured, saved)
+    before = deepcopy(saved)
+    native = assessment(value, requests=requests, operations=list(saved), latestRequest=latest)
+    result = followups.plan(value, native, saved)['findings'][0]
+    assert result['newCommits'] == expected
+    assert result['status'] == ('eligible' if expected == 2 else 'recent_request')
+    assert followups.inspection_output(value)['commitEvidence']['newCommits'][request_head] == expected
+    assert saved == before
+
+
+@pytest.mark.parametrize('failure', ['missing_parents', 'disconnected'])
+def test_small_incomplete_api_graph_uses_pinned_local_proof(branched_history, failure):
+    *_, head, histories = branched_history
+    items = deepcopy(histories[head][0])
+    if failure == 'missing_parents':
+        del items[0]['parents']
+    else:
+        items[-1]['parents'] = items[-1]['parents'][:1]
+    captured = capture_small_history(branched_history, head, items=items)
+    assert captured['mode'] == 'local'
+    assert captured['newCommits'][branched_history[4]] == 2
+
+
+def test_small_missing_api_parent_evidence_without_local_objects_blocks(branched_history, tmp_path):
+    *_, head, histories = branched_history
+    items = deepcopy(histories[head][0])
+    del items[0]['parents']
+    with pytest.raises(ValueError, match='restore full local Git objects'):
+        capture_small_history(branched_history, head, items=items, cwd=tmp_path)
+
+
+def test_unproved_list_positions_cannot_supply_age_for_reports_or_receipts():
+    saved = {'/original/operation.json': retained('verified', A)}
+    value = context(retained=saved)
+    del value['commitEvidence']
+    for operations, latest in [([], 'C99'), (list(saved), next(iter(saved)))]:
+        result = followups.plan(value, assessment(value, operations=operations, latestRequest=latest), saved)
+        assert result['findings'][0]['status'] == 'uncertain_age'
+    assert followups.inspection_output(value)['commitEvidence']['newCommits'] == {}
+
+
+@pytest.mark.parametrize('order', ['reversed', 'head_first'])
+def test_small_api_age_does_not_depend_on_head_position(branched_history, tmp_path, order):
+    *_, head, histories = branched_history
+    items = histories[head][0]
+    items = list(reversed(items)) if order == 'reversed' else [items[-1], *items[:-1]]
+    with patch.object(followups, 'local_history', side_effect=AssertionError('API graph is complete')):
+        captured = capture_small_history(branched_history, head, items=items, cwd=tmp_path)
+    assert captured['newCommits'][branched_history[4]] == 2

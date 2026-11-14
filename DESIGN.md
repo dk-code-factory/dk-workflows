@@ -874,8 +874,13 @@ retain their ordinary approval/CI/merge gates and posting permissions remain liv
 The read-only follow-up helper verifies existing complete evidence, captures a
 stable paginated PR commit list with its total and constructs source routes and
 reply payloads. Review commit IDs or native-validated source-head links supply
-anchors; unsupported or rewritten latest anchors stay uncertain. Beyond the REST
-250-commit cap, full local objects supplement the capped list: pin the captured
+anchors; unsupported or rewritten latest anchors stay uncertain. Complete API
+parent graphs count PR members reachable from the current head but absent from
+the anchor ancestry. Chronological list position is never arrival history:
+merging an older-dated side branch can add commits after the request. Complete
+short histories need no checkout when API parents prove every member reachable.
+Beyond the REST 250-commit cap or when API parent evidence is insufficient, full
+local objects supplement the list: pin the captured
 head and live target tip, require count/list agreement, prove anchor ancestry and
 exclude target-only commits. Changed pins, shallow/missing objects or incomplete
 GitHub evidence require restoration and recapture. Timestamps never substitute

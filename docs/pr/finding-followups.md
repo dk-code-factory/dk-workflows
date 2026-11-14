@@ -58,10 +58,18 @@ requires semantic reassessment.
 
 Missing/rewritten latest anchors are uncertain. A later evidenced substantive request
 can supersede an unanchored original report or verified receipt when the verifier establishes that
-ordering. Incomplete/unstable commit lists or changed heads block calculation. Beyond the
-endpoint's 250-commit cap, the helper supplements its stable 250-entry list and
-GitHub total with full local Git objects at the captured PR head and live target
-branch tip. It validates total membership and listed commits, requires each
+ordering. Incomplete/unstable commit lists or changed heads block calculation.
+For complete histories within the endpoint's 250-commit cap, the helper uses API
+parent links to prove all PR members reachable from the current head, then counts
+members absent from the anchor's ancestry. No checkout is needed for this proof.
+The API's chronological ordering is not PR arrival history: if A branches to B
+and an older-dated X, merging X into B adds X and the merge after a request at B,
+even if X appears before B in the list. Report, request and receipt anchors all
+use the same ancestry calculation.
+
+Beyond the cap, or when API parent evidence cannot prove the complete graph,
+the helper supplements the stable list and GitHub total with full local Git
+objects at the captured PR head and live target branch tip. It validates total membership and listed commits, requires each
 anchor to be an ancestor of that head, and excludes target-only ancestry when
 counting subsequent PR commits. It rechecks the live target before returning and
 repeats capture for stability. Missing objects, shallow history, mismatched
