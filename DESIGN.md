@@ -48,8 +48,13 @@ review-request evidence blocks continuation without rewriting the pending intent
 Malformed retained review evidence, including nested legacy specs and reports,
 returns the incoming-review recovery handoff with a diagnostic under current policy
 rather than supplying approval coverage or usable overrides. Explicit invocation
-options require validation before every handoff, including reconciliation and
-CI observation without remaining gates. Existing review definitions, results,
+options and current defaults require complete effective-option validation before
+every handoff, including reconciliation and CI observation without remaining
+gates. Retained overrides govern only fully accepted evidence; rejected evidence
+recovers under the current explicit invocation or defaults. Listed and unlisted
+pending review requests share the live no-resend check, preserving their original
+head binding and intent rather than requiring a fabricated verified receipt.
+Existing review definitions, results,
 fingerprints, publication intents and receipts retain their original
 freshness boundaries; changed governing inputs refresh only affected analysis.
 No durable field, summary, snapshot or continuation store is added: the existing

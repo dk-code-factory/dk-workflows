@@ -28,7 +28,8 @@ def snapshot(path):
     if value.get('configuration') == 'skill-owned':
         value['skill_settings_fingerprints'] = {
             name: digest(skill_config.effective('dk-workflows:' + name, value['repository'], value.get('upstream'),
-                                                options=value.get(field, {}))['options'])
+                                                options=skill_config.validate('dk-workflows:' + name,
+                                                                              value.get(field, {})))['options'])
             for name, field in [('dk-pr-review', 'options'), ('dk-pr-reviewers-run', 'reviewer_options')]}
         value.pop('skill_settings', None)
     value['instruction_fingerprints'] = {key: resource(source) for key, source in value['instructions'].items()}
@@ -57,6 +58,11 @@ def bridge(path):
     if 'evidence' in bound and (not isinstance(bound['evidence'], str) or not bound['evidence']):
         raise ValueError('Bridge evidence must reference an incoming-review document path')
     approval = Approval(publish.handler(bound))
+    repository = approval.handler.host + '/' + approval.handler.root.removeprefix('repos/')
+    # Validate the complete current invocation before any early handoff. Schema
+    # validation alone cannot enforce rules involving merged default/scope values.
+    current = skill_config.effective('dk-workflows:dk-pr-review', repository, bound.get('upstream'),
+                                     options=options)['options']
     continuation = {'request': str(Path(path).resolve()), 'ci_success': None,
                     'after_approval': ['dk-workflows:dk-ci', 'dk-workflows:dk-pr-publish']}
     # A prior approval may have removed a gate despite a lost response. Discover
@@ -74,24 +80,6 @@ def bridge(path):
     eligible = approval.discover()
     if not eligible:
         return {**continuation, 'action': 'observe-ci', 'eligible_runs': []}
-    repository = approval.handler.host + '/' + approval.handler.root.removeprefix('repos/')
-    evidence_options_error = None
-    if bound.get('evidence'):
-        try:
-            evidence = read(Path(bound['evidence']))
-        except (ValueError, OSError):
-            evidence = {}
-        if (isinstance(evidence, dict) and evidence.get('configuration') == 'skill-owned'
-                and all(evidence.get(key) == bound[key] for key in ('pr', 'head', 'base'))
-                and 'review_options' not in bound):
-            try:
-                options = skill_config.validate('dk-workflows:dk-pr-review', evidence.get('options', {}))
-            except ValueError as exc:
-                evidence_options_error = str(exc)
-    policy = skill_config.effective('dk-workflows:dk-pr-review', repository, bound.get('upstream'),
-                                    options=options)['options']['permissions']
-    if not policy['approve_fork_ci']:
-        raise ValueError('Fork CI execution approval is disabled by current incoming-review policy')
     settings = config.effective(repository, bound.get('upstream'))
     actor = approval.handler.api(bound['pr'], 'user')
     if classify(approval.handler.host, context['user'], actor,
@@ -101,8 +89,7 @@ def bridge(path):
         {'run_id': run['id'], 'attempt': run['run_attempt']} for run in eligible]}
     if bound.get('evidence'):
         try:
-            if evidence_options_error:
-                raise ValueError('Malformed retained incoming-review options: ' + evidence_options_error)
+            evidence = read(Path(bound['evidence']))
             if isinstance(evidence, dict) and (
                     evidence.get('upstream') != bound.get('upstream')
                     or 'review_options' in bound and (
@@ -116,6 +103,11 @@ def bridge(path):
                     'evidence': bound['evidence']}
     else:
         reason = 'Standalone review has no current incoming-review evidence document'
+    # Retained overrides govern only fully accepted evidence. Rejected evidence
+    # must not redirect recovery scope, policy or task selection; use the current
+    # explicit invocation, or current defaults when no overrides were supplied.
+    if not current['permissions']['approve_fork_ci']:
+        raise ValueError('Fork CI execution approval is disabled by current incoming-review policy')
     return {**result, 'action': 'review', 'skill': 'dk-workflows:dk-pr-review',
             'review_options': options, 'reason': reason}
 

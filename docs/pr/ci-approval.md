@@ -62,9 +62,11 @@ silently recapture a different target to make a pending request pass. Already
 approved runs require no new approval; their CI results still need observation.
 Malformed retained evidence, including legacy task specs and nested reports,
 produces a review handoff and diagnostic with valid explicit request options or
-current defaults; damaged evidence cannot supply
-approval coverage. Invalid explicit request options block every handoff, including
-reconciliation and CI observation when no fork gates remain.
+current defaults. Rejected evidence cannot supply invocation overrides or approval
+coverage, including when its upstream scope differs. Validate the full merged
+effective options, including cross-field constraints, before every handoff;
+invalid explicit request options or current defaults block reconciliation and CI
+observation too, even when no fork gates remain.
 This bridge also works when no eligible fork gates exist, without injecting a
 new review or requiring fork approval permission for an unrelated merge.
 
@@ -112,7 +114,7 @@ When discovery has candidates, supply the independent verification occurrence ge
 
 Only evidenced `rejected` or `resolved` candidates satisfy readiness. `confirmed`, `uncertain`, missing or duplicate dispositions block approval. Record actual unresolved verification findings in `findings`; they also block approval. A resolution must establish why the issue no longer requires action at the current reviewed inputs. Save original verification output unchanged.
 
-Skill-owned lists place custom work directly before and after review; they do not inherit hidden process hooks. Keep `hooks:[]` for this mode. Complete required selected tasks before finalization. List the journal paths of all review publications in `publications`; they must have verified receipts at this head. Pending publications anywhere in this PR journal block new writes until reconciled, except an uncertain review request with a live-validated `no_resend` disposition.
+Skill-owned lists place custom work directly before and after review; they do not inherit hidden process hooks. Keep `hooks:[]` for this mode. Complete required selected tasks before finalization. List the journal paths of all review publications in `publications`; they must have verified receipts at this head or be an uncertain review request at this head with a live-validated `no_resend` disposition. The same disposition check applies to listed and unlisted operations, retaining the pending intent without inventing a receipt. Other pending publications anywhere in this PR journal block new writes until reconciled.
 
 Evidence without `configuration` retains the legacy process API: its selected reviewer and named verifier settings and complete configured hook occurrences remain required. Legacy noncacheable hook results use the retained run and their generated occurrence; hook claims omit the reviewer cycle flag. Discovery and verification attempts require the current review cycle in both modes.
 

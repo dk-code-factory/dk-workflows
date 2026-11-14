@@ -100,7 +100,8 @@ class Approval:
         if owned:
             selected_settings = {
                 name: skill_config.effective('dk-workflows:' + name, repository, value.get('upstream'),
-                                             options=value.get(field, {}))
+                                             options=skill_config.validate('dk-workflows:' + name,
+                                                                           value.get(field, {})))
                 for name, field in [('dk-pr-review', 'options'), ('dk-pr-reviewers-run', 'reviewer_options')]}
             fingerprints = {name: digest(selected['options']) for name, selected in selected_settings.items()}
             if fingerprints != value.get('skill_settings_fingerprints'):
@@ -279,17 +280,21 @@ class Approval:
                           for index, _ in enumerate(hooks)]
         if sorted(occurrences) != sorted(required_hooks):
             raise ValueError('Current review cycle hooks are incomplete')
-        for path in value.get('publications', []):
-            operation = publication.load(path)
-            if (operation['status'] != 'verified' or operation['request']['target'] != request['pr']
-                    or operation['request']['approved'].get('head') != request['head']):
-                raise ValueError('Review publications require reconciled receipts at the reviewed head')
-        # Also detect uncertain writes omitted from the evidence document.
         from shared.workflow_storage import operations_root
         from shared.review_request_recovery import Recovery
         from shared.github_publications import Handler
         recovery = Recovery(lambda approved: Handler(approved, api=h.api, metadata=h.metadata,
                                                      run=h.run, endpoint=h.endpoint))
+        for path in value.get('publications', []):
+            operation = publication.load(path)
+            settled = (operation['status'] == 'verified'
+                       or operation['status'] == 'pending' and operation['request']['kind'] == 'request-review'
+                       and operation.get('review_request_disposition')
+                       and not recovery.blocks(operation, {**request, 'kind': 'ci-approve'}))
+            if (not settled or operation['request']['target'] != request['pr']
+                    or operation['request']['approved'].get('head') != request['head']):
+                raise ValueError('Review publications require reconciled receipts or a current no-resend disposition at the reviewed head')
+        # Also detect uncertain writes omitted from the evidence document.
         scope = operations_root(repository=request.get('checkout')) / publication.digest(request['pr'])
         for path in scope.glob('*/*.json'):
             operation = publication.load(path)

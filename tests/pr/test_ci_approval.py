@@ -297,7 +297,10 @@ def test_bridge_no_gates_observes_ci_without_requiring_fork_execution_permission
     assert not r.remote.calls
 
 
-@pytest.mark.parametrize('options', [[], None, {'permissions': []}, {'unknown': True}])
+@pytest.mark.parametrize('options', [[], None, {'permissions': []}, {'unknown': True},
+    {'architecture': {'scoring': {'profile': 'custom'}}},
+    {'architecture': {'scoring': {'profile': 'custom', 'custom_prompt': None}}},
+    {'architecture': {'scoring': {'profile': 'custom', 'custom_prompt': '   '}}}])
 @pytest.mark.parametrize('continuation', ['gated', 'no-gates', 'pending'])
 def test_bridge_invalid_explicit_options_still_block_instead_of_using_defaults(reviewed, tmp_path, options, continuation):
     r = reviewed
@@ -314,6 +317,66 @@ def test_bridge_invalid_explicit_options_still_block_instead_of_using_defaults(r
         r.cli.bridge(path)
     assert r.remote.calls == calls and r.remote.state['writes'] == writes
     assert r.remote.list_reads == reads
+
+
+@pytest.mark.parametrize('continuation', ['gated', 'no-gates', 'pending'])
+def test_bridge_validates_merged_current_settings_before_every_handoff(reviewed, tmp_path, continuation):
+    r = reviewed
+    if continuation == 'no-gates':
+        for run in r.remote.runs.values():
+            run.update(status='completed', conclusion='success')
+    elif continuation == 'pending':
+        r.remote.state['lose_response'] = ['ci-approve']
+        with pytest.raises(Diagnostic):
+            r.cli.approve(r.evidence)
+    # Each layer is schema-valid; the effective result violates a cross-field rule.
+    write(config.path('github.com/owner/repo'), config.invocation.merge(r.settings, {
+        'skill_defaults': {'dk-workflows:dk-pr-review': {'options': {
+            'architecture': {'scoring': {'profile': 'custom', 'custom_prompt': None}}}}}}))
+    reads = r.remote.list_reads
+    with pytest.raises(ValueError, match='requires custom_prompt'):
+        r.cli.bridge(merge_request(r, tmp_path, evidence=str(r.evidence)))
+    assert r.remote.list_reads == reads
+
+
+@pytest.mark.parametrize('rejection', ['malformed', 'stale', 'upstream'])
+@pytest.mark.parametrize('options', [
+    {'architecture': {'enabled': False}}, {'tasks': []},
+    {'permissions': {'approve_fork_ci': False}},
+    {'architecture': {'scoring': {'profile': 'custom', 'custom_prompt': None}}},
+])
+def test_rejected_retained_overrides_cannot_govern_current_review_recovery(reviewed, tmp_path, rejection, options):
+    r = reviewed
+    fields = {'configuration': 'skill-owned', 'options': options}
+    if rejection == 'malformed':
+        fields['discovery'] = [[]]
+    elif rejection == 'stale':
+        fields['skill_settings_fingerprints'] = {}
+    else:
+        fields['upstream'] = 'github.com/old/upstream'
+    r.edit(lambda value: value.update(fields),
+           snapshot=rejection == 'malformed' and 'scoring' not in options.get('architecture', {}))
+    original = r.evidence.read_bytes(), r.store.manifest.read_bytes()
+    fresh = load('fresh_rejected_override_bridge', ROOT/'scripts/ci_approve.py')
+    plan = fresh.bridge(merge_request(r, tmp_path, evidence=str(r.evidence)))
+    assert plan['action'] == 'review' and plan['review_options'] == {} and plan['reason']
+    if rejection == 'upstream':
+        assert 'invocation scope changed' in plan['reason']
+    elif 'scoring' in options.get('architecture', {}):
+        assert 'requires custom_prompt' in plan['reason']
+    assert (r.evidence.read_bytes(), r.store.manifest.read_bytes()) == original
+    assert not r.remote.calls and not r.remote.state['writes']
+
+
+def test_rejected_retained_permission_cannot_override_current_disabled_policy(reviewed, tmp_path):
+    r = reviewed
+    r.edit(lambda value: value.update(configuration='skill-owned', options={
+        'permissions': {'approve_fork_ci': True}}, discovery=[[]]))
+    write(config.path('github.com/owner/repo'), config.invocation.merge(r.settings, {
+        'processes': {'pr-review': {'permissions': {'approve_fork_ci': False}}}}))
+    with pytest.raises(ValueError, match='disabled by current'):
+        r.cli.bridge(merge_request(r, tmp_path, evidence=str(r.evidence)))
+    assert not r.remote.calls and not r.remote.state['writes']
 
 
 @pytest.mark.parametrize('value', [[], None, {}, {'analysis_only': False}])
@@ -443,7 +506,8 @@ def test_bridge_permission_failure_retains_exact_operation_and_never_resends(rev
 
 
 @pytest.mark.parametrize('disposition', ['current', 'missing', 'changed-requested', 'changed-history', 'other-pending'])
-def test_bridge_review_request_disposition_retains_freshness_and_uncertain_write_guards(reviewed, tmp_path, disposition):
+@pytest.mark.parametrize('listed', [False, True])
+def test_bridge_review_request_disposition_retains_freshness_and_uncertain_write_guards(reviewed, tmp_path, disposition, listed):
     r = reviewed
     path = merge_request(r, tmp_path, evidence=str(r.evidence))
     request = {**fixture.request('request-review'), 'head': r.head}
@@ -458,6 +522,8 @@ def test_bridge_review_request_disposition_retains_freshness_and_uncertain_write
             'decision': 'no_resend', 'reason': 'No further review request is needed.',
             'observation': inspected['fingerprint']})
         assert r.cli.publish.publish(operation, reconcile=True)['status'] == 'disposed'
+    if listed:
+        r.edit(lambda value: value['publications'].append(operation))
     original = Path(operation).read_bytes()
     reports = deepcopy(read(r.store.manifest)['entries'])
     if disposition == 'changed-requested':
@@ -499,6 +565,19 @@ def test_bridge_review_request_disposition_retains_freshness_and_uncertain_write
     assert Path(operation).read_bytes() == original
     assert read(r.store.manifest)['entries'] == reports
     assert r.remote.state['writes']['request-review'] == 1
+
+
+def test_listed_prepared_review_request_is_not_a_settled_publication(reviewed, tmp_path):
+    r = reviewed
+    operation = r.cli.publish.prepare({**fixture.request('request-review'), 'head': r.head})['operation']
+    r.edit(lambda value: value['publications'].append(operation))
+    original = Path(operation).read_bytes()
+    plan = r.cli.bridge(merge_request(r, tmp_path, evidence=str(r.evidence)))
+    assert plan['action'] == 'review' and 'reconciled receipts' in plan['reason']
+    with pytest.raises(ValueError, match='reconciled receipts'):
+        r.cli.approve(r.evidence)
+    assert Path(operation).read_bytes() == original
+    assert not r.remote.calls and not r.remote.state['writes']
 
 
 def test_discovery_lists_only_the_reviewed_head_without_scanning_repository_history(reviewed):
@@ -722,6 +801,7 @@ def test_skill_owned_review_occurrences_verification_and_active_approval_claim(r
             r.cli.approve(r.evidence)
         assert r.remote.calls == []
         return
+    assert r.cli.bridge(merge_request(r, tmp_path, evidence=str(r.evidence)))['action'] == 'approve'
     result = r.cli.approve(r.evidence)
     assert result['status'] == 'verified' and r.remote.calls == [101, 202]
 
