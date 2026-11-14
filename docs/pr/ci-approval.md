@@ -60,9 +60,11 @@ need their exact diagnostic and supported recovery step. Reassess affected input
 through the owning workflow, retaining original results and operations. Do not
 silently recapture a different target to make a pending request pass. Already
 approved runs require no new approval; their CI results still need observation.
-Malformed retained options produce a review handoff and diagnostic with valid
-explicit request options or current defaults; damaged evidence cannot supply
-approval coverage. Invalid explicit request options still block continuation.
+Malformed retained evidence, including legacy task specs and nested reports,
+produces a review handoff and diagnostic with valid explicit request options or
+current defaults; damaged evidence cannot supply
+approval coverage. Invalid explicit request options block every handoff, including
+reconciliation and CI observation when no fork gates remain.
 This bridge also works when no eligible fork gates exist, without injecting a
 new review or requiring fork approval permission for an unrelated merge.
 

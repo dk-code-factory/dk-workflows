@@ -65,6 +65,15 @@ class Approval:
         return sorted(values, key=lambda v: v['id'])
 
     def evidence(self):
+        # Retained documents, legacy specs and immutable reports are untrusted
+        # JSON shapes. Keep malformed references on the same fail-closed path
+        # as missing/stale evidence, including the bridge's native recovery.
+        try:
+            return self._evidence()
+        except (AttributeError, KeyError, TypeError, IndexError) as exc:
+            raise ValueError('Malformed retained incoming-review evidence: ' + str(exc)) from exc
+
+    def _evidence(self):
         request, h = self.request, self.handler
         value = read(Path(request['evidence']))
         if (not isinstance(value, dict) or value.get('workflow') != 'dk-workflows:dk-pr-review'
@@ -74,6 +83,12 @@ class Approval:
         if (any(not isinstance(value.get(key), str) or not value[key] for key in ('run', 'cycle', 'checkout'))
                 or any(not isinstance(value.get(key, []), list) for key in ('discovery', 'hooks', 'publications'))):
             raise ValueError('Retained review run/cycle, checkout and task lists are required')
+        verification = value.get('verification')
+        if verification is not None and not (
+                isinstance(verification, str) and verification
+                or isinstance(verification, dict) and set(verification) == {'key'}
+                and isinstance(verification['key'], str) and verification['key']):
+            raise ValueError('Verification requires a managed task key or legacy spec path')
         repository = h.host + '/' + h.root.removeprefix('repos/')
         if value.get('repository') != repository:
             raise ValueError('Review evidence belongs to another repository')
@@ -119,6 +134,8 @@ class Approval:
                     or not isinstance(active['claim'], str)):
                 raise ValueError('Malformed current approval task binding')
             current = managed.saved_spec(active['key']) if 'key' in active else read(Path(active['spec']))
+            if not isinstance(current, dict):
+                raise ValueError('Current approval task spec must be an object')
             selection = current.get('skill_configuration', {})
             if (not owned or current['skill']['identity'] != 'dk-workflows:dk-ci-approve'
                     or selection.get('skill') != 'dk-workflows:dk-pr-review'
@@ -138,6 +155,8 @@ class Approval:
                 spec = read(Path(reference))
             else:
                 raise ValueError('Review evidence requires a managed task key or legacy spec path')
+            if not isinstance(spec, dict):
+                raise ValueError('Review task spec must be an object')
             if any(spec.get('instructions', {}).get(key) != path for key, path in instructions.items()):
                 raise ValueError('Review tasks must capture the original governing instructions')
             current = capture(spec)

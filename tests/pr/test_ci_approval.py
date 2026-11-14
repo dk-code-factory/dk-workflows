@@ -4,6 +4,7 @@ import base64
 import importlib.util
 import json
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 
@@ -297,11 +298,99 @@ def test_bridge_no_gates_observes_ci_without_requiring_fork_execution_permission
 
 
 @pytest.mark.parametrize('options', [[], None, {'permissions': []}, {'unknown': True}])
-def test_bridge_invalid_explicit_options_still_block_instead_of_using_defaults(reviewed, tmp_path, options):
+@pytest.mark.parametrize('continuation', ['gated', 'no-gates', 'pending'])
+def test_bridge_invalid_explicit_options_still_block_instead_of_using_defaults(reviewed, tmp_path, options, continuation):
     r = reviewed
+    if continuation == 'no-gates':
+        for run in r.remote.runs.values():
+            run.update(status='completed', conclusion='success')
+    elif continuation == 'pending':
+        r.remote.state['lose_response'] = ['ci-approve']
+        with pytest.raises(Diagnostic):
+            r.cli.approve(r.evidence)
+    calls, writes, reads = list(r.remote.calls), deepcopy(r.remote.state['writes']), r.remote.list_reads
     path = merge_request(r, tmp_path, evidence=str(r.evidence), review_options=options)
     with pytest.raises(ValueError):
         r.cli.bridge(path)
+    assert r.remote.calls == calls and r.remote.state['writes'] == writes
+    assert r.remote.list_reads == reads
+
+
+@pytest.mark.parametrize('value', [[], None, {}, {'analysis_only': False}])
+def test_bridge_malformed_request_documents_fail_before_external_reads(reviewed, tmp_path, value):
+    path = tmp_path/'malformed-request.json'
+    write(path, value)
+    with pytest.raises(ValueError, match='authorized merge request'):
+        reviewed.cli.bridge(path)
+    assert reviewed.remote.list_reads == 0 and not reviewed.remote.calls
+
+
+@pytest.mark.parametrize('reference', [[], None, {}, '', 1])
+def test_bridge_malformed_explicit_evidence_references_fail_before_handoff(reviewed, tmp_path, reference):
+    with pytest.raises(ValueError, match='document path'):
+        reviewed.cli.bridge(merge_request(reviewed, tmp_path, evidence=reference))
+    assert reviewed.remote.list_reads == 0 and not reviewed.remote.calls
+
+
+@pytest.mark.parametrize('pr', [[], None, {}, 1])
+def test_bridge_malformed_explicit_pr_fails_before_handoff(reviewed, tmp_path, pr):
+    with pytest.raises(ValueError, match='canonical PR URL'):
+        reviewed.cli.bridge(merge_request(reviewed, tmp_path, pr=pr))
+    assert reviewed.remote.list_reads == 0 and not reviewed.remote.calls
+
+
+@pytest.mark.parametrize('fields', [
+    {'approval_task': {'key': [], 'claim': 'retained'}},
+    {'approval_task': {'spec': [], 'claim': 'retained'}},
+    {'approval_task': []}, {'configuration': []}, {'instructions': {'user': []}},
+    {'discovery': [[]]}, {'verification': []}, {'verification': {}}, {'verification': False},
+    {'verification': 0}, {'verification': ''}, {'hooks': [[]]}, {'publications': [[]]},
+])
+def test_bridge_nested_malformed_evidence_returns_diagnostic_without_changing_results(reviewed, tmp_path, fields):
+    r = reviewed
+    r.edit(lambda value: value.update(fields))
+    original = r.evidence.read_bytes(), r.store.manifest.read_bytes()
+    plan = r.cli.bridge(merge_request(r, tmp_path, evidence=str(r.evidence)))
+    assert plan['action'] == 'review' and plan['reason']
+    with pytest.raises(ValueError):
+        r.cli.approve(r.evidence)
+    assert (r.evidence.read_bytes(), r.store.manifest.read_bytes()) == original
+    assert not r.remote.calls and not r.remote.state['writes']
+
+
+@pytest.mark.parametrize('role', ['approval_task', 'discovery', 'verification', 'hooks'])
+@pytest.mark.parametrize('shape', [[], None, {'instructions': []}, {'skill': []}, {'git': []},
+                                   {'options': []}, {'inputs': []}, {'task': []}])
+def test_malformed_retained_specs_return_review_handoff_and_block_approval(reviewed, tmp_path, role, shape):
+    r = reviewed
+    spec = read(Path(read(r.evidence)['discovery'][0]))
+    broken = tmp_path/'malformed-spec.json'
+    write(broken, {**spec, **shape} if isinstance(shape, dict) else shape)
+    r.edit(lambda value: value.update({role: (
+        {'spec': str(broken), 'claim': 'retained-claim'} if role == 'approval_task'
+        else str(broken) if role == 'verification' else [str(broken)])}))
+    original = broken.read_bytes(), r.evidence.read_bytes(), r.store.manifest.read_bytes()
+    path = merge_request(r, tmp_path, evidence=str(r.evidence))
+    fresh = load('fresh_malformed_evidence_bridge', ROOT/'scripts/ci_approve.py')
+    plan = fresh.bridge(path)
+    assert plan['action'] == 'review' and plan['skill'] == 'dk-workflows:dk-pr-review'
+    assert plan['reason'] and plan['review_options'] == {}
+    with pytest.raises(ValueError):
+        fresh.approve(r.evidence)
+    assert (broken.read_bytes(), r.evidence.read_bytes(), r.store.manifest.read_bytes()) == original
+    assert not r.remote.calls and not r.remote.state['writes']
+
+
+def test_bridge_cli_malformed_legacy_approval_spec_returns_native_handoff(reviewed, tmp_path, monkeypatch, capsys):
+    r = reviewed
+    broken = tmp_path/'array-spec.json'
+    write(broken, [])
+    r.edit(lambda value: value.update(approval_task={'spec': str(broken), 'claim': 'retained-claim'}))
+    path = merge_request(r, tmp_path, evidence=str(r.evidence))
+    monkeypatch.setattr(sys, 'argv', ['ci_approve.py', 'bridge', '--request', str(path)])
+    runpy.run_path(str(ROOT/'scripts/ci_approve.py'), run_name='__main__')
+    plan = json.loads(capsys.readouterr().out)
+    assert plan['action'] == 'review' and 'spec must be an object' in plan['reason']
     assert not r.remote.calls and not r.remote.state['writes']
 
 

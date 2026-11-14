@@ -45,10 +45,12 @@ reconciliation before discovery or new writes, except an uncertain review
 request with a current explicit `no_resend` disposition. The bridge, approval
 and publication boundaries share that existing live disposition check; changed
 review-request evidence blocks continuation without rewriting the pending intent.
-Malformed retained review options return the incoming-review recovery handoff
-under current policy rather than supplying approval coverage or usable overrides.
-Explicit invocation options still require validation. Existing review definitions,
-results, fingerprints, publication intents and receipts retain their original
+Malformed retained review evidence, including nested legacy specs and reports,
+returns the incoming-review recovery handoff with a diagnostic under current policy
+rather than supplying approval coverage or usable overrides. Explicit invocation
+options require validation before every handoff, including reconciliation and
+CI observation without remaining gates. Existing review definitions, results,
+fingerprints, publication intents and receipts retain their original
 freshness boundaries; changed governing inputs refresh only affected analysis.
 No durable field, summary, snapshot or continuation store is added: the existing
 private merge request and original instruction sources supply the continuation.

@@ -45,10 +45,17 @@ def bridge(path):
     from shared.workflow_storage import operations_root
 
     bound = read(Path(path))
-    if bound.get('kind') != 'merge-pr' or bound.get('analysis_only') is not False:
+    if (not isinstance(bound, dict) or bound.get('kind') != 'merge-pr'
+            or bound.get('analysis_only') is not False):
         raise ValueError('Bridge requires an authorized merge request with analysis_only:false')
     for key in ('head', 'base'):
         sha(bound.get(key))
+    if not isinstance(bound.get('pr'), str):
+        raise ValueError('Bridge requires a canonical PR URL')
+    options = (skill_config.validate('dk-workflows:dk-pr-review', bound['review_options'])
+               if 'review_options' in bound else {})
+    if 'evidence' in bound and (not isinstance(bound['evidence'], str) or not bound['evidence']):
+        raise ValueError('Bridge evidence must reference an incoming-review document path')
     approval = Approval(publish.handler(bound))
     continuation = {'request': str(Path(path).resolve()), 'ci_success': None,
                     'after_approval': ['dk-workflows:dk-ci', 'dk-workflows:dk-pr-publish']}
@@ -68,8 +75,6 @@ def bridge(path):
     if not eligible:
         return {**continuation, 'action': 'observe-ci', 'eligible_runs': []}
     repository = approval.handler.host + '/' + approval.handler.root.removeprefix('repos/')
-    options = (skill_config.validate('dk-workflows:dk-pr-review', bound['review_options'])
-               if 'review_options' in bound else {})
     evidence_options_error = None
     if bound.get('evidence'):
         try:
@@ -167,6 +172,6 @@ if __name__ == '__main__':
     except Diagnostic as exc:
         print(json.dumps(exc.envelope()))
         sys.exit(2)
-    except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as exc:
+    except (ValueError, KeyError, TypeError, AttributeError, IndexError, OSError, subprocess.SubprocessError) as exc:
         print(json.dumps({'status': 'blocked', 'reason': str(exc)}))
         sys.exit(2)
