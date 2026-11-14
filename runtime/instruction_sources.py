@@ -1,4 +1,4 @@
-"""Repository instruction discovery and explicit adoption, without saved source text."""
+"""Repository instruction discovery with an all-source default and optional overrides."""
 import hashlib
 import json
 import os
@@ -66,6 +66,12 @@ def load(identity):
     return envelope(identity, value['policy'])
 
 
+def effective_policy(saved):
+    # A missing override or legacy reset marker uses the default without a write.
+    return saved['policy'] if saved and saved['policy'] is not None else {
+        'mode': 'all', 'include': [], 'exclude': []}
+
+
 def root(checkout):
     checkout = Path(checkout).resolve()
     result = subprocess.run(['git', '-C', str(checkout), 'rev-parse', '--show-toplevel'],
@@ -127,9 +133,9 @@ def inspect(checkout, identity=None):
     identity = identity or repository(checkout)
     checkout = root(checkout)
     saved = load(identity)
-    policy = saved['policy'] if saved else None
-    return {'repository': key(identity), 'initialized': policy is not None,
-            'status': 'ready' if policy is not None else 'choice-needed', 'policy': policy,
+    policy = effective_policy(saved)
+    return {'repository': key(identity), 'initialized': True,
+            'status': 'ready', 'policy': policy,
             'sources': discover(checkout, policy), 'host_limitations': HOST_LIMITATIONS}
 
 
@@ -152,22 +158,18 @@ def read_source(checkout, source, *, discovery=False, identity=None):
 
 def binding(checkout, identity):
     saved = load(identity)
-    if saved is None:
-        return None  # Preserve legacy task identities; native initialization still asks.
-    if saved['policy'] is None:
-        raise ValueError('Repository instruction choice needed after reset; initialize through dk-config')
+    policy = effective_policy(saved)
     checkout = root(checkout)
-    sources = discover(checkout, saved['policy'])
+    sources = discover(checkout, policy)
+    if not sources and (saved is None or saved['policy'] is None):
+        return None  # Preserve legacy fingerprints when no repository guidance exists.
     selected = {item['path']: hashlib.sha256((checkout/item['path']).read_bytes()).hexdigest()
                 for item in sources if item['selected']}
-    encoded = json.dumps({'policy': saved['policy'], 'sources': selected}, sort_keys=True).encode()
+    encoded = json.dumps({'policy': policy, 'sources': selected}, sort_keys=True).encode()
     return {'checkout': str(checkout), 'fingerprint': hashlib.sha256(encoded).hexdigest()}
 
 
 def check_paths(checkout, identity, paths):
-    saved = load(identity)
-    if saved is None:
-        return
     context = inspect(checkout, identity)
     checkout = root(checkout)
     selected = {(checkout/item['path']).resolve() for item in context['sources'] if item['selected']}

@@ -46,24 +46,73 @@ def build(spec, **overrides):
     return make_spec(repository=REPO, pr=PR, **{**definition(spec), **overrides})
 
 
-def test_initialization_discovers_rules_without_adopting_or_writing(case):
+def test_default_follows_all_discovered_rules_without_configuration_writes(case):
     spec, _ = case
     checkout = Path(spec['git']['checkout'])
     files(checkout)
     output = sources.inspect(checkout, REPO)
-    assert output['status'] == 'choice-needed' and not output['initialized']
-    assert not any(item['selected'] for item in output['sources'])
+    assert output['status'] == 'ready' and output['initialized']
+    assert output['policy'] == policy('all')
+    assert all(item['selected'] for item in output['sources'])
     assert {item['path'] for item in output['sources']} == {
         'AGENTS.md', '.github/copilot-instructions.md', '.github/instructions/python.instructions.md',
         'CONTRIBUTING.md', 'docs/development/testing.md'}
     assert 'cannot unload host context' in output['host_limitations']
     assert not sources.policy_path(REPO).exists()
-    with pytest.raises(ValueError, match='not adopted'):
-        sources.read_source(checkout, 'AGENTS.md', identity=REPO)
+    assert sources.read_source(checkout, 'AGENTS.md', identity=REPO)['adopted']
     evidence = sources.read_source(checkout, 'AGENTS.md', discovery=True, identity=REPO)
-    assert not evidence['adopted'] and 'model attribution' in evidence['text']
+    assert evidence['adopted'] and 'model attribution' in evidence['text']
     assert sources.read_source(checkout, 'docs/team.md', discovery=True, identity=REPO)['kind'] == 'custom'
-    assert sources.inspect(checkout, REPO)['status'] == 'choice-needed'
+    assert sources.inspect(checkout, REPO)['status'] == 'ready'
+    assert not sources.policy_path(REPO).exists()
+
+
+@pytest.mark.parametrize('reset_marker', [False, True])
+def test_default_reuses_fresh_session_and_refreshes_changed_or_new_guidance(case, tmp_path, reset_marker):
+    spec, store = case
+    checkout = Path(spec['git']['checkout'])
+    files(checkout)
+    if reset_marker:
+        save(None)
+    bound = build(spec)
+    claim = store.start(bound)['claim']['id']
+    store.record(bound, claim, b'Original all-source analysis', {'complete': True}, 'complete')
+    before = store.manifest.read_bytes()
+    policy_before = sources.policy_path(REPO).read_bytes() if reset_marker else None
+    saved = tmp_path/'default-spec.json'
+    saved.write_text(json.dumps(bound))
+    command = [sys.executable, str(ROOT/'scripts/dk.py'), '--repository', REPO, '--pr', PR,
+               'start', '--spec', str(saved)]
+    assert json.loads(subprocess.check_output(command))['action'] == 'reuse'
+    assert store.manifest.read_bytes() == before
+    (checkout/'unrelated.txt').write_text('Unrelated content')
+    assert json.loads(subprocess.check_output(command))['action'] == 'reuse'
+    for name in ['AGENTS.md', 'CONTRIBUTING.md', '.claude/rules/new.md']:
+        source = checkout/name
+        original = source.read_bytes() if source.exists() else None
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text('Changed or new governing instructions')
+        result = subprocess.run(command, capture_output=True, text=True)
+        assert result.returncode == 2 and 'rebuild assignment' in result.stdout
+        if original is None:
+            source.unlink()
+        else:
+            source.write_bytes(original)
+    assert json.loads(subprocess.check_output(command))['action'] == 'reuse'
+    assert store.manifest.read_bytes() == before
+    assert (sources.policy_path(REPO).read_bytes() if reset_marker else None) == policy_before
+    assert sources.policy_path(REPO).exists() == reset_marker
+
+
+def test_default_and_explicit_all_keep_identical_bindings(case):
+    spec, _ = case
+    checkout = Path(spec['git']['checkout'])
+    files(checkout)
+    default = sources.binding(checkout, REPO)
+    save(policy('all'))
+    assert sources.binding(checkout, REPO) == default
+    save(None)
+    assert sources.binding(checkout, REPO) == default
 
 
 @pytest.mark.parametrize('tracked', [False, True])
@@ -226,7 +275,8 @@ def test_originless_nested_checkout_reuses_implicit_source_identity(case):
     assert sources.read_source(nested, 'CONTRIBUTING.md')['adopted']
     root_command = [sys.executable, str(ROOT/'scripts/instruction_sources.py'), '--checkout', str(checkout), 'show']
     root = json.loads(subprocess.check_output(root_command))
-    assert root['repository'] == 'path:' + str(checkout) and root['status'] == 'choice-needed'
+    assert root['repository'] == 'path:' + str(checkout) and root['status'] == 'ready'
+    assert root['policy'] == policy('all')
     assert sources.policy_path(identity).read_bytes() == saved
     assert not sources.policy_path(root['repository']).exists()
     binding = sources.binding(nested, identity)
@@ -263,7 +313,7 @@ def test_git_ignored_guidance_is_discovered_and_rejected_in_handoffs(case, value
         path.write_text('Ignored repository guidance')
     initial = sources.inspect(checkout, REPO)
     assert {item['path'] for item in initial['sources']} == names
-    assert not any(item['selected'] for item in initial['sources'])
+    assert all(item['selected'] for item in initial['sources'])
     save(value)
     assert {item['path'] for item in sources.inspect(checkout, REPO)['sources']} == names
     alias = checkout/'guidance-alias.md'
@@ -512,7 +562,7 @@ def test_directory_handoff_cycles_keep_resource_failure_bounded(case, field):
 
 
 @pytest.mark.parametrize('field', ['instructions', 'inputs', 'resources'])
-@pytest.mark.parametrize('value', [policy('all'), policy('custom', include=['CLAUDE.md'])])
+@pytest.mark.parametrize('value', [None, policy('all'), policy('custom', include=['CLAUDE.md'])])
 def test_unsafe_alias_does_not_exclude_an_independently_selected_source(case, field, value):
     spec, _ = case
     checkout = Path(spec['git']['checkout'])
@@ -520,7 +570,8 @@ def test_unsafe_alias_does_not_exclude_an_independently_selected_source(case, fi
     source.write_text('Selected repository instructions')
     alias = checkout/'AGENTS.md'
     alias.symlink_to(source)
-    save(value)
+    if value is not None:
+        save(value)
     assert sources.read_source(checkout, 'CLAUDE.md', identity=REPO)['adopted']
     bound = build(spec, **{field: {'selected-guidance': str(source)}})
     capture(bound)
@@ -603,19 +654,25 @@ def test_managed_saved_binding_reuses_then_blocks_changed_summary(case):
     assert result['reason'] == 'refresh_required' and 'rebuild assignment' in result['detail']
 
 
-def test_request_application_and_uncertain_write_recovery_keep_choice_and_siblings(case, monkeypatch):
+@pytest.mark.parametrize('action', ['set', 'reset'])
+def test_request_application_and_uncertain_write_recovery_keep_choice_and_siblings(case, monkeypatch, action):
     spec, _ = case
     checkout = spec['git']['checkout']
     files(Path(checkout))
     context = {'checkout': checkout, 'repository': REPO}
     store = config_requests.Requests()
-    request_id = store.start('Use human contributor rules for this repository.', context)['id']
-    operation = {'domain': 'instruction-sources', 'action': 'set', 'scope': 'repo', 'value': policy()}
+    if action == 'reset':
+        save(policy())
+    ask = 'Reset to all instructions.' if action == 'reset' else 'Use human contributor rules for this repository.'
+    request_id = store.start(ask, context)['id']
+    operation = {'domain': 'instruction-sources', 'action': action, 'scope': 'repo'}
+    if action == 'set':
+        operation['value'] = policy()
     sibling = {'domain': 'skill', 'action': 'set', 'scope': 'repo', 'skill': 'dk-workflows:dk-ci',
                'value': {'timeout_seconds': 42}}
     operations = [sibling, operation]
     result = store.prepare(request_id, {'operations': operations})
-    assessment = {'fingerprint': result['fingerprint'], 'summary': 'User selected human rules; inspected source provenance.',
+    assessment = {'fingerprint': result['fingerprint'], 'summary': 'Inspected requested instruction policy and sources.',
                   'reviewed': [], 'relations': [], 'unresolved': []}
     store.prepare(request_id, {'operations': operations, 'assessment': assessment})
     original = config_requests.atomic_text
@@ -633,35 +690,47 @@ def test_request_application_and_uncertain_write_recovery_keep_choice_and_siblin
     assert recovered.resume(request_id)['admission'] == 'reusable'
     assert recovered.apply(request_id)['status'] == 'applied'
     assert recovered.show(request_id, 'progress')['progress'][0] == completed_sibling
-    assert sources.inspect(checkout, REPO)['policy'] == policy()
+    assert sources.inspect(checkout, REPO)['policy'] == policy('all' if action == 'reset' else 'human')
     assert recovered.apply(request_id)['status'] == 'applied'
 
 
-def test_reset_is_request_bound_and_leaves_choice_needed_marker(case):
-    spec, _ = case
+def test_reset_is_request_bound_and_restores_all_source_default(case):
+    spec, task_store = case
     checkout = spec['git']['checkout']
+    files(Path(checkout))
     save(policy())
+    bound = build(spec)
+    claim = task_store.start(bound)['claim']['id']
+    task_store.record(bound, claim, b'Original human-source analysis', {'complete': True}, 'complete')
+    before = task_store.manifest.read_bytes()
     store = config_requests.Requests()
     request_id = store.start('Reset repository instruction source choice.', {'checkout': checkout, 'repository': REPO})['id']
     operation = {'domain': 'instruction-sources', 'action': 'reset', 'scope': 'repo'}
     result = store.prepare(request_id, {'operations': [operation]})
     store.prepare(request_id, {'operations': [operation], 'assessment': {
-        'fingerprint': result['fingerprint'], 'summary': 'Explicit reset; require a new source choice.',
+        'fingerprint': result['fingerprint'], 'summary': 'Explicit reset restores all discovered instructions.',
         'reviewed': [], 'relations': [], 'unresolved': []}})
     store.apply(request_id)
-    assert sources.inspect(checkout, REPO)['status'] == 'choice-needed'
-    with pytest.raises(ValueError, match='choice needed'):
-        sources.binding(checkout, REPO)
+    assert sources.inspect(checkout, REPO)['status'] == 'ready'
+    assert sources.inspect(checkout, REPO)['policy'] == policy('all')
+    assert sources.read_source(checkout, 'AGENTS.md', identity=REPO)['adopted']
+    with pytest.raises(ValueError, match='rebuild assignment'):
+        capture(bound)
+    assert task_store.manifest.read_bytes() == before
 
 
+@pytest.mark.parametrize('saved_policy', [None, policy()])
 @pytest.mark.parametrize('changed_source,expected', [('AGENTS.md', 'reusable'),
                                                    ('CONTRIBUTING.md', 'stale'),
                                                    ('DEVELOPMENT.md', 'stale')])
-def test_configuration_admission_reuses_only_selected_unchanged_sources(case, changed_source, expected):
+def test_configuration_admission_reuses_only_selected_unchanged_sources(case, saved_policy, changed_source, expected):
     spec, _ = case
     checkout = Path(spec['git']['checkout'])
     files(checkout)
-    save(policy())
+    if saved_policy is not None:
+        save(saved_policy)
+    elif changed_source == 'AGENTS.md':
+        expected = 'stale'
     store = config_requests.Requests()
     request_id = store.start('Use a 42 second CI timeout.', {'checkout': str(checkout), 'repository': REPO})['id']
     operation = {'domain': 'skill', 'action': 'set', 'scope': 'repo', 'skill': 'dk-workflows:dk-ci',
@@ -779,7 +848,8 @@ def test_no_policy_no_git_task_preserves_legacy_fingerprint(case, tmp_path, monk
     assert capture(task['assignment'])['fingerprint'] == capture(legacy)['fingerprint']
 
 
-def test_source_contract_changes_stale_configuration_admission(case, monkeypatch):
+@pytest.mark.parametrize('resource', ['docs/instruction-sources.md', 'codex/skills/dk-repo-onboard/SKILL.md'])
+def test_source_contract_changes_stale_configuration_admission(case, monkeypatch, resource):
     spec, _ = case
     checkout = Path(spec['git']['checkout'])
     files(checkout)
@@ -794,7 +864,7 @@ def test_source_contract_changes_stale_configuration_admission(case, monkeypatch
         'reviewed': [], 'relations': [], 'unresolved': []}})
     assert config_requests.Requests().resume(request_id)['admission'] == 'reusable'
     original = config_requests.read_text
-    contract = ROOT/'docs/instruction-sources.md'
+    contract = ROOT/resource
     monkeypatch.setattr(config_requests, 'read_text', lambda path: original(path) + '\nChanged adoption contract.'
                         if Path(path) == contract else original(path))
     assert config_requests.Requests().resume(request_id)['admission'] == 'stale'

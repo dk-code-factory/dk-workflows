@@ -255,7 +255,7 @@ def input_paths(context, operations):
     paths.update(root/'runtime'/name for name in ('config.py', 'preferences.py', 'skill_config.py', 'settings.py', 'commit_policy.py', 'invocation.py'))
     paths.update((root/'runtime/shared').glob('*.py'))
     paths.update((root/'schemas').glob('*.json'))
-    for name in ('dk-config', 'dk-preferences'):
+    for name in ('dk-config', 'dk-preferences', 'dk-repo-onboard'):
         paths.add(root/'codex/skills'/name/'SKILL.md')
     for folder in (root/'codex/skills').iterdir():
         paths.update([folder/'config.json', folder/'config.schema.json'])
@@ -269,12 +269,8 @@ def input_paths(context, operations):
     paths.add(root/'runtime/instruction_sources.py')
     paths.add(root/'scripts/instruction_sources.py')
     paths.update(parent/'AGENTS.md' for parent in requested_checkout.parents)
-    if saved is None:
-        paths.add(checkout/'AGENTS.md')
-        paths.update(checkout.rglob('AGENTS.md'))
-    else:
-        paths.update(checkout/item['path'] for item in instruction_sources.discover(checkout, saved['policy'])
-                     if item['selected'])
+    paths.update(checkout/item['path'] for item in instruction_sources.discover(
+        checkout, instruction_sources.effective_policy(saved)) if item['selected'])
     if any(op['domain'] == 'preferences' for op in operations):
         paths.add(preferences.catalog_path(checkout))
     for op in operations:

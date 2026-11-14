@@ -511,26 +511,38 @@ contract. These changes add no durable store or claim of measured token savings.
 
 ## Repository instruction source selection
 
-Repository guidance is discovered before adoption. At first native workflow
-initialization, `dk-config` presents relevant rules and provenance and obtains a
-repository-specific human, all-source or custom choice, with exact includes and
-exclusions. Discovery reads are evidence-only; ordinary source reads enforce the
-saved selection. The current inventory is reconstructed deterministically, not
+Repository guidance defaults to all discovered instruction sources within each
+file's documented scope and the host's priority rules. An absent policy or legacy
+null-policy reset marker uses `all` with empty includes/excludes immediately,
+without a source-choice question, configuration request or native delegation.
+Explicit repository-only human/all/custom overrides remain supported, with exact
+includes/exclusions; reset restores the default. Ordinary reads enforce the
+effective policy. The current inventory is reconstructed deterministically, not
 stored. All skills and referenced handoff/admission guidance use this boundary.
 Hosts may already have loaded repository or ancestor rules; this policy controls
 optional dk-workflows adoption and cannot unload context or override host priority.
 A conflicting host rule is disclosed and affected behavior remains incomplete
-when the requested exclusion cannot be honored.
+when a requested explicit exclusion cannot be honored.
 
-Only the mode and exact source references, or a minimal reset-pending marker,
-are saved in private repository configuration. The pending marker prevents a
-reset from falling back to pre-feature cached guidance. The choice avoids repeated
-source discovery interpretation and asking the same question in subsequent skills and fresh sessions. The existing
-configuration-request history retains the user's choice and write recovery;
-there is no new source-content snapshot, rendered rules summary, effective
-settings cache or transcript. The expected avoided native cost of repeated
-source-choice explanation and clarification exceeds reading and validating this
-small record for repeated repository use; actual API dollar savings are unmeasured.
+The dedicated onboarding skill owns requested discovery and explicit refreshes.
+It runs read-only in the current session and returns a structured private inventory
+of all discovered sources, rules with scope/provenance and authority, repository
+facts, inspected settings/preferences, conflicts, gaps and completion. Unreadable
+or uninspected evidence makes discovery incomplete rather than silently absent.
+The report is constructed in memory from current reads and is never a
+governing-source copy. Its freshness ends at changes to repository identity,
+effective policy/content, inspected settings/preferences or host context. Ordinary
+workflows use the effective policy without requiring onboarding or its full report.
+Configuration admission still binds the onboarding prompt as a governing resource.
+
+No new durable field, store, default-policy record, cache or schema is added.
+Only explicit overrides and existing configuration-request decisions/receipts are
+saved; the existing null-policy reset record is interpreted as the default. Those
+records avoid reinterpreting explicit choices and repeating uncertain writes in
+fresh sessions. Removing mandatory default-choice explanation, clarification,
+delegation and persistence reduces expected complete-workflow API dollar cost in
+both the current and next session, without adding a record to create, validate,
+load or explain. Native API dollar savings remain unmeasured.
 Inventory discovery and targeted content reads remain live costs in both sessions.
 Discovery preserves Git's raw pathname bytes and supplements its ordinary ignored
 directory pruning with guidance-specific ignored-path queries. Ignored automation
@@ -554,18 +566,20 @@ Directory handoff checks visit each lexical spelling independently and bound lin
 cycles by resolved ancestors on that branch. An adopted alias cannot hide an
 unselected canonical source in a sibling input or enclosing resource bundle.
 
-The freshness boundary is the current repository identity, saved choice and
-selected source contents. New sources follow the explicit saved mode and
-exclusions. Changed/reset choices or selected content require affected governing
-inputs and analysis to be refreshed. Task definitions retain only the checkout
+The freshness boundary is the current repository identity, effective policy and
+selected source contents. New sources follow the default all-source mode or the
+explicit saved mode and exclusions. Changed/reset choices or selected content
+require affected governing inputs and analysis to be refreshed. Task definitions retain only the checkout
 and selection/content binding digest; existing capture validates that binding and requires rebuilding stale assignments
 and handoffs. This preserves task keys without deleting original outputs,
 resetting budgets or discarding unaffected siblings. Old summaries and copied
 handoffs cannot promote excluded sources back into rules; retain them only as
 historical evidence and rebuild affected governing handoffs from selected original
-references. Missing or malformed evidence blocks applicable reuse. Low-level
-uninitialized captures retain compatibility with existing fingerprints; native
-workflow initialization still requires the source question before source loading.
+references. Missing or malformed evidence blocks applicable reuse. Default-selected
+sources use the same binding bytes as an explicit all-source policy, preserving existing all-source fingerprints. Checkouts without discovered
+sources or an explicit override retain legacy fingerprints. Legacy unbound tasks
+with discovered guidance require affected handoffs to be rebuilt, retaining their
+original results, siblings and budgets rather than silently reusing stale guidance.
 Source checks cover governing resources as well as instructions and inputs.
 Explicit custom exclusions and unsafe source links remain visible to admission;
 resolved aliases cannot override an exclusion. Unsafe aliases remain rejected
@@ -580,7 +594,7 @@ add no durable fields or copies of source content.
 
 Unchanged fresh-session reads reuse the choice and valid results. Configuration
 request intent/receipts supply partial-write recovery without a second journal.
-Offline acceptance covers initialization, reuse, change/reset, excluded cached
+Offline acceptance covers the read-only default, reuse, change/reset, excluded cached
 guidance and relevant-input invalidation; it establishes behavior, not measured
 native savings or host enforcement of source exclusions.
 
