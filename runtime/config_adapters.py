@@ -269,12 +269,8 @@ def input_paths(context, operations):
     paths.add(root/'runtime/instruction_sources.py')
     paths.add(root/'scripts/instruction_sources.py')
     paths.update(parent/'AGENTS.md' for parent in requested_checkout.parents)
-    if saved is None:
-        paths.add(checkout/'AGENTS.md')
-        paths.update(checkout.rglob('AGENTS.md'))
-    else:
-        paths.update(checkout/item['path'] for item in instruction_sources.discover(checkout, saved['policy'])
-                     if item['selected'])
+    paths.update(checkout/item['path'] for item in instruction_sources.discover(
+        checkout, instruction_sources.effective_policy(saved)) if item['selected'])
     if any(op['domain'] == 'preferences' for op in operations):
         paths.add(preferences.catalog_path(checkout))
     for op in operations:
