@@ -146,16 +146,7 @@ def review_recovery():
 
 
 def blocks(retained, request):
-    if retained['status'] != 'pending':
-        return False
-    if retained['request']['kind'] == 'request-review':
-        # A reply cannot request another review or conceal its uncertain outcome.
-        if request.get('kind') in {'reply-inline', 'reply-comment'}:
-            return False
-        if request.get('kind') != 'request-review' and retained.get('review_request_disposition'):
-            review_recovery().current(retained)
-            return False
-    return True
+    return review_recovery().blocks(retained, request)
 
 
 def rejected_push(value):

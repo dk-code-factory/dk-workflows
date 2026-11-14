@@ -243,7 +243,9 @@ def test_content_filters_are_bypassed_without_losing_candidates(repository, proc
     git(p, 'config', 'filter.fixture.clean', str(hook))
     git(p, 'config', 'filter.fixture.required', 'true')
     (p/'.gitattributes').write_text('routing.py filter=fixture\n')
-    git(p, 'add', '.gitattributes', 'routing.py')
+    git(p, 'add', '.gitattributes')
+    # An unchanged tracked file can bypass clean through Git's stat cache.
+    git(p, 'add', '--renormalize', 'routing.py')
     if not unborn:
         git(p, 'commit', '-qm', 'Store normalized content')
     if process:

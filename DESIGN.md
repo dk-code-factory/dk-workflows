@@ -34,6 +34,41 @@ the existing PR, ref and repository checks. Context changes still invalidate
 readiness, and every dispatch rechecks the live reviewed pins. This adds no
 durable state, resets no analysis and preserves publication intent and receipts.
 
+Direct merge requests after standalone review enter a read-only fork-CI bridge
+before waiting for CI or preparing the merge. The helper discovers current gates,
+checks policy/source pins and constructs the native incoming-review or approval
+handoff. The already-running session resumes supported managed work, completes
+current evidence, approves eligible attempts, observes CI and returns to the
+original authorized merge. Unbound standalone outputs never become fabricated
+managed coverage. Pending journal operations are returned for read-only
+reconciliation before discovery or new writes, except an uncertain review
+request with a current explicit `no_resend` disposition. The bridge, approval
+and publication boundaries share that existing live disposition check; changed
+review-request evidence blocks continuation without rewriting the pending intent.
+Malformed retained review evidence, including nested legacy specs and reports,
+returns the incoming-review recovery handoff with a diagnostic under current policy
+rather than supplying approval coverage or usable overrides. Explicit invocation
+options and current defaults require complete effective-option validation before
+every handoff, including reconciliation and CI observation without remaining
+gates. Unavailable retained checkouts, pinned Git objects and local capture sources
+also return that handoff with the underlying failure and prerequisite restoration
+step. Normalize failures only while reading/reconstructing local retained evidence;
+non-Git process failures and typed publication diagnostics retain their own blocked
+or reconciliation paths. Restoring the original sources permits unchanged analysis
+reuse without refreshing snapshots, rewriting results or retrying publication.
+Retained overrides govern only fully accepted evidence; rejected evidence
+recovers under the current explicit invocation or defaults. Listed and unlisted
+pending review requests share the live no-resend check, preserving their original
+head binding and intent rather than requiring a fabricated verified receipt.
+Existing review definitions, results,
+fingerprints, publication intents and receipts retain their original
+freshness boundaries; changed governing inputs refresh only affected analysis.
+No durable field, summary, snapshot or continuation store is added: the existing
+private merge request and original instruction sources supply the continuation.
+This avoids reconstructing an alternate approval protocol and repeating valid
+managed analysis across sessions. Native API dollar savings are unmeasured;
+offline handoff/recovery tests establish behavior, not measured cost savings.
+
 Fork-CI discovery first enumerates the reviewed head's pull-request runs rather
 than repository-wide history. Verify each listing's stable total count and
 complete pagination before dispatch or a no-op. At GitHub's 1,000-result search

@@ -6,7 +6,27 @@ import config
 import skill_config
 from state import capture, digest, read, resource
 from shared import publication
+from shared.diagnostics import Diagnostic
 from shared.pr_ownership import classify
+
+
+def _retained(label, operation, *args, **kwargs):
+    """Normalize local source failures without consuming live API diagnostics."""
+    try:
+        return operation(*args, **kwargs)
+    except Diagnostic:
+        raise
+    except (OSError, RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        if isinstance(exc, (subprocess.CalledProcessError, subprocess.TimeoutExpired)):
+            command = exc.cmd
+            if not isinstance(command, (list, tuple)) or not command or Path(command[0]).name != 'git':
+                raise
+        detail = str(exc)
+        stderr = getattr(exc, 'stderr', None)
+        if stderr:
+            detail += '\n' + (stderr.decode(errors='replace') if isinstance(stderr, bytes) else stderr)
+        raise ValueError('Retained ' + label + ' is unavailable: ' + detail
+                         + '\nRestore this prerequisite, then resume incoming review at the original source pins.') from exc
 
 
 class ApprovalFailure(ValueError):
@@ -65,6 +85,15 @@ class Approval:
         return sorted(values, key=lambda v: v['id'])
 
     def evidence(self):
+        # Retained documents, legacy specs and immutable reports are untrusted
+        # JSON shapes. Keep malformed references on the same fail-closed path
+        # as missing/stale evidence, including the bridge's native recovery.
+        try:
+            return self._evidence()
+        except (AttributeError, KeyError, TypeError, IndexError) as exc:
+            raise ValueError('Malformed retained incoming-review evidence: ' + str(exc)) from exc
+
+    def _evidence(self):
         request, h = self.request, self.handler
         value = read(Path(request['evidence']))
         if (not isinstance(value, dict) or value.get('workflow') != 'dk-workflows:dk-pr-review'
@@ -74,6 +103,12 @@ class Approval:
         if (any(not isinstance(value.get(key), str) or not value[key] for key in ('run', 'cycle', 'checkout'))
                 or any(not isinstance(value.get(key, []), list) for key in ('discovery', 'hooks', 'publications'))):
             raise ValueError('Retained review run/cycle, checkout and task lists are required')
+        verification = value.get('verification')
+        if verification is not None and not (
+                isinstance(verification, str) and verification
+                or isinstance(verification, dict) and set(verification) == {'key'}
+                and isinstance(verification['key'], str) and verification['key']):
+            raise ValueError('Verification requires a managed task key or legacy spec path')
         repository = h.host + '/' + h.root.removeprefix('repos/')
         if value.get('repository') != repository:
             raise ValueError('Review evidence belongs to another repository')
@@ -85,7 +120,8 @@ class Approval:
         if owned:
             selected_settings = {
                 name: skill_config.effective('dk-workflows:' + name, repository, value.get('upstream'),
-                                             options=value.get(field, {}))
+                                             options=skill_config.validate('dk-workflows:' + name,
+                                                                           value.get(field, {})))
                 for name, field in [('dk-pr-review', 'options'), ('dk-pr-reviewers-run', 'reviewer_options')]}
             fingerprints = {name: digest(selected['options']) for name, selected in selected_settings.items()}
             if fingerprints != value.get('skill_settings_fingerprints'):
@@ -96,7 +132,8 @@ class Approval:
         instructions = value.get('instructions')
         if not isinstance(instructions, dict) or not instructions:
             raise ValueError('Original governing instructions are required')
-        if {key: resource(path) for key, path in instructions.items()} != value.get('instruction_fingerprints'):
+        if {key: _retained('instruction source ' + str(path), resource, path)
+                for key, path in instructions.items()} != value.get('instruction_fingerprints'):
             raise ValueError('Original governing instructions changed')
         context = self.context()
         if context != value.get('context'):
@@ -109,7 +146,8 @@ class Approval:
         if classify(h.host, context['user'], actor, settings['settings']['accounts']['personal'])['ownership'] != 'others':
             raise ValueError('CI approval requires another author\'s PR')
         from tasks import Tasks
-        managed = Tasks(repository, request['pr'], checkout=value['checkout'])
+        managed = _retained('review checkout ' + value['checkout'], Tasks,
+                            repository, request['pr'], checkout=value['checkout'])
         store = managed.store
         results, specs = {}, {}
         approval_key, approval_claim, approval_fingerprint = None, None, None
@@ -118,14 +156,17 @@ class Approval:
             if (not isinstance(active, dict) or set(active) not in ({'spec', 'claim'}, {'key', 'claim'})
                     or not isinstance(active['claim'], str)):
                 raise ValueError('Malformed current approval task binding')
-            current = managed.saved_spec(active['key']) if 'key' in active else read(Path(active['spec']))
+            current = (_retained('approval task ' + str(active['key']), managed.saved_spec, active['key'])
+                       if 'key' in active else read(Path(active['spec'])))
+            if not isinstance(current, dict):
+                raise ValueError('Current approval task spec must be an object')
             selection = current.get('skill_configuration', {})
             if (not owned or current['skill']['identity'] != 'dk-workflows:dk-ci-approve'
                     or selection.get('skill') != 'dk-workflows:dk-pr-review'
                     or selection.get('kind') != 'finalizers' or selection.get('options') != value.get('options', {})
                     or selection.get('upstream') != value.get('upstream')):
                 raise ValueError('Current approval task must be the selected incoming-review finalizer')
-            captured = capture(current)
+            captured = _retained('approval task source capture', capture, current)
             if captured['subject'] != store.subject:
                 raise ValueError('Current approval task belongs to another PR')
             approval_key, approval_claim = captured['key'], active['claim']
@@ -133,19 +174,21 @@ class Approval:
 
         def completed(reference, *, source_required=True, cycle=value['cycle']):
             if isinstance(reference, dict) and set(reference) == {'key'} and isinstance(reference['key'], str):
-                spec = managed.saved_spec(reference['key'])
+                spec = _retained('review task ' + reference['key'], managed.saved_spec, reference['key'])
             elif isinstance(reference, str):
                 spec = read(Path(reference))
             else:
                 raise ValueError('Review evidence requires a managed task key or legacy spec path')
+            if not isinstance(spec, dict):
+                raise ValueError('Review task spec must be an object')
             if any(spec.get('instructions', {}).get(key) != path for key, path in instructions.items()):
                 raise ValueError('Review tasks must capture the original governing instructions')
-            current = capture(spec)
-            if current['subject'] != store.subject:
-                raise ValueError('Review task belongs to another PR')
             source = spec.get('git', {})
             if source_required and (source.get('head') != request['head'] or source.get('target') != request['base']):
                 raise ValueError('Review task source pins changed')
+            current = _retained('review task source capture ' + str(reference), capture, spec)
+            if current['subject'] != store.subject:
+                raise ValueError('Review task belongs to another PR')
             with store.locked() as manifest:
                 entry = manifest['entries'].get(current['key'], {})
                 if any(e.get('claim') and not (
@@ -260,18 +303,26 @@ class Approval:
                           for index, _ in enumerate(hooks)]
         if sorted(occurrences) != sorted(required_hooks):
             raise ValueError('Current review cycle hooks are incomplete')
+        from shared.workflow_storage import operations_root
+        from shared.review_request_recovery import Recovery
+        from shared.github_publications import Handler
+        recovery = Recovery(lambda approved: Handler(approved, api=h.api, metadata=h.metadata,
+                                                     run=h.run, endpoint=h.endpoint))
         for path in value.get('publications', []):
             operation = publication.load(path)
-            if (operation['status'] != 'verified' or operation['request']['target'] != request['pr']
+            settled = (operation['status'] == 'verified'
+                       or operation['status'] == 'pending' and operation['request']['kind'] == 'request-review'
+                       and operation.get('review_request_disposition')
+                       and not recovery.blocks(operation, {**request, 'kind': 'ci-approve'}))
+            if (not settled or operation['request']['target'] != request['pr']
                     or operation['request']['approved'].get('head') != request['head']):
-                raise ValueError('Review publications require reconciled receipts at the reviewed head')
+                raise ValueError('Review publications require reconciled receipts or a current no-resend disposition at the reviewed head')
         # Also detect uncertain writes omitted from the evidence document.
-        from shared.workflow_storage import operations_root
         scope = operations_root(repository=request.get('checkout')) / publication.digest(request['pr'])
         for path in scope.glob('*/*.json'):
-            if publication.load(path)['status'] == 'pending':
+            operation = publication.load(path)
+            if recovery.blocks(operation, {**request, 'kind': 'ci-approve'}):
                 # The current operation is pending while checking its own receipt.
-                operation = publication.load(path)
                 if operation['request']['approved'].get('_payload_hash') != request.get('_payload_hash'):
                     raise ValueError('Uncertain publication requires read-only reconciliation')
         return {'evidence': digest(value), 'results': {key: result['original_sha256'] for key, result in results.items()},

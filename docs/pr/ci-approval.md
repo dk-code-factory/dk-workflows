@@ -1,5 +1,85 @@
 # Fork workflow approval evidence
 
+## Standalone review followed by a merge request
+
+A direct request to merge an exact PR, including “approve and merge” after a
+standalone review, must arrange eligible fork workflow execution approvals before
+waiting for CI or preparing a merge. PR review approval does not open a fork
+execution gate; deployment approval and a failed CI run are different boundaries.
+The original merge authorization survives the supported native handoffs below.
+Narrower user restrictions, analysis-only instructions and disabled fork approval
+policy still govern. Never ask the user to repeat an already authorized action
+merely because review began outside the incoming-review workflow.
+
+Use `python3 PACKAGE_ROOT/scripts/ci_approve.py bridge --request FILE` with the
+existing private merge request, adding `analysis_only:false` after assessing the
+current instructions. It contains `kind:"merge-pr"`, canonical `pr`, reviewed
+`head`, live reviewed target `base` and the publisher's merge fields. Preserve
+`upstream` and `review_options` when incoming-review invocation options were
+supplied; the latter are separate from publisher options. Add `evidence` only
+when an original incoming-review evidence document exists. Keep the exact original
+authorization and instruction sources available to the native caller. The bridge
+does not authorize mutations, save state, approve, invoke models or merge.
+
+Execute the returned action and continue the same original request:
+
+- `reconcile`: reconcile every returned retained publication operation read-only
+  through `publish.py`; uncertain outcomes cannot be resent. Rerun the bridge
+  only once reconciliation settles the pending actions. An uncertain review
+  request with a current explicit `no_resend` disposition remains pending as a
+  duplicate barrier for review requests, while allowing independent CI approval
+  and merge. Changed review-request observations require inspection and
+  reassessment before continuation; other uncertain actions still reconcile.
+- `review`: invoke `dk-workflows:dk-pr-review` natively for the same PR and pinned
+  source, original instructions and original merge authorization, using the
+  returned review options and original upstream scope. Resume compact managed
+  status and read targeted original reports; reuse current completed analysis
+  under its existing keys and native evidence. Complete missing/stale discovery,
+  required verification, architecture/configured work and publication
+  reconciliation through that workflow. Obtain its current evidence document,
+  attach its path to this same merge request and continue. Never invent managed
+  records, adopt an unbound standalone verdict as coverage, or refresh snapshots
+  merely to bypass stale inputs. Missing native execution/evidence is incomplete
+  work with an exact prerequisite, never grounds for a CLI runner fallback.
+  If that workflow already completes the original authorized merge, return its
+  verified receipt instead of starting another bridge or merge operation.
+- `approve`: invoke `dk-workflows:dk-ci-approve` with the returned original
+  evidence path. It revalidates all readiness and association guards at dispatch
+  and retains one journal operation per run/attempt. Complete its returned actions
+  and retain partial results; permission failures need the stated permission and
+  read-only reconciliation rather than another endpoint or duplicated dispatch.
+- `observe-ci`: or after execution approval, use `dk-workflows:dk-ci` to observe
+  actual CI execution and outcomes. `ci_success:null` in bridge/approval results
+  means success has not been established. Failed CI blocks merging. When review,
+  CI and repository requirements are satisfied at the current pins, return to
+  `dk-workflows:dk-pr-publish` and complete the original authorized merge with its
+  live checks and recovery journal. A handoff alone does not finish the request.
+
+Changed head/target, ambiguous gates, disabled policy and inaccessible evidence
+need their exact diagnostic and supported recovery step. Reassess affected inputs
+through the owning workflow, retaining original results and operations. Do not
+silently recapture a different target to make a pending request pass. Already
+approved runs require no new approval; their CI results still need observation.
+Malformed retained evidence, including legacy task specs and nested reports,
+produces a review handoff and diagnostic with valid explicit request options or
+current defaults. Missing retained checkouts, unavailable pinned Git objects and
+local source-capture failures produce the same handoff with the original failure
+and prerequisite restoration step. Restore the referenced sources and access at
+the original pins before resuming incoming review; unchanged completed results
+remain reusable without refreshing evidence snapshots or rewriting retained state.
+Local recovery does not consume non-Git process failures or typed publication
+diagnostics: permission and uncertain-write failures retain their own recovery
+paths. Never blindly retry a failed source read or a publication.
+Rejected evidence cannot supply invocation overrides or approval
+coverage, including when its upstream scope differs. Validate the full merged
+effective options, including cross-field constraints, before every handoff;
+invalid explicit request options or current defaults block reconciliation and CI
+observation too, even when no fork gates remain.
+This bridge also works when no eligible fork gates exist, without injecting a
+new review or requiring fork approval permission for an unrelated merge.
+
+## Evidence and finalization
+
 `dk-workflows:dk-pr-review` calls `dk-workflows:dk-ci-approve` when selected in its finalizer list and review is ready for CI. Its `permissions.approve_fork_ci` defaults to true independently of posting PR approvals or merging. Analysis-only instructions and narrower mutation restrictions override it. This boundary does not alter `dk-workflows:dk-pr-fix`, completion instructions, branch protection or deployment approvals. CI execution permission does not establish CI success.
 
 Keep a private JSON evidence document with the following fields. Preserve original instructions and reports; a boolean readiness assertion is insufficient.
@@ -42,7 +122,7 @@ When discovery has candidates, supply the independent verification occurrence ge
 
 Only evidenced `rejected` or `resolved` candidates satisfy readiness. `confirmed`, `uncertain`, missing or duplicate dispositions block approval. Record actual unresolved verification findings in `findings`; they also block approval. A resolution must establish why the issue no longer requires action at the current reviewed inputs. Save original verification output unchanged.
 
-Skill-owned lists place custom work directly before and after review; they do not inherit hidden process hooks. Keep `hooks:[]` for this mode. Complete required selected tasks before finalization. List the journal paths of all review publications in `publications`; they must have verified receipts at this head. Pending publications anywhere in this PR journal block new writes until reconciled.
+Skill-owned lists place custom work directly before and after review; they do not inherit hidden process hooks. Keep `hooks:[]` for this mode. Complete required selected tasks before finalization. List the journal paths of all review publications in `publications`; they must have verified receipts at this head or be an uncertain review request at this head with a live-validated `no_resend` disposition. The same disposition check applies to listed and unlisted operations, retaining the pending intent without inventing a receipt. Other pending publications anywhere in this PR journal block new writes until reconciled.
 
 Evidence without `configuration` retains the legacy process API: its selected reviewer and named verifier settings and complete configured hook occurrences remain required. Legacy noncacheable hook results use the retained run and their generated occurrence; hook claims omit the reviewer cycle flag. Discovery and verification attempts require the current review cycle in both modes.
 
