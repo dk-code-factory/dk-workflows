@@ -791,8 +791,14 @@ leaf claims inherit the owning workflow limits and permissions.
 Direct commit/message preparation and PR fix/finalization share one semantic
 scope assessment before commit cleanup. A read-only helper captures HEAD, staged
 and unstaged patches and untracked paths without interpreting relevance, writing
-Git state or retaining an inventory. Native assessment includes suitable existing
-edits under current commit authorization and preserves unrelated/excluded hunks
+Git state or retaining an inventory. Capture disables filesystem-monitor hooks
+and configured clean/process filters, including initialized submodules, so Git
+inspection cannot populate filter-managed caches. It reports bypassed driver
+names alongside the evidence: staged content stays index-normalized while the
+worktree comparison bypasses external normalization. Such differences still need
+native assessment; capture neither hides candidate edits nor runs filters to
+resolve them. Native assessment includes suitable existing edits under current
+commit authorization and preserves unrelated/excluded hunks
 and their staging state. Commit, rewrite and push permissions stay separate;
 cleanup retains its clean-worktree and reviewed-tree guards.
 

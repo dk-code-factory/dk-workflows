@@ -229,6 +229,90 @@ def test_external_diff_and_textconv_cannot_execute_during_capture(repository):
     assert not marker.exists()
 
 
+@pytest.mark.parametrize('process', [False, True])
+@pytest.mark.parametrize('unborn', [False, True])
+def test_content_filters_are_bypassed_without_losing_candidates(repository, process, unborn):
+    p = repository
+    if unborn:
+        git(p, 'checkout', '--orphan', 'initial')
+    marker = p/'filter-executed'
+    hook = p/'filter-hook'
+    hook.write_text('#!/bin/sh\ntouch "'+str(marker)+'"\n'
+                    'cat >/dev/null\nprintf "normalized route_version = 1\\n"\n')
+    hook.chmod(0o755)
+    git(p, 'config', 'filter.fixture.clean', str(hook))
+    git(p, 'config', 'filter.fixture.required', 'true')
+    (p/'.gitattributes').write_text('routing.py filter=fixture\n')
+    git(p, 'add', '.gitattributes', 'routing.py')
+    if not unborn:
+        git(p, 'commit', '-qm', 'Store normalized content')
+    if process:
+        # A process filter must never even start; no protocol handshake is needed.
+        process_hook = p/'process-hook'
+        process_hook.write_text('#!/bin/sh\ntouch "'+str(marker)+'"\nexit 1\n')
+        process_hook.chmod(0o755)
+        git(p, 'config', 'filter.fixture.process', str(process_hook))
+    marker.unlink()
+    (p/'routing.py').write_text('candidate route_version = 2\n')
+    before = snapshot(p)
+    value = inspect(p)
+    assert not marker.exists()
+    assert snapshot(p) == before
+    assert 'fixture' in value['disabled_filter_drivers']
+    assert '-normalized route_version = 1' in value['unstaged_patch']
+    assert '+candidate route_version = 2' in value['unstaged_patch']
+    if unborn:
+        assert '+normalized route_version = 1' in value['staged_patch']
+    else:
+        assert value['staged_patch'] == ''
+    assert inspect(p) == value
+    assert snapshot(p) == before
+
+
+def test_submodule_local_filter_cannot_execute_during_parent_capture(repository):
+    p = repository
+    sub = p/'sub'
+    sub.mkdir()
+    git(sub, 'init', '-q', '-b', 'main')
+    git(sub, 'config', 'user.name', 'Fixture Author')
+    git(sub, 'config', 'user.email', 'fixture@example.test')
+    git(sub, 'config', 'commit.gpgsign', 'false')
+    marker = p/'sub-filter-executed'
+    hook = p/'sub-filter-hook'
+    hook.write_text('#!/bin/sh\ntouch "'+str(marker)+'"\ncat\n')
+    hook.chmod(0o755)
+    git(sub, 'config', 'filter.subfixture.clean', str(hook))
+    git(sub, 'config', 'filter.subfixture.required', 'true')
+    (sub/'.gitattributes').write_text('code filter=subfixture\n')
+    (sub/'code').write_text('original\n')
+    git(sub, 'add', '.')
+    git(sub, 'commit', '-qm', 'Initial submodule')
+    git(p, 'add', 'sub')
+    git(p, 'commit', '-qm', 'Record submodule')
+    marker.unlink()
+    (sub/'code').write_text('modified\n')
+    before = snapshot(p)
+    value = inspect(p)
+    assert not marker.exists()
+    assert snapshot(p) == before
+    assert 'subfixture' in value['disabled_filter_drivers']
+    assert ' M sub' in value['status']
+    assert '-dirty' in value['unstaged_patch']
+
+
+def test_fsmonitor_hook_cannot_execute_during_capture(repository):
+    p = repository
+    marker = p/'monitor-executed'
+    hook = p/'monitor-hook'
+    hook.write_text('#!/bin/sh\ntouch "'+str(marker)+'"\nexit 1\n')
+    hook.chmod(0o755)
+    git(p, 'config', 'core.fsmonitor', str(hook))
+    (p/'routing.py').write_text('candidate\n')
+    value = inspect(p)
+    assert '+candidate' in value['unstaged_patch']
+    assert not marker.exists()
+
+
 @pytest.mark.parametrize('variable', ['GIT_DIR', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE'])
 def test_repository_environment_cannot_redirect_capture(repository, tmp_path, variable):
     foreign = tmp_path/'foreign'

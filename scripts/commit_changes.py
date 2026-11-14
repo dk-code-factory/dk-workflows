@@ -12,9 +12,13 @@ def inspect_changes(checkout):
     checkout = Path(checkout).resolve(strict=True)
     env = {**os.environ, 'GIT_OPTIONAL_LOCKS': '0', 'GIT_TERMINAL_PROMPT': '0'}
 
-    def git(*args, missing_ok=False):
-        result = subprocess.run(['git', '--no-lazy-fetch', '--no-pager', '-C', str(checkout),
-                                 *args], capture_output=True, env=env)
+    filter_options = []
+
+    def git(*args, missing_ok=False, at=None):
+        result = subprocess.run(['git', '--no-lazy-fetch', '--no-pager',
+                                 '-c', 'core.fsmonitor=false', *filter_options,
+                                 '-C', str(checkout if at is None else at), *args],
+                                capture_output=True, env=env)
         if missing_ok and result.returncode == 1:
             return None
         if result.returncode:
@@ -30,7 +34,33 @@ def inspect_changes(checkout):
         raise ValueError('Commit preparation requires a worktree')
     checkout = Path(git('rev-parse', '--show-toplevel').removesuffix('\n'))
 
+    def disable_filters():
+        # Worktree comparisons run clean/process filters even with --no-textconv.
+        # Include initialized submodule configurations: status can inspect them.
+        filter_options.clear()
+        pending, seen, drivers = [checkout], set(), set()
+        while pending:
+            repo = pending.pop().resolve()
+            if repo in seen:
+                continue
+            seen.add(repo)
+            keys = git('config', '--null', '--name-only', '--get-regexp',
+                       r'^filter\..*\.(clean|process|required)$', missing_ok=True, at=repo)
+            for key in (keys or '').split('\0'):
+                if key:
+                    drivers.add(key.rsplit('.', 1)[0])
+            for entry in git('ls-files', '--stage', '-z', at=repo).split('\0'):
+                if entry.startswith('160000 '):
+                    submodule = repo/entry.split('\t', 1)[1]
+                    if (submodule/'.git').exists():
+                        pending.append(submodule)
+        for driver in sorted(drivers):
+            filter_options.extend(['-c', driver+'.clean=', '-c', driver+'.process=',
+                                   '-c', driver+'.required=false'])
+        return [driver.removeprefix('filter.') for driver in sorted(drivers)]
+
     def capture():
+        disabled_filter_drivers = disable_filters()
         head = git('rev-parse', '--verify', '--quiet', 'HEAD^{commit}', missing_ok=True)
         if head is None:
             git('symbolic-ref', '--quiet', 'HEAD')
@@ -42,7 +72,7 @@ def inspect_changes(checkout):
             raise ValueError('Resolve index conflicts before commit preparation')
         flags = ['--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--binary',
                  '--full-index', '--ignore-submodules=none', '--no-relative']
-        return {'head': head,
+        return {'head': head, 'disabled_filter_drivers': disabled_filter_drivers,
                 'status': git('-c', 'status.renames=false', 'status', '--porcelain=v1',
                               '-z', '--untracked-files=all').split('\0')[:-1],
                 'staged_patch': git('diff', *flags, '--cached', *([head] if head else []), '--'),
