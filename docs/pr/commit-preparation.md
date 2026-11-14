@@ -9,9 +9,12 @@ history. Preserve the user's narrower scope and explicit exclusions.
 
 Run `python3 PACKAGE_ROOT/scripts/commit_changes.py --checkout REPO` for a
 read-only capture of HEAD, status, staged and unstaged patches, and untracked
-paths. The helper requires Git 2.45 or newer, disables external diff/textconv and
-lazy fetching, and rejects unresolved index conflicts or changes observed during
-capture. It creates no files or persistent records. Read relevant untracked files
+paths across the whole repository, including when REPO is a subdirectory or
+`diff.relative` is enabled. HEAD is null on an unborn branch; initial staged
+changes are compared against the empty tree. The helper requires Git 2.45 or
+newer, disables external diff/textconv and lazy fetching, and rejects unresolved
+index conflicts or changes observed during capture. It creates no files or
+persistent records. Read relevant untracked files
 and binary/submodule changes separately; paths and binary patches alone do not
 establish relevance or correctness. Recheck live changes before staging or commit.
 
