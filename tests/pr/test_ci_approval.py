@@ -282,6 +282,20 @@ def test_bridge_no_gates_observes_ci_without_requiring_fork_execution_permission
     assert not r.remote.calls
 
 
+@pytest.mark.parametrize('fields', [
+    {'review_options': {'architecture': {'enabled': False}}},
+    {'upstream': 'github.com/upstream/repo'},
+])
+def test_bridge_does_not_reuse_evidence_from_another_invocation_scope(reviewed, tmp_path, fields):
+    r = reviewed
+    path = merge_request(r, tmp_path, evidence=str(r.evidence), **fields)
+    plan = r.cli.bridge(path)
+    assert plan['action'] == 'review'
+    assert 'invocation scope changed' in plan['reason']
+    assert plan['review_options'] == fields.get('review_options', {})
+    assert not r.remote.calls and not r.remote.state['writes']
+
+
 def test_bridge_preserves_pending_approval_identity_before_discovery_and_recovers_remaining_runs(reviewed, tmp_path):
     r = reviewed
     path = merge_request(r, tmp_path, evidence=str(r.evidence))

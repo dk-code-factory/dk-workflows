@@ -91,6 +91,11 @@ def bridge(path):
         {'run_id': run['id'], 'attempt': run['run_attempt']} for run in eligible]}
     if bound.get('evidence'):
         try:
+            if isinstance(evidence, dict) and (
+                    evidence.get('upstream') != bound.get('upstream')
+                    or 'review_options' in bound and (
+                        evidence.get('configuration') != 'skill-owned' or evidence.get('options') != options)):
+                raise ValueError('Incoming-review invocation scope changed; reassess affected evidence')
             approval.evidence()
         except (ValueError, KeyError, TypeError, OSError) as exc:
             reason = str(exc)
