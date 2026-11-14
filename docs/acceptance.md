@@ -1,5 +1,16 @@
 # Behavior contract
 
+[Historical finding follow-ups](pr/finding-followups.md) retain independently
+confirmed unresolved findings across duplicate suppression and permit a targeted
+request after two new PR commits since the latest substantive request. Offline
+tests cover all source routes, bots/people/prior runs, per-finding bot-summary
+edits, fixed and explicit dispositions, recent requests, unchanged reruns,
+original journals and uncertain-write recovery. Complete API capture and pinned
+local history beyond its cap exclude target-only ancestry and reject unavailable
+or changing source evidence. Reminder eligibility never grants publication or
+clean-review readiness. The [bounded native sample](native-finding-followup-exercise.md)
+reports its frozen evidence and in-session limits separately.
+
 Required behavior: unchanged reruns invoke zero reviewers; failed or interrupted tasks retain completed siblings; five initial review/fix cycles with retained same-cycle retries and explicit bounded continuation; tree-preserving commit cleanup; fresh publication reconciliation after interruption; exact-head CI; existing partition settings and explicit human acceptances.
 
 [Managed bookkeeping](task-state.md) combines spec construction, capture and claims in prepare, retains minimal replay definitions in existing entries, and finishes by task key. Fresh-process resume recaptures current sources without model-built specs and exposes compact counts and evidence references. Tests cover legacy adoption without cache/budget resets, concurrent/lost-response claims, successful siblings, source drift, removed occurrences, history-only cleanup and read-only targeted result/progress reads. Preference handoffs reuse unchanged condition decisions; the settings facade reads selected sections once without storing effective snapshots. These checks are behavior and output-size proxies, not native token measurements. Follow [state admission](../DESIGN.md#objective-and-state-admission) for every additional persisted field.

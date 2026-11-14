@@ -861,3 +861,58 @@ current scope, exclusions, HEAD, index and worktree content; live changes requir
 fresh assessment and affected review coverage. Offline Git tests establish capture
 and preservation behavior, not native API dollar savings; cost evidence is
 unavailable.
+
+## Historical finding follow-ups
+
+Complete discussion and retained original findings feed discovery and independent
+current-head verification even when a report already exists. Native agents group
+equivalent requests per finding, distinguish substantive requests from formatting
+edits, choose the latest request and preserve fixed/rejected/uncertain and explicit
+accepted/deferred dispositions. Age governs reminders only; unresolved findings
+retain their ordinary approval/CI/merge gates and posting permissions remain live.
+
+The read-only follow-up helper verifies existing complete evidence, captures a
+stable paginated PR commit list with its total and constructs source routes and
+reply payloads. Review commit IDs or native-validated source-head links supply
+anchors; unsupported or rewritten latest anchors stay uncertain. Complete API
+parent graphs count PR members reachable from the current head but absent from
+the anchor ancestry. Chronological list position is never arrival history:
+merging an older-dated side branch can add commits after the request. Complete
+short histories need no checkout when API parents prove every member reachable.
+Beyond the REST 250-commit cap or when API parent evidence is insufficient, full
+local objects supplement the list: pin the captured
+head and live target tip, require count/list agreement, prove anchor ancestry and
+exclude target-only commits. Changed pins, shallow/missing objects or incomplete
+GitHub evidence require restoration and recapture. Timestamps never substitute
+for PR membership. Formatting-only bot edits require semantic reassessment of the
+changed discussion, while retaining each unchanged finding's original anchor.
+
+Inspection returns compact source and publication references; native decisions
+stay in existing original task results. Default inspection exposes counts, pins
+and candidate ages, with complete commit membership available through an explicit
+full-evidence option. Both presentations share the complete internal fingerprint;
+planning still recaptures and validates the whole proof. This avoids repeated
+model consumption of large histories in this and fresh sessions without storing
+derived summaries; changed source pins still invalidate affected work.
+Planning recaptures discussion, commits
+and original intents and checks its transient input fingerprint. Existing
+verified equivalent replies suppress recent reminders even during discussion
+visibility lag; pending or undispatched equivalent intents require their existing
+recovery rather than regenerated wording. The publisher retains original source,
+root parent, payload, head, receipts and uncertain-write reconciliation.
+Journal discovery matches the publisher's canonical PR scope, preserving exact
+original source URLs and journals. A verified superseded unavailable anchor no
+longer blocks age when the native verifier establishes a later substantive
+request; unknown latest anchors and uncertain equivalent writes still block.
+Pending publication barriers share the publisher's independent-reply exception
+for unrelated review requests; other pending kinds retain their barriers.
+
+No durable follow-up registry, commit-list cache, copied result, rendered plan or
+new counter is admitted. Existing fingerprints, budgets, original results and
+completed siblings retain their lifecycle. Reusing valid original analysis and
+publication evidence avoids repeated semantic discovery and duplicate uncertain
+writes in a fresh session without a new state's creation, validation, loading or
+explanation cost. Freshness ends at changed governing instructions, relevant code,
+discussion, request meaning, source pins or publication evidence; only affected
+work refreshes. Offline call counts and reuse tests are proxies; native API dollar
+savings across current and subsequent sessions have not been measured.
