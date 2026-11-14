@@ -512,7 +512,7 @@ contract. These changes add no durable store or claim of measured token savings.
 ## Repository instruction source selection
 
 Repository guidance is discovered before adoption. At first native workflow
-initialization, `dk-config` presents relevant rules and provenance and obtains a
+initialization, `dk-repo-onboard` presents relevant rules and provenance and obtains a
 repository-specific human, all-source or custom choice, with exact includes and
 exclusions. Discovery reads are evidence-only; ordinary source reads enforce the
 saved selection. The current inventory is reconstructed deterministically, not
@@ -521,6 +521,21 @@ Hosts may already have loaded repository or ancestor rules; this policy controls
 optional dk-workflows adoption and cannot unload context or override host priority.
 A conflicting host rule is disclosed and affected behavior remains incomplete
 when the requested exclusion cannot be honored.
+
+The dedicated onboarding skill owns that first-run interaction and explicit
+discovery refreshes; `dk-config` retains later settings inspection, change and
+reset. Onboarding returns a structured private inventory of all discovered
+sources, rules with scope/provenance and authority, repository facts, inspected
+settings/preferences, conflicts, gaps and completion. Unreadable or uninspected
+evidence makes discovery incomplete rather than silently absent. The report is
+constructed in memory from current reads and is never a governing-source copy.
+Its freshness ends at changes to repository identity, source choice/content,
+inspected settings/preferences or host context. Ordinary initialized workflows
+reuse the existing choice without repeating onboarding or its full report. No
+new durable field, cache or schema is added; configuration admission binds the
+onboarding prompt as a governing resource. Existing choice and request receipts
+continue to avoid repeated clarification and duplicate writes across sessions;
+no additional API dollar savings are claimed for the report.
 
 Only the mode and exact source references, or a minimal reset-pending marker,
 are saved in private repository configuration. The pending marker prevents a
@@ -586,7 +601,8 @@ native savings or host enforcement of source exclusions.
 
 ## Dedicated configuration admission
 
-Saved dk-workflows changes enter through `dk-config`, which hands a stable request
+Saved dk-workflows changes enter through `dk-config` (or `dk-repo-onboard` for
+initial source selection), which hands a stable request
 ID and configuration-only assignment to a fresh supported native agent. The main
 agent relays clarification and reconciles existing native execution after an
 interruption. `dk-preferences` mutations use the same agent and retain their

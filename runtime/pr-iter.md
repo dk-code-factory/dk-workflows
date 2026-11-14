@@ -2,7 +2,7 @@
 
 Follow [simplification review](../docs/simplification.md). For each selected reviewer runner, pass the live owning workflow selector to plan/preflight and managed leaves; do not copy a composed list into invocation overrides. Re-select the live plan before completion. Verify maintainability recommendations for concrete benefit, behavior preservation and bounded scope without requiring a functional bug; fix workflows assess and implement justified recommendations through their existing stages. Preserve ordinary review coverage.
 
-Before repository guidance reads, follow [repository instruction sources](../docs/instruction-sources.md). Reuse the saved source choice, or initialize it through `dk-workflows:dk-config`; pass only selected source references as current rules, retaining excluded historical material as evidence. Refresh affected guidance and analysis when that choice changes.
+Before repository guidance reads, follow [repository instruction sources](../docs/instruction-sources.md). Reuse the saved source choice, or initialize it through `dk-workflows:dk-repo-onboard`; pass only selected source references as current rules, retaining excluded historical material as evidence. Refresh affected guidance and analysis when that choice changes.
 
 Follow [private workflow reporting](../docs/private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 

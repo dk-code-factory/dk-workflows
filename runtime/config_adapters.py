@@ -255,7 +255,7 @@ def input_paths(context, operations):
     paths.update(root/'runtime'/name for name in ('config.py', 'preferences.py', 'skill_config.py', 'settings.py', 'commit_policy.py', 'invocation.py'))
     paths.update((root/'runtime/shared').glob('*.py'))
     paths.update((root/'schemas').glob('*.json'))
-    for name in ('dk-config', 'dk-preferences'):
+    for name in ('dk-config', 'dk-preferences', 'dk-repo-onboard'):
         paths.add(root/'codex/skills'/name/'SKILL.md')
     for folder in (root/'codex/skills').iterdir():
         paths.update([folder/'config.json', folder/'config.schema.json'])

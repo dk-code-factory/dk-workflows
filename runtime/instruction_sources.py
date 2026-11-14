@@ -155,7 +155,7 @@ def binding(checkout, identity):
     if saved is None:
         return None  # Preserve legacy task identities; native initialization still asks.
     if saved['policy'] is None:
-        raise ValueError('Repository instruction choice needed after reset; initialize through dk-config')
+        raise ValueError('Repository instruction choice needed after reset; initialize through dk-workflows:dk-repo-onboard')
     checkout = root(checkout)
     sources = discover(checkout, saved['policy'])
     selected = {item['path']: hashlib.sha256((checkout/item['path']).read_bytes()).hexdigest()

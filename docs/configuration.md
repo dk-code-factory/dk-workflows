@@ -2,7 +2,7 @@
 
 Saved mutations use the [dedicated configuration agent](configuration-agent.md) and [request history](configuration-requests.md). Every saved-write command requires `--request-id ID` bound to its exact prepared operation; read commands are unchanged.
 
-For repository initialization, follow [repository instruction sources](instruction-sources.md) before adopting repository files. `dk-config` asks which sources to follow, saves a repository-specific choice, and supports inspection, change and reset without editing upstream files. Ordinary reads reuse that choice.
+For repository initialization, follow [repository instruction sources](instruction-sources.md) before adopting repository files. [dk-repo-onboard](../codex/skills/dk-repo-onboard/SKILL.md) discovers sources, asks which to follow, saves a repository-specific choice and returns a structured discovery report. `dk-config` supports later inspection, change and reset without editing upstream files. Ordinary reads reuse that choice.
 
 Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts remain private.
 
@@ -46,7 +46,7 @@ Read effective options with `scripts/config.py --repository HOST/OWNER/REPO skil
 
 Workflow-owned permissions are passed downstream; a selected invocation grants no additional permission. Saved policy does not override narrower current user instructions. Independent review, source completeness, freshness, exact leases, retained budgets and reconciliation remain governing requirements. Custom finalizers cannot claim omitted cleanup or CI was verified.
 
-Use `dk-workflows:dk-config` for repository instruction-source initialization and when changing, inspecting or explaining saved settings is the user's task. Ordinary skills read their configuration directly. Scoped implementation/review preferences remain owned by `dk-workflows:dk-preferences`; existing PR policies and records are described in [PR configuration](pr/configuration.md).
+Use `dk-workflows:dk-repo-onboard` for repository initialization or an explicit onboarding refresh. Use `dk-workflows:dk-config` when changing, inspecting or explaining saved settings is the user's task. Ordinary skills read their configuration directly. Scoped implementation/review preferences remain owned by `dk-workflows:dk-preferences`; existing PR policies and records are described in [PR configuration](pr/configuration.md).
 
 ## Repository review selections
 

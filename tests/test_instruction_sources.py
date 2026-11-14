@@ -779,7 +779,8 @@ def test_no_policy_no_git_task_preserves_legacy_fingerprint(case, tmp_path, monk
     assert capture(task['assignment'])['fingerprint'] == capture(legacy)['fingerprint']
 
 
-def test_source_contract_changes_stale_configuration_admission(case, monkeypatch):
+@pytest.mark.parametrize('resource', ['docs/instruction-sources.md', 'codex/skills/dk-repo-onboard/SKILL.md'])
+def test_source_contract_changes_stale_configuration_admission(case, monkeypatch, resource):
     spec, _ = case
     checkout = Path(spec['git']['checkout'])
     files(checkout)
@@ -794,7 +795,7 @@ def test_source_contract_changes_stale_configuration_admission(case, monkeypatch
         'reviewed': [], 'relations': [], 'unresolved': []}})
     assert config_requests.Requests().resume(request_id)['admission'] == 'reusable'
     original = config_requests.read_text
-    contract = ROOT/'docs/instruction-sources.md'
+    contract = ROOT/resource
     monkeypatch.setattr(config_requests, 'read_text', lambda path: original(path) + '\nChanged adoption contract.'
                         if Path(path) == contract else original(path))
     assert config_requests.Requests().resume(request_id)['admission'] == 'stale'
