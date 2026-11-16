@@ -47,11 +47,11 @@ def package(root):
             assert source.read_bytes() == target.read_bytes(), 'Run scripts/sync_skills.py: '+name+'/'+filename
             json.loads(source.read_text())
     if manifests[0]['name']=='dk-workflows':
-        assert entries[0]==['dk-architecture-review', 'dk-ci', 'dk-ci-approve', 'dk-ci-flakes', 'dk-code-simplify', 'dk-commit-message', 'dk-commit-split',
+        assert entries[0]==['dk-alternatives-review', 'dk-ci', 'dk-ci-approve', 'dk-ci-flakes', 'dk-code-simplify', 'dk-commit-message', 'dk-commit-split',
                             'dk-config', 'dk-issue', 'dk-pr-approvers', 'dk-pr-decisions',
                             'dk-pr-description', 'dk-pr-feedback-address',
                             'dk-pr-feedback-read', 'dk-pr-feedback-reply', 'dk-pr-fix',
-                            'dk-pr-iter', 'dk-pr-publish', 'dk-pr-review', 'dk-pr-review-architect', 'dk-pr-review-post',
+                            'dk-pr-iter', 'dk-pr-publish', 'dk-pr-review', 'dk-pr-review-alternatives', 'dk-pr-review-post',
                             'dk-pr-reviewers-run', 'dk-pr-split', 'dk-preferences', 'dk-repo-onboard']
     for name in ('.agents/plugins/marketplace.json','.claude-plugin/marketplace.json'):
         catalog=json.loads((root/name).read_text())

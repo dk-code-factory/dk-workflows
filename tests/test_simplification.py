@@ -29,7 +29,7 @@ def save(owner=FIX, **policy):
 
 
 def selector(owner=FIX, **options):
-    return {'skill': owner, 'index': 0, 'options': options}
+    return {'skill': owner, 'index': 0, 'options': ({'alternatives': {'enabled': False}, **options} if owner == FIX else options)}
 
 
 def selected(workflow=None):
@@ -224,7 +224,7 @@ def test_runner_handoff_and_cli_derive_live_selection(case, tmp_path):
     spec, _ = case
     save()
     fields = {**definition(spec), 'skill_identity': RUNNER, 'responsibility': 'skill-task'}
-    task = {'kind': 'skill', 'skill': FIX, 'selection': 'tasks', 'index': 0, 'definition': fields}
+    task = {'kind': 'skill', 'skill': FIX, 'selection': 'tasks', 'index': 0, 'definition': fields, 'options': {'alternatives': {'enabled': False}}}
     prepared = Tasks(REPO, PR).prepare({'tasks': [task]})['tasks'][0]
     assert prepared['assignment']['options']['workflow'] == selector()
     source = tmp_path/'workflow.json'; write(source, selector())
@@ -268,7 +268,7 @@ def test_live_invocation_options_keep_owner_scope_and_override_saved_policy():
 
 
 def test_review_preflight_excludes_disabled_provider_and_finalizers():
-    options = {'architecture': {'enabled': False}, 'tasks': [{'skill': RUNNER}],
+    options = {'alternatives': {'enabled': False}, 'tasks': [{'skill': RUNNER}],
                'finalizers': ['missing:ending'], 'simplification': {'enabled': False, 'reviewer': 'missing:simplifier'}}
     calls = list(skill_config.calls(REVIEW, REPO, stage='review', options=options))
     assert invocation.preflight(calls, skill_config.catalog())['ready']

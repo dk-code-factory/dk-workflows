@@ -40,7 +40,9 @@ def initialize(root, source):
     duties = [dict(instructions='Assess offline '+label+' against inputs/evidence.json. '
                    'Keep the exact F1 acceptance and source. No remote writes.', options={}, required=True)
               for label in LABELS]
-    options = {'tasks': duties[:9], 'finalizers': duties[9:]}
+    # This fixture measures instruction-only selected duties, without native
+    # alternatives review; production gate coverage has its own offline tests.
+    options = {'tasks': duties[:9], 'finalizers': duties[9:], 'alternatives': {'enabled': False}}
     save(root/'inputs/evidence.json', {'head': scenario['head'], 'value': 2, 'finding': 'F1',
         'disposition': 'explicitly accepted', 'acceptance': scenario['acceptance'],
         'source': scenario['source'], 'publication': 'reconciled fixture no-op',

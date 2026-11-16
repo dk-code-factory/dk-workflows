@@ -18,6 +18,8 @@ def test_run_resume_includes_shared_skill_tasks_and_only_its_own_finalizers(case
     fields['responsibility'] = 'bounded-inspection'
     owner = 'dk-workflows:dk-pr-fix' if selection == 'tasks' else 'dk-workflows:dk-pr-reviewers-run'
     options = {selection: [{'instructions': 'Inspect the bounded fixture.', 'required': True}]}
+    if selection == 'tasks':
+        options['alternatives'] = {'enabled': False}
     shared = {'kind': 'skill', 'skill': owner, 'selection': selection,
               'index': 0, 'options': options, 'definition': fields}
     if selection == 'reviewers':
@@ -27,7 +29,7 @@ def test_run_resume_includes_shared_skill_tasks_and_only_its_own_finalizers(case
         fields['native_review'] = CONTRACT
         fields['skill_identity'] = owner
     finalizer = {'kind': 'skill', 'skill': 'dk-workflows:dk-pr-fix', 'selection': 'finalizers',
-                 'index': 0, 'options': {'finalizers': [{'instructions': 'Bounded finalizer.'}]},
+                 'index': 0, 'options': {'finalizers': [{'instructions': 'Bounded finalizer.'}], 'alternatives': {'enabled': False}},
                  'definition': {**definition(spec), 'skill_identity': 'dk-workflows:dk-pr-fix'}}
     tasks = Tasks(REPO, PR)
     prepared = tasks.prepare({'run': 'one', 'tasks': [shared]})['tasks'][0]

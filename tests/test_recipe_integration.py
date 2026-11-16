@@ -223,6 +223,38 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
         else:
             assert result['status']=='incomplete'
         return result
+    # Run the actual initial fix gate before entering the repeated workflow.
+    # This fixture's scalar-value edit is a sourced simple-change skip. Its
+    # accepted native evidence must survive all later fixes and CI repairs.
+    from native_review_observations import CONTRACT, observations
+    from checklist_reports import report as checklist_report
+    metadata = save('alternatives-initial-pr.json', {'url': PR, 'body': 'Return two.', 'headRefOid': head})
+    initial_definition = {
+        'skill_identity': 'dk-workflows:dk-alternatives-review',
+        'resources': {'skill': str(installed/'domain.md')},
+        'assigned_instructions': 'Assess the original scalar-value change.',
+        'instructions': {}, 'inputs': {'context': str(context), 'rules': str(applicable_rules),
+                                      'alternatives_current_pr': str(metadata)},
+        'options': {}, 'governing_inputs_complete': True, 'native_review': CONTRACT,
+        'git': {'checkout': str(checkout), 'target': base, 'base': base, 'head': head}}
+    def initial_gate():
+        return command(ROOT/'scripts/alternatives.py', '--repository', REPO, '--pr', PR, 'fix-gate')
+    next_task = initial_gate()['next_task']
+    next_task['definition'] = initial_definition
+    prepared = cache('prepare', '--file', save('alternatives-request.json', {'tasks': [next_task]}))['tasks'][0]
+    initial_report = {**checklist_report(prepared['checklist']), 'required': False,
+                      'reason': 'A scalar-value edit with no material implementation alternatives.',
+                      'evidence': [str(context)], 'findings': []}
+    initial_output = save('alternatives-output.json', initial_report)
+    initial_native = tmp_path/'alternatives-native.json'
+    initial_native.write_bytes(observations(prepared['assignment'], prepared['claim'], initial_output.read_bytes()))
+    initial_finished = cache('finish', '--key', prepared['key'], '--claim', prepared['claim']['id'],
+                             '--original', initial_output, '--report', initial_output, '--native-evidence', initial_native)
+    assert initial_finished['checklist_complete']
+    initial_references = initial_gate()['references']
+    assert initial_gate()['outcome'] == 'skipped'
+    initial_result = Path(initial_finished['result'])
+    original_alternatives = initial_result.read_bytes()
     finalizer_groups=cache('finalizer-plan')['groups']
     assert finalizer_groups==[[{'skill': reference, 'options': {}, 'required': True}] for reference in [
         'dk-workflows:dk-commit-split','dk-workflows:dk-pr-decisions',
@@ -407,6 +439,8 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
     for name,text in unrelated_docs.items():
         assert (checkout/name).read_text()==text
         assert git('show',head+':'+name)==text.strip()
+    assert initial_gate()['references'] == initial_references
+    assert initial_result.read_bytes() == original_alternatives
     if merge_after_iteration:
         # Explicit caller permission survives routed fixes, interruption,
         # cleanup and any CI repair. The final reviewed/published pins govern

@@ -35,7 +35,7 @@ Execute the returned action and continue the same original request:
   returned review options and original upstream scope. Resume compact managed
   status and read targeted original reports; reuse current completed analysis
   under its existing keys and native evidence. Complete missing/stale discovery,
-  required verification, architecture/configured work and publication
+  required verification, alternatives/configured work and publication
   reconciliation through that workflow. Obtain its current evidence document,
   attach its path to this same merge request and continue. Never invent managed
   records, adopt an unbound standalone verdict as coverage, or refresh snapshots

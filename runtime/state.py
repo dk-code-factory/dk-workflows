@@ -27,6 +27,12 @@ def digest(value):
                                      ensure_ascii=True, allow_nan=False).encode()).hexdigest()
 
 
+def task_key(subject, task, skill, *, options=None):
+    from alternatives_compat import storage_identity
+    task, skill = storage_identity(task, skill, options)
+    return digest({**subject, 'task': task, 'skill': skill})
+
+
 def has_output_content(original):
     return bool(original.decode('utf-8', errors='surrogateescape').strip())
 
@@ -492,7 +498,7 @@ def capture(spec, *, _context=None):
     if 'native_review' in spec:
         from native_review import contract
         fingerprint_inputs['native_review'] = deepcopy(contract(spec['native_review']))
-    key = digest({**subject, 'task': task['id'], 'skill': skill['identity']})
+    key = task_key(subject, task['id'], skill['identity'], options=spec.get('options'))
     return {'key': key, 'fingerprint': digest(fingerprint_inputs), 'components': fingerprint_inputs,
             'provenance': provenance, 'cacheable': cacheable, 'subject': subject,
             'hook_phase': deepcopy(spec.get('options', {}).get('hook_phase'))}
@@ -695,7 +701,7 @@ class Store:
                 if not tolerate_missing:
                     raise
                 unavailable.append({
-                    'key': digest({**self.subject, 'task': spec['task']['id'], 'skill': spec['skill']['identity']}),
+                    'key': task_key(self.subject, spec['task']['id'], spec['skill']['identity'], options=spec.get('options')),
                     'reusable': False, 'coverage_complete': False,
                     'reason': 'refresh_required', 'detail': str(exc)})
         if any(c['subject'] != self.subject for c in captures):

@@ -19,9 +19,9 @@ Read the complete PR discussion, user instructions and current Decisions. Distin
 
 Follow [decision language review](../../../runtime/dk-pr-decisions/references/language.md) for the configured `language_review_passes`, at most three passes. Use the configured `section_heading` when locating and publishing the bounded decision section; consumers read this setting from this skill. When authorized, use `scripts/publish.py` to update only Decisions. Preserve the rest of the title and body. Return structured decisions, open questions, sources and original instruction snapshots.
 
-Keep generated architecture analysis and selection in private managed results.
-Do not add an Architecture decisions subsection or copy architecture comparisons,
+Keep generated alternatives analysis and selection in private managed results.
+Do not add an Alternatives decisions subsection or copy alternatives comparisons,
 scores, alternatives or selection rationale into the PR description. Continue
 recording sourced scope and behavior agreements concisely. Preserve existing
 published decisions unless their revision is authorized. Follow the
-[architecture evidence boundary](../../../docs/architecture-review.md#publication-and-freshness).
+[alternatives evidence boundary](../../../docs/alternatives-review.md#publication-and-freshness).

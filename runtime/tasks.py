@@ -6,7 +6,7 @@ from pathlib import Path
 from config import make_completion_spec, make_finalizer_spec, make_hook_spec
 from checklists import contract as checklist_contract
 from native_review import binding, required
-from state import Store, digest, make_spec
+from state import Store, make_spec, task_key
 import skill_config
 
 
@@ -30,6 +30,8 @@ class Tasks:
             raise ValueError('Task requires a definition and optional occurrence selector')
         if not isinstance(descriptor.get('definition'), dict):
             raise ValueError('Task requires an explicit definition')
+        from alternatives_compat import descriptor as current_descriptor
+        descriptor.update(current_descriptor(descriptor))
         kind = descriptor.get('kind', 'task')
         definition = {key: value for key, value in descriptor['definition'].items()
                       if key not in {'checklist', 'required'}}
@@ -43,8 +45,8 @@ class Tasks:
             if set(descriptor) - {'kind', 'definition'}:
                 raise ValueError('Ordinary task identity excludes run and occurrence selectors')
             return make_spec(**self.store.subject, **definition)
-        if kind == 'architecture':
-            from architecture import stage_spec
+        if kind == 'alternatives':
+            from alternatives import stage_spec
             return stage_spec(self, descriptor, definition, replay=replay)
         if kind == 'skill':
             return skill_config.make_spec(**common, skill=descriptor['skill'], kind=descriptor['selection'],
@@ -80,7 +82,9 @@ class Tasks:
         for flag in ('retry', 'ci_repair', 'ci_rerun'):
             if flag in request and type(request[flag]) is not bool:
                 raise ValueError(flag + ' must be boolean')
-        descriptors = deepcopy(request['tasks'])
+        from alternatives_compat import descriptor as current_descriptor
+        descriptors = [current_descriptor(item) if isinstance(item, dict) else item
+                       for item in request['tasks']]
         entries = self._entries() if any(isinstance(item, dict) and 'key' in item for item in descriptors) else {}
         for index, item in enumerate(descriptors):
             if not isinstance(item, dict):
@@ -91,7 +95,7 @@ class Tasks:
                 saved = entries.get(item['key'], {}).get('managed')
                 if saved is None:
                     raise ValueError('Task has no retained definition')
-                saved = deepcopy(saved)
+                saved = current_descriptor(saved)
                 self._retained_policy(saved)
                 if 'git' in item:
                     if (not isinstance(item['git'], dict) or set(item['git']) - {'target', 'base', 'head'}
@@ -126,10 +130,10 @@ class Tasks:
         selections = {item.get('selection') for item in descriptors} if kinds == {'skill'} else set()
         if len(selections) > 1:
             raise ValueError('Prepare one skill-owned list kind at a time')
-        occurrence = bool(kinds - {'task', 'skill', 'architecture'} or selections == {'finalizers'})
+        occurrence = bool(kinds - {'task', 'skill', 'alternatives'} or selections == {'finalizers'})
         if occurrence and any(request.get(key) for key in ('retry', 'ci_repair', 'ci_rerun')):
             raise ValueError('Occurrence tasks do not reserve reviewer or CI retry budgets')
-        from architecture import evaluation
+        from alternatives import evaluation
         with evaluation(self):
             specs = [self.spec(item) for item in descriptors]
         for spec, item in zip(specs, descriptors):
@@ -139,8 +143,7 @@ class Tasks:
             if required(spec) and 'native_review' not in spec:
                 raise ValueError('Reviewer tasks require their native execution contract before preparation')
         # Key computation needs only identity, not a second expensive capture.
-        retained = {digest({**self.store.subject, 'task': spec['task']['id'],
-                            'skill': spec['skill']['identity']}): item
+        retained = {task_key(self.store.subject, spec['task']['id'], spec['skill']['identity'], options=spec.get('options')): item
                     for spec, item in zip(specs, descriptors)}
         checklists = {key: checklist_contract(spec, item['definition'])
                       for key, spec, item in zip(retained, specs, descriptors)}
@@ -159,11 +162,11 @@ class Tasks:
                 else:
                     task.pop('assignment', None)
                 task['checklist'] = checklists[task['key']]
-                if task['action'] == 'invoke' and retained[task['key']].get('kind') == 'architecture':
-                    from architecture import scoring_handoff
+                if task['action'] == 'invoke' and retained[task['key']].get('kind') == 'alternatives':
+                    from alternatives import scoring_handoff
                     scores = scoring_handoff(assignments[task['key']])
                     if scores is not None:
-                        task['architecture_scores'] = scores
+                        task['alternatives_scores'] = scores
                 if task['action'] == 'invoke':
                     entry = manifest['entries'][task['key']]
                     if required(entry['components']):
@@ -189,7 +192,7 @@ class Tasks:
         if set(keys) - entries.keys():
             raise ValueError('Unknown task key')
         specs, blocked, legacy, contracts = [], [], [], {}
-        from architecture import evaluation
+        from alternatives import evaluation
         with evaluation(self):
             for key, entry in entries.items():
                 if keys and key not in keys:
@@ -199,7 +202,7 @@ class Tasks:
                     legacy.append({'key': key, 'task': entry.get('components', {}).get('task', {}).get('id'),
                                    'reason': 'definition_required'})
                     continue
-                occurrence = (descriptor.get('kind', 'task') not in {'task', 'skill', 'architecture'} or
+                occurrence = (descriptor.get('kind', 'task') not in {'task', 'skill', 'alternatives', 'architecture'} or
                               descriptor.get('kind') == 'skill' and descriptor.get('selection') == 'finalizers')
                 if (run is not None and occurrence
                         and descriptor.get('run') != run):
@@ -215,7 +218,7 @@ class Tasks:
         with evaluation(self):
             result = self.store.status(specs, compact=True, run=run, explain=explain, tolerate_missing=True)
         result['tasks'] = [self.compact(task) for task in result['tasks']] + blocked
-        pins = {digest({**self.store.subject, 'task': spec['task']['id'], 'skill': spec['skill']['identity']}): spec['git']
+        pins = {task_key(self.store.subject, spec['task']['id'], spec['skill']['identity'], options=spec.get('options')): spec['git']
                 for spec in specs if 'git' in spec}
         for task in result['tasks']:
             key = task['key']
@@ -250,7 +253,7 @@ class Tasks:
         spec = self.spec(entry['managed'], replay=True)
         checklist = checklist_contract(spec, entry['managed']['definition'])
         if round_id is None:
-            from architecture import validate_report
+            from alternatives import validate_report
             validate_report(spec, report)
         if round_id is not None:
             if status is not None or progress is not None or native_evidence is not None:
