@@ -86,7 +86,11 @@ def operate(root, action, request=None, operation=None, lose_response=False):
             for prefix, key in [('/pulls/comments/', 'replies'), ('/issues/comments/', 'issue_comments')]:
                 if prefix in path:
                     comment_id = int(path.rsplit('/', 1)[-1])
-                    found = [v for v in remote.state[key] if v['id'] == comment_id]
+                    candidates = list(remote.state[key])
+                    if key == 'replies':
+                        candidates += [comment for comments in remote.state['review_comments'].values()
+                                       for comment in comments]
+                    found = [v for v in candidates if v['id'] == comment_id]
                     if len(found) == 1:
                         return found[0]
                     raise subprocess.CalledProcessError(1, ['gh', 'api'], stderr='gh: Not Found (HTTP 404)')
