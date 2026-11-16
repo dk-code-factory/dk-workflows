@@ -69,13 +69,28 @@ def outcome(value=None, **changes):
 
 
 @pytest.mark.parametrize('history,age,status', [([C], 0, 'uncertain_age'),
-                         ([A, C], 1, 'recent_request'), ([A, B, C], 2, 'eligible'),
+                         ([A, C], 1, 'eligible'), ([A, B, C], 2, 'eligible'),
                          ([A, B, D, C], 3, 'eligible')])
 def test_only_actual_pr_commit_membership_counts(history, age, status):
     result = outcome(context(history))
     assert result['status'] == status
     if status != 'uncertain_age':
         assert result['newCommits'] == age
+
+
+@pytest.mark.parametrize('source', ['C99', 'pullrequestreview-789', 'issuecomment-901'])
+@pytest.mark.parametrize('anchor,age,status', [(C, 0, 'recent_request'), (A, 1, 'eligible')])
+def test_zero_and_one_commit_boundary_for_each_source(source, anchor, age, status):
+    inline, top = inputs()
+    top['reviews'][0]['commitId'] = anchor
+    top['comments'][0]['text'] = f'Empty input fails at [head]({PR}/commits/{anchor}).'
+    value = followups.inspect(inline, top, linear_history([A, C]), {})
+    native = assessment(value, source=source)
+    if source == 'issuecomment-901':
+        native['findings'][0]['requests'][0]['commit'] = anchor
+    result = followups.plan(value, native, {})['findings'][0]
+    assert (result['status'], result['newCommits']) == (status, age)
+    assert ('request' in result) is (status == 'eligible')
 
 
 @pytest.mark.parametrize('source,kind,parent', [('C99', 'reply-inline', 41),
@@ -107,17 +122,18 @@ def test_resolved_thread_never_reminds():
 
 
 @pytest.mark.parametrize('author', ['robot[bot]', 'maintainer', 'previous-workflow'])
-def test_recent_equivalent_request_resets_age_for_every_author(author):
+@pytest.mark.parametrize('anchor,age,status', [(C, 0, 'recent_request'), (B, 1, 'eligible')])
+def test_recent_equivalent_request_resets_age_for_every_author(author, anchor, age, status):
     inline, top = inputs()
     recent = {**top['comments'][0], 'reference': 'issuecomment-902', 'id': 902,
               'url': PR + '#issuecomment-902', 'author': author,
-              'text': f'Please handle empty input at [head]({PR}/commits/{B}).'}
+              'text': f'Please handle empty input at [head]({PR}/commits/{anchor}).'}
     top['items'].append(recent)
     value = followups.inspect(inline, top, linear_history([A, B, C]), {})
-    requests = [{'reference': 'C99'}, {'reference': recent['reference'], 'commit': B,
-                                     'anchorEvidence': 'Equivalent substantive author request at B.'}]
-    assert outcome(value, requests=requests, latestRequest=recent['reference'])['newCommits'] == 1
-    assert outcome(value, requests=requests, latestRequest=recent['reference'])['status'] == 'recent_request'
+    requests = [{'reference': 'C99'}, {'reference': recent['reference'], 'commit': anchor,
+                                     'anchorEvidence': 'Equivalent substantive request explicitly binds this head.'}]
+    assert outcome(value, requests=requests, latestRequest=recent['reference'])['newCommits'] == age
+    assert outcome(value, requests=requests, latestRequest=recent['reference'])['status'] == status
 
 
 def test_unknown_equivalent_request_and_unsupported_link_are_uncertain():
@@ -160,7 +176,7 @@ def test_one_summary_edit_does_not_reset_every_findings_substantive_age():
     native['findings'].append(second)
     result = followups.plan(value, native, {})
     assert [(item['status'], item['newCommits']) for item in result['findings']] == [
-        ('eligible', 2), ('recent_request', 1)]
+        ('eligible', 2), ('eligible', 1)]
 
 
 @pytest.mark.parametrize('history', [[A, C], [C], [A, B, C]])
@@ -189,11 +205,13 @@ def test_original_journal_prevents_unchanged_fresh_session_reminders(status, exp
     assert saved == original
 
 
-def test_two_commits_after_latest_verified_receipt_can_be_reassessed():
-    saved = {'/original/operation.json': retained('verified', A)}
+@pytest.mark.parametrize('anchor,age,status', [(C, 0, 'recent_request'),
+                         (B, 1, 'eligible'), (A, 2, 'eligible')])
+def test_age_since_latest_verified_receipt(anchor, age, status):
+    saved = {'/original/operation.json': retained('verified', anchor)}
     value = context(retained=saved)
     result = followups.plan(value, assessment(value, operations=list(saved)), saved)['findings'][0]
-    assert result['status'] == 'eligible' and result['newCommits'] == 2
+    assert result['status'] == status and result['newCommits'] == age
 
 
 @pytest.mark.parametrize('local', [False, True])
@@ -361,7 +379,7 @@ def test_capped_list_uses_pinned_local_membership_without_target_only_commits(la
     value = followups.inspect(inline, top, captured, {})
     result = outcome(value)
     assert result['newCommits'] == expected
-    assert result['status'] == ('eligible' if expected == 2 else 'recent_request')
+    assert result['status'] == 'eligible'
 
 
 @pytest.mark.parametrize('failure', ['missing_objects', 'count', 'listed', 'target_changed', 'shallow'])
@@ -470,20 +488,21 @@ def test_followup_payload_uses_existing_single_dispatch_journal(tmp_path, monkey
     assert result['findings'][0]['status'] == 'recent_request'
 
 
+@pytest.mark.parametrize('anchor,age,status', [(C, 0, 'recent_request'), (B, 1, 'eligible')])
 @pytest.mark.parametrize('caller', ['https://github.com/Owner/Repo/pull/7', PR + '/',
                                     'https://GitHub.com/Owner/Repo/pull/7/'])
-def test_equivalent_caller_identity_finds_recent_receipt_during_discussion_lag(tmp_path, monkeypatch, caller):
+def test_equivalent_caller_identity_finds_receipt_during_discussion_lag(tmp_path, monkeypatch, caller, anchor, age, status):
     exercise = load_exercise()
     root = tmp_path / 'fixture'
     exercise.initialize(root)
     monkeypatch.setenv('XDG_STATE_HOME', str(root / 'state'))
     request = outcome()['request']
-    # Remote was at B when this request was published, but the complete
+    # Remote was at the receipt anchor when this request was published, but the complete
     # discussion fixture still only exposes the older report at A.
     state = json.loads((root / 'remote.json').read_text())
-    state['metadata']['headRefOid'] = B
+    state['metadata']['headRefOid'] = anchor
     (root / 'remote.json').write_text(json.dumps(state))
-    request['head'] = B
+    request['head'] = anchor
     published = exercise.operate(root, 'submit', request)
     path = published['operation']
     before = Path(path).read_bytes()
@@ -491,8 +510,8 @@ def test_equivalent_caller_identity_finds_recent_receipt_during_discussion_lag(t
     assert str(Path(path).resolve()) in discovered
     value = context(retained=discovered)
     result = followups.plan(value, assessment(value, operations=list(discovered)), discovered)
-    assert result['findings'][0]['status'] == 'recent_request'
-    assert result['findings'][0]['newCommits'] == 1
+    assert result['findings'][0]['status'] == status
+    assert result['findings'][0]['newCommits'] == age
     assert Path(path).read_bytes() == before
 
 
@@ -639,7 +658,7 @@ def test_small_api_graph_counts_new_commits_since_each_request_not_timestamp_or_
     native = assessment(value, requests=requests, operations=list(saved), latestRequest=latest)
     result = followups.plan(value, native, saved)['findings'][0]
     assert result['newCommits'] == expected
-    assert result['status'] == ('eligible' if expected == 2 else 'recent_request')
+    assert result['status'] == 'eligible'
     assert followups.inspection_output(value)['commitEvidence']['newCommits'][request_head] == expected
     assert saved == before
 

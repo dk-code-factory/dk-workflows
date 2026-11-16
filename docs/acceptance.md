@@ -2,7 +2,7 @@
 
 [Historical finding follow-ups](pr/finding-followups.md) retain independently
 confirmed unresolved findings across duplicate suppression and permit a targeted
-request after two new PR commits since the latest substantive request. Offline
+request after one new PR commit since the latest substantive request. Offline
 tests cover all source routes, bots/people/prior runs, per-finding bot-summary
 edits, fixed and explicit dispositions, recent requests, unchanged reruns,
 original journals and uncertain-write recovery. Complete API capture and pinned
