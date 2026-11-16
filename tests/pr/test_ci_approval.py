@@ -298,9 +298,9 @@ def test_bridge_no_gates_observes_ci_without_requiring_fork_execution_permission
 
 
 @pytest.mark.parametrize('options', [[], None, {'permissions': []}, {'unknown': True},
-    {'architecture': {'scoring': {'profile': 'custom'}}},
-    {'architecture': {'scoring': {'profile': 'custom', 'custom_prompt': None}}},
-    {'architecture': {'scoring': {'profile': 'custom', 'custom_prompt': '   '}}}])
+    {'alternatives': {'scoring': {'profile': 'custom'}}},
+    {'alternatives': {'scoring': {'profile': 'custom', 'custom_prompt': None}}},
+    {'alternatives': {'scoring': {'profile': 'custom', 'custom_prompt': '   '}}}])
 @pytest.mark.parametrize('continuation', ['gated', 'no-gates', 'pending'])
 def test_bridge_invalid_explicit_options_still_block_instead_of_using_defaults(reviewed, tmp_path, options, continuation):
     r = reviewed
@@ -332,7 +332,7 @@ def test_bridge_validates_merged_current_settings_before_every_handoff(reviewed,
     # Each layer is schema-valid; the effective result violates a cross-field rule.
     write(config.path('github.com/owner/repo'), config.invocation.merge(r.settings, {
         'skill_defaults': {'dk-workflows:dk-pr-review': {'options': {
-            'architecture': {'scoring': {'profile': 'custom', 'custom_prompt': None}}}}}}))
+            'alternatives': {'scoring': {'profile': 'custom', 'custom_prompt': None}}}}}}))
     reads = r.remote.list_reads
     with pytest.raises(ValueError, match='requires custom_prompt'):
         r.cli.bridge(merge_request(r, tmp_path, evidence=str(r.evidence)))
@@ -341,9 +341,9 @@ def test_bridge_validates_merged_current_settings_before_every_handoff(reviewed,
 
 @pytest.mark.parametrize('rejection', ['malformed', 'stale', 'upstream'])
 @pytest.mark.parametrize('options', [
-    {'architecture': {'enabled': False}}, {'tasks': []},
+    {'alternatives': {'enabled': False}}, {'tasks': []},
     {'permissions': {'approve_fork_ci': False}},
-    {'architecture': {'scoring': {'profile': 'custom', 'custom_prompt': None}}},
+    {'alternatives': {'scoring': {'profile': 'custom', 'custom_prompt': None}}},
 ])
 def test_rejected_retained_overrides_cannot_govern_current_review_recovery(reviewed, tmp_path, rejection, options):
     r = reviewed
@@ -355,14 +355,14 @@ def test_rejected_retained_overrides_cannot_govern_current_review_recovery(revie
     else:
         fields['upstream'] = 'github.com/old/upstream'
     r.edit(lambda value: value.update(fields),
-           snapshot=rejection == 'malformed' and 'scoring' not in options.get('architecture', {}))
+           snapshot=rejection == 'malformed' and 'scoring' not in options.get('alternatives', {}))
     original = r.evidence.read_bytes(), r.store.manifest.read_bytes()
     fresh = load('fresh_rejected_override_bridge', ROOT/'scripts/ci_approve.py')
     plan = fresh.bridge(merge_request(r, tmp_path, evidence=str(r.evidence)))
     assert plan['action'] == 'review' and plan['review_options'] == {} and plan['reason']
     if rejection == 'upstream':
         assert 'invocation scope changed' in plan['reason']
-    elif 'scoring' in options.get('architecture', {}):
+    elif 'scoring' in options.get('alternatives', {}):
         assert 'requires custom_prompt' in plan['reason']
     assert (r.evidence.read_bytes(), r.store.manifest.read_bytes()) == original
     assert not r.remote.calls and not r.remote.state['writes']
@@ -591,7 +591,7 @@ def test_unavailable_checkout_preserves_pending_approval_reconciliation_priority
 
 
 @pytest.mark.parametrize('fields', [
-    {'review_options': {'architecture': {'enabled': False}}},
+    {'review_options': {'alternatives': {'enabled': False}}},
     {'upstream': 'github.com/upstream/repo'},
 ])
 def test_bridge_does_not_reuse_evidence_from_another_invocation_scope(reviewed, tmp_path, fields):
@@ -905,8 +905,8 @@ def test_skill_owned_review_occurrences_verification_and_active_approval_claim(r
     original = r.store.status([first_spec])['tasks'][0]['result']
     verifier = {**definition, 'skill_identity': 'dk-workflows:dk-pr-review',
                 'responsibility': 'finding-verification', 'inputs': {'candidate': original}}
-    # This fixture isolates ordinary CI approval after architecture is disabled.
-    owner_options = {'architecture': {'enabled': False}}
+    # This fixture isolates ordinary CI approval after alternatives is disabled.
+    owner_options = {'alternatives': {'enabled': False}}
     verification, _, _ = managed('dk-workflows:dk-pr-review', 'tasks', 2, verifier, owner_options, {
         'complete': True, 'findings': [], 'dispositions': [
             {'task': capture(first_spec)['key'], 'index': 0, 'status': 'rejected', 'evidence': 'Verified source behavior'}]})

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Build architecture handoffs, evaluate accepted gates and draft bounded Decisions."""
+"""Build alternatives handoffs, evaluate accepted gates and draft bounded Decisions."""
 import argparse
 import json
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'runtime'))
-import architecture
+import alternatives
 from state import read
 from tasks import Tasks
 
@@ -26,6 +26,7 @@ def main():
     p = sub.add_parser('gate')
     p.add_argument('--file', type=Path, required=True, help='Accepted stage keys and publication operation paths')
     p.add_argument('--analysis-only', action='store_true')
+    sub.add_parser('fix-gate', help='Discover initial fix alternatives work or reuse its accepted PR plan')
     p = sub.add_parser('governing-body')
     p.add_argument('--body', type=Path, required=True)
     p.add_argument('--operation', type=Path, required=True)
@@ -36,30 +37,33 @@ def main():
     p.add_argument('--body', type=Path, required=True)
     args = parser.parse_args()
     tasks = Tasks(args.repository, args.pr, checkout=args.checkout)
-    if args.command == 'gate':
-        result = architecture.gate(tasks, read(args.file), options=read(args.options) if args.options else None,
+    if args.command == 'fix-gate':
+        from fix_alternatives import gate
+        result = gate(tasks, options=read(args.options) if args.options else None, upstream=args.upstream)
+    elif args.command == 'gate':
+        result = alternatives.gate(tasks, read(args.file), options=read(args.options) if args.options else None,
                                    upstream=args.upstream, analysis_only=args.analysis_only)
     elif args.command == 'governing-body':
-        result = {'body': architecture.governing_body(body_text(args.body), args.operation, tasks, upstream=args.upstream)}
+        result = {'body': alternatives.governing_body(body_text(args.body), args.operation, tasks, upstream=args.upstream)}
     else:
-        selected = architecture.accepted(tasks, args.selection, historical=args.impact is not None)
+        selected = alternatives.accepted(tasks, args.selection, historical=args.impact is not None)
         impact_key = args.impact or selected['dependencies'].get('impact')
-        accepted = architecture.accepted(tasks, args.comparison, historical=impact_key is not None)
+        accepted = alternatives.accepted(tasks, args.comparison, historical=impact_key is not None)
         if impact_key:
-            impact = architecture.accepted(tasks, impact_key)
-            architecture.linked(impact, 'comparison', accepted)
-            architecture.validate_selection_impact(impact, selected)
+            impact = alternatives.accepted(tasks, impact_key)
+            alternatives.linked(impact, 'comparison', accepted)
+            alternatives.validate_selection_impact(impact, selected)
             if impact['report']['impact'] != 'nonmaterial':
-                raise ValueError('Changed architecture analysis requires refresh')
-        architecture.linked(selected, 'comparison', accepted)
+                raise ValueError('Changed alternatives analysis requires refresh')
+        alternatives.linked(selected, 'comparison', accepted)
         if not selected['report'].get('choice'):
-            raise ValueError('Architecture choice remains pending')
-        rendered = architecture.render_decision(accepted['report'], accepted['policy']['scoring'],
+            raise ValueError('Alternatives choice remains pending')
+        rendered = alternatives.render_decision(accepted['report'], accepted['policy']['scoring'],
                                                selected['report']['choice'], selection=selected['report'])
-        heading = architecture.skill_config.effective('dk-workflows:dk-pr-decisions', args.repository,
+        heading = alternatives.skill_config.effective('dk-workflows:dk-pr-decisions', args.repository,
                                                       args.upstream)['options']['section_heading']
-        result = {'body': architecture.replace_decision(body_text(args.body), rendered, heading=heading),
-                  'decision_type': 'architecture'}
+        result = {'body': alternatives.replace_decision(body_text(args.body), rendered, heading=heading),
+                  'decision_type': 'alternatives'}
     print(json.dumps(result, sort_keys=True))
 
 

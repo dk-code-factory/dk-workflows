@@ -374,7 +374,7 @@ def test_fixer_completion_uses_live_selected_plan_without_restoring_disabled_act
     fields = definition(spec)
     fields.pop('responsibility')
     fields['skill_identity'] = 'dk-workflows:dk-pr-fix'
-    body = {'run': 'fix-run', 'tasks': [{'kind': 'completion', 'definition': fields}]}
+    body = {'run': 'fix-run', 'tasks': [{'kind': 'completion', 'definition': fields, 'options': {'alternatives': {'enabled': False}}}]}
     tasks = Tasks(REPO, PR)
     prepared, check = initial(tasks, body)
     assert prepared['assignment']['options']['completion_plan'] == plan
@@ -443,7 +443,7 @@ def test_completion_keeps_invocation_local_plan_and_invalidates_on_its_change(ca
     fields.pop('responsibility')
     fields['skill_identity'] = 'dk-workflows:dk-pr-fix'
     body = {'run': 'local-plan', 'tasks': [{'kind': 'completion', 'definition': fields,
-                                         'options': {'finalizers': []}}]}
+                                         'options': {'finalizers': [], 'alternatives': {'enabled': False}}}]}
     tasks = Tasks(REPO, PR)
     _, check = initial(tasks, body)
     assert check['assignment']['options']['completion_plan'] == []
@@ -463,7 +463,7 @@ def test_skill_selected_optional_task_defaults_to_best_effort(case):
     write(config.path(REPO), {'skill_defaults': {'dk-workflows:dk-pr-fix': {'options': {
         'tasks': [{'skill': 'team:check', 'required': False}]}}}})
     body = {'tasks': [{'kind': 'skill', 'skill': 'dk-workflows:dk-pr-fix',
-                      'selection': 'tasks', 'index': 0, 'definition': fields}]}
+                      'selection': 'tasks', 'index': 0, 'definition': fields, 'options': {'alternatives': {'enabled': False}}}]}
     tasks = Tasks(REPO, PR)
     value, check = initial(tasks, body)
     assert not value['checklist']['required']

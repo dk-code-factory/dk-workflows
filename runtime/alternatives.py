@@ -1,6 +1,6 @@
-"""Architecture gate contracts and arithmetic over existing managed evidence.
+"""Alternatives gate contracts and arithmetic over existing managed evidence.
 
-No execution engine or architecture store: the native session owns analysis.
+No execution engine or alternatives store: the native session owns analysis.
 """
 import base64
 import json
@@ -16,7 +16,8 @@ from state import make_spec, read
 import skill_config
 
 OWNER = 'dk-workflows:dk-pr-review'
-REVIEW_SKILL = 'dk-workflows:dk-architecture-review'
+FIX_OWNER = 'dk-workflows:dk-pr-fix'
+REVIEW_SKILL = 'dk-workflows:dk-alternatives-review'
 CRITERIA = ('edge_coverage', 'quality', 'simplicity', 'low_intrusiveness', 'low_loc', 'low_operational_cost')
 PROFILES = {
     'minimal_change_edge_coverage': dict(zip(CRITERIA, (40, 15, 15, 15, 10, 5))),
@@ -47,12 +48,12 @@ REQUIRES = {'assessment': (), 'comparison': ('assessment',), 'impact': (),
             'selection': ('comparison',), 'alignment': ('comparison', 'selection'),
             'verification': ('alignment',)}
 GUIDANCE = {
-    'assessment': 'Inspect current requirements, complete discussion, Decisions and pinned diff. Require architecture review for material boundaries, interfaces, dependencies, state, concurrency, recovery or operational choices; otherwise explain a simple-change skip with evidence.',
+    'assessment': 'Inspect current requirements, complete discussion, Decisions and pinned diff. Require alternatives review for material boundaries, interfaces, dependencies, state, concurrency, recovery or operational choices; otherwise explain a simple-change skip with evidence.',
     'comparison': 'Compare reasonable materially distinct approaches using the assigned prompt and mandatory checklist. Return all required solution fields; select a scoring profile when auto. Do not choose, publish or run ordinary reviewers.',
     'impact': 'Compare retained applicability, alternatives and settled selection with current requirements, solution choices, constraints and relevant evidence. Nonmaterial requires unchanged applicability, feasibility, choice, confidence and estimate sensitivity, including any sourced user choice. Return material, nonmaterial or uncertain impact with evidence. Only nonmaterial permits reuse; always refresh current alignment. Own Decisions edits require exact reconciled before/after evidence.',
     'selection': 'Apply assigned selection policy to accepted comparison. Evaluate confidence and estimate sensitivity. Manual choices require an explicit user source and rationale. Pending choice blocks other reviewers. Do not publish.',
     'alignment': 'Compare current pinned implementation to the selected approach. Return aligned, mismatch or uncertain with evidence. A material mismatch needs substantive required design changes. Do not run ordinary reviewers.',
-    'verification': 'Independently challenge the material architecture mismatch against the selected decision and current pinned implementation. Return confirmed, rejected or uncertain with evidence and required design changes. Verify only; no publication or ordinary review.',
+    'verification': 'Independently challenge the material alternatives mismatch against the selected decision and current pinned implementation. Return confirmed, rejected or uncertain with evidence and required design changes. Verify only; no publication or ordinary review.',
 }
 
 
@@ -62,7 +63,7 @@ def text(value):
 
 def evidence(report):
     if not isinstance(report.get('evidence'), list) or not report['evidence'] or not all(map(text, report['evidence'])):
-        raise ValueError('Architecture requires source evidence')
+        raise ValueError('Alternatives requires source evidence')
 
 
 def scoring_policy(scoring):
@@ -78,7 +79,7 @@ def rubric(report, scoring):
     profile = report.get('profile')
     configured = scoring['profile']
     if configured != 'auto' and profile != configured:
-        raise ValueError('Architecture scoring profile differs from configuration')
+        raise ValueError('Alternatives scoring profile differs from configuration')
     if not text(report.get('profile_rationale')):
         raise ValueError('Scoring profile needs a circumstance rationale')
     if configured == 'auto' and profile not in PROFILES:
@@ -185,7 +186,7 @@ def choose(compared, policy, assessment):
 
 
 def validate_report(spec, report, *, compared=None):
-    assigned = spec.get('options', {}).get('architecture')
+    assigned = spec.get('options', {}).get('alternatives')
     if assigned is None or not report.get('complete'):
         return
     stage, config = assigned['stage'], assigned['policy']
@@ -193,8 +194,8 @@ def validate_report(spec, report, *, compared=None):
     if stage == 'assessment':
         if type(report.get('required')) is not bool or not text(report.get('reason')):
             raise ValueError('Applicability requires boolean required and an evidence-backed reason')
-        if spec['inputs'].get('architecture_request') and not report['required']:
-            raise ValueError('Explicit architecture review requires comparison; it cannot skip applicability')
+        if spec['inputs'].get('alternatives_request') and not report['required']:
+            raise ValueError('Explicit alternatives review requires comparison; it cannot skip applicability')
     elif stage == 'comparison':
         comparison(report, config['scoring'])
     elif stage == 'impact':
@@ -202,7 +203,7 @@ def validate_report(spec, report, *, compared=None):
             raise ValueError('Impact requires a supported material/nonmaterial/uncertain assessment')
     elif stage == 'selection':
         if compared is None:
-            compared = read(spec['inputs']['architecture_comparison'])['normalized']
+            compared = read(spec['inputs']['alternatives_comparison'])['normalized']
         compared = comparison(compared, assigned['comparison_scoring'])
         selected = choose(compared, config['auto_pick'], report)
         if report.get('choice') != selected:
@@ -225,7 +226,7 @@ def validate_report(spec, report, *, compared=None):
             raise ValueError('Confirmed mismatch requires substantive design changes')
 
 
-_EVALUATION = ContextVar('architecture_evaluation', default=None)
+_EVALUATION = ContextVar('alternatives_evaluation', default=None)
 
 
 @contextmanager
@@ -248,7 +249,7 @@ def accepted(tasks, key, *, historical=False):
     with evaluation(tasks) as context:
         identity = (key, historical)
         if identity in context['active']:
-            raise ValueError('Circular architecture evidence dependencies')
+            raise ValueError('Circular alternatives evidence dependencies')
         if identity not in context['accepted']:
             context['active'].add(identity)
             try:
@@ -266,24 +267,26 @@ def _accepted(tasks, key, context, *, historical=False):
     with tasks.store.locked() as manifest:
         entry = deepcopy(manifest['entries'][key])
     if historical:
-        descriptor = entry['managed']
+        from alternatives_compat import descriptor as current_descriptor
+        descriptor = current_descriptor(entry['managed'])
         tasks._retained_policy(descriptor)
-        loaded = skill_config.effective(OWNER, tasks.store.subject['repository'], descriptor.get('upstream'),
+        owner = descriptor.get('skill', OWNER)
+        loaded = skill_config.effective(owner, tasks.store.subject['repository'], descriptor.get('upstream'),
                                         options=descriptor.get('options'))
         definition = {k: v for k, v in descriptor['definition'].items() if k not in {'checklist', 'required'}}
-        execution = stage_execution(definition, descriptor['stage'], loaded['options'])
+        execution = stage_execution(definition, descriptor['stage'], loaded['options'], owner=owner)
         current_spec = make_spec(**tasks.store.subject, **execution)
     else:
         current_spec = tasks.saved_spec(key)
     current_capture = capture(current_spec, _context=context['capture'])
     saved, problem = tasks.store._load_saved(entry)
     if problem or saved['status'] != 'complete':
-        raise ValueError('Architecture evidence is incomplete or damaged')
+        raise ValueError('Alternatives evidence is incomplete or damaged')
     if historical:
         original_components = entry['components']
         for field in ('task', 'skill', 'instructions', 'native_review', 'instruction_policy'):
             if current_capture['components'].get(field) != original_components.get(field):
-                raise ValueError('Architecture review guidance changed; refresh affected analysis')
+                raise ValueError('Alternatives review guidance changed; refresh affected analysis')
         spec = deepcopy(original_components)
         captured = {'key': key, 'fingerprint': saved['fingerprint'],
                     'components': spec, 'cacheable': saved['cacheable']}
@@ -291,19 +294,19 @@ def _accepted(tasks, key, context, *, historical=False):
         spec, captured = current_spec, current_capture
     described = tasks.store.describe(captured, entry)
     if not described['coverage_complete'] or not described.get('checklist', {}).get('complete'):
-        raise ValueError('Architecture evidence lacks fresh native/checklist coverage')
+        raise ValueError('Alternatives evidence lacks fresh native/checklist coverage')
     report = deepcopy(saved['normalized'])
     reference = saved['path']
     native = json.loads(base64.b64decode(saved['native_execution']['evidence']))
     compared = None
-    if historical and spec['options']['architecture']['stage'] == 'selection':
+    if historical and spec['options']['alternatives']['stage'] == 'selection':
         from state import resource
-        source = accepted(tasks, spec['options']['architecture']['dependencies']['comparison'], historical=True)
-        if spec['inputs']['architecture_comparison'] != resource(source['reference']):
-            raise ValueError('Architecture selection refers to a changed comparison')
+        source = accepted(tasks, spec['options']['alternatives']['dependencies']['comparison'], historical=True)
+        if spec['inputs']['alternatives_comparison'] != resource(source['reference']):
+            raise ValueError('Alternatives selection refers to a changed comparison')
         compared = source['report']
     validate_report(spec, report, compared=compared)
-    assigned = spec['options']['architecture']
+    assigned = spec['options']['alternatives']
     return {'key': key, 'spec': spec, 'report': report, 'reference': reference, 'native_handle': native['invocation']['handle'], **assigned}
 
 
@@ -313,21 +316,27 @@ def stage_spec(tasks, descriptor, definition, *, replay=False):
 
 
 def _stage_spec(tasks, descriptor, definition, *, replay=False):
-    if set(descriptor) - {'kind', 'stage', 'dependencies', 'definition', 'options', 'upstream'}:
-        raise ValueError('Architecture descriptors use stage, dependencies and owner options only')
+    if set(descriptor) - {'kind', 'skill', 'stage', 'dependencies', 'definition', 'options', 'upstream'}:
+        raise ValueError('Alternatives descriptors use stage, dependencies and owner options only')
     stage = descriptor.get('stage')
     if stage not in STAGES:
-        raise ValueError('Unknown architecture stage')
-    loaded = skill_config.effective(OWNER, tasks.store.subject['repository'], descriptor.get('upstream'),
+        raise ValueError('Unknown alternatives stage')
+    owner = descriptor.get('skill', OWNER)
+    if owner not in {OWNER, FIX_OWNER}:
+        raise ValueError('Alternatives owner must be the incoming or fix workflow')
+    loaded = skill_config.effective(owner, tasks.store.subject['repository'], descriptor.get('upstream'),
                                     options=descriptor.get('options'))
-    config = loaded['options']['architecture']
+    config = loaded['options']['alternatives']
     if not config['enabled']:
-        raise ValueError('Architecture is disabled; bypass assessment, execution and publication')
+        raise ValueError('Alternatives is disabled; bypass assessment, execution and publication')
+    if owner == FIX_OWNER:
+        from fix_alternatives import pinned_definition
+        definition = pinned_definition(tasks, descriptor, definition)
     dependencies = descriptor.get('dependencies', {})
     if not isinstance(dependencies, dict) or set(dependencies) - set(ALLOWS[stage]):
-        raise ValueError('Architecture dependencies must reference stage task keys')
+        raise ValueError('Alternatives dependencies must reference stage task keys')
     if set(REQUIRES[stage]) - dependencies.keys():
-        raise ValueError('Architecture stage is missing prerequisite evidence')
+        raise ValueError('Alternatives stage is missing prerequisite evidence')
     if stage == 'impact' and not {'assessment', 'comparison'} & dependencies.keys():
         raise ValueError('Impact requires retained applicability or comparison')
     retained = {}
@@ -339,30 +348,36 @@ def _stage_spec(tasks, descriptor, definition, *, replay=False):
                                                              and (stage == 'impact' or 'impact' in dependencies)))
     for name, value in retained.items():
         if value['stage'] != name:
-            raise ValueError('Architecture dependency stage mismatch')
+            raise ValueError('Alternatives dependency stage mismatch')
+        if value.get('owner', OWNER) != owner:
+            raise ValueError('Alternatives dependencies must belong to the same workflow owner')
     if stage == 'comparison' and retained['assessment']['report']['required'] is not True:
         raise ValueError('Skipped applicability cannot start comparison')
     if stage == 'comparison':
-        request = retained['assessment']['spec']['inputs'].get('architecture_request')
+        request = retained['assessment']['spec']['inputs'].get('alternatives_request')
         if request:
             definition = deepcopy(definition)
-            definition.setdefault('inputs', {})['architecture_request'] = request
-            descriptor['definition'].setdefault('inputs', {})['architecture_request'] = request
+            definition.setdefault('inputs', {})['alternatives_request'] = request
+            descriptor['definition'].setdefault('inputs', {})['alternatives_request'] = request
     if 'impact' in retained and retained['impact']['report']['impact'] != 'nonmaterial':
-        raise ValueError('Material or uncertain impact requires refreshed architecture analysis')
+        raise ValueError('Material or uncertain impact requires refreshed alternatives analysis')
     if stage == 'alignment' and 'impact' in retained:
         validate_selection_impact(retained['impact'], retained['selection'])
     if stage == 'alignment' and not retained['selection']['report'].get('choice'):
-        raise ValueError('Architecture choice remains pending')
+        raise ValueError('Alternatives choice remains pending')
     if stage == 'verification' and retained['alignment']['report']['alignment'] != 'mismatch':
         raise ValueError('Only material mismatches require independent verification')
-    execution = stage_execution(definition, stage, loaded['options'])
-    execution.setdefault('inputs', {}).update({'architecture_' + name: value['reference']
+    execution = stage_execution(definition, stage, loaded['options'], owner=owner)
+    execution.setdefault('inputs', {}).update({'alternatives_' + name: value['reference']
                                                for name, value in retained.items()})
-    execution['options']['architecture']['dependencies'] = dependencies
+    execution['options']['alternatives']['dependencies'] = dependencies
     if stage == 'selection':
-        execution['options']['architecture']['comparison_scoring'] = retained['comparison']['policy']['scoring']
-    return make_spec(**tasks.store.subject, **execution)
+        execution['options']['alternatives']['comparison_scoring'] = retained['comparison']['policy']['scoring']
+    spec = make_spec(**tasks.store.subject, **execution)
+    if owner == FIX_OWNER:
+        from fix_alternatives import guard_completed
+        guard_completed(tasks, stage, spec)
+    return spec
 
 
 def impact_selection_source(tasks, key):
@@ -371,11 +386,11 @@ def impact_selection_source(tasks, key):
     New impact preparation accepts the current selection normally. Replaying that
     assignment keeps its exact immutable source while selection is refreshed.
     """
-    from state import digest, resource
-    impact_key = digest({**tasks.store.subject, 'task': 'architecture-impact-review', 'skill': OWNER})
+    from state import task_key, resource
+    impact_key = task_key(tasks.store.subject, 'alternatives-impact-review', OWNER)
     with tasks.store.locked() as manifest:
         impact = manifest['entries'][impact_key]
-        expected = impact['components']['inputs']['architecture_selection']
+        expected = impact['components']['inputs']['alternatives_selection']
         attempts = deepcopy(manifest['entries'][key]['attempts'])
     for attempt in reversed(attempts):
         filename = attempt.get('result')
@@ -394,21 +409,21 @@ def impact_selection_source(tasks, key):
     raise ValueError('Impact selection source is missing; retain original analysis and recovery references')
 
 
-def stage_execution(definition, stage, options):
+def stage_execution(definition, stage, options, *, owner=OWNER):
     """Construct current guidance independently of retained analysis inputs."""
-    config = options['architecture']
+    config = options['alternatives']
     execution = deepcopy(definition)
     if stage in {'impact', 'alignment'}:
-        source = execution.get('inputs', {}).get('architecture_current_pr')
+        source = execution.get('inputs', {}).get('alternatives_current_pr')
         if not source or not isinstance(read(source).get('body'), str):
-            raise ValueError('Architecture ' + stage + ' requires the existing current PR metadata input architecture_current_pr')
+            raise ValueError('Alternatives ' + stage + ' requires the existing current PR metadata input alternatives_current_pr')
     if 'git' not in execution:
-        raise ValueError('Architecture stages require pinned Git inputs')
+        raise ValueError('Alternatives stages require pinned Git inputs')
     if 'native_review' not in execution:
-        raise ValueError('Architecture stages require a native execution contract')
-    identity = config['review_skill'] if stage in {'assessment', 'comparison'} else OWNER
+        raise ValueError('Alternatives stages require a native execution contract')
+    identity = config['review_skill'] if stage in {'assessment', 'comparison'} else owner
     if execution.get('skill_identity') != identity:
-        raise ValueError('Architecture definition must resolve the exact stage skill')
+        raise ValueError('Alternatives definition must resolve the exact stage skill')
     policy = ({'scoring': scoring_policy(config['scoring'])} if stage == 'comparison' else
               {'auto_pick': config['auto_pick']} if stage == 'selection' else {})
     if stage == 'comparison':
@@ -419,14 +434,14 @@ def stage_execution(definition, stage, options):
             execution['assigned_instructions'] += '\n' + config['scoring']['custom_prompt']
     else:
         execution['assigned_instructions'] = GUIDANCE[stage]
-    request = execution.get('inputs', {}).get('architecture_request')
+    request = execution.get('inputs', {}).get('alternatives_request')
     if request:
         original = read(request)
         if (not isinstance(original, dict)
                 or any(not text(original.get(key)) for key in ('id', 'source', 'instruction'))):
-            raise ValueError('Architecture request requires its stable id, original source and exact instruction')
+            raise ValueError('Alternatives request requires its stable id, original source and exact instruction')
         execution['assigned_instructions'] += (
-            '\nAn explicit manual architecture review was requested. Read architecture_request. '
+            '\nAn explicit manual alternatives review was requested. Read alternatives_request. '
             'Require comparison even for a simple change; assess alternatives afresh for this request. '
             'Resume completed stages of the same request rather than repeating them.')
     if stage == 'selection':
@@ -434,21 +449,31 @@ def stage_execution(definition, stage, options):
     assigned = definition.get('assigned_instructions')
     if assigned:
         execution['assigned_instructions'] += '\n\nOriginal additional instructions:\n' + assigned
-    execution['responsibility'] = 'architecture-' + stage + '-review'
+    execution['responsibility'] = 'alternatives-' + stage + '-review'
+    if owner == FIX_OWNER:
+        execution['responsibility'] = 'alternatives-' + stage + '-fix-review'
+        execution['assigned_instructions'] += (
+            '\nThis is the once-per-PR initial alternatives plan. Assess the original pinned PR; '
+            'do not rerun this review for fix cycles or later heads. A material mismatch supplies '
+            'required changes to the fix workflow, never a REQUEST_CHANGES review. '
+            'This plan supplies design context, not current-head review or merge readiness.')
     resources = execution.setdefault('resources', {})
-    resources['architecture_contract'] = str(Path(__file__))
-    resources['architecture_guidance'] = str(skill_config.ROOT/'docs/architecture-review.md')
+    resources['alternatives_contract'] = str(Path(__file__))
+    resources['alternatives_guidance'] = str(skill_config.ROOT/'docs/alternatives-review.md')
     target = skill_config.directory(identity)
     if target:
-        resources['architecture_prompt'] = str(target/'SKILL.md')
+        resources['alternatives_prompt'] = str(target/'SKILL.md')
     execution.setdefault('options', {})['process_limits'] = options['limits']
-    execution['options']['architecture'] = {'stage': stage, 'policy': policy, 'dependencies': {}}
+    execution['options']['alternatives'] = {'stage': stage, 'policy': policy, 'dependencies': {}}
+    if owner == FIX_OWNER:
+        execution['options']['alternatives']['owner'] = owner
+        resources['alternatives_fix_contract'] = str(Path(__file__).with_name('fix_alternatives.py'))
     return execution
 
 
 def linked(value, name, other):
     if value['dependencies'].get(name) != other['key']:
-        raise ValueError('Architecture evidence refers to a different ' + name)
+        raise ValueError('Alternatives evidence refers to a different ' + name)
 
 
 def validate_selection_impact(impact, selection):
@@ -458,10 +483,10 @@ def validate_selection_impact(impact, selection):
         source = value['spec']['inputs'].get(label)
         return resource(source) if isinstance(source, str) else source
     if (selection['dependencies'].get('impact') == impact['key']
-            and bound(selection, 'architecture_impact') == resource(impact['reference'])):
+            and bound(selection, 'alternatives_impact') == resource(impact['reference'])):
         return
     linked(impact, 'selection', selection)
-    if bound(impact, 'architecture_selection') != resource(selection['reference']):
+    if bound(impact, 'alternatives_selection') != resource(selection['reference']):
         raise ValueError('Impact assessed a different selection result; refresh affected evidence')
 
 
@@ -472,24 +497,24 @@ def journal(path, tasks, *, kind, head):
     if (value['status'] != 'verified' or not value.get('receipt')
             or request['target'].lower() != tasks.store.subject['pr'].lower()
             or (head is not None and request['approved'].get('head') != head)):
-        raise ValueError('Architecture publication needs a reconciled receipt for this PR/head')
+        raise ValueError('Alternatives publication needs a reconciled receipt for this PR/head')
     return value
 
 
 
 def live_pr(pr):
-    """Current architecture inputs, never a retained readiness cache."""
+    """Current alternatives inputs, never a retained readiness cache."""
     from shared.github_reads import run
     try:
         result = run(['gh', 'pr', 'view', pr, '--json', 'url,headRefOid,body'],
                      capture_output=True, text=True, check=True, timeout=60)
         value = json.loads(result.stdout)
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
-        raise ValueError('Live architecture publication evidence is unavailable') from exc
+        raise ValueError('Live alternatives publication evidence is unavailable') from exc
     if (not isinstance(value, dict) or value.get('url', '').lower() != pr.lower()
             or not isinstance(value.get('body'), str)
             or not isinstance(value.get('headRefOid'), str)):
-        raise ValueError('Live architecture publication identity is incomplete')
+        raise ValueError('Live alternatives publication identity is incomplete')
     return value
 
 def gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
@@ -497,18 +522,25 @@ def gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
         return _gate(tasks, refs, options=options, upstream=upstream, analysis_only=analysis_only)
 
 
+def incoming_evidence(tasks, key, *, historical=False):
+    value = accepted(tasks, key, historical=historical)
+    if value.get('owner', OWNER) != OWNER:
+        raise ValueError('Incoming alternatives gate requires incoming workflow evidence')
+    return value
+
+
 def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
     loaded = skill_config.effective(OWNER, tasks.store.subject['repository'], upstream, options=options)['options']
-    if not loaded['architecture']['enabled']:
+    if not loaded['alternatives']['enabled']:
         return {'outcome': 'disabled', 'release_reviewers': True}
     if not isinstance(refs, dict) or 'assessment' not in refs:
-        raise ValueError('Incoming review requires architecture applicability evidence')
-    impact = accepted(tasks, refs['impact']) if refs.get('impact') else None
-    assessment = accepted(tasks, refs['assessment'], historical=impact is not None)
-    if assessment['spec']['skill']['identity'] != loaded['architecture']['review_skill']:
-        raise ValueError('Architecture review skill changed; refresh affected applicability and comparison')
+        raise ValueError('Incoming review requires alternatives applicability evidence')
+    impact = incoming_evidence(tasks, refs['impact']) if refs.get('impact') else None
+    assessment = incoming_evidence(tasks, refs['assessment'], historical=impact is not None)
+    if assessment['spec']['skill']['identity'] != loaded['alternatives']['review_skill']:
+        raise ValueError('Alternatives review skill changed; refresh affected applicability and comparison')
     if assessment['stage'] != 'assessment':
-        raise ValueError('Architecture assessment stage required')
+        raise ValueError('Alternatives assessment stage required')
     if impact and impact['report']['impact'] != 'nonmaterial':
         return {'outcome': 'analysis_required', 'release_reviewers': False}
     if not assessment['report']['required']:
@@ -517,30 +549,30 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
         current = impact or assessment
         return {'outcome': 'skipped', 'release_reviewers': True, 'reason': assessment['report']['reason'],
                 'current_evidence': current['key'], 'applicability_reference': assessment['reference']}
-    compared = accepted(tasks, refs['comparison'], historical=impact is not None)
-    if compared['spec']['skill']['identity'] != loaded['architecture']['review_skill']:
-        raise ValueError('Architecture review skill changed; refresh affected comparison')
+    compared = incoming_evidence(tasks, refs['comparison'], historical=impact is not None)
+    if compared['spec']['skill']['identity'] != loaded['alternatives']['review_skill']:
+        raise ValueError('Alternatives review skill changed; refresh affected comparison')
     if compared['stage'] != 'comparison':
-        raise ValueError('Architecture comparison required')
-    if compared['policy']['scoring'] != scoring_policy(loaded['architecture']['scoring']):
-        raise ValueError('Architecture scoring inputs changed; refresh affected comparison')
+        raise ValueError('Alternatives comparison required')
+    if compared['policy']['scoring'] != scoring_policy(loaded['alternatives']['scoring']):
+        raise ValueError('Alternatives scoring inputs changed; refresh affected comparison')
     if impact:
         linked(impact, 'comparison', compared)
         if impact['report']['impact'] != 'nonmaterial':
             return {'outcome': 'analysis_required', 'release_reviewers': False}
     linked(compared, 'assessment', assessment)
-    selection = accepted(tasks, refs['selection'], historical=impact is not None)
+    selection = incoming_evidence(tasks, refs['selection'], historical=impact is not None)
     if impact:
         validate_selection_impact(impact, selection)
     linked(selection, 'comparison', compared)
-    if selection['policy']['auto_pick'] != loaded['architecture']['auto_pick']:
-        raise ValueError('Architecture selection policy changed; refresh selection only')
+    if selection['policy']['auto_pick'] != loaded['alternatives']['auto_pick']:
+        raise ValueError('Alternatives selection policy changed; refresh selection only')
     choice = selection['report'].get('choice')
     if not choice:
         return {'outcome': 'choice_pending', 'release_reviewers': False}
-    alignment = accepted(tasks, refs['alignment'])
+    alignment = incoming_evidence(tasks, refs['alignment'])
     if selection['stage'] != 'selection' or alignment['stage'] != 'alignment':
-        raise ValueError('Architecture selection/alignment stages required')
+        raise ValueError('Alternatives selection/alignment stages required')
     linked(alignment, 'comparison', compared)
     linked(alignment, 'selection', selection)
     if impact:
@@ -548,7 +580,7 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
     pins = alignment['spec'].get('git', {})
     for current in (impact or assessment,):
         if current is not None and any(current['spec'].get('git', {}).get(k) != pins.get(k) for k in ('head', 'base', 'target')):
-            raise ValueError('Architecture live stages must assess the same current Git pins')
+            raise ValueError('Alternatives live stages must assess the same current Git pins')
     head = pins.get('head')
     if not head:
         raise ValueError('Alignment requires current pinned Git inputs')
@@ -558,8 +590,8 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
             context['live'][pr] = live_pr(pr)
         live = context['live'][pr]
     if live['headRefOid'] != head:
-        raise ValueError('PR head changed after architecture alignment')
-    current_pr = read(alignment['spec']['inputs']['architecture_current_pr'])
+        raise ValueError('PR head changed after alternatives alignment')
+    current_pr = read(alignment['spec']['inputs']['alternatives_current_pr'])
     if current_pr['body'] != live['body'] or current_pr.get('headRefOid') != head:
         return {'outcome': 'impact_required', 'release_reviewers': False}
     result = alignment['report']['alignment']
@@ -567,14 +599,14 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
         return {'outcome': 'aligned', 'release_reviewers': True,
                 'governing_evidence': [compared['reference'], selection['reference'], alignment['reference']]}
     if result == 'mismatch':
-        verification = accepted(tasks, refs['verification'])
+        verification = incoming_evidence(tasks, refs['verification'])
         if verification['stage'] != 'verification':
-            raise ValueError('Independent architecture verification stage required')
+            raise ValueError('Independent alternatives verification stage required')
         if any(verification['spec'].get('git', {}).get(k) != pins.get(k) for k in ('head', 'base', 'target')):
-            raise ValueError('Architecture verification pins changed')
+            raise ValueError('Alternatives verification pins changed')
         linked(verification, 'alignment', alignment)
         if verification['native_handle'] == alignment['native_handle']:
-            raise ValueError('Architecture mismatch verification must use an independent native agent')
+            raise ValueError('Alternatives mismatch verification must use an independent native agent')
         if verification['report']['disposition'] == 'confirmed':
             if analysis_only or not loaded['permissions']['post_review']:
                 return {'outcome': 'publication_blocked', 'release_reviewers': False}
@@ -582,8 +614,8 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
             approved = review['request']['approved']
             if (approved['event'] != 'REQUEST_CHANGES' or approved.get('comments')
                     or approved.get('body') != verification['report']['required_changes']):
-                raise ValueError('Architecture-only rejection requires the independently verified design changes')
-            return {'outcome': 'architecture_rejected', 'release_reviewers': False, 'complete': True,
+                raise ValueError('Alternatives-only rejection requires the independently verified design changes')
+            return {'outcome': 'alternatives_rejected', 'release_reviewers': False, 'complete': True,
                     'ordinary_review_complete': False}
     return {'outcome': 'alignment_blocked', 'release_reviewers': False}
 
@@ -821,12 +853,13 @@ def decision_section(body, heading):
     return start, end, level
 
 
-def architecture_bounds(body, section):
+def alternatives_bounds(body, section):
     start, end, level = section
     view = heading_view(body)[start.end():end]
-    matches = list(re.finditer(r'(?m)^ {0,3}#{' + str(level + 1) + r'}[ \t]+Architecture[ \t]+decisions(?:[ \t]+#+)?[ \t]*(?=\r?$)', view))
+    # Historical publication receipts must still reconcile their exact old body.
+    matches = list(re.finditer(r'(?m)^ {0,3}#{' + str(level + 1) + r'}[ \t]+(?:Alternatives|Architecture)[ \t]+decisions(?:[ \t]+#+)?[ \t]*(?=\r?$)', view))
     if len(matches) > 1:
-        raise ValueError('Ambiguous Architecture decisions subsection')
+        raise ValueError('Ambiguous Alternatives decisions subsection')
     if not matches:
         return None
     existing = matches[0]
@@ -834,8 +867,9 @@ def architecture_bounds(body, section):
     return start.end() + existing.end(), start.end() + stop
 
 
-def replace_decision(body, rendered, *, heading='## Decisions'):
-    """Preserve all bytes outside the distinct Architecture decisions subsection."""
+def replace_decision(body, rendered, *, heading='## Decisions', _legacy_heading=False):
+    """Preserve all bytes outside the distinct Alternatives decisions subsection."""
+    subsection = 'Architecture decisions' if _legacy_heading else 'Alternatives decisions'
     section = decision_section(body, heading)
     if section is None:
         title = heading.strip()
@@ -844,14 +878,14 @@ def replace_decision(body, rendered, *, heading='## Decisions'):
         level = len(title) - len(title.lstrip('#'))
         if not 1 <= level < 6 or not re.fullmatch(r'#{1,5} [^\r\n]+', title):
             raise ValueError('Decisions heading needs an available subsection depth')
-        marker = '#' * (level + 1) + ' Architecture decisions'
+        marker = '#' * (level + 1) + ' ' + subsection
         return body + ('\n\n' if body and not body.endswith('\n\n') else '') + title + '\n\n' + marker + '\n\n' + rendered + '\n\n'
     start, end, level = section
     if level >= 6:
         raise ValueError('Decisions heading has no available subsection depth')
-    bounds = architecture_bounds(body, section)
+    bounds = alternatives_bounds(body, section)
     if bounds is None:
-        marker = '#' * (level + 1) + ' Architecture decisions'
+        marker = '#' * (level + 1) + ' ' + subsection
         return body[:end] + ('\n' if body[:end].endswith('\n') else '\n\n') + marker + '\n\n' + rendered + '\n\n' + body[end:]
     first, stop = bounds
     return body[:first] + '\n\n' + rendered + '\n\n' + body[stop:]
@@ -887,25 +921,25 @@ def enforce(spec, repository, pr, *, options=None, upstream=None):
 
 def _enforce(spec, tasks, *, options=None, upstream=None):
     execution = spec.get('options', {}).get('execution', spec.get('options', {}))
-    result = gate(tasks, execution.get('architecture_evidence'), options=options,
+    result = gate(tasks, execution.get('alternatives_evidence'), options=options,
                   upstream=upstream, analysis_only=execution.get('analysis_only', False))
     if not result['release_reviewers']:
-        raise ValueError('Architecture gate blocks ordinary tasks: ' + result['outcome'])
+        raise ValueError('Alternatives gate blocks ordinary tasks: ' + result['outcome'])
     if result['outcome'] == 'skipped':
         current = accepted(tasks, result['current_evidence'])
         if any(spec.get('git', {}).get(k) != current['spec'].get('git', {}).get(k) for k in ('head', 'base', 'target')):
-            raise ValueError('Ordinary review pins differ from architecture applicability')
-        spec['inputs']['architecture_applicability'] = result['applicability_reference']
+            raise ValueError('Ordinary review pins differ from alternatives applicability')
+        spec['inputs']['alternatives_applicability'] = result['applicability_reference']
         if current['stage'] == 'impact':
-            spec['inputs']['architecture_impact'] = current['reference']
+            spec['inputs']['alternatives_impact'] = current['reference']
     if result['outcome'] == 'aligned':
-        alignment = accepted(tasks, execution['architecture_evidence']['alignment'])
+        alignment = accepted(tasks, execution['alternatives_evidence']['alignment'])
         for pin in ('head', 'base', 'target'):
             if spec.get('git', {}).get(pin) != alignment['spec'].get('git', {}).get(pin):
-                raise ValueError('Ordinary review pins differ from architecture alignment')
+                raise ValueError('Ordinary review pins differ from alternatives alignment')
         # Dependency paths are regenerated, never a second saved decision summary.
         for index, path in enumerate(result['governing_evidence']):
-            spec['inputs']['architecture_governing_' + str(index)] = path
+            spec['inputs']['alternatives_governing_' + str(index)] = path
 
 
 def governing_body(body, operation, tasks, *, upstream=None):
@@ -924,9 +958,13 @@ def governing_body(body, operation, tasks, *, upstream=None):
             raise ValueError('Own Decisions normalization cannot cover unrelated fields')
         approved = fields['body']
         section = decision_section(approved, heading)
-        bounds = architecture_bounds(approved, section) if section else None
-        if not bounds or replace_decision(request['expected']['body'], approved[bounds[0]:bounds[1]].strip('\r\n'), heading=heading) != approved:
-            raise ValueError('Own Decisions normalization requires a bounded architecture edit')
+        bounds = alternatives_bounds(approved, section) if section else None
+        # Reconstruct historical insertions with the heading recorded in their
+        # original approved body, including a first subsection publication.
+        legacy = bool(bounds and 'Architecture' in heading_view(approved)[:bounds[0]].splitlines()[-1])
+        if not bounds or replace_decision(request['expected']['body'], approved[bounds[0]:bounds[1]].strip('\r\n'),
+                                         heading=heading, _legacy_heading=legacy) != approved:
+            raise ValueError('Own Decisions normalization requires a bounded alternatives edit')
         return approved, request['expected']['body']
 
     approved, before = transition(publication.load(operation, 'edit-pr'))
@@ -963,10 +1001,10 @@ def governing_body(body, operation, tasks, *, upstream=None):
 
 def scoring_handoff(spec):
     """Transient helper arithmetic for confidence assessment; never saved again."""
-    assigned = spec.get('options', {}).get('architecture')
+    assigned = spec.get('options', {}).get('alternatives')
     if not assigned or assigned['stage'] != 'selection':
         return None
-    compared = comparison(read(spec['inputs']['architecture_comparison'])['normalized'],
+    compared = comparison(read(spec['inputs']['alternatives_comparison'])['normalized'],
                           assigned['comparison_scoring'])
     return {'profile': compared['profile'], 'weights': compared['weights'],
             'scores': [{'id': s['id'], 'total': s['total'], 'feasible': s['feasible'],

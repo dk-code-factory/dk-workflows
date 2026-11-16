@@ -678,9 +678,21 @@ behavior without model/GitHub calls. They establish neither native adherence nor
 measured token savings. No new native execution or token evidence accompanies this
 change; helper/process counts remain proxies only.
 
-## Incoming architecture gate
+## Incoming alternatives gate
 
-`dk-pr-review-architect` is a manual architecture-only entrypoint sharing these
+The alternatives review names replace architecture review across skills, options,
+handoffs and helpers. Read old saved configuration and managed descriptors through
+bounded name aliases without rewriting their files or original evidence. Derive
+contract-v2 task keys using their historical identities, preserving attempts,
+fingerprints, claims, sibling results, budgets and publication recovery records.
+No durable state or migration store is added. This avoids reconstructing settings
+and recovery context in a fresh session. Existing freshness checks still recapture
+current resources: renamed or changed governing guidance refreshes only affected
+work; aliases never grant stale coverage. Historical Decisions headings remain
+readable for exact publication reconciliation. Native API dollar savings remain
+unmeasured.
+
+`dk-pr-review-alternatives` is a manual alternatives-only entrypoint sharing these
 managed stages, reviewer policy and restricted publisher. A new explicit request
 requires fresh assessment/comparison even for unchanged code; resuming that
 request reuses its completed stages. The assessment references the original
@@ -689,7 +701,7 @@ input map. Helpers propagate the reference into comparison and require compariso
 instead of a simple-change skip. Dependencies refresh selection and alignment
 through immutable result references. Existing automatic task definitions remain
 unchanged; task keys, original attempts, completed siblings and budgets survive.
-Manual invocation enables only this invocation's architecture policy and stops
+Manual invocation enables only this invocation's alternatives policy and stops
 before ordinary tasks and finalizers. No model launcher or separate runner exists.
 
 This adds no store, manifest field, completion marker or rendered report. The
@@ -702,7 +714,7 @@ refreshes comparison. Replays never mint another request identity or reset limit
 Offline tests establish rerun, recovery and invalidation behavior; native API
 dollar savings have not been measured.
 
-Incoming review assesses architecture before every configured task or parallel
+Incoming review assesses alternatives before every configured task or parallel
 review group. Its replaceable prompt supplies examination guidance only. The
 framework supplies stage assignments, mandatory checklist, weighted arithmetic,
 selection gates and publication/recovery rules. Standalone reviewer execution and
@@ -711,11 +723,11 @@ the independent dk-architecture catalog remain separate.
 Use existing managed tasks for assessment, comparison, selection, impact,
 alignment and independent mismatch verification. Retain only their definitions,
 original immutable results, native observations and dependency references in the
-existing PR manifest. There is no architecture database, completion flag or saved
+existing PR manifest. There is no alternatives database, completion flag or saved
 rendered comparison. Completion is derived from accepted task evidence and the
 existing review publication journal when rejecting a mismatch. Native tools execute the prompts; helpers never
 launch model sessions. Missing execution/verification evidence blocks dependents.
-An architecture-only rejection is a completed, separately named outcome, with
+An alternatives-only rejection is a completed, separately named outcome, with
 ordinary review and approval/merge finalizers unperformed.
 
 Comparison binds the requirements, discussion, constraints, preferences, prompt
@@ -741,16 +753,16 @@ result bindings, so another attempt under the same task key cannot upgrade old
 coverage. Every normal review handoff includes the settled
 decision as governing context.
 
-Architecture analysis and selection remain in original private managed results.
-Neither the architecture workflow nor Decisions/description skills add a generated
-architecture section to the PR description. Aligned review requires no description
+Alternatives analysis and selection remain in original private managed results.
+Neither the alternatives workflow nor Decisions/description skills add a generated
+alternatives section to the PR description. Aligned review requires no description
 edit or publication receipt, including for analysis-only requests. The legacy
-`edit_architecture_decisions` setting remains readable but cannot enable these
+`edit_alternatives_decisions` setting remains readable but cannot enable these
 edits. Verified mismatch rejection still requires its independently checked
 `REQUEST_CHANGES` review and reconciled receipt under current permissions.
 
 Alignment references the existing current PR metadata artifact through
-`architecture_current_pr`, already used by impact. The gate checks its consumed
+`alternatives_current_pr`, already used by impact. The gate checks its consumed
 body and head against the live PR. This adds no durable field, copied metadata,
 rendered summary or new store. Changed description, head or other governing inputs
 still require affected analysis and current alignment. Original comparison,
@@ -759,9 +771,9 @@ their existing identities. Historical publication journals and bounded-body
 normalization remain available for exact read-only recovery; do not resend an old
 description edit or require its section to remain published. External edits end
 historical normalization chains and require assessment; ambiguous or circular
-chains fail privately. Disabled architecture retains existing evidence and
+chains fail privately. Disabled alternatives retains existing evidence and
 bypasses its stages. An unavailable ordinary reviewer cannot block the separately
-preflighted architecture stage or its verified rejection.
+preflighted alternatives stage or its verified rejection.
 
 The expected saving is avoiding repeated alternatives analysis, user selection,
 public-summary generation and description-publication recovery in later sessions. Consumers read compact
@@ -773,7 +785,7 @@ selection policy or damaged/missing evidence; current authorization, publication
 and CI checks are never cached. Offline reuse/recovery tests establish behavior,
 not API dollar savings. Native API cost telemetry is unavailable for this change.
 
-Architecture dependency validation memoizes accepted tasks and shares Git capture
+Alternatives dependency validation memoizes accepted tasks and shares Git capture
 only within one read-only validation boundary, across sibling incoming occurrences.
 Managed prepare/resume use separate contexts for assignment construction and live
 capture; each reads the live PR once, rather than once per sibling. Contexts end
@@ -789,6 +801,56 @@ locates the homogeneous thematic-marker suffix once. It avoids quadratic suffix
 rescanning and copying on long descriptions. Offline scan/copy budgets measure
 deterministic work rather than elapsed time or native API dollar savings. This
 adds no persisted parser output, readiness cache or telemetry.
+
+## Once-per-PR fix alternatives review
+
+`dk-pr-fix` owns a default-enabled alternatives gate with the same replaceable
+reviewer, scoring and selection controls as incoming review. Before its repeated
+task list, assess the initial PR, compare reasonable approaches, settle the choice
+and assess initial implementation alignment. A mismatch becomes required fix
+guidance, never a request-changes review of the author's own PR. Uncertain analysis
+or a pending choice blocks progress. A supported simple-change skip completes
+the initial assessment without comparison.
+
+Keep these original stages in the existing PR task manifest, with fixed PR-wide
+keys independent of run, cycle, head and configured reviewer. The existing `skill`
+selector identifies the fix owner; the prepared options bind that owner. Preserve
+incoming stage identities and fingerprints. The first assessment's exact Git pins
+govern the other fix stages; retain the existing original input artifacts rather
+than overwriting them with later PR snapshots. Repeated preparations retain those
+pins. Helpers discover the four known task keys and return compact next-stage or
+accepted-result references. No completion flag, decision copy, snapshot store or
+new budget is added: completion follows from accepted native/checklist evidence.
+Completed-stage guards share immutable Git calculations with accepted dependencies
+inside the existing transient validation context. Each new boundary captures anew;
+resource and instruction freshness checks still run. This avoids duplicate full
+diff generation during reuse without adding durable state. Offline capture counts
+are work proxies, not measured API dollar savings.
+
+Completed initial analysis runs once for the PR, across new fix invocations,
+sessions, commits, cleanup, CI repairs and iterations. Resume unfinished claims
+and checks and preserve completed siblings; incomplete or pending work is not a
+completed review. A sourced pending selection can be settled without repeating
+comparison. The initial decision supplies design context to current fixes and
+ordinary reviewers; it never supplies current-head review, CI or publication
+coverage. Current work must remain within its sourced requirements and constraints.
+Material scope changes require explicit reassessment, rather than automatic
+repetition or stale acceptance. Changed governing resources, instruction sources,
+original evidence or scoring/selection policy block reuse and automatic reruns of
+completed initial stages. Missing or damaged evidence blocks recovery. Disabling
+the gate preserves its original records. Incoming and manual alternatives review
+retain their existing independent freshness and explicit-rerun behavior.
+Every result consumed by the incoming gate must belong to the incoming workflow;
+an initial fix-plan skip or alignment cannot release incoming review.
+
+The reused original results and small owner selector avoid repeating paid
+alternatives analysis and reconstructing its recovery on subsequent cycles and
+fresh-session entry. Their expected avoided API dollar cost exceeds capturing,
+validating and loading these existing references; no additional durable store is
+admitted. Freshness ends at changed governing inputs or damaged sources, while
+ordinary current-head checks remain live. Offline tests cover fresh-process reuse,
+partial recovery, new heads, scoped invalidation and separate incoming evidence;
+native API dollar savings are unmeasured.
 
 ## Workflow simplification reviewer
 

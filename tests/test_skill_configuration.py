@@ -22,6 +22,14 @@ REPOSITORY = 'github.com/owner/repo'
 PR = 'https://' + REPOSITORY + '/pull/1'
 CI = 'dk-workflows:dk-ci'
 FIX = 'dk-workflows:dk-pr-fix'
+
+
+def ordinary_spec(**arguments):
+    # These tests isolate ordinary skill occurrence/configuration behavior.
+    # Initial alternatives planning is exercised in test_fix_alternatives.py.
+    if arguments['skill'] == FIX:
+        arguments['options'] = {**(arguments.get('options') or {}), 'alternatives': {'enabled': False}}
+    return skill_config.make_spec(**arguments)
 SCHEMAS = [json.loads(path.read_text()) for path in [
     *ROOT.glob('schemas/*.schema.json'), *ROOT.glob('codex/skills/*/config.schema.json')]]
 REGISTRY = Registry().with_resources((value['$id'], Resource.from_contents(value)) for value in SCHEMAS)
@@ -138,7 +146,7 @@ def test_review_recipient_changes_refresh_publisher_without_invalidating_sibling
             'review_requests': {'reviewers': [user], 'team_reviewers': []}}},
             FIX: {'options': {'finalizers': ['team:check', publisher]}}}})
     def spec(index, identity):
-        return skill_config.make_spec(repository=REPOSITORY, pr=PR, skill=FIX,
+        return ordinary_spec(repository=REPOSITORY, pr=PR, skill=FIX,
             kind='finalizers', index=index, run='retained', definition={
                 'skill_identity': identity, 'resources': {'skill': str(resource)},
                 'assigned_instructions': 'Complete selected finalization.', 'instructions': {},
@@ -256,8 +264,8 @@ def test_repeated_invocations_and_parallel_groups_need_no_task_registry(tmp_path
     definition = {'skill_identity': 'team:check', 'resources': {'skill': str(resource)},
                   'assigned_instructions': 'Original caller assignment.', 'instructions': {}, 'inputs': {},
                   'options': {}, 'governing_inputs_complete': True}
-    first = skill_config.make_spec(repository=REPOSITORY, pr=PR, skill=FIX, kind='tasks', index=0, definition=definition)
-    second = skill_config.make_spec(repository=REPOSITORY, pr=PR, skill=FIX, kind='tasks', index=1, definition=definition)
+    first = ordinary_spec(repository=REPOSITORY, pr=PR, skill=FIX, kind='tasks', index=0, definition=definition)
+    second = ordinary_spec(repository=REPOSITORY, pr=PR, skill=FIX, kind='tasks', index=1, definition=definition)
     assert capture(first)['key'] != capture(second)['key']
     assert first['task']['instructions'].startswith('Original caller assignment.')
     assert first['task']['instructions'].endswith(task['instructions'])
@@ -276,7 +284,7 @@ def test_repeated_invocations_and_parallel_groups_need_no_task_registry(tmp_path
 
 
 def test_preflight_checks_optional_nested_calls_and_rejects_recursive_plans():
-    selected = {'tasks': [{'parallel': [{'skill': 'team:check', 'required': False}, {'instructions': 'Read scope.'}]}], 'finalizers': []}
+    selected = {'alternatives': {'enabled': False}, 'tasks': [{'parallel': [{'skill': 'team:check', 'required': False}, {'instructions': 'Read scope.'}]}], 'finalizers': []}
     calls = list(skill_config.calls(FIX, REPOSITORY, options=selected))
     result = invocation.preflight(calls, [FIX])
     assert result['missing_selected_skills'] == ['team:check']
@@ -296,7 +304,7 @@ def test_explicit_responsibilities_and_repeated_reviewers_keep_distinct_claims(t
                   'responsibility': 'finding-verification', 'assigned_instructions': 'Verify findings.',
                   'instructions': {}, 'inputs': {}, 'options': {}, 'governing_inputs_complete': True}
     def spec(index, plan):
-        return skill_config.make_spec(repository=REPOSITORY, pr=PR, skill=owner, kind=kind,
+        return ordinary_spec(repository=REPOSITORY, pr=PR, skill=owner, kind=kind,
                                       index=index, definition=definition, run='retained', options={kind: plan})
     first, second = spec(0, [call, call]), spec(1, [call, call])
     assert capture(first)['key'] != capture(second)['key']
@@ -326,7 +334,7 @@ def test_managed_skill_occurrences_replay_and_detect_live_selection_drift(tmp_pa
     selected = {'skill': 'team:check', 'instructions': 'Check repository invariants.'}
     write(config.path(REPOSITORY), {'skill_defaults': {FIX: {'options': {kind: [selected]}}}})
     request = {'run': 'retained', 'tasks': [{'kind': 'skill', 'skill': FIX, 'selection': kind,
-                                           'index': 0, 'definition': definition}]}
+                                           'index': 0, 'definition': definition, 'options': {'alternatives': {'enabled': False}}}]}
     tasks = Tasks(REPOSITORY, PR)
     first = tasks.prepare(request)['tasks'][0]
     from checklist_reports import accept
@@ -570,7 +578,7 @@ def test_skill_spec_cli_resolves_builtin_options_and_retained_finalizer_run(tmp_
     definition = tmp_path/'definition.json'
     resource = tmp_path/'SKILL.md'
     resource.write_text('Inspect current CI with exact-head evidence.')
-    write(config.path(REPOSITORY), {'skill_defaults': {FIX: {'options': {'finalizers': [{'skill': CI, 'options': {'timeout_seconds': 25}, 'required': True}]}}}})
+    write(config.path(REPOSITORY), {'skill_defaults': {FIX: {'options': {'alternatives': {'enabled': False}, 'finalizers': [{'skill': CI, 'options': {'timeout_seconds': 25}, 'required': True}]}}}})
     write(definition, {'skill_identity': CI, 'resources': {'skill': str(resource)},
                        'assigned_instructions': 'Check the final head.', 'instructions': {}, 'inputs': {},
                        'options': {}, 'governing_inputs_complete': True, 'cacheable': False})

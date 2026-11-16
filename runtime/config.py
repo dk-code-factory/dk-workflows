@@ -65,7 +65,8 @@ def finalizer_groups(finalizers):
 def validate(settings):
     if not isinstance(settings, dict) or set(settings) - (DEFAULTS.keys() | {'$schema'}):
         raise ValueError('Unknown workflow setting; use the process configuration format')
-    result = deepcopy(settings)
+    from alternatives_compat import configuration
+    result = configuration(settings)
     if '$schema' in result and not invocation.text(result['$schema']):
         raise ValueError('$schema must be a nonempty schema reference')
     if 'schema_version' in result and (type(result['schema_version']) is not int or result['schema_version'] != 1):
@@ -368,6 +369,8 @@ def make_completion_spec(*, repository, pr, run, definition, upstream=None, opti
                      options={'completion_plan': loaded['options']['finalizers'],
                               'execution': definition.get('options', {})})
     spec = make_spec(repository=repository, pr=pr, **execution)
+    from fix_alternatives import enforce
+    enforce(spec, repository, pr, options=options, upstream=upstream)
     skill_config.bind_options(spec, {'skill': owner, 'options': options or {}}, repository, upstream)
     return spec
 

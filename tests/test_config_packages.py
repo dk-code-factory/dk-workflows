@@ -27,7 +27,7 @@ def test_settings_precedence_and_missing_selected_skills():
         native_reviews=preflight_requirements(config.calls(effective)))['ready']
 
 
-@pytest.mark.parametrize('settings',[{'architecture':{}},{'reviewers':[{'command':['x']}]},
+@pytest.mark.parametrize('settings',[{'alternatives':{}},{'reviewers':[{'command':['x']}]},
                                     {'reviewers':[{'skill':'x','host':'codex'}]},
                                     {'iteration':{'max_cycles':6}}])
 def test_core_rejects_domain_execution_and_budget_configuration(settings):

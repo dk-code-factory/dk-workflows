@@ -16,6 +16,8 @@ DIRECTORY = ROOT/'codex/skills'
 
 def directory(skill):
     import invocation
+    from alternatives_compat import skill as current_skill
+    skill = current_skill(skill)
     invocation.skill_name(skill)
     plugin, name = skill.split(':')
     target = DIRECTORY/name
@@ -99,6 +101,9 @@ def _validate(value, schema, location='options'):
 
 
 def validate(skill, options):
+    from alternatives_compat import skill as current_skill, options as current_options
+    skill = current_skill(skill)
+    options = current_options(skill, options)
     target = directory(skill)
     if not isinstance(options, dict):
         raise ValueError('Skill options must be an object')
@@ -169,6 +174,8 @@ def _domain_layer(skill, repository):
 
 def effective(skill, repository=None, upstream=None, *, options=None, domain=True):
     import invocation
+    from alternatives_compat import skill as current_skill
+    skill = current_skill(skill)
     options = {} if options is None else validate(skill, options)
     def merge_options(base, layer):
         merged = invocation.merge(base, layer)
@@ -238,10 +245,10 @@ def effective(skill, repository=None, upstream=None, *, options=None, domain=Tru
     from simplification import OWNERS, validate_policy
     if skill in OWNERS:
         validate_policy(result['simplification'])
-    if skill == 'dk-workflows:dk-pr-review':
-        scoring = result['architecture']['scoring']
+    if skill in {'dk-workflows:dk-pr-review', 'dk-workflows:dk-pr-fix'}:
+        scoring = result['alternatives']['scoring']
         if scoring['profile'] == 'custom' and not invocation.text(scoring['custom_prompt']):
-            raise ValueError('Custom architecture scoring requires custom_prompt')
+            raise ValueError('Custom alternatives scoring requires custom_prompt')
     if skill == 'dk-workflows:dk-pr-iter':
         seen = set()
         for account in result['personal_accounts']:
@@ -376,7 +383,7 @@ def plan(skill, kind, repository=None, upstream=None, *, options=None, resolved=
 def calls(skill, repository=None, upstream=None, *, options=None, stage=None, workflow=None):
     """Enumerate selected native calls for availability checks, without launching."""
     import invocation
-    if stage not in {None, 'architecture', 'review', 'finalizers'}:
+    if stage not in {None, 'alternatives', 'review', 'finalizers'}:
         raise ValueError('Unknown preflight stage')
     from simplification import OWNERS, RUNNER, compose, selection
     def visit(call, location, ancestors=(), policy=None, root=False):
@@ -395,14 +402,11 @@ def calls(skill, repository=None, upstream=None, *, options=None, stage=None, wo
         yield location, call
         nested = (*ancestors, signature)
         keys = ('tasks', 'finalizers', 'reviewers') if identity and directory(identity) else ('reviewers',)
-        if identity == 'dk-workflows:dk-pr-review':
-            if stage in {None, 'architecture'} and settings['architecture']['enabled']:
-                yield from visit({'skill': settings['architecture']['review_skill'], 'required': True},
-                                 location + '/architecture', nested)
-            keys = (() if stage == 'architecture' else ('tasks',) if stage == 'review'
-                    else ('finalizers',) if stage == 'finalizers' else keys)
-        elif identity == 'dk-workflows:dk-pr-fix':
-            keys = (() if stage == 'architecture' else ('tasks',) if stage == 'review'
+        if identity in {'dk-workflows:dk-pr-review', 'dk-workflows:dk-pr-fix'}:
+            if stage in {None, 'alternatives'} and settings['alternatives']['enabled']:
+                yield from visit({'skill': settings['alternatives']['review_skill'], 'required': True},
+                                 location + '/alternatives', nested)
+            keys = (() if stage == 'alternatives' else ('tasks',) if stage == 'review'
                     else ('finalizers',) if stage == 'finalizers' else keys)
         for key in keys:
             for group_index, group in enumerate(groups(settings.get(key, []))):
@@ -491,8 +495,14 @@ def make_spec(*, repository, pr, skill, kind, index, definition, upstream=None, 
         execution['options']['workflow_assignment'] = digest(parent)
     spec = task_spec(repository=repository, pr=pr, **execution)
     if skill == 'dk-workflows:dk-pr-review':
-        from architecture import enforce
+        from alternatives import enforce
         enforce(spec, repository, pr, options=options, upstream=upstream)
+    elif skill == 'dk-workflows:dk-pr-fix':
+        from fix_alternatives import enforce
+        enforce(spec, repository, pr, options=options, upstream=upstream)
+    elif workflow is not None and workflow['skill'] == 'dk-workflows:dk-pr-fix':
+        from fix_alternatives import enforce
+        enforce(spec, repository, pr, options=workflow.get('options'), upstream=upstream)
     spec['skill_configuration'] = {'skill': skill, 'kind': kind, 'index': index,
                                    'repository': repository, 'upstream': upstream,
                                    'options': options or {}, 'owner_limits': execution['options']['process_limits'],
@@ -523,8 +533,14 @@ def check_selection(spec):
     if selection['skill'] in OWNERS and selection['kind'] == 'tasks' and call.get('skill') == RUNNER:
         actual = compose({'options': actual}, owner['options']['simplification'], selection['repository'], selection['upstream'])['options']
     if selection['skill'] == 'dk-workflows:dk-pr-review':
-        from architecture import enforce
+        from alternatives import enforce
         enforce(spec, selection['repository'], spec['pr'], options=selection['options'], upstream=selection['upstream'])
+    elif selection['skill'] == 'dk-workflows:dk-pr-fix':
+        from fix_alternatives import enforce
+        enforce(spec, selection['repository'], spec['pr'], options=selection['options'], upstream=selection['upstream'])
+    elif selection.get('workflow', {}).get('skill') == 'dk-workflows:dk-pr-fix':
+        from fix_alternatives import enforce
+        enforce(spec, selection['repository'], spec['pr'], options=selection['workflow'].get('options'), upstream=selection['upstream'])
     if (call != spec['options'].get('invocation') or actual != spec['options'].get('configured')
             or selection.get('workflow') is not None
             and digest(owner['workflow_assignment']) != spec['options'].get('workflow_assignment')

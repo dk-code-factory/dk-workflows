@@ -1,33 +1,86 @@
-# Incoming architecture review
+# Alternatives review
 
 `dk-pr-review` owns this default-enabled gate, before all configured tasks and
 parallel groups. `dk-pr-reviewers-run` used independently is unchanged. The
 independent dk-architecture catalog is separate. Resolve the owner's
-`architecture` options through skill-owned configuration. Keep analysis and
+`alternatives` options through skill-owned configuration. Keep analysis and
 selection in private managed results; never add them to the PR description.
-`permissions.edit_architecture_decisions` remains accepted for saved-setting
-compatibility but has no effect. Disabling architecture bypasses assessment, execution,
-selection and new architecture publications; keep existing evidence.
+`permissions.edit_alternatives_decisions` remains accepted for saved-setting
+compatibility but has no effect. Disabling alternatives bypasses assessment, execution,
+selection and new alternatives publications; keep existing evidence.
 
-## Manual architecture review
+Saved configuration and assignments using the former architecture review names
+are read through compatibility aliases; conflicting old and new settings are
+rejected. Task keys, original results, claims, budgets and publication receipts
+stay in their existing stores. Renamed guidance is checked through the ordinary
+freshness rules. Historical Decisions headings still reconcile with exact
+publication receipts. New invocations and settings use the alternatives names.
 
-Invoke `dk-workflows:dk-pr-review-architect` with a PR URL to run only this
-architecture process and record its results, even after a prior completed review.
-For example: `Use dk-workflows:dk-pr-review-architect on https://HOST/OWNER/REPO/pull/N`.
-`dk-architecture-review` is the internal, replaceable examination component. Its
+## Fix workflow: once per PR
+
+`dk-workflows:dk-pr-fix` independently owns the same default-enabled `alternatives`
+options: reviewer, scoring profile and automatic or sourced selection. Run the
+initial assessment, comparison, selection and alignment before the repeated fix
+task list. A simple-change applicability skip completes the initial gate. A
+material initial mismatch supplies required design changes for authorized fixing;
+this path never publishes an alternatives rejection review or description section.
+
+Call `scripts/alternatives.py --repository HOST/OWNER/REPO --pr URL fix-gate`,
+with the same optional `--options FILE` and `--upstream` before the subcommand.
+The read-only helper discovers the existing PR task records and returns compact
+`references` plus either `release_reviewers:true` or the next missing stage and
+`next_task`. On first work, add the ordinary explicit `definition` with complete
+original evidence, installed resources and actual `native_review` contract to
+that descriptor. It already selects `kind:"alternatives"`,
+`skill:"dk-workflows:dk-pr-fix"`, stage, dependencies and owner options. Use the
+configured reviewer for assessment/comparison and the fix skill for
+selection/alignment. Preflight `--stage alternatives` only when there is missing
+native work; later task/finalizer preflight uses its own stage.
+
+Reference the original PR metadata in `definition.inputs.alternatives_current_pr`
+and retain original requirements, discussion, preferences and Git sources. Do not
+overwrite these artifacts with subsequent PR snapshots. The helper pins original
+Git revisions and carries them through later stages and repeated preparations.
+All stages share one PR-wide identity independent of run, cycle and head. Their
+evidence is separate from incoming/manual review and never satisfies that gate.
+No new completion marker or copied decision is saved.
+
+When `fix-gate` returns a saved `next_task.key`, use managed preparation and the
+normal claim/retry/checklist recovery. Resume missing work, never completed
+siblings. A pending selection blocks fixing until a sourced choice settles the
+same selection task; comparison remains reusable. Uncertain alignment and missing
+or damaged evidence remain incomplete. New invocations and sessions do not renew
+budgets or restart completed initial review.
+
+After `planned` or `skipped`, reuse the original result references throughout all
+fix cycles, pushes, commit cleanup and CI repairs. The helper supplies them to
+managed task/finalizer/reviewer assignments and completion. Current work must
+still fit the initial requirements and selected approach. Changed governing
+sources or selection policy block for explicit reassessment; they never silently
+grant stale coverage or trigger another automatic alternatives review. Ordinary
+code reviewers assess current implementation and verify fixes, while current
+scope, CI, permissions and publication checks retain their own live boundaries.
+Disabling `alternatives.enabled` bypasses the gate without deleting its evidence.
+
+## Manual alternatives review
+
+Invoke `dk-workflows:dk-pr-review-alternatives` with a PR URL to run only this
+alternatives process and record its results, even after a prior completed review.
+For example: `Use dk-workflows:dk-pr-review-alternatives on https://HOST/OWNER/REPO/pull/N`.
+`dk-alternatives-review` is the internal, replaceable examination component. Its
 discovery description and short picker description identify it as internal and
 point to this manual entry point; it remains available for prepared workflow
-assignments under its existing identity.
+assignments under its alternatives identity.
 Use `dk-pr-review`'s current reviewer, rubric, selection policy, retained limits
-and publication permissions. Pass invocation-local `architecture.enabled:true`
+and publication permissions. Pass invocation-local `alternatives.enabled:true`
 through preflight, every managed stage and publication/gate checks. This enables
 the requested manual review even when the automatic gate is disabled; it changes
-no saved configuration. Preflight only the architecture stage, never ordinary
+no saved configuration. Preflight only the alternatives stage, never ordinary
 reviewers or finalizers. Collect complete original PR evidence and scoped review
 preferences before preparing analysis.
 
 Each new explicit invocation requests fresh assessment and comparison. Reference
-the original request artifact in assessment `definition.inputs.architecture_request`.
+the original request artifact in assessment `definition.inputs.alternatives_request`.
 It is a JSON object containing nonempty `id`, `source` and `instruction`: a stable
 identity for the actual user message, its source reference and exact instruction.
 Reuse an existing original input artifact when available; otherwise retain only
@@ -49,14 +102,14 @@ refresh affected work under this contract.
 
 Complete comparison, selection and current
 alignment, including independent mismatch verification when needed. Use the same
-publication journal and gate validation below. Stop after architecture: an aligned
+publication journal and gate validation below. Stop after alternatives: an aligned
 manual result completes only this assignment, without executing incoming-review
-tasks or finalizers. A verified rejection remains architecture-only. Analysis-only
+tasks or finalizers. A verified rejection remains alternatives-only. Analysis-only
 instructions can complete aligned analysis while suppressing all external writes.
 Report pending selection, unavailable execution, review publication permission
 failures and uncertain publication privately; never claim ordinary review passed.
 
-After inspection, preflight only `--stage architecture` with `config.py
+After inspection, preflight only `--stage alternatives` with `config.py
 skill-preflight`. Resolve the installed review prompt's native contract and host
 capabilities before claims. Do not preflight normal reviewers until alignment
 releases them; use `--stage review` and later `--stage finalizers`. Unavailable
@@ -65,13 +118,13 @@ Codex or Claude Code, including for recovery.
 
 ## Managed assignments
 
-Use `dk.py prepare` and `finish`, with descriptor `kind:"architecture"`,
+Use `dk.py prepare` and `finish`, with descriptor `kind:"alternatives"`,
 `stage`, `dependencies` (stage name to accepted task key), optional owner
 invocation `options` and `upstream`, and the ordinary explicit `definition`.
 The helper constructs assignments, input references and mandatory checklists,
-including the owning workflow's retained limits. Architecture analysis is read-only;
+including the owning workflow's retained limits. Alternatives analysis is read-only;
 publication permissions are checked live rather than copied into each stage.
-Selection invocations also receive transient `architecture_scores` calculated by
+Selection invocations also receive transient `alternatives_scores` calculated by
 the helper; pass these with the assignment for confidence assessment. These
 derived totals are never saved as a second report.
 Supply complete governing original sources, discussion, requirements, Decisions,
@@ -86,8 +139,8 @@ Stages run in this order:
 1. `assessment`: return `required:bool`, `reason` and `evidence:[source refs]`.
    Material boundaries, interfaces, dependencies, state, concurrency, recovery or
    operational choices require comparison. Simple changes may skip with evidence.
-2. `comparison`: depends on assessment. Execute `architecture.review_skill`
-   (default `dk-workflows:dk-architecture-review`). Return the comparison below.
+2. `comparison`: depends on assessment. Execute `alternatives.review_skill`
+   (default `dk-workflows:dk-alternatives-review`). Return the comparison below.
 3. `selection`: depends on comparison. Return selection below. A pending choice
    blocks every normal reviewer. Ask the user for the actual choice and retain
    its source; elapsed time supplies no authorization. Bind the new choice source
@@ -97,7 +150,7 @@ Stages run in this order:
    implementation; return `alignment:aligned|mismatch|uncertain`, `reason`,
    `evidence` and substantive `required_changes` for mismatch.
    Reference the existing current PR metadata artifact (including `body` and
-   `headRefOid`) in `definition.inputs.architecture_current_pr`. The gate compares
+   `headRefOid`) in `definition.inputs.alternatives_current_pr`. The gate compares
    that consumed evidence with the live PR without creating a published summary.
 5. For mismatch, `verification` depends on alignment and runs in a fresh independent
    native agent. Return `disposition:confirmed|rejected|uncertain`, `reason`,
@@ -110,22 +163,22 @@ Supply evidence explaining irrelevant checklist items; omissions do not disappea
 Primary reports may satisfy the entire checklist; bounded completion checks reuse
 the original analysis. Never use a bare flag or a PR text marker as coverage.
 
-Call `scripts/architecture.py --repository HOST/OWNER/REPO --pr URL gate --file
+Call `scripts/alternatives.py --repository HOST/OWNER/REPO --pr URL gate --file
 REFS.json`. Refs contains `assessment`, and when required `comparison`,
 `selection`, `alignment`, plus `verification` and
 `review_operation` for rejection. Entries are managed task keys or existing
 publication operation paths. Missing/stale/corrupt evidence blocks the gate.
 For ordinary `dk-pr-review` task/finalizer definitions, pass these refs in
-`definition.options.architecture_evidence`; managed skill occurrences enforce the
+`definition.options.alternatives_evidence`; managed skill occurrences enforce the
 gate before claims and recapture it at completion. Include `analysis_only:true`
 under execution options when applicable. Both skipped and aligned gates can
 release analysis-only review tasks. Ordinary publications remain disabled by the caller.
 
 `aligned` releases normal tasks with the decision's immutable source results as
-governing inputs. `architecture_rejected` is a completed architecture-only review,
+governing inputs. `alternatives_rejected` is a completed alternatives-only review,
 with `ordinary_review_complete:false`: stop without running ordinary reviewers,
 fork CI approval, PR approval or merge finalizers. Never imply code review ran.
-An architecture-only rejection still requires authorized, reconciled review
+An alternatives-only rejection still requires authorized, reconciled review
 publication. Denied permission or analysis-only instructions keep that outcome
 privately incomplete; aligned analysis requires no publication.
 
@@ -162,7 +215,7 @@ cost, estimates, scoring, uncertainties and recommendation evidence.
 | quality | 25 | 30 | 20 | 10 | 5 | 10 |
 | minimal_change | 15 | 15 | 20 | 25 | 20 | 5 |
 
-`scoring.profile:auto` asks the architecture agent to assess new features,
+`scoring.profile:auto` asks the alternatives agent to assess new features,
 existing behavior, tests, CI and maintenance with `profile_selection_prompt` and
 choose a built-in profile with rationale. A fixed profile bypasses that choice.
 `custom` requires `custom_prompt`, a shared `weights` map of positive integer
@@ -184,24 +237,24 @@ for every unchosen option, including after a user chooses a different approach.
 
 Keep chosen approach, rationale, alternatives, scores and rejection reasons in
 the original private comparison and selection results. Pass their immutable
-references to downstream reviewers. Do not publish an Architecture decisions
-section or another architecture summary in the PR description, including through
+references to downstream reviewers. Do not publish an Alternatives decisions
+section or another alternatives summary in the PR description, including through
 Decisions or description skills. Existing public entries are not automatically
 rewritten or removed. A missing section or old `decision_operation` is not a gate
 requirement. Review publication remains required only for an independently
-confirmed architecture mismatch, using the existing journal and substantive
+confirmed alternatives mismatch, using the existing journal and substantive
 required changes as `REQUEST_CHANGES`.
 
 Before releasing reviewers, check the live PR head and body against alignment's
-consumed `architecture_current_pr` evidence. Changed inputs require affected
+consumed `alternatives_current_pr` evidence. Changed inputs require affected
 analysis and current alignment; a description edit cannot silently reuse old
 coverage. No description edit permission or publication receipt is needed for
 aligned analysis.
 
 After a change, prepare `impact` against the retained comparison and selection
-(or the retained assessment for an architecture skip) and current sources. Assess
+(or the retained assessment for an alternatives skip) and current sources. Assess
 applicability, feasible choices, confidence, estimate sensitivity and any sourced
-user choice; nonmaterial means these remain valid. Supply `definition.inputs.architecture_current_pr` as a reference to the existing
+user choice; nonmaterial means these remain valid. Supply `definition.inputs.alternatives_current_pr` as a reference to the existing
 current PR metadata evidence (including `body` and `headRefOid`); no second body
 snapshot is needed. Only evidence-backed `impact:nonmaterial` permits historical alternatives
 reuse; material or uncertain impact requires refreshed affected analysis. Keep
@@ -224,7 +277,7 @@ recovery references. Treat a historical workflow Decisions edit as self-produced
 when reconciled journals match the exact before/after body lineage. Trace successive
 own edits back to the original governing body; stop at an external edit. Ambiguous
 or circular lineage blocks normalization privately. External edits still require
-current impact assessment. Use `architecture.py governing-body --body FILE --operation FILE` to recognize
+current impact assessment. Use `alternatives.py governing-body --body FILE --operation FILE` to recognize
 that exact self-produced body deterministically. Capture normalized governing context
 without the recognized self-produced subsection; retain the live body as a
 publication input, not a copied analysis snapshot.
@@ -246,4 +299,4 @@ prose paragraphs so inserting them cannot absorb a following indented sibling
 into a generated alternatives list; full private comparisons retain formatting.
 
 Offline acceptance establishes reuse, invalidation and recovery behavior. Native
-API dollar savings remain unmeasured; see the [design](../DESIGN.md#incoming-architecture-gate).
+API dollar savings remain unmeasured; see the [design](../DESIGN.md#incoming-alternatives-gate).

@@ -47,6 +47,8 @@ def validate_settings(value):
 
 
 def validate(value):
+    from alternatives_compat import call
+    value = call(value)
     if isinstance(value, str):
         skill_name(value)
     elif isinstance(value, dict):
@@ -142,7 +144,7 @@ def preflight(calls, available, capabilities=None, *, native_reviews=None):
             else:
                 resolved[reference] = candidates[0]
         reviewer = (re.search(r'/(?:options/reviewers/[0-9]+|reviewers/[0-9]+/[0-9]+)$', location)
-                    is not None or location == 'reviewer' or location.endswith('/architecture')
+                    is not None or location == 'reviewer' or location.endswith('/alternatives')
                     or (reference or '').split(':')[-1].startswith('code-review'))
         if reviewer or location in native_reviews:
             requirements = native_reviews.get(location)

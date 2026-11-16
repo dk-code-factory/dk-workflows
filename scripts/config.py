@@ -45,7 +45,7 @@ def main():
             c.add_argument('--kind', choices=['tasks', 'finalizers', 'reviewers'], required=True)
             c.add_argument('--resolved', action='store_true', help='Include inherited invocations and effective leaf options')
         if action == 'skill-preflight':
-            c.add_argument('--stage', choices=['architecture', 'review', 'finalizers'])
+            c.add_argument('--stage', choices=['alternatives', 'review', 'finalizers'])
             c.add_argument('--available', type=Path, required=True)
             c.add_argument('--capabilities', type=Path)
             c.add_argument('--native-reviews', type=Path, help='Resolved review contracts keyed by occurrence location')

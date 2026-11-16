@@ -15,7 +15,7 @@ Resolve configuration for `dk-workflows:dk-pr-description` through [skill-owned 
 
 Read the complete diff, PR template, linked issue, maintainer conventions and current Decisions. Use the configured repository-relative `template` when present; null uses repository discovery. Apply `fallback_sections` only when repository formatting leaves a choice. Honor `update_title` and `update_body`, preserving each disabled field. Describe the resulting behavior and validation. Preserve Decisions and unrelated body sections. Make the description match the agreed scope before review.
 
-Keep generated architecture analysis and selection in private managed results. Do not add an architecture review section or copy its comparisons, scores, alternatives or selection rationale into the description.
+Keep generated alternatives analysis and selection in private managed results. Do not add an alternatives review section or copy its comparisons, scores, alternatives or selection rationale into the description.
 
 Draft locally and review the text. Publish authorized edits with `scripts/publish.py` after checking the current head, title and body. Follow [the decision record](../../../runtime/dk-pr-description/references/decisions.md) when handling Decisions.
 

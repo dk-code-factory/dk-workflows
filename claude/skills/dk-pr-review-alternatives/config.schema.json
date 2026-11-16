@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/dk-code-factory/dk-workflows/main/codex/skills/dk-pr-review-architect/config.schema.json",
-  "title": "dk-workflows:dk-pr-review-architect options",
+  "$id": "https://raw.githubusercontent.com/dk-code-factory/dk-workflows/main/codex/skills/dk-pr-review-alternatives/config.schema.json",
+  "title": "dk-workflows:dk-pr-review-alternatives options",
   "type": "object",
   "properties": {
     "$schema": {

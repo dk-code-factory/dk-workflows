@@ -467,7 +467,7 @@
               "if": {
                 "properties": {
                   "skill": {
-                    "const": "dk-workflows:dk-architecture-review"
+                    "const": "dk-workflows:dk-alternatives-review"
                   }
                 },
                 "required": [
@@ -477,7 +477,7 @@
               "then": {
                 "properties": {
                   "options": {
-                    "$ref": "../codex/skills/dk-architecture-review/config.schema.json"
+                    "$ref": "../codex/skills/dk-alternatives-review/config.schema.json"
                   }
                 }
               }
