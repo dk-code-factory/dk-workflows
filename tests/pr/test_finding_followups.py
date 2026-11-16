@@ -853,7 +853,8 @@ def test_real_repost_journal_prevents_duplicate_across_new_process_and_discussio
     command = ('import json,sys; import finding_followups as f; '
                'v=json.load(open(sys.argv[1])); '
                'print(json.dumps(f.plan(v["context"],v["assessment"],v["retained"])))')
-    results = [json.loads(subprocess.check_output([sys.executable, '-c', command, str(payload)], text=True))
+    results = [json.loads(subprocess.check_output([sys.executable, '-c', command, str(payload)],
+                                                 text=True, timeout=30))
                for _ in range(2)]
     assert results[0] == results[1]
     expected = 'recent_request' if phase == 'verified' else 'recover_required'
