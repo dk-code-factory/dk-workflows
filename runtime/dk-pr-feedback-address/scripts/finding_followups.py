@@ -15,6 +15,7 @@ sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 
 import pr_evidence as evidence
 import fetch_pr_conversation as conversation
 from shared import publication
+from shared.github_publications import Handler
 from shared.review_request_recovery import Recovery
 from shared.workflow_storage import operations_root
 
@@ -215,7 +216,27 @@ def inspection_output(context, *, full_commits=False):
     return result
 
 
-def plan(context, assessments, retained):
+def review_recovery(cwd):
+    """Use the publisher's live no-resend check without allowing any writes."""
+    def read(argv):
+        return conversation.gh_json(argv[1:], cwd)
+
+    def endpoint(pr):
+        parsed = urlsplit(pr)
+        owner, repo, _, number = parsed.path.strip('/').split('/')
+        return parsed.hostname, f'repos/{owner}/{repo}', number
+
+    def api(pr, path):
+        return read(['gh', 'api', '--hostname', endpoint(pr)[0], path])
+
+    def metadata(pr):
+        return read(['gh', 'pr', 'view', pr, '--json', 'url,headRefOid'])
+
+    return Recovery(lambda approved: Handler(approved, api=api, metadata=metadata,
+                                             run=read, endpoint=endpoint))
+
+
+def plan(context, assessments, retained, *, cwd=None):
     """Consume native semantics; construct counts, routing and exact payloads."""
     if assessments.get('head') != context['head']:
         raise ValueError('assessment head changed; independently verify again')
@@ -231,6 +252,7 @@ def plan(context, assessments, retained):
         raise ValueError('effective reply_to_feedback and post_review permission booleans required')
     result = []
     seen = set()
+    recovery = review_recovery(Path.cwd() if cwd is None else cwd)
     for finding in findings:
         key = finding['key']
         if not isinstance(key, str) or not key or key in seen:
@@ -316,7 +338,7 @@ def plan(context, assessments, retained):
                    if (path in finding.get('operations', [])
                        and value['status'] not in {'verified', 'not_applied'})
                    or (value['status'] == 'pending'
-                       and Recovery(None).blocks(value, {'kind': route}))]
+                       and recovery.blocks(value, {'kind': route}))]
         if pending:
             result.append({**outcome, 'status': 'recover_required', 'operations': pending})
             continue
@@ -414,7 +436,7 @@ def main():
         if args.command == 'plan':
             if not args.assessment:
                 raise ValueError('--assessment required for plan')
-            result = plan(context, json.loads(args.assessment.read_bytes()), retained)
+            result = plan(context, json.loads(args.assessment.read_bytes()), retained, cwd=cwd)
         else:
             result = inspection_output(context, full_commits=args.full_commits)
         print(evidence.encoded(result).decode())

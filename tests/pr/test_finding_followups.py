@@ -874,6 +874,88 @@ def test_review_route_obeys_pending_request_review_barrier_while_reply_can_proce
         assert result['status'] == expected
 
 
+@pytest.fixture
+def disposed_review_request(tmp_path, monkeypatch):
+    exercise = load_exercise()
+    root = tmp_path / 'fixture'
+    exercise.initialize(root)
+    monkeypatch.setenv('XDG_STATE_HOME', str(root / 'state'))
+    published = exercise.operate(root, 'submit', exercise.fixture.request('request-review'),
+                                 lose_response=True)
+    remote = exercise.fixture.Remote(json.loads((root / 'remote.json').read_text()))
+    for key in ('metadata', 'api', 'run'):
+        monkeypatch.setattr(exercise.publisher, key, getattr(remote, key))
+    operation = published['operation']
+    inspected = exercise.publisher.review_recovery().inspect(operation)
+    exercise.publisher.review_recovery().dispose(operation, {
+        'decision': 'no_resend', 'reason': 'The reviewer needs no further request.',
+        'observation': inspected['fingerprint']})
+    saved = followups.operations(PR, root)
+    value, native = unanchored_case(saved=saved)
+
+    def read(arguments, cwd):
+        assert cwd == root
+        return remote.run(['gh', *arguments])
+
+    monkeypatch.setattr(followups.conversation, 'gh_json', read)
+    return root, remote, operation, saved, value, native
+
+
+def test_current_review_request_disposition_allows_fallback_across_fresh_processes(
+        disposed_review_request, tmp_path):
+    root, remote, operation, saved, value, native = disposed_review_request
+    original = Path(operation).read_bytes()
+    assert followups.plan(value, native, saved, cwd=root)['findings'][0]['status'] == 'review_candidate'
+    payload = tmp_path / 'recovery-input.json'
+    payload.write_text(json.dumps({'context': value, 'assessment': native, 'remote': remote.state}))
+    code = '''
+import importlib.util, json, pathlib, sys
+import finding_followups as followups
+root, payload, fixture_path = map(pathlib.Path, sys.argv[1:])
+spec = importlib.util.spec_from_file_location('offline_remote', fixture_path)
+fixture = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fixture)
+value = json.loads(payload.read_text())
+remote = fixture.Remote(json.loads(json.dumps(value['remote'])))
+def read(arguments, cwd):
+    assert cwd == root
+    return remote.run(['gh', *arguments])
+followups.conversation.gh_json = read
+saved = followups.operations(value['context']['pr'], root)
+print(json.dumps(followups.plan(value['context'], value['assessment'], saved, cwd=root)))
+assert remote.state == value['remote']
+'''
+    for _ in range(2):
+        child = subprocess.run([sys.executable, '-c', code, str(root), str(payload),
+                                str(Path(__file__).with_name('fixtures') / 'github_remote.py')],
+                               capture_output=True, text=True, timeout=30)
+        assert child.returncode == 0, child.stderr
+        assert json.loads(child.stdout)['findings'][0]['status'] == 'review_candidate'
+    assert Path(operation).read_bytes() == original
+    assert remote.state['writes'] == {'request-review': 1}
+
+
+@pytest.mark.parametrize('change', ['head', 'requested', 'timeline', 'reviews'])
+def test_review_fallback_revalidates_retained_no_resend_disposition(disposed_review_request, change):
+    root, remote, operation, saved, value, native = disposed_review_request
+    original = Path(operation).read_bytes()
+    if change == 'head':
+        remote.state['metadata']['headRefOid'] = D
+    elif change == 'requested':
+        remote.state['requested'] = {'users': [], 'teams': []}
+    elif change == 'timeline':
+        remote.state['timeline'] = [{'id': 1, 'event': 'review_request_removed',
+                                     'requested_reviewer': {'login': 'reviewer'},
+                                     'created_at': '2026-11-16T23:00:00Z'}]
+    else:
+        remote.state['reviews'] = [{'id': 1, 'user': {'login': 'reviewer'}, 'state': 'APPROVED',
+                                   'submitted_at': '2026-11-16T23:00:00Z', 'commit_id': C}]
+    with pytest.raises(ValueError, match='Inspect and reassess'):
+        followups.plan(value, native, saved, cwd=root)
+    assert Path(operation).read_bytes() == original
+    assert remote.state['writes'] == {'request-review': 1}
+
+
 def test_known_age_review_fallback_needs_no_equivalent_open_thread():
     value = context()
     native = assessment(value)

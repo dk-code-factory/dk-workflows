@@ -914,6 +914,10 @@ longer blocks age when the native verifier establishes a later substantive
 request; unknown latest anchors leave reminder age uncertain, while uncertain equivalent writes still block.
 Pending publication barriers share the publisher's independent-reply exception
 for unrelated review requests; other pending kinds retain their barriers.
+Review-route planning also revalidates an existing `no_resend` disposition through
+the publisher's read-only recovery handler. Changed head, requested reviewers or
+matching review/timeline evidence requires reassessment; the original pending
+intent and disposition remain intact without another durable record.
 
 Unknown or rewritten report anchors cannot permanently suppress a newly confirmed
 finding that has no equivalent open thread or current substantive request. Native
