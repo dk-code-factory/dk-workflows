@@ -224,6 +224,11 @@ def plan(context, assessments, retained):
     findings = assessments.get('findings')
     if not isinstance(findings, list):
         raise ValueError('native finding assessments required')
+    permissions = assessments.get('permissions')
+    if permissions is not None and (not isinstance(permissions, dict)
+            or set(permissions) != {'reply_to_feedback', 'post_review'}
+            or any(type(value) is not bool for value in permissions.values())):
+        raise ValueError('effective reply_to_feedback and post_review permission booleans required')
     result = []
     seen = set()
     for finding in findings:
@@ -248,6 +253,22 @@ def plan(context, assessments, retained):
         latest = finding.get('latestRequest')
         if latest not in [item.get('reference') for item in requests] + finding.get('operations', []):
             raise ValueError('identify the latest substantive request for this finding')
+        coverage = finding.get('coverage')
+        if coverage is not None:
+            references = {item['reference'] for item in requests}
+            if (not isinstance(coverage, dict)
+                    or set(coverage) != {'openThreads', 'currentRequests', 'evidence'}
+                    or not isinstance(coverage['evidence'], str) or not coverage['evidence'].strip()
+                    or any(not isinstance(coverage[name], list)
+                           or any(not isinstance(ref, str) for ref in coverage[name])
+                           for name in ('openThreads', 'currentRequests'))
+                    or not set(coverage['openThreads']).issubset(references)
+                    or not set(coverage['currentRequests']).issubset(references | set(finding.get('operations', [])))):
+                raise ValueError('complete finding-specific open-thread/current-request coverage evidence required')
+            for reference in coverage['openThreads']:
+                item = context['sources'][reference]
+                if item['kind'] != 'inline_comment' or item.get('resolved') is not False:
+                    raise ValueError('openThreads must reference equivalent unresolved inline comments')
         anchors = []
         uncertain = False
         for request in requests:
@@ -286,20 +307,40 @@ def plan(context, assessments, retained):
                     anchors.append(age)
             else:
                 uncertain = uncertain or path == latest
-        reply_kind = 'reply-inline' if source['kind'] == 'inline_comment' else 'reply-comment'
+        route = 'reply-inline' if source['kind'] == 'inline_comment' else 'reply-comment'
+        if permissions is not None and not permissions['reply_to_feedback']:
+            route = 'post-review' if permissions['post_review'] else None
+        # Any equivalent undispatched intent retains its original recovery path;
+        # do not evade it with another route, body or action id.
         pending = [path for path, value in retained.items()
-                   if value['status'] == 'pending' and
-                   (path in finding.get('operations', []) or
-                    Recovery(None).blocks(value, {'kind': reply_kind}))]
+                   if (path in finding.get('operations', [])
+                       and value['status'] not in {'verified', 'not_applied'})
+                   or (value['status'] == 'pending'
+                       and Recovery(None).blocks(value, {'kind': route}))]
         if pending:
             result.append({**outcome, 'status': 'recover_required', 'operations': pending})
             continue
-        if uncertain:
-            result.append({**outcome, 'status': 'uncertain_age'})
+        # Existing current-head receipts prevent a second request even before
+        # discussion visibility, including an aggregated post-review payload.
+        if anchors and min(anchors) == 0:
+            result.append({**outcome, 'status': 'recent_request', 'newCommits': 0})
             continue
-        age = min(anchors)
-        if age < 1:
-            result.append({**outcome, 'status': 'recent_request', 'newCommits': age})
+        fallback = False
+        if uncertain:
+            if coverage is None:
+                result.append({**outcome, 'status': 'uncertain_age'})
+                continue
+            open_threads = [item['reference'] for item in requests
+                            if context['sources'][item['reference']].get('resolved') is False]
+            if open_threads or coverage['currentRequests']:
+                result.append({**outcome, 'status': 'covered_request'})
+                continue
+            if permissions is None:
+                raise ValueError('effective route permissions required for an unknown-age fallback')
+            fallback = True
+        age = None if uncertain else min(anchors)
+        if route is None:
+            result.append({**outcome, 'status': 'publication_blocked'})
             continue
         correction = finding.get('correction')
         if not isinstance(correction, str) or not correction.strip():
@@ -314,6 +355,28 @@ def plan(context, assessments, retained):
         source_record = {name: source[name] for name in ('kind', 'id', 'url')}
         if type(source_record['id']) is not int or source_record['id'] <= 0:
             raise ValueError('original source database ID required')
+        details = {'unknownAgeFallback': True} if fallback else {'newCommits': age}
+        if route == 'post-review':
+            if coverage is None:
+                result.append({**outcome, **details, 'status': 'coverage_required'})
+                continue
+            if (coverage['currentRequests'] or any(
+                    context['sources'][item['reference']].get('resolved') is False for item in requests)):
+                result.append({**outcome, **details, 'status': 'covered_request'})
+                continue
+            location = finding.get('location')
+            if (not isinstance(location, dict) or set(location) != {'path', 'line', 'side'}
+                    or not isinstance(location['path'], str) or not location['path'].strip()
+                    or type(location['line']) is not int or location['line'] <= 0
+                    or location['side'] != 'RIGHT'):
+                result.append({**outcome, **details, 'status': 'location_required'})
+                continue
+            # The selected publisher batches this candidate into its ordinary
+            # review and chooses the event under its current completion policy.
+            # Its changed-line validation remains authoritative at preparation.
+            result.append({**outcome, **details, 'status': 'review_candidate',
+                           'sourceRecord': source_record, 'comment': {**location, 'body': body}})
+            continue
         request = {'pr': context['pr'], 'head': context['head'], 'source': source_record, 'body': body}
         if source['kind'] == 'inline_comment':
             if type(source['parent']) is not int or source['parent'] <= 0:
@@ -322,7 +385,7 @@ def plan(context, assessments, retained):
             source_record['thread_id'] = source['thread']
         else:
             request.update(kind='reply-comment', body=f'In Reply To: [Earlier finding]({url})\n\n' + body)
-        result.append({**outcome, 'status': 'eligible', 'newCommits': age, 'request': request})
+        result.append({**outcome, **details, 'status': 'eligible', 'request': request})
     return {'head': context['head'], 'findings': result, 'publicationAuthority': False}
 
 

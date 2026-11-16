@@ -911,9 +911,23 @@ root parent, payload, head, receipts and uncertain-write reconciliation.
 Journal discovery matches the publisher's canonical PR scope, preserving exact
 original source URLs and journals. A verified superseded unavailable anchor no
 longer blocks age when the native verifier establishes a later substantive
-request; unknown latest anchors and uncertain equivalent writes still block.
+request; unknown latest anchors leave reminder age uncertain, while uncertain equivalent writes still block.
 Pending publication barriers share the publisher's independent-reply exception
 for unrelated review requests; other pending kinds retain their barriers.
+
+Unknown or rewritten report anchors cannot permanently suppress a newly confirmed
+finding that has no equivalent open thread or current substantive request. Native
+verification records finding-specific coverage evidence in its existing original
+result. The transient planner checks referenced thread states and current
+receipts, prefers an authorized source reply and otherwise hands a changed-line
+candidate to ordinary review publication under explicit effective route grants.
+Age remains unknown; no threshold proof is manufactured. A general bot summary is
+not an unresolved thread. Coverage/location or permission gaps remain incomplete,
+and fixed/rejected/accepted/deferred/uncertain dispositions remain excluded.
+Equivalent prepared and pending intents recover their original operation;
+verified current-head receipts suppress reposts before discussion visibility,
+including findings nested in aggregated review payloads. The ordinary publisher
+retains its live authorization, changed-line and publication checks.
 
 No durable follow-up registry, commit-list cache, copied result, rendered plan or
 new counter is admitted. Existing fingerprints, budgets, original results and

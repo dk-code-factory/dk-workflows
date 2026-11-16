@@ -43,7 +43,10 @@ needed. Both presentations return the same fingerprint. Read original discussion
 only relevant journal operations by their returned paths. Native semantics must
 identify every equivalent substantive request and the latest one for each
 finding, including requests in review bodies, top-level comments and prior runs.
-A recent equivalent request by any participant suppresses another reminder.
+A recent equivalent request by any participant suppresses another reminder. A general
+bot-summary comment has no resolved/open thread state; its existence alone does
+not establish an equivalent unresolved inline thread or a current correction
+request.
 
 Review submissions provide their captured `commitId`; inline comments use their
 associated review. Explicit commit links in other reports/requests are only
@@ -56,7 +59,11 @@ or leave that latest request's anchor unknown. Formatting-only edits retain the
 unchanged finding's original review/link anchor, even though changed discussion
 requires semantic reassessment.
 
-Missing/rewritten latest anchors are uncertain. A later evidenced substantive request
+Missing/rewritten latest anchors leave reminder age uncertain; never invent age
+proof. They do not permanently suppress a freshly confirmed actionable finding.
+When no equivalent unresolved inline thread or current substantive correction
+request exists, use the evidence-bound fallback below to surface it at the current
+head. If either already exists, suppress the fallback. A later evidenced substantive request
 can supersede an unanchored original report or verified receipt when the verifier establishes that
 ordering. Incomplete/unstable commit lists or changed heads block calculation.
 For complete histories within the endpoint's 250-commit cap, the helper uses API
@@ -122,16 +129,66 @@ latest substantive request reference or equivalent retained operation path.
 yet visible remotely. Review-based requests default to their `reviewCommit`;
 other requests need an explicit `commit` from `linkedCommits` and a finding-specific
 `anchorEvidence` explanation. Use `commit:null` when that binding is unsupported.
-The helper counts from the newest evidenced equivalent request/receipt and blocks
-an unknown latest anchor. The verifier owns completeness, substantive equivalence,
-ordering, disposition and the targeted correction; helpers do not infer them.
+The helper counts from the newest evidenced equivalent request/receipt and leaves
+an unknown latest anchor uncertain unless the fallback's coverage assessment is
+supplied. The verifier owns completeness, substantive equivalence, ordering,
+disposition and the targeted correction; helpers do not infer them.
+
+For fallback assessment, add finding-specific `coverage` to each original native
+verification result, with `openThreads` listing equivalent unresolved inline
+comment references, `currentRequests` listing current substantive request
+references or equivalent operation paths, and `evidence` explaining the complete
+discussion/journal assessment. Include all equivalent thread comments among
+`requests`; the helper also checks their actual resolved state, independently of
+`openThreads`. Empty lists require supported absence evidence. A historical report
+with unknown age is not automatically a current correction request. Conversely,
+a current request without an anchor still suppresses another request. Do not
+infer either conclusion from timestamps, bot identity or missing age alone.
+
+Supply the current caller's effective route permissions at the assessment's top
+level, for example:
+
+```json
+{
+  "permissions": {"reply_to_feedback": false, "post_review": true},
+  "findings": [{
+    "coverage": {
+      "openThreads": [],
+      "currentRequests": [],
+      "evidence": "Complete discussion and relevant intents show only the historical summary for this finding; no equivalent open thread or current request exists."
+    },
+    "location": {"path": "code.py", "line": 42, "side": "RIGHT"}
+  }]
+}
+```
+
+These fields supplement the complete assessment above. `location` must identify
+a supported changed line at the current head for review publication. Explicit
+boolean route grants are required for an unknown-age fallback; they are a
+transient selection input, never publication authority or a saved permission
+snapshot. Re-resolve current permissions before planning and publishing. Legacy
+age-only assessments without these fields still produce reply candidates subject
+to the ordinary authorization check, but cannot enable an unknown-age fallback.
+
+Prefer the original source reply when `reply_to_feedback` is authorized. If it is
+denied and `post_review` is authorized, assess the review route rather than
+silently treating the finding as handled. Return one inline review candidate only
+when coverage establishes no equivalent open thread/current request and a changed
+line is supplied. Never expand reply permission from review permission. If neither
+route is authorized, or required evidence/location is missing, report the affected
+publication as incomplete privately; do not clear its finding disposition.
 
 ## Plan and publish
 
 Run the same command with `plan --assessment FILE` instead of `inspect`. It
 recaptures live discussion, commits and original intents and rejects a changed
 context or head. Results distinguish `excluded`, `uncertain_age`,
-`recover_required`, `recent_request` and `eligible`. An unchanged rerun does not
+`recover_required`, `recent_request`, `covered_request`, `publication_blocked`,
+`coverage_required`, `location_required`, `review_candidate` and `eligible`.
+`covered_request` suppresses another fallback because actionable coverage already
+exists. `publication_blocked`, `coverage_required` and `location_required` leave
+publication incomplete. An unknown-age candidate has `unknownAgeFallback:true`
+and omits `newCommits`; it is not a claim that the reminder threshold was met. An unchanged rerun does not
 produce another eligible request after a substantive request. One or more new PR commits make a still-confirmed finding eligible,
 counting from the latest equivalent substantive request or verified follow-up.
 The plan is transient; retain original native decisions and publication journals
@@ -145,11 +202,25 @@ top-level findings receive source-linked `reply-comment` responses beginning
 with `In Reply To:`. Every response links the earlier finding, identifies the
 current head and asks the author for a concrete supported correction. Embedded
 file/line references never create a new inline destination. Follow-ups use this
-source route rather than publishing a duplicate new inline finding.
+source route for ordinary reminders. For a `review_candidate`, add the generated
+`comment` to the configured publisher's ordinary `post-review` payload instead,
+retaining its original source link and current correction. Honor the publisher's
+configured review event and completion rules; partial reviews still use `COMMENT`.
+Its normal live changed-line validation remains required. Never publish both
+routes for the same finding.
 
 Refresh the plan immediately before preparing/publishing, and recheck current
 authorization, head, scope and discussion at that boundary. Exclude the original
-finding from new-review duplicate publication when it is handled by this route.
+finding from new-review duplicate publication only when an actionable current
+request/open thread or an eligible authorized route actually carries it. An old
+summary alone, `uncertain_age` or a denied reply route is not proof that the
+finding is handled. Read equivalent ordinary `post-review` operations too: the
+finding can be nested in `approved.comments`, with no general review body. A
+verified current-head receipt suppresses reposts even before discussion visibility;
+a prepared or pending equivalent intent requires recovery of that exact operation.
+After a successful fallback, its published request/receipt supplies the normal
+new anchor for later reminders. Preserve its original operation and do not rerun
+unchanged verification merely to recover that boundary.
 Posting remains disabled for analysis-only or denied policy. Missing native
 verification/evidence stays incomplete. Use the original operation on interruption
 and reconcile uncertain writes read-only before further sends. Do not regenerate

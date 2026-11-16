@@ -194,7 +194,7 @@ def retained(status, head=C):
 
 
 @pytest.mark.parametrize('status,expected', [('verified', 'recent_request'),
-                   ('pending', 'recover_required'), ('prepared', 'uncertain_age')])
+                   ('pending', 'recover_required'), ('prepared', 'recover_required')])
 def test_original_journal_prevents_unchanged_fresh_session_reminders(status, expected):
     saved = {'/original/operation.json': retained(status)}
     value = context(retained=saved)
@@ -702,3 +702,218 @@ def test_small_api_age_does_not_depend_on_head_position(branched_history, tmp_pa
     with patch.object(followups, 'local_history', side_effect=AssertionError('API graph is complete')):
         captured = capture_small_history(branched_history, head, items=items, cwd=tmp_path)
     assert captured['newCommits'][branched_history[4]] == 2
+
+
+def unanchored_case(*, rewritten=False, replies=False, reviews=True, saved=None):
+    """A top-level bot summary is not itself an unresolved review thread."""
+    inline, top = inputs()
+    top['comments'][0].update(author='qodo[bot]', text='Changed routing keys select stale replicas.')
+    if rewritten:
+        top['comments'][0]['text'] += f' Report head: {PR}/commits/{D}'
+    value = followups.inspect(inline, top, linear_history([A, B, C]), saved or {})
+    native = assessment(value, source='issuecomment-901',
+                        requests=[{'reference': 'issuecomment-901', 'commit': D if rewritten else None,
+                                   'anchorEvidence': 'Explicit report-head label.'}],
+                        coverage={'openThreads': [], 'currentRequests': [],
+                                  'evidence': 'Complete discussion has only the historical bot report for this finding; '
+                                              'the inline thread concerns a distinct issue and no current request exists.'},
+                        location={'path': 'code.py', 'line': 1, 'side': 'RIGHT'})
+    native['permissions'] = {'reply_to_feedback': replies, 'post_review': reviews}
+    return value, native
+
+
+@pytest.mark.parametrize('rewritten', [False, True])
+@pytest.mark.parametrize('replies,reviews,status', [(True, False, 'eligible'),
+                (False, True, 'review_candidate'), (True, True, 'eligible'),
+                (False, False, 'publication_blocked')])
+def test_unanchored_bot_summary_uses_only_an_authorized_route(rewritten, replies, reviews, status):
+    value, native = unanchored_case(rewritten=rewritten, replies=replies, reviews=reviews)
+    result = followups.plan(value, native, {})
+    finding = result['findings'][0]
+    assert finding['status'] == status
+    assert result['publicationAuthority'] is False
+    assert 'newCommits' not in finding  # no invented age for either missing/rewritten anchors
+    if status != 'publication_blocked':
+        assert finding['unknownAgeFallback'] is True
+        body = finding['request']['body'] if replies else finding['comment']['body']
+        assert PR + '#issuecomment-901' in body and C in body
+        assert native['findings'][0]['correction'] in body
+    if status == 'review_candidate':
+        assert 'request' not in finding
+        assert finding['sourceRecord']['kind'] == 'issue_comment'
+        assert finding['comment']['path'] == 'code.py'
+
+
+@pytest.mark.parametrize('coverage', ['open_thread', 'current_top_level', 'original_inline'])
+def test_unknown_age_fallback_never_duplicates_existing_actionable_coverage(coverage):
+    value, native = unanchored_case()
+    finding = native['findings'][0]
+    if coverage == 'original_inline':
+        finding.update(source='C99', requests=[{'reference': 'C99', 'commit': None}], latestRequest='C99')
+    elif coverage == 'open_thread':
+        # Even an incorrectly omitted openThreads entry cannot hide an
+        # equivalent unresolved inline request listed in requests.
+        finding['requests'].append({'reference': 'C99', 'commit': None})
+    else:
+        finding['coverage']['currentRequests'] = ['issuecomment-901']
+    result = followups.plan(value, native, {})['findings'][0]
+    assert result['status'] == 'covered_request'
+    assert 'comment' not in result and 'request' not in result
+
+
+@pytest.mark.parametrize('disposition', ['fixed', 'rejected', 'uncertain', 'accepted', 'deferred'])
+def test_unknown_age_fallback_preserves_nonactionable_dispositions(disposition):
+    value, native = unanchored_case()
+    native['findings'][0]['disposition'] = disposition
+    assert followups.plan(value, native, {})['findings'][0]['status'] == 'excluded'
+
+
+@pytest.mark.parametrize('damage', ['absent', 'evidence', 'open_reference', 'current_reference', 'permissions'])
+def test_fallback_requires_complete_semantic_evidence_and_explicit_permissions(damage):
+    value, native = unanchored_case()
+    finding = native['findings'][0]
+    if damage == 'absent':
+        del finding['coverage']
+        assert followups.plan(value, native, {})['findings'][0]['status'] == 'uncertain_age'
+        return
+    if damage == 'evidence':
+        finding['coverage']['evidence'] = ''
+    elif damage == 'open_reference':
+        finding['coverage']['openThreads'] = ['issuecomment-901']
+    elif damage == 'current_reference':
+        finding['coverage']['currentRequests'] = ['invented-comment']
+    else:
+        del native['permissions']
+    with pytest.raises(ValueError, match='coverage|openThreads|permissions'):
+        followups.plan(value, native, {})
+
+
+def test_review_route_requires_changed_line_candidate_and_still_checks_actual_diff(tmp_path, monkeypatch):
+    value, native = unanchored_case()
+    finding = native['findings'][0]
+    del finding['location']
+    assert followups.plan(value, native, {})['findings'][0]['status'] == 'location_required'
+    finding['location'] = {'path': 'code.py', 'line': 999, 'side': 'RIGHT'}
+    candidate = followups.plan(value, native, {})['findings'][0]
+    exercise = load_exercise()
+    root = tmp_path / 'fixture'
+    exercise.initialize(root)
+    monkeypatch.setenv('XDG_STATE_HOME', str(root / 'state'))
+    with pytest.raises(ValueError, match='changed line'):
+        exercise.operate(root, 'submit', {'kind': 'post-review', 'pr': PR, 'head': C,
+                         'event': 'COMMENT', 'comments': [candidate['comment']]})
+    assert exercise.operate(root, 'inspect')['writes'] == {}
+
+
+@pytest.mark.parametrize('permission', ['reply_to_feedback', 'post_review'])
+def test_route_permission_snapshot_requires_booleans(permission):
+    value, native = unanchored_case()
+    native['permissions'][permission] = 'true'
+    with pytest.raises(ValueError, match='permission booleans'):
+        followups.plan(value, native, {})
+
+
+@pytest.mark.parametrize('route', ['reply', 'review'])
+@pytest.mark.parametrize('phase', ['prepared', 'pending', 'verified'])
+def test_real_repost_journal_prevents_duplicate_across_new_process_and_discussion_lag(
+        tmp_path, monkeypatch, route, phase):
+    exercise = load_exercise()
+    root = tmp_path / 'fixture'
+    exercise.initialize(root)
+    monkeypatch.setenv('XDG_STATE_HOME', str(root / 'state'))
+    value, native = unanchored_case(replies=route == 'reply')
+    candidate = followups.plan(value, native, {})['findings'][0]
+    if route == 'reply':
+        request = candidate['request']
+    else:
+        # Actual ordinary review shape: the equivalent finding is one nested
+        # comment in a review with an empty general body and another finding.
+        request = {'kind': 'post-review', 'pr': PR, 'head': C, 'body': '', 'event': 'COMMENT',
+                   'comments': [{'path': 'code.py', 'line': 1, 'side': 'RIGHT',
+                                 'body': 'A distinct independently confirmed finding.'}, candidate['comment']]}
+    if phase == 'prepared':
+        remote = exercise.fixture.Remote(json.loads((root / 'remote.json').read_text()))
+        with patch.object(exercise.publisher, 'metadata', remote.metadata), \
+             patch.object(exercise.publisher, 'api', remote.api), \
+             patch.object(exercise.publisher, 'run', remote.run):
+            published = exercise.publisher.prepare(request)
+    else:
+        published = exercise.operate(root, 'submit', request, lose_response=phase == 'pending')
+    path = published['operation']
+    saved = followups.operations(PR, root)
+    assert list(saved.values())[0]['status'] == phase
+    before = Path(path).read_bytes()
+    value, native = unanchored_case(replies=route == 'reply', saved=saved)
+    native['findings'][0]['operations'] = list(saved)
+    # Original report remains unanchored and latestRequest deliberately still
+    # names that report; a verified current-head receipt is sufficient to avoid
+    # another request, without waiting for visible discussion or an age guess.
+    payload = tmp_path / 'recovery-input.json'
+    payload.write_text(json.dumps({'context': value, 'assessment': native, 'retained': saved}))
+    command = ('import json,sys; import finding_followups as f; '
+               'v=json.load(open(sys.argv[1])); '
+               'print(json.dumps(f.plan(v["context"],v["assessment"],v["retained"])))')
+    results = [json.loads(subprocess.check_output([sys.executable, '-c', command, str(payload)], text=True))
+               for _ in range(2)]
+    assert results[0] == results[1]
+    expected = 'recent_request' if phase == 'verified' else 'recover_required'
+    assert results[0]['findings'][0]['status'] == expected
+    assert Path(path).read_bytes() == before
+    if phase == 'pending':
+        assert exercise.operate(root, 'reconcile', operation=path)['status'] == 'verified'
+    writes = exercise.operate(root, 'inspect')['writes']
+    assert writes == ({} if phase == 'prepared' else {request['kind']: 1})
+
+
+def test_review_route_obeys_pending_request_review_barrier_while_reply_can_proceed():
+    saved = {'/pending/request.json': retained('pending')}
+    saved['/pending/request.json']['request']['kind'] = 'request-review'
+    for replies, expected in [(False, 'recover_required'), (True, 'eligible')]:
+        value, native = unanchored_case(replies=replies, saved=saved)
+        result = followups.plan(value, native, saved)['findings'][0]
+        assert result['status'] == expected
+
+
+def test_known_age_review_fallback_needs_no_equivalent_open_thread():
+    value = context()
+    native = assessment(value)
+    native['permissions'] = {'reply_to_feedback': False, 'post_review': True}
+    native['findings'][0]['location'] = {'path': 'code.py', 'line': 1, 'side': 'RIGHT'}
+    assert followups.plan(value, native, {})['findings'][0]['status'] == 'coverage_required'
+    native['findings'][0]['coverage'] = {'openThreads': ['C99'], 'currentRequests': [],
+                                       'evidence': 'Original inline thread remains open.'}
+    assert followups.plan(value, native, {})['findings'][0]['status'] == 'covered_request'
+
+
+@pytest.mark.parametrize('change', ['head', 'discussion', 'thread_state', 'publication'])
+def test_fallback_rejects_stale_coverage_without_discarding_original_evidence(change):
+    value, native = unanchored_case()
+    original = deepcopy(native)
+    inline, top = inputs()
+    top['comments'][0].update(author='qodo[bot]', text='Changed routing keys select stale replicas.')
+    saved = {}
+    if change == 'head':
+        inline['pullRequest']['headRefOid'] = D
+    elif change == 'discussion':
+        top['comments'][0]['text'] += ' This behavior is explicitly accepted for this PR.'
+    elif change == 'thread_state':
+        inline['threads'][0]['isResolved'] = True
+    else:
+        saved['/new/review.json'] = retained('verified')
+        saved['/new/review.json']['request']['kind'] = 'post-review'
+    current = followups.inspect(inline, top, linear_history([A, B, C]), saved)
+    with pytest.raises(ValueError, match='changed'):
+        followups.plan(current, native, saved)
+    assert native == original
+    assert followups.plan(value, native, {})['findings'][0]['status'] == 'review_candidate'
+
+
+def test_fallback_route_changes_with_current_permissions_without_mutating_verification():
+    value, native = unanchored_case()
+    original = deepcopy(native['findings'])
+    assert followups.plan(value, native, {})['findings'][0]['status'] == 'review_candidate'
+    native['permissions'] = {'reply_to_feedback': False, 'post_review': False}
+    assert followups.plan(value, native, {})['findings'][0]['status'] == 'publication_blocked'
+    native['permissions'] = {'reply_to_feedback': True, 'post_review': False}
+    assert followups.plan(value, native, {})['findings'][0]['request']['kind'] == 'reply-comment'
+    assert native['findings'] == original
