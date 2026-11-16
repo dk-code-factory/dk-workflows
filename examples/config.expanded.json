@@ -201,7 +201,7 @@
           "enabled": false,
           "method": "squash"
         },
-        "edit_architecture_decisions": true
+        "edit_architecture_decisions": false
       },
       "hooks": {
         "before_cycle": [],

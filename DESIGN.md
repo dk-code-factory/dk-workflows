@@ -713,7 +713,7 @@ alignment and independent mismatch verification. Retain only their definitions,
 original immutable results, native observations and dependency references in the
 existing PR manifest. There is no architecture database, completion flag or saved
 rendered comparison. Completion is derived from accepted task evidence and the
-existing publication journal. Native tools execute the prompts; helpers never
+existing review publication journal when rejecting a mismatch. Native tools execute the prompts; helpers never
 launch model sessions. Missing execution/verification evidence blocks dependents.
 An architecture-only rejection is a completed, separately named outcome, with
 ordinary review and approval/merge finalizers unperformed.
@@ -741,26 +741,30 @@ result bindings, so another attempt under the same task key cannot upgrade old
 coverage. Every normal review handoff includes the settled
 decision as governing context.
 
-Decision edits use the existing exact-body publication journal, constrained to
-Architecture decisions under the configured Decisions heading. Recognize the
-workflow's own edits only by exact reconciled before/after body chains in existing
-PR publication journals. Consecutive own edits normalize to the original governing
-body, avoiding self-invalidating analysis across policy or rationale updates. No
-lineage database is saved. External edits end the chain and still require impact;
-ambiguous or circular histories fail privately rather than guessing. The gate reads the live
-PR head and selected decision subsection before releasing reviewers; a historical
-receipt alone cannot establish that the decision remains published. Unrelated
-body edits require impact bound to the existing current PR metadata source.
-Code-only head updates preserve the receipt when the selected
-subsection remains exact and current analysis/alignment are accepted. Public text contains design
-reasoning and rejected alternatives, never private comparisons, handles or task
-state. Analysis-only and denied decision permission leave publication incomplete
-and private; disabled architecture bypasses all stages and new writes without
-removing retained evidence. An unavailable ordinary reviewer cannot block the
-separately preflighted architecture stage or its verified rejection.
+Architecture analysis and selection remain in original private managed results.
+Neither the architecture workflow nor Decisions/description skills add a generated
+architecture section to the PR description. Aligned review requires no description
+edit or publication receipt, including for analysis-only requests. The legacy
+`edit_architecture_decisions` setting remains readable but cannot enable these
+edits. Verified mismatch rejection still requires its independently checked
+`REQUEST_CHANGES` review and reconciled receipt under current permissions.
 
-The expected saving is avoiding repeated alternatives analysis, user selection
-and uncertain-publication reconstruction in later sessions. Consumers read compact
+Alignment references the existing current PR metadata artifact through
+`architecture_current_pr`, already used by impact. The gate checks its consumed
+body and head against the live PR. This adds no durable field, copied metadata,
+rendered summary or new store. Changed description, head or other governing inputs
+still require affected analysis and current alignment. Original comparison,
+selection, completed siblings, fingerprints, budgets and recovery evidence retain
+their existing identities. Historical publication journals and bounded-body
+normalization remain available for exact read-only recovery; do not resend an old
+description edit or require its section to remain published. External edits end
+historical normalization chains and require assessment; ambiguous or circular
+chains fail privately. Disabled architecture retains existing evidence and
+bypasses its stages. An unavailable ordinary reviewer cannot block the separately
+preflighted architecture stage or its verified rejection.
+
+The expected saving is avoiding repeated alternatives analysis, user selection,
+public-summary generation and description-publication recovery in later sessions. Consumers read compact
 status then only referenced evidence. Small definitions/references reuse the
 existing accepted-result and publication machinery, so their expected avoided
 native analysis and recovery cost exceeds their capture/validation/loading cost.

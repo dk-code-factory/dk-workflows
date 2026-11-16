@@ -398,10 +398,10 @@ def stage_execution(definition, stage, options):
     """Construct current guidance independently of retained analysis inputs."""
     config = options['architecture']
     execution = deepcopy(definition)
-    if stage == 'impact':
+    if stage in {'impact', 'alignment'}:
         source = execution.get('inputs', {}).get('architecture_current_pr')
         if not source or not isinstance(read(source).get('body'), str):
-            raise ValueError('Impact requires the existing current PR metadata input architecture_current_pr')
+            raise ValueError('Architecture ' + stage + ' requires the existing current PR metadata input architecture_current_pr')
     if 'git' not in execution:
         raise ValueError('Architecture stages require pinned Git inputs')
     if 'native_review' not in execution:
@@ -478,7 +478,7 @@ def journal(path, tasks, *, kind, head):
 
 
 def live_pr(pr):
-    """Current publication boundary, never a retained readiness cache."""
+    """Current architecture inputs, never a retained readiness cache."""
     from shared.github_reads import run
     try:
         result = run(['gh', 'pr', 'view', pr, '--json', 'url,headRefOid,body'],
@@ -552,18 +552,6 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
     head = pins.get('head')
     if not head:
         raise ValueError('Alignment requires current pinned Git inputs')
-    if analysis_only or not loaded['permissions']['edit_architecture_decisions']:
-        return {'outcome': 'publication_blocked', 'release_reviewers': False}
-    decision = journal(refs['decision_operation'], tasks, kind='edit-pr', head=None)
-    fields = decision['request']['approved']['fields']
-    if set(fields) != {'body'}:
-        raise ValueError('Architecture publication may edit only the bounded body subsection')
-    body = fields['body']
-    before = decision['request']['expected']['body']
-    rendered = render_decision(compared['report'], compared['policy']['scoring'], choice, selection=selection['report'])
-    heading = skill_config.effective('dk-workflows:dk-pr-decisions', tasks.store.subject['repository'], upstream)['options']['section_heading']
-    if body != replace_decision(before, rendered, heading=heading):
-        raise ValueError('Architecture publication changed unrelated PR text or lacks the settled decision')
     with evaluation(tasks) as context:
         pr = tasks.store.subject['pr']
         if pr not in context['live']:
@@ -571,19 +559,12 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
         live = context['live'][pr]
     if live['headRefOid'] != head:
         raise ValueError('PR head changed after architecture alignment')
-    current_section = decision_section(live['body'], heading)
-    bounds = architecture_bounds(live['body'], current_section) if current_section else None
-    if not bounds or live['body'][bounds[0]:bounds[1]].strip('\r\n') != rendered:
-        return {'outcome': 'publication_required', 'release_reviewers': False}
-    if live['body'] != body:
-        if impact is None:
-            return {'outcome': 'impact_required', 'release_reviewers': False}
-        current_pr = read(impact['spec']['inputs']['architecture_current_pr'])
-        if current_pr['body'] != live['body'] or current_pr.get('headRefOid') != head:
-            return {'outcome': 'impact_required', 'release_reviewers': False}
+    current_pr = read(alignment['spec']['inputs']['architecture_current_pr'])
+    if current_pr['body'] != live['body'] or current_pr.get('headRefOid') != head:
+        return {'outcome': 'impact_required', 'release_reviewers': False}
     result = alignment['report']['alignment']
     if result == 'aligned':
-        return {'outcome': 'aligned', 'release_reviewers': True, 'decision': rendered,
+        return {'outcome': 'aligned', 'release_reviewers': True,
                 'governing_evidence': [compared['reference'], selection['reference'], alignment['reference']]}
     if result == 'mismatch':
         verification = accepted(tasks, refs['verification'])
@@ -595,7 +576,7 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
         if verification['native_handle'] == alignment['native_handle']:
             raise ValueError('Architecture mismatch verification must use an independent native agent')
         if verification['report']['disposition'] == 'confirmed':
-            if not loaded['permissions']['post_review']:
+            if analysis_only or not loaded['permissions']['post_review']:
                 return {'outcome': 'publication_blocked', 'release_reviewers': False}
             review = journal(refs['review_operation'], tasks, kind='post-review', head=head)
             approved = review['request']['approved']
@@ -917,7 +898,7 @@ def _enforce(spec, tasks, *, options=None, upstream=None):
         spec['inputs']['architecture_applicability'] = result['applicability_reference']
         if current['stage'] == 'impact':
             spec['inputs']['architecture_impact'] = current['reference']
-    if result.get('decision'):
+    if result['outcome'] == 'aligned':
         alignment = accepted(tasks, execution['architecture_evidence']['alignment'])
         for pin in ('head', 'base', 'target'):
             if spec.get('git', {}).get(pin) != alignment['spec'].get('git', {}).get(pin):

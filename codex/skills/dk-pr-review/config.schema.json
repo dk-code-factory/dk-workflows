@@ -160,8 +160,8 @@
         },
         "edit_architecture_decisions": {
           "type": "boolean",
-          "description": "Edit only Architecture decisions entries under the configured Decisions heading.",
-          "default": true
+          "description": "Legacy compatibility option; architecture analysis stays private and never edits the PR description.",
+          "default": false
         }
       },
       "additionalProperties": false,
@@ -180,7 +180,7 @@
           "enabled": false,
           "method": "squash"
         },
-        "edit_architecture_decisions": true
+        "edit_architecture_decisions": false
       },
       "description": "Actions permitted by saved policy, subject to the actual assignment and narrower current user instructions."
     },

@@ -60,7 +60,7 @@
       "enabled": false,
       "method": "squash"
     },
-    "edit_architecture_decisions": true
+    "edit_architecture_decisions": false
   },
   "architecture": {
     "enabled": true,
