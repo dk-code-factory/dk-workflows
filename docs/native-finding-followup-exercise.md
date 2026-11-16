@@ -37,6 +37,11 @@ plan's `publicationAuthority:false` is preserved when the actor declines posting
 under denied permission. Ordinary review, CI and merge gates remain separate;
 this exercise does not establish their execution.
 
+The issue #199 implementation sample below predates the one-commit threshold
+introduced for #203; its recorded one-commit result describes the former rule.
+Current exercises must expect eligibility after one new PR commit and suppress
+reminders only at zero new commits.
+
 In the issue #199 implementation sample, the already-running actor authored
 eight bounded decisions from frozen sources and simulated independent review
 evidence. Three independently isolated source-route cases produced one fixture

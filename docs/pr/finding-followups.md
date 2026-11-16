@@ -1,7 +1,7 @@
 # Follow up on an unresolved finding
 
 An earlier report does not permanently suppress an actionable finding. After at
-least two new PR commits since its latest substantive report or fix request,
+least one new PR commit since its latest substantive report or fix request,
 independently verify it at the current head and, when authorized, ask the author
 for the correction still needed. Apply this rule to bots, people and earlier
 workflow runs. Commit age proves neither a defect nor publication permission.
@@ -131,8 +131,9 @@ ordering, disposition and the targeted correction; helpers do not infer them.
 Run the same command with `plan --assessment FILE` instead of `inspect`. It
 recaptures live discussion, commits and original intents and rejects a changed
 context or head. Results distinguish `excluded`, `uncertain_age`,
-`recover_required`, `recent_request` and `eligible`. An unchanged rerun or one new
-commit does not produce another eligible request after a substantive request.
+`recover_required`, `recent_request` and `eligible`. An unchanged rerun does not
+produce another eligible request after a substantive request. One or more new PR commits make a still-confirmed finding eligible,
+counting from the latest equivalent substantive request or verified follow-up.
 The plan is transient; retain original native decisions and publication journals
 through their existing task lifecycle, without copying the rendered plan.
 

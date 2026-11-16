@@ -298,7 +298,7 @@ def plan(context, assessments, retained):
             result.append({**outcome, 'status': 'uncertain_age'})
             continue
         age = min(anchors)
-        if age < 2:
+        if age < 1:
             result.append({**outcome, 'status': 'recent_request', 'newCommits': age})
             continue
         correction = finding.get('correction')

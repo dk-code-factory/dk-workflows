@@ -872,7 +872,11 @@ Complete discussion and retained original findings feed discovery and independen
 current-head verification even when a report already exists. Native agents group
 equivalent requests per finding, distinguish substantive requests from formatting
 edits, choose the latest request and preserve fixed/rejected/uncertain and explicit
-accepted/deferred dispositions. Age governs reminders only; unresolved findings
+accepted/deferred dispositions. At least one new PR commit after the latest
+substantive request makes a still-confirmed finding eligible for a reminder; zero
+new commits suppress
+unchanged reruns. Verified follow-up receipts reset that boundary even before
+the reply is visible in discussion. Age governs reminders only; unresolved findings
 retain their ordinary approval/CI/merge gates and posting permissions remain live.
 
 The read-only follow-up helper verifies existing complete evidence, captures a
