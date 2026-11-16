@@ -3,8 +3,10 @@
 `dk-pr-review` owns this default-enabled gate, before all configured tasks and
 parallel groups. `dk-pr-reviewers-run` used independently is unchanged. The
 independent dk-architecture catalog is separate. Resolve the owner's
-`architecture` and `permissions.edit_architecture_decisions` options through
-skill-owned configuration. Disabling architecture bypasses assessment, execution,
+`architecture` options through skill-owned configuration. Keep analysis and
+selection in private managed results; never add them to the PR description.
+`permissions.edit_architecture_decisions` remains accepted for saved-setting
+compatibility but has no effect. Disabling architecture bypasses assessment, execution,
 selection and new architecture publications; keep existing evidence.
 
 ## Manual architecture review
@@ -45,13 +47,13 @@ is needed. An interruption retains the request reference: start with compact
 through the normal managed lifecycle. Governing PR or policy changes still
 refresh affected work under this contract.
 
-Complete comparison, selection, bounded decision publication and current
+Complete comparison, selection and current
 alignment, including independent mismatch verification when needed. Use the same
 publication journal and gate validation below. Stop after architecture: an aligned
 manual result completes only this assignment, without executing incoming-review
 tasks or finalizers. A verified rejection remains architecture-only. Analysis-only
-instructions preserve private results but cannot claim public decision publication
-or a reconciled gate. Report pending selection, unavailable execution, permission
+instructions can complete aligned analysis while suppressing all external writes.
+Report pending selection, unavailable execution, review publication permission
 failures and uncertain publication privately; never claim ordinary review passed.
 
 After inspection, preflight only `--stage architecture` with `config.py
@@ -91,15 +93,13 @@ Stages run in this order:
    its source; elapsed time supplies no authorization. Bind the new choice source
    as an additional selection input to refresh selection without repeating
    unchanged alternatives analysis.
-4. Publish the settled typed `architecture` decision using the existing Decisions
-   publisher and journal. This permission covers only Architecture decisions
-   under the configured Decisions heading. Preserve other decisions and PR text. Bounded edits exclude fenced/HTML
-   examples and recognize indented ATX sibling boundaries; reject an unfinished example; unchanged insertion is idempotent.
-   The restricted journal may contain only a body edit, never a title edit.
-5. `alignment`: depends on comparison and selection. Compare the current pinned
+4. `alignment`: depends on comparison and selection. Compare the current pinned
    implementation; return `alignment:aligned|mismatch|uncertain`, `reason`,
    `evidence` and substantive `required_changes` for mismatch.
-6. For mismatch, `verification` depends on alignment and runs in a fresh independent
+   Reference the existing current PR metadata artifact (including `body` and
+   `headRefOid`) in `definition.inputs.architecture_current_pr`. The gate compares
+   that consumed evidence with the live PR without creating a published summary.
+5. For mismatch, `verification` depends on alignment and runs in a fresh independent
    native agent. Return `disposition:confirmed|rejected|uncertain`, `reason`,
    `evidence` and `required_changes` when confirmed. Publish exactly those design
    changes as `REQUEST_CHANGES`, with no ordinary findings, through `publish.py`.
@@ -112,22 +112,22 @@ the original analysis. Never use a bare flag or a PR text marker as coverage.
 
 Call `scripts/architecture.py --repository HOST/OWNER/REPO --pr URL gate --file
 REFS.json`. Refs contains `assessment`, and when required `comparison`,
-`selection`, `alignment`, `decision_operation`, plus `verification` and
+`selection`, `alignment`, plus `verification` and
 `review_operation` for rejection. Entries are managed task keys or existing
 publication operation paths. Missing/stale/corrupt evidence blocks the gate.
 For ordinary `dk-pr-review` task/finalizer definitions, pass these refs in
 `definition.options.architecture_evidence`; managed skill occurrences enforce the
 gate before claims and recapture it at completion. Include `analysis_only:true`
-under execution options when applicable. A skipped gate can release analysis-only
-review tasks; an applicable gate cannot publish its required decision and stays
-privately incomplete. Ordinary publications remain disabled by the caller.
+under execution options when applicable. Both skipped and aligned gates can
+release analysis-only review tasks. Ordinary publications remain disabled by the caller.
 
 `aligned` releases normal tasks with the decision's immutable source results as
 governing inputs. `architecture_rejected` is a completed architecture-only review,
 with `ordinary_review_complete:false`: stop without running ordinary reviewers,
 fork CI approval, PR approval or merge finalizers. Never imply code review ran.
-Publication permission failures and analysis-only instructions retain private
-analysis but cannot claim reconciled architecture publication or completion.
+An architecture-only rejection still requires authorized, reconciled review
+publication. Denied permission or analysis-only instructions keep that outcome
+privately incomplete; aligned analysis requires no publication.
 
 ## Comparison and scoring
 
@@ -182,21 +182,21 @@ for every unchosen option, including after a user chooses a different approach.
 
 ## Publication and freshness
 
-Use `architecture.py decision --comparison KEY --selection KEY --body CURRENT_BODY`
-to construct a bounded body edit, then review its exact public text. After an
-author update, add `--impact KEY` to reuse the unchanged accepted selection
-under current nonmaterial impact. Use the
-existing `publish.py` edit-pr journal, never a second publisher or blind retry.
-The helper returns `decision_type:architecture`; decision entries distinguish
-these from scope/behavior decisions. Publish chosen approach, rationale,
-considered alternatives, scores and rejection reasons. Keep full comparison
-reports, workflow handles, receipts and blockers private. Gate verification checks
-the exact bounded transformation and the reconciled receipt, then reads the
-live PR head and current selected subsection. Removal or changes block reviewer
-release pending publication. An unrelated body edit preserves an intact decision
-only after current nonmaterial impact bound to that metadata evidence; later
-external edits require assessment again. Reuse journal paths
-for read-only recovery and duplicate prevention.
+Keep chosen approach, rationale, alternatives, scores and rejection reasons in
+the original private comparison and selection results. Pass their immutable
+references to downstream reviewers. Do not publish an Architecture decisions
+section or another architecture summary in the PR description, including through
+Decisions or description skills. Existing public entries are not automatically
+rewritten or removed. A missing section or old `decision_operation` is not a gate
+requirement. Review publication remains required only for an independently
+confirmed architecture mismatch, using the existing journal and substantive
+required changes as `REQUEST_CHANGES`.
+
+Before releasing reviewers, check the live PR head and body against alignment's
+consumed `architecture_current_pr` evidence. Changed inputs require affected
+analysis and current alignment; a description edit cannot silently reuse old
+coverage. No description edit permission or publication receipt is needed for
+aligned analysis.
 
 After a change, prepare `impact` against the retained comparison and selection
 (or the retained assessment for an architecture skip) and current sources. Assess
@@ -220,7 +220,7 @@ Always run current implementation alignment after author changes. Changed scorin
 or review guidance refreshes comparison, including changed prompt contents under
 the same skill identity; historical reuse recaptures that guidance. Changed auto-pick policy refreshes only
 selection. Keep originals, completed siblings, claims, budgets and publication
-recovery references. Treat the workflow's Decisions edit as self-produced only
+recovery references. Treat a historical workflow Decisions edit as self-produced only
 when reconciled journals match the exact before/after body lineage. Trace successive
 own edits back to the original governing body; stop at an external edit. Ambiguous
 or circular lineage blocks normalization privately. External edits still require
@@ -229,7 +229,7 @@ that exact self-produced body deterministically. Capture normalized governing co
 without the recognized self-produced subsection; retain the live body as a
 publication input, not a copied analysis snapshot.
 
-The bounded editor recognizes [CommonMark heading and HTML block boundaries](https://spec.commonmark.org/0.31.2/#html-blocks), treating block HTML and list containers as opaque. Complete unknown HTML tags
+The legacy bounded editor retained for journal recovery recognizes [CommonMark heading and HTML block boundaries](https://spec.commonmark.org/0.31.2/#html-blocks), treating block HTML and list containers as opaque. Complete unknown HTML tags
 start blocks only outside an open paragraph; code-starting list items do not
 create lazy paragraph continuations that hide a root heading. Quoted HTML
 attributes retain their complete-tag grammar, and list-contained HTML/fences

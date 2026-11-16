@@ -129,9 +129,15 @@ def test_custom_rubric_and_sourced_manual_choice():
 
 
 def descriptor(spec, stage, deps=None, options=None):
-    value = definition(spec)
+    value = deepcopy(definition(spec))
     value['skill_identity'] = arch.REVIEW_SKILL if stage in {'assessment', 'comparison'} else arch.OWNER
     value['native_review'] = CONTRACT
+    if stage == 'alignment':
+        metadata = Path(spec['git']['checkout']).parent/'current-pr.json'
+        if not metadata.exists():
+            LIVE[PR] = {'url': PR, 'body': '# Summary\n\nText\n', 'headRefOid': spec['git']['head']}
+            write(metadata, LIVE[PR])
+        value['inputs']['architecture_current_pr'] = str(metadata)
     return {'kind': 'architecture', 'stage': stage, 'dependencies': deps or {},
             'definition': value, 'options': options or {}}
 
@@ -147,9 +153,11 @@ def finish(tasks, task, value, *, native=True, handle=None):
 
 def complete(tasks, spec, stage, value, deps=None, options=None):
     d = descriptor(spec, stage, deps, options)
-    if stage == 'impact':
+    if stage in {'impact', 'alignment'}:
         metadata = Path(spec['git']['checkout']).parent/'current-pr.json'
-        write(metadata, {**LIVE.get(PR, {'url': PR, 'body': 'Initial PR body'}), 'headRefOid': spec['git']['head']})
+        LIVE.setdefault(PR, {'url': PR, 'body': '# Summary\n\nText\n'})
+        LIVE[PR]['headRefOid'] = spec['git']['head']
+        write(metadata, LIVE[PR])
         d['definition']['inputs']['architecture_current_pr'] = str(metadata)
     task = tasks.prepare({'tasks': [d]})['tasks'][0]
     assert task['action'] == 'invoke'
@@ -174,14 +182,15 @@ def verified_journal(tasks, spec, *, kind, **fields):
     return operation['operation']
 
 
-def aligned(tasks, spec, refs=None, *, alignment='aligned', dependencies=None):
+def aligned(tasks, spec, refs=None, *, alignment='aligned', dependencies=None, legacy=False):
     refs = refs or initial(tasks, spec)
+    if legacy:
+        c = arch.accepted(tasks, refs['comparison'], historical='impact' in refs)
+        body = arch.replace_decision('# Summary\n\nText\n', arch.render_decision(c['report'], c['policy']['scoring'], 'implemented', selection=selection()), heading='Decisions')
+        refs['decision_operation'] = verified_journal(tasks, spec, kind='edit-pr', fields={'body': body})
+        LIVE[PR] = {'url': PR, 'headRefOid': spec['git']['head'], 'body': body}
     refs['alignment'] = complete(tasks, spec, 'alignment', {'alignment': alignment, 'reason': 'Compare state owner', 'required_changes': 'Use the selected state owner to preserve recovery.', 'evidence': ['code:1']},
                                  dependencies or {k: refs[k] for k in ('comparison', 'selection')})
-    c = arch.accepted(tasks, refs['comparison'], historical='impact' in refs)
-    body = arch.replace_decision('# Summary\n\nText\n', arch.render_decision(c['report'], c['policy']['scoring'], 'implemented', selection=selection()), heading='Decisions')
-    refs['decision_operation'] = verified_journal(tasks, spec, kind='edit-pr', fields={'body': body})
-    LIVE[PR] = {'url': PR, 'headRefOid': spec['git']['head'], 'body': body}
     return refs
 
 
@@ -239,8 +248,12 @@ def test_pending_manual_selection_and_aligned_continuation(case):
     assert result['outcome'] == 'aligned' and result['release_reviewers']
     task = tasks.prepare({'tasks': [ordinary(spec, refs)]})['tasks'][0]
     assert len([k for k in task['assignment']['inputs'] if k.startswith('architecture_governing')]) == 3
-    assert not arch.gate(tasks, refs, analysis_only=True)['release_reviewers']
-    assert not arch.gate(tasks, refs, options={'permissions': {'edit_architecture_decisions': False}})['release_reviewers']
+    assert arch.gate(tasks, refs, analysis_only=True)['release_reviewers']
+    for legacy_permission in (False, True):
+        assert arch.gate(tasks, refs, options={'permissions': {'edit_architecture_decisions': legacy_permission}})['release_reviewers']
+    assert 'decision_operation' not in refs
+    assert 'decision' not in result
+    assert LIVE[PR]['body'] == '# Summary\n\nText\n'
 
 
 def test_independently_verified_architecture_only_rejection_stops_normal_work(case):
@@ -256,6 +269,7 @@ def test_independently_verified_architecture_only_rejection_stops_normal_work(ca
         tasks.prepare({'tasks': [ordinary(spec, refs)]})
     assert not any('skill_configuration' in e['components'] for e in read(store.manifest)['entries'].values())
     assert arch.gate(tasks, refs, options={'permissions': {'post_review': False}})['outcome'] == 'publication_blocked'
+    assert arch.gate(tasks, refs, analysis_only=True)['outcome'] == 'publication_blocked'
 
 
 def test_primary_omissions_and_missing_native_evidence_remain_incomplete(case):
@@ -286,14 +300,17 @@ def test_decisions_are_typed_bounded_and_preserve_unrelated_text():
 
 def test_own_publication_normalization_requires_exact_reconciled_body(case):
     spec, store = case; tasks = Tasks(REPO, PR)
-    refs = aligned(tasks, spec)
+    refs = aligned(tasks, spec, legacy=True)
     operation = read(refs['decision_operation'])
     body = operation['request']['approved']['fields']['body']
     assert arch.governing_body(body, refs['decision_operation'], tasks) == operation['request']['expected']['body']
     assert arch.governing_body(body+'External edit', refs['decision_operation'], tasks) == body+'External edit'
     operation['status'] = 'pending'; operation['intent'] = {'operation_id': operation['operation_id'], 'request_hash': operation['request_hash']}; write(refs['decision_operation'], operation)
     with pytest.raises(ValueError, match='reconciled'):
-        arch.gate(tasks, refs)
+        arch.governing_body(body, refs['decision_operation'], tasks)
+    # Old intents are retained for publisher recovery, not architecture coverage.
+    assert arch.gate(tasks, refs)['release_reviewers']
+    assert read(refs['decision_operation']) == operation
 
 
 def test_unchanged_fresh_process_reuse_and_partial_claim_recovery(case, tmp_path):
@@ -415,9 +432,7 @@ def test_changed_author_code_uses_targeted_impact_and_current_alignment(case):
     retained = {name: arch.accepted(tasks, refs[name], historical=True)['reference'] for name in ('assessment', 'comparison', 'selection')}
     originals = {name: Path(path).read_bytes() for name, path in retained.items()}
     refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'Applicability, feasible choices and selection confidence unchanged; only implementation detail changed', 'evidence': ['diff:1']}, {k: refs[k] for k in ('comparison', 'selection')})
-    decision_operation = refs['decision_operation']
     refs['alignment'] = complete(tasks, spec, 'alignment', {'alignment': 'aligned', 'reason': 'Current code still uses the selected state owner', 'evidence': ['code:1']}, {k: refs[k] for k in ('comparison', 'selection', 'impact')})
-    refs['decision_operation'] = decision_operation
     LIVE[PR]['headRefOid'] = spec['git']['head']
     assert arch.gate(tasks, refs)['outcome'] == 'aligned'
     assert Path(reference).read_bytes() == original
@@ -569,11 +584,9 @@ def test_unclosed_example_blocks_decisions_edit_without_deleting_text():
 
 def test_restricted_decision_receipt_cannot_include_title_edit(case):
     spec, store = case; tasks = Tasks(REPO, PR)
-    refs = aligned(tasks, spec)
+    refs = aligned(tasks, spec, legacy=True)
     body = read(refs['decision_operation'])['request']['approved']['fields']['body']
     refs['decision_operation'] = verified_journal(tasks, spec, kind='edit-pr', fields={'body': body, 'title': 'Unrelated title edit'})
-    with pytest.raises(ValueError, match='only the bounded body'):
-        arch.gate(tasks, refs)
     with pytest.raises(ValueError, match='unrelated fields'):
         arch.governing_body(body, refs['decision_operation'], tasks)
 
@@ -647,24 +660,27 @@ def test_raw_html_blocks_preserve_apparent_decisions(opener, closer):
     assert example in updated and '### Other\nKeep this choice.' in updated
 
 
-def test_historical_receipt_cannot_release_after_decision_is_removed(case):
+def test_removed_legacy_decision_needs_no_republication_after_current_assessment(case):
     spec, store = case; tasks = Tasks(REPO, PR)
-    refs = aligned(tasks, spec)
+    refs = aligned(tasks, spec, legacy=True)
+    operation = Path(refs['decision_operation']).read_bytes()
     LIVE[PR]['body'] = 'Author removed Architecture decisions.\n'
     Path(spec['inputs']['context']).write_text('Current discussion: same design; author removed public decision')
     refs['assessment'] = complete(tasks, spec, 'assessment', {'required': True, 'reason': 'Same state boundary', 'evidence': ['discussion']})
     refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'No solution changes; public decision was removed', 'evidence': ['discussion']}, {'comparison': refs['comparison']})
     refs['selection'] = complete(tasks, spec, 'selection', selection(), {k: refs[k] for k in ('comparison', 'impact')})
     refs['alignment'] = complete(tasks, spec, 'alignment', {'alignment': 'aligned', 'reason': 'Same state owner', 'evidence': ['code']}, {k: refs[k] for k in ('comparison', 'selection', 'impact')})
-    assert arch.gate(tasks, refs) == {'outcome': 'publication_required', 'release_reviewers': False}
-    with pytest.raises(ValueError, match='publication_required'):
-        tasks.prepare({'tasks': [ordinary(spec, refs)]})
+    assert arch.gate(tasks, refs)['outcome'] == 'aligned'
+    assert tasks.prepare({'tasks': [ordinary(spec, refs)]})['tasks'][0]['action'] == 'invoke'
+    assert LIVE[PR]['body'] == 'Author removed Architecture decisions.\n'
+    assert Path(refs['decision_operation']).read_bytes() == operation
 
 
-def test_unrelated_external_body_change_needs_current_impact_but_reuses_receipt(case):
+@pytest.mark.parametrize('legacy', [False, True])
+def test_unrelated_external_body_change_needs_current_impact_but_reuses_analysis(case, legacy):
     spec, store = case; tasks = Tasks(REPO, PR)
-    refs = aligned(tasks, spec)
-    operation = refs['decision_operation']
+    refs = aligned(tasks, spec, legacy=legacy)
+    operation = refs.get('decision_operation')
     LIVE[PR]['body'] = 'Updated description.\n\n' + LIVE[PR]['body']
     assert arch.gate(tasks, refs)['outcome'] == 'impact_required'
     Path(spec['inputs']['context']).write_text('Current discussion: typo in unrelated description fixed')
@@ -673,7 +689,7 @@ def test_unrelated_external_body_change_needs_current_impact_but_reuses_receipt(
     refs['selection'] = complete(tasks, spec, 'selection', selection(), {k: refs[k] for k in ('comparison', 'impact')})
     refs['alignment'] = complete(tasks, spec, 'alignment', {'alignment': 'aligned', 'reason': 'Same implementation', 'evidence': ['code']}, {k: refs[k] for k in ('comparison', 'selection', 'impact')})
     assert arch.gate(tasks, refs)['outcome'] == 'aligned'
-    assert refs['decision_operation'] == operation
+    assert refs.get('decision_operation') == operation
     LIVE[PR]['body'] = 'Another external edit.\n\n' + LIVE[PR]['body']
     assert arch.gate(tasks, refs)['outcome'] == 'impact_required'
 
