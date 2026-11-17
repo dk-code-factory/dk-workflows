@@ -329,9 +329,17 @@ def plan(context, assessments, retained, *, cwd=None):
                     anchors.append(age)
             else:
                 uncertain = uncertain or path == latest
-        route = 'reply-inline' if source['kind'] == 'inline_comment' else 'reply-comment'
-        if permissions is not None and not permissions['reply_to_feedback']:
-            route = 'post-review' if permissions['post_review'] else None
+        # Reuse an equivalent open inline thread, regardless of where the
+        # finding was first reported. Source provenance does not select a
+        # top-level destination for a new correction request.
+        threads = [context['sources'][item['reference']] for item in requests
+                   if context['sources'][item['reference']]['kind'] == 'inline_comment'
+                   and context['sources'][item['reference']].get('resolved') is False]
+        destination = source if source in threads else next(iter(threads), None)
+        if destination is not None and (permissions is None or permissions['reply_to_feedback']):
+            route = 'reply-inline'
+        else:
+            route = 'post-review' if permissions is None or permissions['post_review'] else None
         # Any equivalent undispatched intent retains its original recovery path;
         # do not evade it with another route, body or action id.
         pending = [path for path, value in retained.items()
@@ -399,14 +407,18 @@ def plan(context, assessments, retained, *, cwd=None):
             result.append({**outcome, **details, 'status': 'review_candidate',
                            'sourceRecord': source_record, 'comment': {**location, 'body': body}})
             continue
-        request = {'pr': context['pr'], 'head': context['head'], 'source': source_record, 'body': body}
-        if source['kind'] == 'inline_comment':
-            if type(source['parent']) is not int or source['parent'] <= 0:
-                raise ValueError('original inline parent database ID required')
-            request.update(kind='reply-inline', parent=source['parent'])
-            source_record['thread_id'] = source['thread']
-        else:
-            request.update(kind='reply-comment', body=f'In Reply To: [Earlier finding]({url})\n\n' + body)
+        if type(destination['parent']) is not int or destination['parent'] <= 0:
+            raise ValueError('original inline parent database ID required')
+        destination_url = destination['url']
+        if (not isinstance(destination_url, str) or '#' not in destination_url or
+                destination_url.partition('#')[0].rstrip('/').lower() != context['pr'].rstrip('/').lower()):
+            raise ValueError('inline source URL must belong to this PR')
+        if type(destination['id']) is not int or destination['id'] <= 0:
+            raise ValueError('inline source database ID required')
+        destination_record = {name: destination[name] for name in ('kind', 'id', 'url')}
+        destination_record['thread_id'] = destination['thread']
+        request = {'pr': context['pr'], 'head': context['head'], 'source': destination_record,
+                   'body': body, 'kind': 'reply-inline', 'parent': destination['parent']}
         result.append({**outcome, **details, 'status': 'eligible', 'request': request})
     return {'head': context['head'], 'findings': result, 'publicationAuthority': False}
 

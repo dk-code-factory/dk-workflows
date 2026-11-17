@@ -59,6 +59,10 @@ def assessment(value, source='C99', **changes):
                'requests': [request], 'operations': [],
                'latestRequest': source,
                'correction': 'Please return an empty list before indexing input in code.py:42.'}
+    if source != 'C99':
+        finding.update(coverage={'openThreads': [], 'currentRequests': [],
+                                 'evidence': 'No equivalent open thread or current request exists.'},
+                       location={'path': 'code.py', 'line': 1, 'side': 'RIGHT'})
     finding.update(changes)
     return {'head': value['head'], 'context': evidence.digest(value), 'findings': [finding]}
 
@@ -89,24 +93,80 @@ def test_zero_and_one_commit_boundary_for_each_source(source, anchor, age, statu
     if source == 'issuecomment-901':
         native['findings'][0]['requests'][0]['commit'] = anchor
     result = followups.plan(value, native, {})['findings'][0]
-    assert (result['status'], result['newCommits']) == (status, age)
-    assert ('request' in result) is (status == 'eligible')
+    expected = 'review_candidate' if status == 'eligible' and source != 'C99' else status
+    assert (result['status'], result['newCommits']) == (expected, age)
+    assert ('request' in result) is (expected == 'eligible')
 
 
-@pytest.mark.parametrize('source,kind,parent', [('C99', 'reply-inline', 41),
-            ('pullrequestreview-789', 'reply-comment', None), ('issuecomment-901', 'reply-comment', None)])
-def test_original_source_and_destination_are_preserved(source, kind, parent):
+@pytest.mark.parametrize('source', ['C99', 'pullrequestreview-789', 'issuecomment-901'])
+def test_original_source_is_preserved_without_selecting_a_top_level_destination(source):
     result = outcome(source=source)
-    request = result['request']
-    assert request['kind'] == kind
-    assert request.get('parent') == parent
-    assert request['source']['url'] == context()['sources'][source]['url']
-    assert C in request['body'] and request['source']['url'] in request['body']
-    if kind == 'reply-inline':
+    if source == 'C99':
+        request = result['request']
+        assert request['kind'] == 'reply-inline' and request['parent'] == 41
         assert request['source'] == {'kind': 'inline_comment', 'id': 99,
               'url': PR + '#discussion_r99', 'thread_id': 'PRRT_fixture'}
+        body = request['body']
     else:
-        assert request['body'].startswith('In Reply To: [Earlier finding](')
+        assert result['status'] == 'review_candidate' and 'request' not in result
+        assert result['sourceRecord']['url'] == context()['sources'][source]['url']
+        body = result['comment']['body']
+    assert C in body and context()['sources'][source]['url'] in body
+
+
+@pytest.mark.parametrize('source', ['pullrequestreview-789', 'issuecomment-901'])
+def test_equivalent_inline_thread_is_reused_for_a_summary_finding(source, tmp_path, monkeypatch):
+    value = context()
+    native = assessment(value, source=source)
+    finding = native['findings'][0]
+    finding['requests'].append({'reference': 'C99'})
+    finding['coverage']['openThreads'] = ['C99']
+    native['permissions'] = {'reply_to_feedback': True, 'post_review': True}
+    original = deepcopy(native)
+    candidate = followups.plan(value, native, {})['findings'][0]
+    request = candidate['request']
+    assert candidate['source'] == source and candidate['status'] == 'eligible'
+    assert request['kind'] == 'reply-inline' and request['parent'] == 41
+    assert request['source']['id'] == 99 and request['source']['thread_id'] == 'PRRT_fixture'
+    assert value['sources'][source]['url'] in request['body']
+    assert native == original
+    exercise = load_exercise()
+    root = tmp_path / 'fixture'
+    exercise.initialize(root)
+    monkeypatch.setenv('XDG_STATE_HOME', str(root / 'state'))
+    published = exercise.operate(root, 'submit', request, lose_response=True)
+    assert exercise.operate(root, 'reconcile', operation=published['operation'])['status'] == 'verified'
+    saved = followups.operations(PR, root)
+    value = context(retained=saved)
+    native.update(context=evidence.digest(value))
+    finding['operations'] = list(saved)
+    assert followups.plan(value, native, saved)['findings'][0]['status'] == 'recent_request'
+    assert exercise.operate(root, 'inspect')['writes'] == {'reply-inline': 1}
+
+
+@pytest.mark.parametrize('source', ['pullrequestreview-789', 'issuecomment-901'])
+@pytest.mark.parametrize('missing,status', [('coverage', 'coverage_required'),
+                                         ('location', 'location_required')])
+def test_summary_without_inline_destination_never_falls_back_to_top_level(source, missing, status):
+    value = context()
+    native = assessment(value, source=source)
+    del native['findings'][0][missing]
+    native['permissions'] = {'reply_to_feedback': True, 'post_review': True}
+    result = followups.plan(value, native, {})['findings'][0]
+    assert result['status'] == status and result['disposition'] == 'confirmed'
+    assert 'request' not in result
+    native['permissions']['post_review'] = False
+    assert followups.plan(value, native, {})['findings'][0]['status'] == 'publication_blocked'
+
+
+def test_resolved_equivalent_thread_is_not_reused_for_a_summary():
+    inline, top = inputs()
+    inline['threads'][0]['isResolved'] = True
+    value = followups.inspect(inline, top, linear_history([A, B, C]), {})
+    native = assessment(value, source='issuecomment-901')
+    native['findings'][0]['requests'].append({'reference': 'C99'})
+    result = followups.plan(value, native, {})['findings'][0]
+    assert result['status'] == 'review_candidate' and 'request' not in result
 
 
 @pytest.mark.parametrize('disposition', ['fixed', 'rejected', 'uncertain', 'accepted', 'deferred'])
@@ -140,7 +200,7 @@ def test_unknown_equivalent_request_and_unsupported_link_are_uncertain():
     value = context()
     assert outcome(value, requests=[{'reference': 'C99'}, {'reference': 'issuecomment-901'}],
                    latestRequest='issuecomment-901')['status'] == 'uncertain_age'
-    assert outcome(value, source='issuecomment-901', requests=[{
+    assert outcome(value, source='issuecomment-901', coverage=None, requests=[{
         'reference': 'issuecomment-901', 'commit': B, 'anchorEvidence': 'Unproven guess'}])['status'] == 'uncertain_age'
     assert outcome(value, requests=[{'reference': 'C99', 'commit': D}])['status'] == 'uncertain_age'
 
@@ -150,6 +210,7 @@ def test_later_evidenced_request_can_supersede_an_unanchored_original():
     result = outcome(value, source='issuecomment-901', requests=[{'reference': 'issuecomment-901'},
                      {'reference': 'C99'}], latestRequest='C99')
     assert result['status'] == 'eligible' and result['newCommits'] == 2
+    assert result['request']['source']['id'] == 99
 
 
 def test_formatting_only_bot_summary_edit_keeps_each_findings_anchor():
@@ -176,7 +237,7 @@ def test_one_summary_edit_does_not_reset_every_findings_substantive_age():
     native['findings'].append(second)
     result = followups.plan(value, native, {})
     assert [(item['status'], item['newCommits']) for item in result['findings']] == [
-        ('eligible', 2), ('eligible', 1)]
+        ('review_candidate', 2), ('review_candidate', 1)]
 
 
 @pytest.mark.parametrize('history', [[A, C], [C], [A, B, C]])
@@ -237,8 +298,10 @@ def test_source_repository_casing_preserves_exact_publication_url(source):
     value = followups.inspect(inline, top, linear_history([A, B, C]), {})
     result = outcome(value, source=source)
     url = value['sources'][source]['url']
-    assert result['request']['source']['url'] == url
-    assert url in result['request']['body']
+    record = result['request']['source'] if source == 'C99' else result['sourceRecord']
+    body = result['request']['body'] if source == 'C99' else result['comment']['body']
+    assert record['url'] == url
+    assert url in body
 
 
 @pytest.mark.parametrize('url', [PR.replace('/owner/', '/other/') + '#discussion_r99',
@@ -263,6 +326,8 @@ def test_pending_operations_follow_publisher_independent_reply_policy(source, ki
     original = deepcopy(saved)
     native = assessment(value, source=source, operations=list(saved) if equivalent else [])
     result = followups.plan(value, native, saved)['findings'][0]
+    if kind == 'request-review' and source != 'C99':
+        expected = 'recover_required'
     assert result['status'] == expected
     assert saved == original
 
@@ -470,7 +535,9 @@ def test_followup_payload_uses_existing_single_dispatch_journal(tmp_path, monkey
     root = tmp_path / 'fixture'
     exercise.initialize(root)
     monkeypatch.setenv('XDG_STATE_HOME', str(root / 'state'))
-    request = outcome(source=source)['request']
+    candidate = outcome(source=source)
+    request = candidate.get('request') or {'kind': 'post-review', 'pr': PR, 'head': C,
+                                          'event': 'COMMENT', 'comments': [candidate['comment']]}
     first = exercise.operate(root, 'submit', request, lose_response=True)
     operation = first['operation']
     original = publication.load(operation)
@@ -723,8 +790,8 @@ def unanchored_case(*, rewritten=False, replies=False, reviews=True, saved=None)
 
 
 @pytest.mark.parametrize('rewritten', [False, True])
-@pytest.mark.parametrize('replies,reviews,status', [(True, False, 'eligible'),
-                (False, True, 'review_candidate'), (True, True, 'eligible'),
+@pytest.mark.parametrize('replies,reviews,status', [(True, False, 'publication_blocked'),
+                (False, True, 'review_candidate'), (True, True, 'review_candidate'),
                 (False, False, 'publication_blocked')])
 def test_unanchored_bot_summary_uses_only_an_authorized_route(rewritten, replies, reviews, status):
     value, native = unanchored_case(rewritten=rewritten, replies=replies, reviews=reviews)
@@ -735,7 +802,7 @@ def test_unanchored_bot_summary_uses_only_an_authorized_route(rewritten, replies
     assert 'newCommits' not in finding  # no invented age for either missing/rewritten anchors
     if status != 'publication_blocked':
         assert finding['unknownAgeFallback'] is True
-        body = finding['request']['body'] if replies else finding['comment']['body']
+        body = finding['comment']['body']
         assert PR + '#issuecomment-901' in body and C in body
         assert native['findings'][0]['correction'] in body
     if status == 'review_candidate':
@@ -824,7 +891,12 @@ def test_real_repost_journal_prevents_duplicate_across_new_process_and_discussio
     value, native = unanchored_case(replies=route == 'reply')
     candidate = followups.plan(value, native, {})['findings'][0]
     if route == 'reply':
-        request = candidate['request']
+        # A top-level follow-up retained from an older version must still
+        # recover its exact operation after the routing policy changes.
+        request = {'kind': 'reply-comment', 'pr': PR, 'head': C,
+                   'source': candidate['sourceRecord'],
+                   'body': f'In Reply To: [Earlier finding]({PR}#issuecomment-901)\n\n'
+                           + candidate['comment']['body']}
     else:
         # Actual ordinary review shape: the equivalent finding is one nested
         # comment in a review with an empty general body and another finding.
@@ -866,10 +938,10 @@ def test_real_repost_journal_prevents_duplicate_across_new_process_and_discussio
     assert writes == ({} if phase == 'prepared' else {request['kind']: 1})
 
 
-def test_review_route_obeys_pending_request_review_barrier_while_reply_can_proceed():
+def test_summary_review_route_keeps_pending_request_barrier_even_with_reply_permission():
     saved = {'/pending/request.json': retained('pending')}
     saved['/pending/request.json']['request']['kind'] = 'request-review'
-    for replies, expected in [(False, 'recover_required'), (True, 'eligible')]:
+    for replies, expected in [(False, 'recover_required'), (True, 'recover_required')]:
         value, native = unanchored_case(replies=replies, saved=saved)
         result = followups.plan(value, native, saved)['findings'][0]
         assert result['status'] == expected
@@ -998,5 +1070,5 @@ def test_fallback_route_changes_with_current_permissions_without_mutating_verifi
     native['permissions'] = {'reply_to_feedback': False, 'post_review': False}
     assert followups.plan(value, native, {})['findings'][0]['status'] == 'publication_blocked'
     native['permissions'] = {'reply_to_feedback': True, 'post_review': False}
-    assert followups.plan(value, native, {})['findings'][0]['request']['kind'] == 'reply-comment'
+    assert followups.plan(value, native, {})['findings'][0]['status'] == 'publication_blocked'
     assert native['findings'] == original

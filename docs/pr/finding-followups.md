@@ -134,8 +134,8 @@ an unknown latest anchor uncertain unless the fallback's coverage assessment is
 supplied. The verifier owns completeness, substantive equivalence, ordering,
 disposition and the targeted correction; helpers do not infer them.
 
-For fallback assessment, add finding-specific `coverage` to each original native
-verification result, with `openThreads` listing equivalent unresolved inline
+For review-route or unknown-age fallback assessment, add finding-specific
+`coverage` to each original native verification result, with `openThreads` listing equivalent unresolved inline
 comment references, `currentRequests` listing current substantive request
 references or equivalent operation paths, and `evidence` explaining the complete
 discussion/journal assessment. Include all equivalent thread comments among
@@ -167,14 +167,26 @@ a supported changed line at the current head for review publication. Explicit
 boolean route grants are required for an unknown-age fallback; they are a
 transient selection input, never publication authority or a saved permission
 snapshot. Re-resolve current permissions before planning and publishing. Legacy
-age-only assessments without these fields still produce reply candidates subject
-to the ordinary authorization check, but cannot enable an unknown-age fallback.
+age-only assessments without these fields can still produce inline-thread reply
+candidates subject to ordinary authorization, but cannot enable an unknown-age
+fallback or bypass the review route's coverage/location requirements.
 
-Prefer the original source reply when `reply_to_feedback` is authorized. If it is
-denied and `post_review` is authorized, assess the review route rather than
-silently treating the finding as handled. Return one inline review candidate only
-when coverage establishes no equivalent open thread/current request and a changed
-line is supplied. Never expand reply permission from review permission. If neither
+Choose the destination from equivalent open inline threads and the current diff,
+independently of whether the old finding was in an inline comment, review body or
+top-level summary. When `reply_to_feedback` is authorized, reuse the original open
+inline thread if available; otherwise reuse an equivalent open inline thread
+identified among `requests`. Only finding-specific semantic equivalence permits
+reuse: belonging to the same review or containing a code link is insufficient.
+The reply's publication `source` identifies that inline comment and its original
+thread root; its body still links the original finding, even when that finding
+was in a summary.
+
+If no authorized inline-thread reply is available and `post_review` is authorized,
+assess ordinary changed-line review publication. Return one inline review candidate
+only when coverage establishes no equivalent open thread/current request and a changed
+line is supplied. Do not create a top-level `reply-comment` reminder because the
+earlier report was top-level or in a review body. Never expand reply permission
+from review permission, or review permission from reply permission. If neither
 route is authorized, or required evidence/location is missing, report the affected
 publication as incomplete privately; do not clear its finding disposition.
 
@@ -196,13 +208,11 @@ through their existing task lifecycle, without copying the rendered plan.
 
 For an eligible independently confirmed finding, review the generated exact
 public body and use its `request` through the configured publisher and ordinary
-[publication journal](publication.md). An inline reply stays under the original
-thread root and retains the finding comment's own source. Review bodies and
-top-level findings receive source-linked `reply-comment` responses beginning
-with `In Reply To:`. Every response links the earlier finding, identifies the
-current head and asks the author for a concrete supported correction. Embedded
-file/line references never create a new inline destination. Follow-ups use this
-source route for ordinary reminders. For a `review_candidate`, add the generated
+[publication journal](publication.md). An inline reply stays under the selected
+equivalent thread's original root and retains its inline source. Every response
+links the earlier finding, identifies the current head and asks the author for a
+concrete supported correction. Embedded file/line references never create a new
+inline parent. For a `review_candidate`, add the generated
 `comment` to the configured publisher's ordinary `post-review` payload instead,
 retaining its original source link and current correction. Honor the publisher's
 configured review event and completion rules; partial reviews still use `COMMENT`.
@@ -226,3 +236,7 @@ verification/evidence stays incomplete. Use the original operation on interrupti
 and reconcile uncertain writes read-only before further sends. Do not regenerate
 wording to evade an existing intent. Publication permission grants no approval,
 merge, fixes, thread resolution or budget extension.
+
+Preserve and reconcile any top-level follow-up intent or receipt retained from
+an earlier version. The new destination rule never authorizes replacing a prepared
+or uncertain old operation with a new inline request.
