@@ -985,11 +985,26 @@ Unknown or rewritten report anchors cannot permanently suppress a newly confirme
 finding that has no equivalent open thread or current substantive request. Native
 verification records finding-specific coverage evidence in its existing original
 result. The transient planner checks referenced thread states and current
-receipts, prefers an authorized source reply and otherwise hands a changed-line
-candidate to ordinary review publication under explicit effective route grants.
+receipts and hands a changed-line candidate to ordinary review publication under
+explicit effective route grants.
 Age remains unknown; no threshold proof is manufactured. A general bot summary is
 not an unresolved thread. Coverage/location or permission gaps remain incomplete,
 and fixed/rejected/accepted/deferred/uncertain dispositions remain excluded.
+
+Destination selection is independent of the original report location. For an
+age-eligible finding, prefer its original open inline thread or an equivalent
+open inline thread from the verified substantive requests. The inline publisher
+binds the selected comment and root while the body preserves the original finding
+link. Otherwise use ordinary changed-line review publication with its coverage,
+location and permission checks; never generate a top-level reminder from a review
+body or summary. Missing permissions/location leave publication incomplete.
+Existing top-level follow-up operations retain their original recovery identity.
+This changes only transient routing, adds no state and avoids unnecessary summary
+reply generation/recovery across sessions. Existing analysis and receipts remain
+reusable within their governing freshness boundaries; changed routing guidance
+refreshes affected work without resetting siblings or caches. API dollar savings
+have not been measured.
+
 Equivalent prepared and pending intents recover their original operation;
 verified current-head receipts suppress reposts before discussion visibility,
 including findings nested in aggregated review payloads. The ordinary publisher

@@ -8,7 +8,8 @@ with an external runner. When a fresh native verifier is unavailable, keep that
 production requirement explicitly incomplete; supplied fixture verification is
 only a stand-in for this bounded interpretation sample.
 
-Supply complete original sources for an inline finding, a review-body finding
+Supply current changed-line locations and effective route permissions alongside
+complete original sources for an inline finding, a review-body finding
 with an embedded file/line reference and a top-level report with an explicit
 report-head link. Give the actor a pinned A/B/C PR commit list, a frozen current
 head reproduction/disposition and the current recipe, skill and follow-up
@@ -23,8 +24,12 @@ Use separate isolated fixture directories for the three source-route cases so
 one case's legitimate reply does not create a recent request for the next case.
 Feed each actor-authored assessment to the actual transient planner. With
 explicit fixture-only posting authorization, submit eligible generated requests
-through the offline publisher interface. Lose at least one write response and
-recover its original operation read-only. Reinspect existing journal operations
+through the offline publisher interface, batching `review_candidate` comments
+into ordinary review payloads. Include a summary finding with an equivalent open
+inline thread to check thread reuse, and a summary without such a thread to check
+changed-line review publication. Neither case should create a top-level reminder.
+Lose at least one write response and recover its original operation read-only.
+Reinspect existing journal operations
 with unchanged frozen discussion to simulate discussion-read lag, and assess
 an unchanged fresh-session rerun. Inspect source, original parent, exact body,
 receipts and write counts. Do not create a second registry or modify operation
@@ -38,7 +43,8 @@ under denied permission. Ordinary review, CI and merge gates remain separate;
 this exercise does not establish their execution.
 
 The issue #199 implementation sample below predates the one-commit threshold
-introduced for #203; its recorded one-commit result describes the former rule.
+introduced for #203 and the current inline destination rule; its recorded
+one-commit result and top-level reply destinations describe former behavior.
 Current exercises must expect eligibility after one new PR commit and suppress
 reminders only at zero new commits.
 
@@ -57,3 +63,13 @@ the finding remained confirmed. This is an in-session interpretation sample,
 not independent native delegation, live GitHub capture, full workflow execution
 or measured API dollar savings. Offline tests separately exercise complete
 capture, capped-list local history, source changes and publication recovery.
+
+A bounded in-session interpretation sample for the inline destination rule
+passed six frozen cases: original inline thread reuse, summary-to-equivalent-thread
+reuse, ordinary changed-line publication for a summary and review body, missing
+changed-line location, and reply-only permission without an inline destination.
+Each of the four publishable cases lost its fixture write response, reconciled
+the original operation and suppressed an unchanged rerun during discussion lag
+with exactly one write. No case generated a new top-level reminder. Verification
+dispositions were supplied premises; this sample does not establish independent
+native verification, live GitHub behavior or measured API dollar savings.

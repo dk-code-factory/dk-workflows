@@ -20,7 +20,12 @@ Requests:
 
 Select reply destinations from the structured original PR evidence. An actual inline review comment uses `reply-inline` in its originating thread; `parent` is the root comment's database id, including when answering a later reply. Preserve that later comment's own id and exact URL as `source.id` and `source.url`. Retain the thread node id as `source.thread_id`. Do not substitute a review id for an inline comment database id.
 
-A review body or top-level comment without an inline parent uses `reply-comment`. Begin its exact body with `In Reply To: [descriptive source label](https://github.com/owner/repo/pull/7#pullrequestreview-789)`, followed by a blank line and the substantive response. Preserve the original URL and fragment. Embedded file/line references, code links and quoted inline findings do not create an inline parent; unrelated inline comments belonging to that review do not route a response to its review body.
+A substantive answer to a review body or top-level comment without an inline parent uses `reply-comment`. Begin its exact body with `In Reply To: [descriptive source label](https://github.com/owner/repo/pull/7#pullrequestreview-789)`, followed by a blank line and the substantive response. Preserve the original URL and fragment. Embedded file/line references, code links and quoted inline findings do not create an inline parent; unrelated inline comments belonging to that review do not route a response to its review body.
+
+Incoming-review [finding reminders](finding-followups.md) select their destination
+separately: reuse an equivalent open inline thread or publish on a current changed
+line. A historical review body or summary never selects a new top-level reminder.
+Existing top-level reminder operations still reconcile through their original journal.
 
 ```json
 {"kind":"reply-comment","pr":"https://github.com/owner/repo/pull/7","head":"FULL_HEAD_SHA","source":{"kind":"review","id":789,"url":"https://github.com/owner/repo/pull/7#pullrequestreview-789"},"body":"In Reply To: [Original review](https://github.com/owner/repo/pull/7#pullrequestreview-789)\n\nVerified answer"}
