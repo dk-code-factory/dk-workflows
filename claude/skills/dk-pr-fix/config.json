@@ -53,6 +53,11 @@
   ],
   "finalizers": [
     {
+      "skill": "dk-workflows:dk-plain-english",
+      "options": {},
+      "required": true
+    },
+    {
       "skill": "dk-workflows:dk-commit-split",
       "options": {},
       "required": true

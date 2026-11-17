@@ -255,6 +255,8 @@ class Tasks:
         if round_id is None:
             from alternatives import validate_report
             validate_report(spec, report)
+            from prose import validate_report as validate_prose_report
+            validate_prose_report(spec, report)
         if round_id is not None:
             if status is not None or progress is not None or native_evidence is not None:
                 raise ValueError('Checklist follow-ups retain primary status, progress and native evidence')

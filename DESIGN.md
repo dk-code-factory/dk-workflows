@@ -1019,3 +1019,34 @@ explanation cost. Freshness ends at changed governing instructions, relevant cod
 discussion, request meaning, source pins or publication evidence; only affected
 work refreshes. Offline call counts and reuse tests are proxies; native API dollar
 savings across current and subsequent sessions have not been measured.
+
+## Prose finalization
+
+The fix workflow selects one prose editing finalizer after review converges and
+before commit cleanup and final CI. It is outside the repeating reviewer list.
+Plain English is the default; ASD-STE100 and installed providers use the existing
+invocation/list replacement contract. Incoming review and custom empty lists do
+not acquire an implicit pass. Native skills identify prose and preserve meaning
+and protected syntax; deterministic helpers select candidate Git diffs only.
+
+The shared prose helper captures original PR pins, guidance and consumed sources
+through existing managed definitions. Accepted native results retain only input
+baseline/head and output commit references. Subsequent handoffs compare the
+current tree to that accepted output and select a delta, or reuse an unchanged
+pass. A previous immutable result reference in existing managed inputs preserves
+the dependency without copying output or adding a registry/completion flag.
+Original claims, results, completed siblings, review budgets and publication
+recovery remain intact. Interrupted work reconciles the original claim; pending
+checklists finish without repeating prose analysis. Edits are committed through
+existing authorized stages before accepting the output reference, and affected
+review coverage refreshes before final CI.
+
+These small references avoid repeating full prose analysis and reconstructing
+its accepted boundary in a new session. Their expected avoided API cost exceeds
+capture, validation, targeted loading and explanation costs. Freshness requires
+unchanged instructions, provider/options, consumed resources/references and
+original base/target content; changes require full affected analysis. Later text
+changes require delta analysis. Missing evidence or Git objects blocks reuse.
+No current authorization, publication or CI check is cached. Offline fixtures
+establish reuse, recovery, delta selection and isolated invalidation; native API
+dollar savings have not been measured. No token/process proxy is a dollar claim.

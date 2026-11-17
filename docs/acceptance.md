@@ -41,7 +41,7 @@ cancelled or unknown outcomes cannot establish coverage. Empty completed results
 are rejected on recording and reuse. The coordinator trusts native execution and
 the selected skill instead of reconstructing nested execution from wire events.
 
-With the default finalizers, iteration waits for CI at a final completion gate after review/fix cycles, commit cleanup and governing-content synchronization. Pending or unsuccessful intermediate checks do not block independent review or cleanup. Selected CI failures remain blockers; code repairs refresh scope, affected review coverage and selected cleanup before observation of the new final head. Retain observation deadlines, five CI repairs per cycle, three transient reruns per head and the current authorized review allowance. Standalone CI observation is unchanged.
+With the default finalizers, iteration waits for CI at a final completion gate after review/fix cycles, changed-prose cleanup, commit cleanup and governing-content synchronization. Pending or unsuccessful intermediate checks do not block independent review or cleanup. Selected CI failures remain blockers; code repairs refresh scope, affected review coverage and selected cleanup before observation of the new final head. Retain observation deadlines, five CI repairs per cycle, three transient reruns per head and the current authorized review allowance. Standalone CI observation is unchanged.
 
 [PR fix finalizers](finalizers.md) replace the ending with qualified skill strings and nonempty parallel groups. Scoped lists replace rather than merge, an empty list disables finalizers, and omitted configuration preserves effective default role selections. External skills resolve through native tools. Groups retain individual claims and original results across interruption and failure; later groups wait for all siblings. Plan/resource/context changes stale evidence, while unfinished task identity survives reordering. Final live checks distinguish selected-plan completion from skipped or missing readiness evidence. Offline tests cover configuration, public helper commands, concurrent fixture skill processes, failure barriers and recovery; these fixtures do not establish native-agent adherence.
 
@@ -73,3 +73,12 @@ not invoke a model or establish native adherence.
 [Simplification review](simplification.md) acceptance covers independent workflow gates, standalone defaults, governing priority/scope inheritance, provider replacement, malformed options, disabled-provider preflight, native evidence, custom groups, fresh-process reuse, interrupted recovery and isolated live-policy invalidation in `tests/test_simplification.py`. Native semantic interpretation remains separate from those offline fixtures.
 
 The [focused native simplification exercise](native-simplification-exercise.md) documents the synthetic recommendation, independent verification and bounded implementation procedure separately from offline event fixtures.
+
+
+Prose finalization acceptance uses offline native-result fixtures for full-diff
+and later-delta selection, unchanged fresh-process reuse, interrupted claims,
+completion-only recovery, governing/reference invalidation and completed sibling
+preservation. Fixtures also retain no-eligible-prose assessments, unchanged
+ambiguous wording and unavailable ASD reference verification. These checks
+validate handoff, configuration and recovery behavior; they do not establish
+native language quality, ASD-STE100 compliance or measured API dollar savings.

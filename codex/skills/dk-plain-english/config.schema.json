@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/dk-code-factory/dk-workflows/main/codex/skills/dk-plain-english/config.schema.json",
+  "title": "dk-workflows:dk-plain-english options",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}
