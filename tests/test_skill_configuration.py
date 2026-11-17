@@ -59,6 +59,8 @@ def test_each_skill_owns_complete_explicit_defaults_and_a_valid_schema(skill):
     ('dk-workflows:dk-commit-split', {'policy': {'prompt': 'x', 'skill': 'team:policy'}}),
     ('dk-workflows:dk-pr-decisions', {'language_review_passes': 4}),
     ('dk-workflows:dk-pr-feedback-address', {'additional_validation_commands': ['pytest -q']}),
+    *[('dk-workflows:dk-pr-feedback-reply', {'reply_prompt': value})
+      for value in ('', ' \n\t', None, False, 1, 'reply\x00text')],
     ('dk-workflows:dk-pr-review-post', {'blocking_event': 'APPROVE'}),
     ('dk-workflows:dk-ci-approve', {'skip_verification': True}),
     ('dk-workflows:dk-pr-publish', {'review_requests': []}),
@@ -92,6 +94,46 @@ def test_options_inherit_by_scope_then_invocation_without_writing_sources():
     assert selected['provenance']['poll_interval_seconds'] == str(config.path(upstream))
     assert all(path.read_bytes() == value for path, value in before.items())
     assert skill_config.scope_path(REPOSITORY) == config.path(REPOSITORY)
+
+
+def test_reply_prompt_replaces_inherited_text_and_refreshes_only_reply_work(tmp_path):
+    reply = 'dk-workflows:dk-pr-feedback-reply'
+    user_prompt = 'Keep replies short.\nPreserve this exact user wording.\n'
+    repo_prompt = 'Explain the outcome and cite the relevant code.\n'
+    local_prompt = 'Answer the specific question in one sentence.\n'
+    write(config.path(), {'skill_defaults': {reply: {'options': {'reply_prompt': user_prompt}}}})
+    assert skill_config.effective(reply, REPOSITORY)['options']['reply_prompt'] == user_prompt
+    write(config.path(REPOSITORY), {'skill_defaults': {
+        reply: {'options': {'reply_prompt': repo_prompt}},
+        FIX: {'options': {'finalizers': [reply, 'team:check']}}}})
+    for _ in range(2):
+        result = cli('skill-show', '--skill', reply)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout)['options']['reply_prompt'] == repo_prompt
+    local = skill_config.effective(reply, REPOSITORY, options={'reply_prompt': local_prompt})
+    assert local['options']['reply_prompt'] == local_prompt
+    assert local['options']['resolve_answered_threads'] is True
+    resource = tmp_path/'SKILL.md'
+    resource.write_text('Complete the assigned finalizer and return evidence.')
+    def spec(index, identity):
+        return ordinary_spec(repository=REPOSITORY, pr=PR, skill=FIX,
+            kind='finalizers', index=index, run='retained', definition={
+                'skill_identity': identity, 'resources': {'skill': str(resource)},
+                'assigned_instructions': 'Complete selected finalization.', 'instructions': {},
+                'inputs': {}, 'options': {}, 'governing_inputs_complete': True})
+    original, sibling = spec(0, reply), spec(1, 'team:check')
+    initial, sibling_initial = capture(original), capture(sibling)
+    assert original['options']['configured']['reply_prompt'] == repo_prompt
+    saved = json.loads(config.path(REPOSITORY).read_text())
+    saved['skill_defaults'][reply]['options']['reply_prompt'] = local_prompt
+    write(config.path(REPOSITORY), saved)
+    with pytest.raises(ValueError, match='Inputs changed'):
+        skill_config.check_selection(original)
+    refreshed = capture(spec(0, reply))
+    assert refreshed['key'] == initial['key']
+    assert refreshed['fingerprint'] != initial['fingerprint']
+    skill_config.check_selection(sibling)
+    assert capture(spec(1, 'team:check')) == sibling_initial
 
 
 def test_repository_review_selections_replace_inheritance_and_survive_fresh_reads(tmp_path):

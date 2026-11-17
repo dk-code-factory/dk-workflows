@@ -4,6 +4,12 @@
   "title": "dk-workflows:dk-pr-feedback-reply options",
   "type": "object",
   "properties": {
+    "reply_prompt": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*\\u0000)[\\s\\S]*$",
+      "description": "Single prompt for writing feedback replies. The explicit default lives in config.json. Overrides replace that prompt without weakening response obligations, evidence, privacy or publication rules."
+    },
     "resolve_answered_threads": {
       "type": "boolean",
       "default": true,
