@@ -257,10 +257,10 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
     original_alternatives = initial_result.read_bytes()
     finalizer_groups=cache('finalizer-plan')['groups']
     assert finalizer_groups==[[{'skill': reference, 'options': {}, 'required': True}] for reference in [
-        'dk-workflows:dk-commit-split','dk-workflows:dk-pr-decisions',
+        'dk-workflows:dk-plain-english','dk-workflows:dk-commit-split','dk-workflows:dk-pr-decisions',
         'dk-workflows:dk-pr-description','dk-workflows:dk-pr-feedback-reply',
         'dk-workflows:dk-ci','dk-workflows:dk-pr-publish']]
-    finalizer_references=dict(zip(('cleanup','decisions','description','reply','ci','publish'),
+    finalizer_references=dict(zip(('prose','cleanup','decisions','description','reply','ci','publish'),
                                    (group[0]['skill'] for group in finalizer_groups)))
     finalizer_calls=[]
     def finalizer_spec(role,task):
@@ -354,6 +354,7 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
         push(old,candidate)
         return {'outcome':'published','reviewed_head':old,'head':candidate,'tree':reviewed_tree,
                 'reasons':['One coherent behavior change with documentation'],'target':base}
+    domain('prose',lambda:{'complete':True,'validation':['The changed README sentence is already clear; this synthetic pass makes no edits.']},finalizer_role='prose')
     head=domain('cleanup',cleanup,finalizer_role='cleanup')['head']
     # Squash changes only provenance: final content review coverage is retained.
     for skill in ('a','b'):assert review(skill,'c3')['action']=='reuse'
@@ -410,8 +411,8 @@ def test_complete_recipe_resume_cleanup_and_unchanged_reruns(tmp_path,final_ci_o
     assert set(remote_value()['check_reads'])==set(ci_heads)
     domain('re-review',lambda:publish({'kind':'request-review','pr':PR,'head':head,'reviewers':['reviewer']}),
            finalizer_role='publish')
-    assert finalizer_calls[:4]==['cleanup','decisions','description','reply']
-    assert finalizer_calls[4:]==({'success':['ci','publish'],'rerun':['ci','ci','publish'],
+    assert finalizer_calls[:5]==['prose','cleanup','decisions','description','reply']
+    assert finalizer_calls[5:]==({'success':['ci','publish'],'rerun':['ci','ci','publish'],
                                   'repair':['ci','cleanup','ci','publish']}[final_ci_outcome])
     domain('complete',lambda:{'head':head,'coverage':['a','b'],'findings':[],'ci':'success','cleanup':'published'})
     status=cache('status','--compact','--run','iteration','--spec',spec('a'),'--spec',spec('b'))

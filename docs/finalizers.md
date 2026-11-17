@@ -12,6 +12,7 @@ Follow [private workflow reporting](private-reporting.md). Operational reports, 
     "dk-workflows:dk-pr-fix": {
       "options": {
       "finalizers": [
+        "dk-workflows:dk-plain-english",
         "dk-workflows:dk-commit-split",
         "dk-workflows:dk-pr-decisions",
         "dk-workflows:dk-pr-description",
@@ -42,7 +43,9 @@ The outer list is sequential. An explicit `{"parallel":[...]}` object is one par
 
 ## Defaults and scope
 
-Omitting the owning skill's `finalizers` option inherits the next lower scope. Existing `processes.pr-fix.finalizers` records remain compatibility inputs. A supplied list replaces the entire inherited list; `[]` disables finalizers. Scope order is repository, explicitly supplied upstream, user, then defaults. The default sequential plan selects `dk-workflows:dk-commit-split`, `dk-workflows:dk-pr-decisions`, `dk-workflows:dk-pr-description`, `dk-workflows:dk-pr-feedback-reply`, `dk-workflows:dk-ci` and `dk-workflows:dk-pr-publish`. Shared `skill_defaults` apply to these calls; local invocation objects override them.
+Omitting the owning skill's `finalizers` option inherits the next lower scope. Existing `processes.pr-fix.finalizers` records remain compatibility inputs. A supplied list replaces the entire inherited list; `[]` disables finalizers. Scope order is repository, explicitly supplied upstream, user, then defaults. The default sequential plan selects `dk-workflows:dk-plain-english`, `dk-workflows:dk-commit-split`, `dk-workflows:dk-pr-decisions`, `dk-workflows:dk-pr-description`, `dk-workflows:dk-pr-feedback-reply`, `dk-workflows:dk-ci` and `dk-workflows:dk-pr-publish`. Shared `skill_defaults` apply to these calls; local invocation objects override them.
+
+The default [prose cleanup](prose-cleanup.md) edits changed documentation, docstrings and comments once after review converges. Use its shared helper before native execution and on resume, including after later fixes: reuse accepted work and process only new text. Replace that entry with `dk-workflows:dk-asd-ste100` or an installed `plugin:skill` using the same invocation options and agent controls. Refresh affected review coverage before continuing to cleanup and final CI.
 
 The default cleanup assesses the full series and publishes a tree-preserving rewrite only when needed. Decisions, description and reply finalizers finish outstanding work. CI observes the final published head. The default publisher reconciles outstanding operations and uses `dk-workflows:dk-pr-approvers` to resolve authorized review/re-review recipients: return the exact `review_requests` override or, for `null`, discover appropriate reviewers. Two empty override lists disable automatic requests. Read [repository review selections](configuration.md#repository-review-selections) and invoke publication with complete nonempty selections at the final published head. Finalizers perform no-op assessments when their work is already satisfied. Configured recipients and the supporting resolver do not restore an omitted publisher or grant permission.
 
@@ -68,7 +71,7 @@ For the current group, call `prepare --file REQUEST.json` with the retained run 
 ```json
 {
   "run": "RUN_ID",
-  "tasks": [{"kind": "skill", "skill": "dk-workflows:dk-pr-fix", "selection": "finalizers", "index": 4, "definition": {
+  "tasks": [{"kind": "skill", "skill": "dk-workflows:dk-pr-fix", "selection": "finalizers", "index": 5, "definition": {
     "skill_identity": "team-tools:check-links",
     "resources": {"skill": "/installed/team-tools/check-links/SKILL.md"},
     "assigned_instructions": "Check links in the pinned PR documentation. Return evidence and explicit completion.",

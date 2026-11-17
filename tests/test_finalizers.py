@@ -48,7 +48,7 @@ def test_default_plan_uses_shared_invocations_and_keeps_defaults_immutable():
     assert original['processes']['pr-fix']['finalizers'] == config.FINALIZER_DEFAULTS
     write(config.path(), {'skill_defaults': {'dk-workflows:dk-commit-split': {'options': {'max_passes': 2}}}})
     selected = config.effective(REPOSITORY)['settings']
-    assert config.select(selected, 'pr-fix', 'finalizer', 0)['options'] == {'max_passes': 2}
+    assert config.select(selected, 'pr-fix', 'finalizer', 1)['options'] == {'max_passes': 2}
     assert config.DEFAULTS['processes']['pr-fix']['finalizers'] == original['processes']['pr-fix']['finalizers']
 
 
