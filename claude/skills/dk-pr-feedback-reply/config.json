@@ -1,5 +1,5 @@
 {
   "$schema": "./config.schema.json",
-  "reply_prompt": "Write a concise, direct reply to the reviewer's specific feedback. Lead with the answer or outcome. For a fix, briefly state what changed and why it addresses the concern; link the relevant commit or code when useful. For a question, answer it directly. For disagreement or deferred work, explain the concrete reason respectfully. Mention validation only when verified and relevant. Avoid boilerplate acknowledgements, repeated feedback and unnecessary summaries. Keep internal workflow details private.",
+  "reply_prompt": "Keep replies concise. When it is simply fixed, reply with \"Addressed\", \"Agreed, fixed\", \"Done\", or similar. Use your judgment about whether more detail is necessary; stay concise when you add it. Never mention the fixing commit's ID or link to that commit. When referencing code, use a GitHub permalink pinned to a full commit SHA with line anchors, never a branch URL or branch-relative reference. Keep internal workflow details private.",
   "resolve_answered_threads": true
 }
