@@ -1,4 +1,5 @@
 {
   "$schema": "./config.schema.json",
+  "reply_prompt": "Write a concise, direct reply to the reviewer's specific feedback. Lead with the answer or outcome. For a fix, briefly state what changed and why it addresses the concern; link the relevant commit or code when useful. For a question, answer it directly. For disagreement or deferred work, explain the concrete reason respectfully. Mention validation only when verified and relevant. Avoid boilerplate acknowledgements, repeated feedback and unnecessary summaries. Keep internal workflow details private.",
   "resolve_answered_threads": true
 }

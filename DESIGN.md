@@ -469,6 +469,15 @@ without persisting an effective-settings cache. No model executable is launched.
 Ordered invocation lists express task/finalizer selection and explicit parallel
 groups; skill instructions own applicability, iteration and completion.
 
+Feedback replies use one replaceable `reply_prompt`, with its explicit default
+in the owning skill's `config.json`. Existing scope resolution supplies the prompt
+to the native skill; no runtime launcher or extra prompt store is introduced.
+Existing managed option/resource bindings refresh only affected reply work when
+the prompt changes. Publication intents keep their original exact body for
+reconciliation even after a prompt edit. No durable state or cache identity is
+added; original results, completed siblings, budgets and receipts retain their
+existing freshness boundaries. Native API dollar savings are unmeasured.
+
 Managed descriptors may select a skill-owned list occurrence by owner, list kind
 and index. Retain that compact selector with the existing replay definition so
 fresh sessions can regenerate the exact assignment without reconstructing lists.

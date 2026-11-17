@@ -74,6 +74,22 @@ Commit grouping policies and PR size settings also consume their skill-owned opt
 
 Additional validation commands are argument arrays, supplement relevant checks, and must never launch Codex or Claude Code. Feedback replies honor `resolve_answered_threads` only within caller authorization. Partial review publication always uses `COMMENT`; configurable review events never authorize approval. Publisher merge defaults only fill an omitted method in an already authorized concrete request; all live merge guards still apply.
 
+Feedback reply wording is owned by `dk-workflows:dk-pr-feedback-reply.options.reply_prompt`. The single explicit default is in the skill's [config.json](../codex/skills/dk-pr-feedback-reply/config.json), and the skill uses the effective prompt for every new reply. Set `reply_prompt` under that skill's `skill_defaults` entry's `options` at user or repository scope, or supply it as an invocation-local option. For example:
+
+```json
+{
+  "skill_defaults": {
+    "dk-workflows:dk-pr-feedback-reply": {
+      "options": {
+        "reply_prompt": "Answer in one short paragraph. Explain the change and cite the relevant code when useful."
+      }
+    }
+  }
+}
+```
+
+An override replaces the default writing prompt; additional invocation `instructions` remain separate governing input. Empty, whitespace-only and null prompts are invalid; omit the option to inherit. The prompt cannot change whether an answer is required or relax evidence, privacy, attribution, authorization or thread-resolution rules. Changed prompts refresh affected managed reply work through the existing option binding. Pending publication intents retain their original exact bodies for reconciliation.
+
 Pass `--upstream HOST/OWNER/REPO` and `--options FILE` to `publish.py prepare` when supplied by the publisher invocation. An explicit request method takes precedence; the existing journal retains only the resolved concrete method. Publish and reconcile use that retained intent without rereading default methods.
 
 The publisher also owns `review_requests` for [repository review selections](configuration.md#repository-review-selections). At PR fix finalization, it invokes `dk-workflows:dk-pr-approvers`: a configured object is returned as the exact override, `null` triggers evidence-based discovery, and two empty recipient lists disable automatic requests. Pass the complete result's nonempty lists explicitly to publication. The supporting skill's `pr_approvers.py` helper constructs this branch handoff using the same repository, upstream and `--publisher-options FILE`, without GitHub calls or persistence. A `request-review` payload omitting both recipient fields can still receive configured lists during preparation; the helper never discovers recipients or launches agents. Explicit recipients in either field take precedence as the whole selection; omitted fields then remain empty. Preparation still requires at least one recipient, so assess empty successful selections as a no-op before preparing. Settings never redirect a retained publication or bypass its recovery guards.
