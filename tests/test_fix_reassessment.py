@@ -38,7 +38,7 @@ def test_unauthorized_input_named_authorization_cannot_replace_initial_review(ca
     source = tmp_path/'permission.json'; write(source, {'instruction': INSTRUCTION, 'skill': 'dk-workflows:dk-pr-review-alternatives', 'origin': 'user'})
     item['definition']['inputs']['alternatives_reassessment'] = str(source)
     before = store.manifest.read_bytes()
-    with pytest.raises(ValueError, match='explicit reassessment'):
+    with pytest.raises(ValueError, match='direct user invocation'):
         tasks.prepare({'tasks': [item]})
     assert store.manifest.read_bytes() == before
 
