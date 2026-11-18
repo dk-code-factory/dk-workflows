@@ -948,7 +948,8 @@ def workflow_reviewed(reviewed, tmp_path):
     from checklist_reports import accept
     r = reviewed
 
-    def build(*, enabled=True, repeated=False, local_runner=False, candidate=False, extra_runner=False):
+    def build(*, enabled=True, repeated=False, local_runner=False, candidate=False, extra_runner=False,
+              selector_options='explicit'):
         value = read(r.evidence)
         original = read(Path(value['discovery'][0]))
         fields = {'resources': original['skill']['resources'], 'assigned_instructions': original['task']['instructions'],
@@ -968,9 +969,14 @@ def workflow_reviewed(reviewed, tmp_path):
         tasks.append({'instructions': 'Independently verify findings.'})
         owner_options = {'alternatives': {'enabled': False}, 'tasks': tasks,
                          'simplification': {'enabled': enabled}}
-        # Distinct providers make both runner occurrences independently coverable.
+        # Distinct providers without simplification retain separate task identities.
         if extra_runner:
             owner_options['simplification']['enabled'] = False
+        if selector_options != 'explicit':
+            scoped = read(config.path(value['repository']))
+            scoped.setdefault('skill_defaults', {})['dk-workflows:dk-pr-review'] = {'options': owner_options}
+            write(config.path(value['repository']), scoped)
+            owner_options = {}
         coordinator = Tasks(value['repository'], fixture.PR, checkout=value['checkout'])
 
         def complete(owner, kind, index, identity, *, workflow=None, normalized=None, inputs=None):
@@ -994,6 +1000,10 @@ def workflow_reviewed(reviewed, tmp_path):
         discovery, candidates, inputs = [], [], {}
         for runner_index in range(len(tasks) - 1):
             workflow = {'skill': 'dk-workflows:dk-pr-review', 'index': runner_index, 'options': owner_options}
+            if selector_options == 'omitted':
+                workflow.pop('options')
+            elif selector_options == 'null':
+                workflow['options'] = None
             plan = skill_config.plan(runner, 'reviewers', value['repository'], workflow=workflow)
             calls = [call for group in plan['groups'] for call in group]
             for index, call in enumerate(calls):
@@ -1065,7 +1075,23 @@ def test_workflow_composed_coverage_rejects_incomplete_or_changed_evidence(workf
         assert coordinator.store.manifest.read_bytes() == before
 
 
-def test_workflow_composed_coverage_requires_every_live_runner_occurrence(workflow_reviewed):
+@pytest.mark.parametrize('selector_options', ['omitted', 'null'])
+@pytest.mark.parametrize('enabled', [False, True])
+def test_workflow_composed_coverage_accepts_default_owner_selector_options(workflow_reviewed, selector_options, enabled):
+    r, _ = workflow_reviewed(selector_options=selector_options, enabled=enabled)
+    assert r.cli.approve(r.evidence)['status'] == 'verified'
+    assert r.remote.calls == [101, 202]
+
+
+def test_workflow_composed_coverage_rejects_different_explicit_owner_options(workflow_reviewed):
+    r, _ = workflow_reviewed(selector_options='omitted')
+    r.edit(lambda value: value.update(options={'limits': {'review_cycles': 4}}), snapshot=True)
+    with pytest.raises(ValueError, match='coverage is incomplete'):
+        r.cli.approve(r.evidence)
+    assert r.remote.calls == []
+
+
+def test_workflow_composed_coverage_requires_every_distinct_runner_occurrence_without_simplification(workflow_reviewed):
     r, _ = workflow_reviewed(extra_runner=True)
     document = read(r.evidence)
     r.edit(lambda value: value.update(discovery=document['discovery'][:-1]))

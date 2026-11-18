@@ -914,6 +914,10 @@ Fork-CI approval uses those same retained workflow selectors to resolve every
 live incoming reviewer-run occurrence and its composed leaves. Match each leaf's
 owner selector, local index and invocation, including repeated reviewers and the
 required simplifier. Missing or mixed workflow/standalone coverage fails closed.
+Omitted or null selector options mean the same empty override as live selection.
+Multiple runner stages require independently retained leaf identities. Existing
+content-review identities overlap for identical invocations across stages,
+including their default simplifiers; that unsupported combination fails closed.
 Historical skill-owned evidence containing only standalone reviewer selections
 keeps its raw runner contract; legacy process evidence remains unchanged. No
 new mode flag, settings snapshot or durable field is added. Existing task and

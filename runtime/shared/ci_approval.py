@@ -35,6 +35,12 @@ class ApprovalFailure(ValueError):
         self.stderr, self.stdout = error.stderr, error.stdout
 
 
+def _workflow_selector(value):
+    if value is None:
+        return None
+    return {**value, 'options': {} if value.get('options') is None else value['options']}
+
+
 class Approval:
     def __init__(self, handler):
         self.handler = handler
@@ -252,7 +258,7 @@ class Approval:
                 settings['settings']['processes']['pr-review']['coordinator']).get('skill'))
             matches = [(key, spec) for key, spec in remaining if config.invocation.matches(expected, spec['skill']['identity'])
                        and (not owned or spec.get('skill_configuration', {}).get('index') == index
-                            and spec.get('skill_configuration', {}).get('workflow') == workflow)]
+                            and _workflow_selector(spec.get('skill_configuration', {}).get('workflow')) == workflow)]
             if len(matches) != 1:
                 raise ValueError('Current selected reviewer coverage is incomplete or duplicated')
             key, spec = matches[0]
