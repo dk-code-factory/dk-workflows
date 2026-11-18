@@ -709,6 +709,54 @@ behavior without model/GitHub calls. They establish neither native adherence nor
 measured token savings. No new native execution or token evidence accompanies this
 change; helper/process counts remain proxies only.
 
+## Decision reconciliation
+
+The Decisions skill owns a configurable `reconciliation_prompt`. Its native
+policy reconciles sourced PR agreements with advised and selected alternatives.
+The default asks the user about contradictions with settled user or repository
+maintainer/admin decisions only when current instructions and an applicable
+retained user resolution do not already settle the conflict. Interpret arbitrary
+user directions by meaning and host instruction priority, including revisions,
+conditions, exceptions and exclusions; no fixed phrases or keyword parser gate
+this authority. Apply clear directions within scope without asking for redundant
+confirmation. Preserve unaffected commitments and historical evidence.
+
+Fix entry supplies effective commitments and exceptions before comparison;
+after advice/selection the coordinator reconciles concrete conflicts before
+dependent implementation. Use the selected Decisions task when applicable;
+the coordinator owns this duty when the configured plan has not reached it or
+omits it, without invoking omitted skills or restoring finalizers. Ranking-mode
+questions remain with selection policy; a separate agreement-conflict question
+uses reconciliation policy. Native skills interpret evidence and user meaning;
+helpers only build, capture and validate ordinary managed handoffs.
+
+Retain only necessary conflict resolutions in existing private managed results,
+referencing original decisions, advice/selections and exact user instruction or
+answer artifacts, with scope and conditions. Selection remains authoritative for
+its analysis; no duplicate decision store, rendered commitment list, settings
+snapshot or new task identity is introduced. Pass consumed original sources and
+resolution references into fixing and later review/finalization assignments.
+Their generated effective commitments must not restore superseded or excluded
+choices from the public PR body. Decisions and alternatives-plan checklists
+require sourced reconciliation; assigned implementation needs current code and
+validation evidence or an already-satisfied disposition, not initial alignment.
+Unresolved governing conflicts leave dependent work incomplete.
+
+The small source bindings and actual user resolution avoid repeating native
+conflict analysis and user questioning after interruption or a new session.
+Reuse survives ordinary commits/cycles while the subject, scope, conditions and
+governing evidence apply. Changed relevant directions, choices or conditions
+refresh affected reconciliation only; missing evidence blocks applicable reuse.
+Retained answers remain historical evidence when surrounding sources change and
+must be checked and rebound before use. Explicit user reconsideration/revision
+can authorize the existing sourced reassessment path without another question;
+resume alone cannot. Preserve original cache keys, results, siblings, claims,
+budgets and publication receipts. Current review, CI, authorization and remote
+checks remain live. Offline policy transport, fresh-process reuse, partial
+recovery and invalidation tests do not measure native judgment or API dollar
+savings; expected avoided repeated analysis must exceed evidence handling cost.
+See [decision reconciliation](docs/decision-reconciliation.md).
+
 ## Shared purpose assessment and architectural alternatives
 
 During initial inspection, after requirements and repository evidence collection,

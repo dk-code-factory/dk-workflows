@@ -25,6 +25,8 @@ def contract(spec, definition):
         {'id': 'deliverables', 'text': 'Supply every assigned deliverable and an explicit complete primary report.'},
     ]
     role = spec['task']['id'].split(':', 1)[0]
+    if spec['skill']['identity'].split(':')[-1] == 'dk-pr-decisions':
+        items.append({'id': 'decision-reconciliation', 'text': 'Apply the effective reconciliation_prompt to sourced PR decisions and advised/selected alternatives. Interpret arbitrary user revisions, conditions and exceptions within scope; reuse applicable sourced answers before asking about unresolved user or maintainer/admin decision conflicts. Retain original resolution references and pass effective commitments to dependent work; unresolved conflicts remain unfinished.'})
     if (not spec.get('options', {}).get('alternatives') and not spec.get('options', {}).get('assessed_alternatives') and
             ('fix' in role or role in {'feedback', 'ci-repair'}
              or spec['skill']['identity'].split(':')[-1] == 'dk-pr-feedback-address')):
@@ -32,6 +34,8 @@ def contract(spec, definition):
             {'id': 'dispositions', 'text': 'Account for every assigned finding with a sourced disposition and remaining blockers.'},
             {'id': 'tests', 'text': 'Run relevant tests for the fixes and retain results; finish missing required checks.'},
         ]
+        if spec['skill']['identity'].split(':')[-1] != 'dk-pr-decisions':
+            items.append({'id': 'decision-reconciliation', 'text': 'Consume sourced decision reconciliation and complete user instructions, including arbitrary revisions, exceptions and conditions. Reuse applicable user answers and do not restore superseded or excluded choices from historical PR Decisions. Leave unresolved governing conflicts unfinished and pass original resolution sources into subsequent handoffs.'})
     alternatives = spec.get('options', {}).get('alternatives')
     if alternatives and alternatives['stage'] == 'comparison':
         from alternatives import CHECKS
@@ -43,7 +47,7 @@ def contract(spec, definition):
         if assessed['stage'] == 'comparison':
             items.append({'id': 'target-estimates', 'text': 'Compare every option against the same pinned target revision, including implementation work already on the PR branch. Supply evidence for ratings, feasibility and estimate uncertainty.'})
     if any(key.startswith('alternatives_fix_governing_') for key in spec.get('inputs', {})):
-        items.append({'id': 'alternatives-plan', 'text': 'Read the retained initial alternatives plan and apply its selected approach and required changes. Verify current work remains within its sourced requirements and constraints; material scope changes require explicit reassessment. The original plan is not current-head code review, CI or publication evidence.'})
+        items.append({'id': 'alternatives-plan', 'text': 'Read the retained initial alternatives plan and reconcile its advice/selection with effective PR decisions and complete user instructions under decision reconciliation. Honor scoped revisions, conditions and exceptions; reuse applicable sourced resolutions, and leave unresolved governing conflicts unfinished. Pass original resolution sources to dependent work. Apply selected approaches and required changes only within the assigned implementation responsibility and permission; otherwise assess or hand them off. Supply current code and relevant validation evidence or a sourced already-satisfied disposition for assigned changes. Material scope changes require explicit reassessment. The original plan is not current-head code review, CI or publication evidence.'})
     if ('alternatives_applicability' in spec.get('inputs', {})
             or any(key.startswith('alternatives_governing_') for key in spec.get('inputs', {}))):
         items.append({'id': 'alternatives-initial-plan', 'text': 'Read the retained alternatives assessment and any selected approach or required design changes. Review the current implementation against that context and verify current scope still fits its sourced requirements and constraints. Material scope changes require explicit reassessment. The initial alternatives review does not supply current-head code review, CI or publication coverage.'})
@@ -70,6 +74,7 @@ def contract(spec, definition):
         selected_groups = groups(plan)
         items += [
             {'id': 'live-inputs', 'text': 'Refresh live scope, instructions, discussion, Decisions, head and target and affected coverage.'},
+            {'id': 'decision-reconciliation', 'text': 'Verify effective PR commitments and arbitrary user revisions, conditions and exceptions against current evidence. Reuse applicable sourced resolutions; unresolved governing conflicts or unimplemented assigned alternative changes leave dependent work incomplete. This is a coordinator duty, not an invocation of omitted Decisions tasks or finalizers.'},
             {'id': 'coverage', 'text': 'Verify required reviews and stages, finding dispositions or explicit acceptances, and reconciled publication receipts.'},
             {'id': 'report', 'text': 'Report selected-plan completion separately from PR readiness, skipped duties, optional omissions and CI exceptions.'},
         ]
