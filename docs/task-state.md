@@ -8,6 +8,42 @@ Native agents resolve and invoke skills. Python manages bookkeeping. Follow [sta
 
 Run commands as `python3 PLUGIN_ROOT/scripts/dk.py --repository HOST/OWNER/REPO --pr https://HOST/OWNER/REPO/pull/N --checkout REPO COMMAND`. Direct skill calls use this cache only when their caller manages them with these commands.
 
+## Lifecycle authority and guidance loading
+
+This is the managed lifecycle authority for entry skills, recipes and selected
+stages, including noncacheable work. It owns preparation, claims, recording,
+checklists, reuse, recovery and retained budgets. Recipes own stage decisions,
+applicability, consumed evidence and acceptance; configuration selects invocations.
+Domain contracts retain native-evidence, authorization, publication and CI checks.
+
+Load necessary common and selected-stage guidance when entering that work. Reuse
+unchanged instructions in the active context; check resource identity at each
+boundary and reread changed guidance and affected references. A fresh session or
+context loss requires the necessary governing instructions again before decisions
+or execution. Omitted or later stages need no detailed prose read unless recovery
+requires their contract, such as an original uncertain publication operation.
+
+Deferred reading never defers capture. Before prepare, supply complete existing
+resource, instruction and input maps, including indirect governing references
+outside the skill directory and selected instruction sources. Bind dependencies
+even if their prose will be loaded later. Helpers capture exact resources; they
+neither discover omitted references nor infer completeness from links. Uncertain
+completeness cannot establish cacheable coverage. Prepare, finish and final
+coverage keep live capture checks; reading order changes no key, fingerprint,
+original result, claim or allowance. No saved instruction bundle, copied settings,
+rendered resume summary or read-status record is needed.
+
+Use [skill-owned configuration](skill-configuration.md) for occurrence selection
+and descriptors, [native handoffs](native-review.md) for execution evidence, the
+completion/recovery sections below for pending checks and claims, and the original
+[publication operation](pr/publication.md) for uncertain writes. These references
+add no invocation. Keep the retained run and counters; prepare only the current
+independent group, execute explicit parallel siblings concurrently, and wait for
+all launched work. Record successful siblings immediately; required incomplete
+work blocks dependents without erasing completed siblings. Every managed stage
+receives its prepared assignment and checklist. Native execution/delegation stays
+in the already-running session; helpers never launch Codex or Claude Code.
+
 ## Prepare, invoke and finish
 
 Use `prepare --file REQUEST.json` once for the current independent task group. The helper builds specs, captures inputs, claims eligible work and saves the small replay definition atomically. No separate spec file, initial status call or native-binding call is necessary. Global arguments supply the canonical PR and repository. Example request:
@@ -197,7 +233,7 @@ Capture all governing inputs:
 - The [scoped preference handoff](preferences.md#workflow-handoffs-and-reuse) in `inputs.preferences`: complete selected records, applicable paths, consumed condition context and applicability decisions. Refresh selection before claims, recording and final coverage checks. Fingerprint the task-specific handoff rather than the catalog revision; relevant changes refresh affected work while unchanged selections and decisions permit reuse.
 - The [commit policy handoff](commit-policy.md) in cleanup's `inputs.commit_policy`: effective configuration, provider resources and consumed context, complete provider report and returned grouping/message instructions. Capture consumed live resources in the corresponding task maps as well. Verify current handoffs before claims and acceptance; refresh affected policy and cleanup evidence when inputs change. Keep immutable starting evidence for cleanup's intentional history changes and verify its resulting head/tree separately.
 
-Reuse unchanged guidance already read in the current context. Check resource identity at each boundary. Reread changed guidance and references. Reload necessary guidance after context loss. Capture checks still apply. Recording and final coverage checks require fresh snapshots of live sources. Observed resource or context changes reject completion. Fingerprints compare explicit inputs, not equivalent meanings.
+Deferred reading follows [lifecycle authority and guidance loading](#lifecycle-authority-and-guidance-loading). Recording and final coverage require fresh snapshots of live sources; observed resource or context changes reject completion. Fingerprints compare explicit inputs, not equivalent meanings.
 
 ## Retained budgets
 
