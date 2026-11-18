@@ -469,3 +469,57 @@ def test_original_completion_rejects_concurrent_primary_replacement(case, tmp_pa
     with pytest.raises(ValueError, match='Original completion changed'):
         tasks.prepare({'tasks': [{'key': task['key']}]})
     assert files(store) == retained
+
+
+@pytest.mark.parametrize('owner', [assessment.FIX, assessment.REVIEW])
+def test_mixed_pre_upgrade_chains_resume_the_discovered_owner(case, monkeypatch, owner):
+    import alternatives_history
+    spec, store = case; tasks = Tasks(REPO, PR)
+    shared = complete(tasks, spec, 'assessment', purpose())
+    inventories = {}
+    # Before canonical routing, both workflows could retain partial inventories.
+    with monkeypatch.context() as previous:
+        previous.setattr(alternatives_history, 'guard_route', lambda *args, **kwargs: None)
+        for route in (assessment.FIX, assessment.REVIEW):
+            inventories[route] = complete(tasks, spec, 'inventory', inventory(('storage', 'inherited')),
+                                           {'assessment': shared}, owner=route)
+    originals = {key: deepcopy(read(store.manifest)['entries'][key]) for key in inventories.values()}
+    result = plans.gate(tasks, owner)
+    assert result['stage'] == 'comparison' and result['next_task']['skill'] == owner
+    next_task = result['next_task']
+    next_task['definition'] = descriptor(spec, 'comparison', owner=owner, decision='storage')['definition']
+    task = tasks.prepare({'tasks': [next_task]})['tasks'][0]
+    assert task['action'] == 'invoke'
+    finish(tasks, task, comparison(spec))
+    assert all(read(store.manifest)['entries'][key] == value for key, value in originals.items())
+    assert plans.gate(tasks, owner)['stage'] == 'selection'
+
+
+@pytest.mark.parametrize('disposition', ['confirmed', 'rejected', 'uncertain'])
+def test_legacy_fix_mismatch_can_complete_independent_verification(case, disposition):
+    from test_fix_alternatives import descriptor as legacy_descriptor
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = planned(tasks, spec, alignment='mismatch')
+    originals = {key: deepcopy(read(store.manifest)['entries'][key]) for key in refs.values()}
+    result = plans.gate(tasks, assessment.REVIEW)
+    assert result['stage'] == 'verification'
+    next_task = result['next_task']
+    next_task['definition'] = legacy_descriptor(spec, 'verification')['definition']
+    task = tasks.prepare({'tasks': [next_task]})['tasks'][0]
+    assert task['action'] == 'invoke'
+    assert task['assignment']['git']['head'] == spec['git']['head']
+    finish(tasks, task, {'disposition': disposition, 'reason': 'Independently checked the original mismatch',
+        'required_changes': 'Use the selected state owner', 'evidence': ['code:1']}, handle='independent-verifier')
+    result = plans.gate(tasks, assessment.REVIEW)
+    assert result['outcome'] == ('mismatch_verified' if disposition == 'confirmed' else 'alignment_blocked')
+    assert result['references']['verification'] == task['key']
+    assert not result['release_reviewers']
+    assert all(read(store.manifest)['entries'][key] == value for key, value in originals.items())
+    before = files(store)
+    plans.gate(Tasks(REPO, PR), assessment.REVIEW, analysis_only=True)
+    assert files(store) == before
+    Path(alternatives.accepted(tasks, task['key'], settled=True)['reference']).unlink()
+    damaged = files(store)
+    result = plans.gate(Tasks(REPO, PR), assessment.REVIEW)
+    assert result['outcome'] == 'recovery_required' and result['next_task'] == {'key': task['key']}
+    assert files(store) == damaged

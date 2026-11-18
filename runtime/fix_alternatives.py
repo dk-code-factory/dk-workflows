@@ -134,11 +134,11 @@ def entry(tasks, stage):
 
 def pinned_definition(tasks, descriptor, definition):
     stage = descriptor['stage']
-    if stage not in STAGES or set(descriptor.get('dependencies', {})) - set(STAGES):
-        raise ValueError('The initial fix alternatives plan uses assessment, comparison, selection and alignment only')
+    if stage not in (*STAGES, 'verification') or set(descriptor.get('dependencies', {})) - set(STAGES):
+        raise ValueError('The initial fix alternatives plan uses assessment, comparison, selection, alignment and mismatch verification only')
     if definition.get('governing_inputs_complete') is not True or definition.get('cacheable') is False:
         raise ValueError('Once-per-PR alternatives review requires complete governing inputs and cacheable original evidence')
-    original = entry(tasks, stage) or entry(tasks, 'assessment')
+    original = entry(tasks, stage) or entry(tasks, 'alignment' if stage == 'verification' else 'assessment')
     result = deepcopy(definition)
     if original:
         result['git'] = deepcopy(original['managed']['definition']['git'])

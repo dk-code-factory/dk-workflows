@@ -47,9 +47,7 @@ def request(path, *, tasks=None):
     # original binding can resume existing work, but cannot authorize a new id.
     if basic and 'skill' not in value and 'origin' not in value and bound:
         return value
-    if not basic or value.get('skill') != MANUAL or value.get('origin') != 'user':
-        raise ValueError('Fresh alternatives requires a stable id, original source and exact instruction for the direct user invocation of ' + MANUAL)
-    return value
+    raise ValueError('Fresh alternatives requires a stable id, original source and exact instruction for the direct user invocation of ' + MANUAL)
 
 
 def guard_route(tasks, owner, kind, definition, *, stage=None):
@@ -67,12 +65,8 @@ def guard_route(tasks, owner, kind, definition, *, stage=None):
     # a later dedicated request must be able to establish its missing rubric.
     if kind == 'assessed-alternatives' and stage == 'assessment':
         return
-    values = entries(tasks)
-    chains = [value['managed'] for value in values.values()
-              if value['managed'].get('stage') != 'assessment']
-    if any(item.get('skill', 'dk-workflows:dk-pr-review') != owner
-           or ('alternatives' if item['kind'] == 'architecture' else item['kind']) != kind
-           for item in chains):
+    retained = route(tasks, owner, include_assessment=False)
+    if retained and (retained['owner'] != owner or retained['kind'] != kind):
         raise ValueError('Resume the original alternatives chain with the same workflow owner; only a direct dedicated user invocation can start a fresh comparison')
 
 
@@ -120,13 +114,13 @@ def accepted(tasks, key):
             'reference': saved['path'], 'managed': original['managed']}
 
 
-def route(tasks, owner, *, request_source=None):
+def route(tasks, owner, *, request_source=None, include_assessment=True):
     """Choose retained work before constructing another route's initial plan."""
     values = entries(tasks)
     # A shared purpose assessment alone is not a second whole-problem plan.
     candidates = [value for value in values.values()
                   if value['managed'].get('stage') != 'assessment']
-    if not candidates:
+    if not candidates and include_assessment:
         candidates = list(values.values())
     if request_source:
         from state import resource
@@ -202,11 +196,16 @@ def legacy_gate(tasks, owner, *, consumer=None, review_operation=None, analysis_
             return {'outcome': 'review_required', 'release_reviewers': False, 'stage': 'verification',
                     'references': refs, 'next_task': {'kind': 'alternatives', 'skill': owner,
                         'stage': 'verification', 'dependencies': {'alignment': alignment['key']}}}
-        verified = alternatives.accepted(tasks, verification['key'], settled=True)
+        try:
+            verified = alternatives.accepted(tasks, verification['key'], settled=True)
+        except ValueError as exc:
+            return {'outcome': 'recovery_required', 'release_reviewers': False, 'stage': 'verification',
+                    'references': refs, 'next_task': {'key': verification['key']}, 'reason': str(exc)}
         if (verified['managed'].get('dependencies', {}).get('alignment') != alignment['key']
                 or not verified['native_handle'] or not alignment['native_handle']
                 or verified['native_handle'] == alignment['native_handle']):
             raise ValueError('Original mismatch requires linked independent verification')
+        refs['verification'] = verification['key']
         if verified['report']['disposition'] == 'confirmed':
             head = alignment['spec']['git']['head']
             if not review_operation:

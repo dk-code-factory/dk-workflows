@@ -944,6 +944,11 @@ new comparison. The shared assessment alone cannot switch the retained chain;
 once a requested modern chain starts, both automatic routes consume it ahead of
 legacy-only context. Original legacy records and pre-rename request bindings
 remain intact and recoverable, without a second canonical-history registry.
+When an older PR already has unfinished chains on both routes, preparation
+follows the same retained-route choice as discovery. The other original chain
+does not invalidate that recovery. A legacy fix-owned mismatch can receive
+independent verification pinned to its original alignment. Existing verification
+and rejection-publication requirements still govern incoming review.
 
 ## Incoming alternatives gate
 
