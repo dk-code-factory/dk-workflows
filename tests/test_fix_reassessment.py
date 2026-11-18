@@ -22,7 +22,7 @@ INSTRUCTION = 'Reassess the retained initial fix comparison and its affected dep
 def authorize(tasks, item, tmp_path, *, request_id='message-215', instruction=INSTRUCTION, **options):
     source = tmp_path/(request_id + '.json')
     if not source.exists():
-        write(source, {'id': request_id, 'source': 'conversation/' + request_id, 'instruction': instruction})
+        write(source, {'id': request_id, 'source': 'conversation/' + request_id, 'instruction': instruction, 'skill': 'dk-workflows:dk-pr-review-alternatives', 'origin': 'user'})
     return tasks.reassess({'tasks': [deepcopy(item)], **options}, request_id=request_id,
                           authorization=instruction, source=str(source))['tasks'][0]
 
@@ -35,7 +35,7 @@ def test_unauthorized_input_named_authorization_cannot_replace_initial_review(ca
     spec, store = case; tasks = Tasks(REPO, PR)
     refs = planned(tasks, deepcopy(spec))
     item = comparison_task(spec, refs)
-    source = tmp_path/'permission.json'; write(source, {'instruction': INSTRUCTION})
+    source = tmp_path/'permission.json'; write(source, {'instruction': INSTRUCTION, 'skill': 'dk-workflows:dk-pr-review-alternatives', 'origin': 'user'})
     item['definition']['inputs']['alternatives_reassessment'] = str(source)
     before = store.manifest.read_bytes()
     with pytest.raises(ValueError, match='explicit reassessment'):
@@ -272,7 +272,7 @@ def test_removed_old_installation_returns_recovery_and_cli_accepts_rebuilt_defin
     item = descriptor(deepcopy(spec), 'assessment')
     item['definition']['resources']['entry'] = str(replacement)
     request = tmp_path/'prepare.json'; write(request, {'tasks': [item]})
-    original = tmp_path/'message.json'; write(original, {'id': 'user-message', 'source': 'conversation/12', 'instruction': INSTRUCTION})
+    original = tmp_path/'message.json'; write(original, {'id': 'user-message', 'source': 'conversation/12', 'instruction': INSTRUCTION, 'skill': 'dk-workflows:dk-pr-review-alternatives', 'origin': 'user'})
     command = [sys.executable, str(ROOT/'scripts/dk.py'), '--repository', REPO, '--pr', PR,
                'reassess', '--file', str(request), '--request-id', 'user-message',
                '--authorization', INSTRUCTION, '--source', str(original)]
@@ -286,7 +286,7 @@ def test_removed_old_installation_returns_recovery_and_cli_accepts_rebuilt_defin
 def test_inexact_or_incomplete_original_request_rejects_before_writes(case, tmp_path, field):
     spec, store = case; tasks = Tasks(REPO, PR)
     planned(tasks, deepcopy(spec), required=False)
-    original = {'id': 'message-215', 'source': 'conversation/message-215', 'instruction': INSTRUCTION}
+    original = {'id': 'message-215', 'source': 'conversation/message-215', 'instruction': INSTRUCTION, 'skill': 'dk-workflows:dk-pr-review-alternatives', 'origin': 'user'}
     original[field] = '' if field == 'source' else 'Other user request'
     write(tmp_path/'message-215.json', original)
     before = store.manifest.read_bytes()

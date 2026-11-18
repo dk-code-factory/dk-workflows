@@ -153,14 +153,16 @@ def test_confidence_doubts_feasibility_checks_shared(case):
         plans.select(compared_value, policy, {'mode': 'manual', 'choice': 'implemented', 'user_source': 'message:1', 'reason': 'Chosen'})
 
 
-def test_shared_original_consumption_across_workflows(case):
+def test_cross_route_entry_resumes_original_inventory_and_shared_assessment(case):
     spec, store = case; tasks = Tasks(REPO, PR)
     shared = complete(tasks, spec, 'assessment', purpose(), owner=assessment.FIX)
     fix = complete(tasks, spec, 'inventory', inventory(('implementation', 'introduced')), {'assessment': shared}, owner=assessment.FIX)
-    review = complete(tasks, spec, 'inventory', inventory(('ownership', 'inherited')), {'assessment': shared})
+    with pytest.raises(ValueError, match='Resume the original alternatives chain'):
+        complete(tasks, spec, 'inventory', inventory(('ownership', 'inherited')), {'assessment': shared})
     original = plans.accepted(tasks, shared)['reference']
     assert plans.accepted(tasks, fix)['spec']['inputs']['assessed_assessment'] == original
-    assert plans.accepted(tasks, review)['spec']['inputs']['assessed_assessment'] == original
+    resumed = plans.gate(tasks, assessment.REVIEW)
+    assert resumed['stage'] == 'comparison' and resumed['next_task']['skill'] == assessment.FIX
     assert plans.key(tasks, assessment.FIX, 'assessment') == plans.key(tasks, assessment.REVIEW, 'assessment')
     assert len(read(store.manifest)['entries'][shared]['attempts']) == 1
 
@@ -195,33 +197,25 @@ def test_partial_recovery_preserves_completed_decision_and_claim(case):
     assert len(read(store.manifest)['entries'][first]['attempts']) == 1
 
 
-def test_mode_only_refresh_preserves_shared_assessment_and_comparisons(case, tmp_path):
+def test_mode_only_change_preserves_settled_selection(case, tmp_path):
     spec, store = case; tasks = Tasks(REPO, PR)
     refs = initial(tasks, spec)
     paths = {k: plans.accepted(tasks, refs[k])['reference'] for k in ('assessment', 'inventory', 'comparison:storage', 'comparison:boundary')}
     settings = {'skill_defaults': {assessment.PR: {'options': {'selection': {'mode': 'manual'}}}}}
     write(skill_config.scope_path(REPO), settings)
     result = plans.gate(tasks, assessment.REVIEW)
-    assert result['stage'] == 'selection'
-    task = tasks.prepare({'tasks': [result['next_task']]})['tasks'][0]
-    assert task['action'] == 'invoke'
-    with pytest.raises(ValueError, match='sourced user choice'):
-        finish(tasks, task, selection())
-    finish(tasks, task, selection(choice=None))
-    assert plans.gate(tasks, assessment.REVIEW)['outcome'] == 'choice_pending'
+    assert result['outcome'] == 'planned' and result['design_context']
+    assert plans.accepted(tasks, refs['selection:storage'], historical=True)['report']['choice'] == 'implemented'
     assert {k: plans.accepted(tasks, refs[k])['reference'] for k in paths} == paths
 
 
-def test_mode_only_same_choices_preserve_interactions_and_alignment(case):
+def test_mode_only_change_does_not_repeat_selection_or_alignment(case):
     spec, _ = case; tasks = Tasks(REPO, PR)
     refs = initial(tasks, spec)
     original = {name: plans.accepted(tasks, refs[name])['reference'] for name in ('interactions', 'alignment')}
     write(skill_config.scope_path(REPO), {'skill_defaults': {assessment.PR: {'options': {'selection': {'mode': 'automatic'}}}}})
-    for decision in ('storage', 'boundary'):
-        result = plans.gate(tasks, assessment.REVIEW)
-        assert result['stage'] == 'selection' and result['next_task']['decision'] == decision
-        task = tasks.prepare({'tasks': [result['next_task']]})['tasks'][0]
-        finish(tasks, task, selection())
+    result = plans.gate(tasks, assessment.REVIEW)
+    assert result['outcome'] == 'planned' and result['current_alignment_required']
     assert plans.gate(Tasks(REPO, PR), assessment.REVIEW)['outcome'] == 'planned'
     assert {name: plans.accepted(tasks, refs[name])['reference'] for name in original} == original
 
@@ -243,18 +237,18 @@ def test_manual_choice_requires_bound_source(case, tmp_path):
     assert finish(tasks, task, report)['checklist_complete']
 
 
-def test_changed_guidance_and_missing_evidence_block_reuse(case):
+def test_changed_requirements_need_live_alignment_and_missing_evidence_needs_restoration(case):
     spec, store = case; tasks = Tasks(REPO, PR)
     refs = initial(tasks, spec)
     Path(spec['inputs']['context']).write_text('Changed governing scope')
     result = plans.gate(tasks, assessment.REVIEW)
-    assert result['stage'] == 'assessment'
-    with pytest.raises(ValueError, match='explicit reassessment'):
-        tasks.prepare({'tasks': [result['next_task']]})
+    assert result['outcome'] == 'planned' and result['current_alignment_required']
     Path(spec['inputs']['context']).write_text('scope and decisions')
     path = plans.accepted(tasks, refs['comparison:boundary'])['reference']
     Path(path).unlink()
-    assert plans.gate(tasks, assessment.REVIEW)['stage'] == 'comparison'
+    recovery = plans.gate(tasks, assessment.REVIEW)
+    assert recovery['stage'] == 'comparison' and recovery['outcome'] == 'recovery_required'
+    assert recovery['next_task'] == {'key': refs['comparison:boundary']}
     assert plans.accepted(tasks, refs['comparison:storage'])['report']['rubric'] == 'writes'
 
 
@@ -371,7 +365,7 @@ def test_legacy_whole_comparison_cannot_complete_architectural_inventory(case):
     old = legacy_complete(tasks, spec, 'assessment', {'required': True, 'reason': 'Compare recovery', 'evidence': ['code:1']})
     with pytest.raises(ValueError, match='legacy results remain recoverable'):
         plans.accepted(tasks, old)
-    assert plans.gate(tasks, assessment.REVIEW)['stage'] == 'assessment'
+    assert plans.gate(tasks, assessment.REVIEW)['stage'] == 'comparison'
 
 
 def test_disabled_alternatives_bypasses_plan_and_prevents_new_native_work(case):
@@ -404,7 +398,7 @@ def test_manual_refresh_reuses_shared_assessment_and_same_request_siblings(case,
     refs = initial(tasks, spec)
     shared_result = plans.accepted(tasks, refs['assessment'])['reference']
     request = tmp_path/'request.json'
-    write(request, {'id': 'message-2', 'source': 'conversation:2', 'instruction': 'Review PR alternatives again'})
+    write(request, {'id': 'message-2', 'source': 'conversation:2', 'instruction': 'Review PR alternatives again', 'skill': 'dk-workflows:dk-pr-review-alternatives', 'origin': 'user'})
     result = plans.gate(tasks, assessment.REVIEW, request=str(request))
     assert result['stage'] == 'inventory'
     task = tasks.prepare({'tasks': [result['next_task']]})['tasks'][0]
@@ -430,7 +424,7 @@ def test_interactions_need_every_settled_choice_and_cannot_release_conflicts(cas
     task_descriptor = descriptor(spec, 'interactions', deps)
     # Changed semantic interaction evidence is a new explicit request.
     source = Path(spec['git']['checkout']).parent/'interaction-request.json'
-    write(source, {'id': 'message-3', 'source': 'conversation:3', 'instruction': 'Recheck approach interactions'})
+    write(source, {'id': 'message-3', 'source': 'conversation:3', 'instruction': 'Recheck approach interactions', 'skill': 'dk-workflows:dk-pr-review-alternatives', 'origin': 'user'})
     task_descriptor['definition']['inputs']['alternatives_request'] = str(source)
     task = tasks.prepare({'tasks': [task_descriptor]})['tasks'][0]
     finish(tasks, task, {'compatible': False, 'reason': 'Two owners conflict', 'required_changes': 'Choose one owner', 'evidence': ['code:1']})
@@ -454,7 +448,7 @@ def test_added_inventory_sibling_reuses_unchanged_comparisons(case, tmp_path):
     refs = initial(tasks, spec)
     preserved = {k: plans.accepted(tasks, refs[k])['reference'] for k in ('comparison:storage', 'comparison:boundary')}
     source = tmp_path/'scope-request.json'
-    write(source, {'id': 'message-4', 'source': 'conversation:4', 'instruction': 'Include the additional API decision'})
+    write(source, {'id': 'message-4', 'source': 'conversation:4', 'instruction': 'Include the additional API decision', 'skill': 'dk-workflows:dk-pr-review-alternatives', 'origin': 'user'})
     task = tasks.prepare({'tasks': [descriptor(spec, 'inventory', {'assessment': refs['assessment']},
                             inputs={'alternatives_reassessment': str(source)})]})['tasks'][0]
     finish(tasks, task, inventory(('storage', 'inherited'), ('boundary', 'materially_changed'), ('api', 'introduced')))

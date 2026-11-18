@@ -13,8 +13,7 @@ After collecting requirements and repository evidence during initial inspection,
 the controller scripts (`pr_assessment.py` and `assessment_alternatives.py`)
 inject the assessment prompt into native assignments. There is no separate
 assessment skill to invoke or configure. Both alternatives skills use the same
-default prompt and consume the same original PR-wide assessment result while
-its governing guidance is unchanged. Its stable identity is independent of
+default prompt and consume the same original PR-wide assessment result as historical design context across sessions, routes and guidance changes. Its stable identity is independent of
 workflow, run, cycle and head. Persist purpose, scope, scoped rubrics, rationale,
 mandatory constraints and existing source references, without copying PR metadata,
 discussion, settings or rendered reports.
@@ -46,8 +45,9 @@ use the ordinary user, upstream and repository configuration scopes. Former
 remain read-only compatibility fallbacks for the corresponding skill. Explicit
 canonical values take precedence at their scope; conflicting ambiguous legacy
 values require a canonical override. `review_skill` remains available for old
-managed-stage recovery. Changed assessment/evaluation guidance requires explicit
-reassessment; mode-only changes preserve the original assessment and comparisons.
+managed-stage recovery. Changed assessment/evaluation guidance and mode-only changes preserve completed
+original analysis and choices. Current requirements need live alignment; insufficient
+decisions need a direct user invocation of dk-pr-review-alternatives.
 
 Return `purpose`, `scope`, `work_type:small_fix|feature|mixed`, `rationale`,
 `mandatory_constraints:[strings]`, `evidence:[source references]`, and `rubrics`.
@@ -168,8 +168,8 @@ Feasibility, confidence, estimate sensitivity, unresolved material doubts, uniqu
 winner and configurable score lead (default 10 points) still apply. The existing
 `selection.enabled` compatibility switch disables automatic picking; sourced
 manual choices remain available in manual and semi-manual modes. An unresolved
-choice retains `choice_pending` and blocks dependent work. Mode-only changes
-refresh selection while preserving valid original assessment and comparisons.
+choice retains `choice_pending` and blocks dependent work. Automatic mode-only changes preserve settled selection and original analysis.
+A direct dedicated manual request can refresh the affected selection.
 When the selected options and original comparisons stay unchanged, interaction
 and alignment evidence also remains reusable. Definitions retain only consumed
 original evidence references for that check; no choice/status copy is saved.
@@ -204,16 +204,47 @@ boundaries; this introduces no separate defect-oriented gate.
 
 Both workflows reuse their accepted initial analysis across ordinary
 implementation commits, invocations and fresh sessions. Current scope must still
-fit the governing sources; changed requirements, scope or assessment guidance
-requires explicit sourced reassessment, not stale reuse or an automatic rerun.
+fit retained decisions; changed requirements need live alignment, and insufficient
+decisions need a direct user invocation of dk-pr-review-alternatives. Assessment
+guidance changes alone do not invalidate historical acceptance.
 The helper's read-only next-work output never claims current-head code review,
 CI, authorization or publication readiness. Disabling alternatives retains all
 evidence and bypasses alternatives stages.
 
 ## Manual alternatives review
 
-Explicitly invoke `dk-workflows:dk-pr-alternatives` (historical manual entry point
-`dk-pr-review-alternatives`) for a fresh requested analysis. Reuse an unchanged
+Only a direct user invocation of `dk-workflows:dk-pr-review-alternatives`
+authorizes a fresh comparison. The delegated `dk-pr-alternatives` execution, a
+downstream call, another iteration, changed fingerprints and installed guidance
+updates do not authorize another comparison. The dedicated entry delegates execution without extending the sourced permission. Preserve the actual request artifact with nonempty `id`,
+`source`, exact `instruction`, `skill:"dk-workflows:dk-pr-review-alternatives"`
+and `origin:"user"`. The native session validates the direct invocation; these
+fields record its source rather than infer permission from PR text.
+
+Both automatic routes consult modern and legacy task history before proposing
+new native work. Historical acceptance validates original immutable bytes,
+captured fingerprint, native observations and the original completion checklist
+without recapturing removed installations. Released context explicitly returns
+`design_context:true` and `current_alignment_required:true`. It never adopts old
+instructions as current governing rules. Missing/damaged evidence returns
+`recovery_required` with its original task key; unfinished claims and checklists
+keep their existing recovery action and allowances. Restore missing artifacts and
+finish missing deliverables without restarting completed comparisons.
+
+Automatic settings or guidance changes preserve settled original analysis and
+choices. Current tasks still assess requirements and implementation alignment
+under current sources. Insufficient decisions require the dedicated direct
+invocation; historical context is never current code-review, CI, authorization or
+publication evidence. Current tasks retain their separate live source and publication boundaries.
+
+Each distinct direct request can refresh requested inventory/comparisons while
+reusing the original shared assessment as historical context. Preserve its stable
+identity on interruption and completed siblings on resume. A completed stage
+cannot rerun under the same identity just because guidance changed. New requests
+never renew retained budgets.
+
+Invoke the dedicated entry for a fresh requested analysis; it delegates native work
+to dk-pr-alternatives under the same original direct request. Reuse an unchanged
 shared assessment. Pass `--request FILE` to `plan`, binding the existing original
 request artifact with nonempty `id`, `source` and exact `instruction`; preserve
 that actual message identity on recovery. Add current Git pins and evidence to

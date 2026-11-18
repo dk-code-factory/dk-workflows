@@ -786,6 +786,34 @@ See [decision reconciliation](docs/decision-reconciliation.md).
 
 ## Shared purpose assessment and architectural alternatives
 
+### Canonical PR history boundary
+
+Automatic alternatives discovery must consult both routes and historical
+architecture/whole-problem identities before proposing native analysis. Completed
+comparisons and sourced choices are historical design context, not current code
+coverage. Validate their immutable result bytes, original captured fingerprint,
+native evidence and original completion checklist without recapturing installed
+guidance. Code pushes, rebases, route changes and package updates cannot turn
+those results into another automatic comparison. Reconstruct outstanding stages
+from the original dependency chain; missing/damaged artifacts require restoration,
+and unfinished claims or checklists require their existing recovery action.
+
+Only a sourced direct user invocation of `dk-pr-review-alternatives` can request
+a fresh comparison. Its stable request identity is retained through interruption;
+ordinary iteration, downstream skill calls and changed fingerprints are not that
+authorization. Current requirements still require native alignment with retained
+decisions. Insufficient decisions require that explicit invocation rather than
+automatic reconsideration. Current review, authorization, CI and publication
+remain separate live checks.
+
+Use a read-only adapter over existing task entries and original artifacts. Add no
+completion flag, registry, copied report or rendered resume plan, and change no
+fingerprint bytes, task keys, claims, budgets or publication recovery records.
+This avoids repeated paid comparison and reconstruction across routes and fresh
+sessions without introducing durable-state loading costs. Historical reuse ends
+at damaged/missing original evidence; its applicability to current requirements
+is a separate live native decision. API dollar savings remain unmeasured.
+
 During initial inspection, after requirements and repository evidence collection,
 the Python controller injects the common assessment prompt into a native
 assignment. There is no installed assessment skill or separate model runner.
@@ -804,9 +832,10 @@ native assignments with the same default assessment prompts, requirements and
 scoring contract. They do not invoke an assessment skill or launch model sessions.
 `pr_assessment.resolve` reads the invoked alternatives skill's scoped settings;
 `selection.mode` can differ between issue and PR alternatives. A shared original
-assessment remains reusable while its governing guidance is unchanged; a changed
-assessment/evaluation prompt requires explicit reassessment. Mode changes alone
-never affect that assessment. Former assessment-skill and owning-workflow settings
+assessment remains historical context across installed guidance changes. Changed
+requirements need live alignment; insufficient decisions need a direct user
+invocation of dk-pr-review-alternatives. Mode changes never repeat settled
+assessment or selection automatically. Former assessment-skill and owning-workflow settings
 remain read-only fallbacks, with canonical skill settings taking precedence at
 their scope. Ambiguous conflicting legacy values require an explicit canonical
 override. No settings file is rewritten on read. Small fixes normally favor focused implementation
@@ -831,7 +860,7 @@ Comparison definitions retain their original immutable inventory reference when
 the selected decision is unchanged, so added or changed siblings do not repeat
 unaffected comparisons. Interaction definitions likewise retain original selection
 and comparison references while the selected option and comparison are unchanged;
-a mode-only refresh does not repeat compatibility or alignment work. These small
+automatic mode-only changes do not repeat settled selection, compatibility or alignment work. These small
 consumed evidence references avoid paid native recomparison/reconstruction across
 sessions, without copying decisions or storing derived status. Missing originals,
 changed decision contents, selected options or comparisons end that reuse.
@@ -852,14 +881,17 @@ or implementation. Manual requires an explicit sourced choice of a feasible
 compared option. Semi-manual selects a qualifying clear winner, otherwise asks.
 Manual source paths are bound and cited in the original selection evidence, with
 rationale and every rejected option's reason. Selection grants no additional
-permission. Unresolved choices retain choice_pending behavior. Mode changes refresh
-selection alone, preserving assessment and comparisons; changed choices require
-affected interaction and alignment checks.
+permission. Unresolved choices retain choice_pending behavior. A direct dedicated
+manual request can refresh selection; automatic settings changes preserve settled
+choices. Explicit changed choices require affected interaction and alignment checks.
 
-Initial automatic alternatives completes once per PR. Explicit manual requests
-bind the actual original user request and refresh requested alternatives work
-while reusing unchanged shared assessment. Changed governing purpose, scope,
-requirements or assessment guidance requires explicit sourced reassessment.
+Initial automatic alternatives completes once per canonical PR across both routes.
+Only direct user invocations of dk-pr-review-alternatives bind an original request
+to fresh alternatives. The request retains its stable id, source, exact instruction,
+invoked skill and user origin; downstream calls and iteration cannot supply that
+authorization. Reuse the original shared assessment as historical context. Changed
+requirements need live alignment and that dedicated invocation when retained
+decisions are insufficient.
 Original attempts, claims, fingerprints, sibling results, budgets and publication
 receipts remain retained. Ordinary implementation commits do not repeat initial
 analysis. Current review, CI and publication readiness still recapture live inputs.
@@ -867,8 +899,9 @@ Issue-only invocation performs the same native assessment and evaluation against
 the issue and selected target branch in memory, without fabricating a PR record.
 
 New architectural responsibilities are distinct from historical whole-problem
-stage identities. Old whole-problem results cannot establish architectural
-inventory coverage. Historical skills and low-level managed gates remain
+stage identities. Old whole-problem results remain historical context; they cannot establish current
+architectural inventory or code-review coverage and cannot trigger a second
+automatic comparison. Historical skills and low-level managed gates remain
 recoverable under their existing keys and stores; no cache reset or migration is
 performed. `dk-issue-implementation-alternatives` is a read alias for
 `dk-issue-alternatives`; its task keys and explicit saved settings retain their
@@ -883,9 +916,10 @@ initial inspection procedure.
 Expected avoided API cost comes from eliminating repeated purpose/rubric analysis
 and completed per-decision comparisons in the current and next session. Reusing
 small definitions and original evidence references costs less to capture, validate,
-load and explain than repeating that native work. Freshness ends at changed
-governing sources, assessment/evaluation guidance, affected comparison inputs or
-missing evidence; mode-only changes invalidate selection rather than assessment.
+load and explain than repeating that native work. Historical acceptance ends at missing/damaged original results, native evidence,
+checklist evidence or unresolved claims. Its current applicability ends at changed
+requirements, with live native alignment and independent current review required.
+Guidance and mode changes alone never launch another automatic comparison.
 No current authorization, publication receipt validation or CI check is cached.
 Offline fresh-process, partial recovery and invalidation tests establish behavior;
 process counts are proxies and native API dollar savings remain unmeasured.

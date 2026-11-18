@@ -9,6 +9,8 @@ Before repository guidance reads, follow [repository instruction sources](../../
 
 Persist workflow state only when it reduces total API dollar cost, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
 
+Apply the canonical [alternatives history boundary](../../../docs/alternatives-review.md#manual-alternatives-review) across both PR routes, sessions, heads and guidance versions. Only a direct user invocation of `dk-workflows:dk-pr-review-alternatives` permits a fresh PR comparison. Preserve original choices and unfinished work; historical context still needs current requirements/implementation alignment and independent review, CI and publication checks.
+
 Set PACKAGE_ROOT to this installed plugin root.
 
 The controller injects the common assessment prompt into native assignments and reuses accepted assessment evidence. There is no separate assessment skill to invoke. This skill owns `selection.mode` and the remaining `selection` options in its configuration; the default is `semi-manual`. Configure issue and PR alternatives independently. Pass invocation-local skill options to the helper with `--alternatives-options`.

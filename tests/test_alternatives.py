@@ -173,7 +173,7 @@ def complete(tasks, spec, stage, value, deps=None, options=None):
 def initial(tasks, spec, *, required=True, manual=False):
     if manual:
         source = Path(spec['git']['checkout']).parent/'alternatives-request.json'
-        write(source, {'id': 'message-1', 'source': 'user:1', 'instruction': 'Review alternatives explicitly'})
+        write(source, {'id': 'message-1', 'source': 'user:1', 'instruction': 'Review alternatives explicitly', 'skill': 'dk-workflows:dk-pr-review-alternatives', 'origin': 'user'})
         d = descriptor(spec, 'assessment')
         d['definition']['inputs']['alternatives_request'] = str(source)
         task = tasks.prepare({'tasks': [d]})['tasks'][0]
@@ -355,7 +355,7 @@ def test_explicit_alternatives_request_reruns_completed_analysis_and_preserves_h
     for number in (1, 2):
         source = tmp_path/f'alternatives-request-{number}.json'
         write(source, {'id': f'message-{number}', 'source': f'conversation:user:{number}',
-                       'instruction': request_text})
+                       'instruction': request_text, 'skill': 'dk-workflows:dk-pr-review-alternatives', 'origin': 'user'})
         d = descriptor(spec, 'assessment', options={'alternatives': {'enabled': True}})
         d['definition'] = deepcopy(d['definition'])
         d['definition']['inputs']['alternatives_request'] = str(source)
@@ -381,7 +381,7 @@ def test_explicit_alternatives_request_reruns_completed_analysis_and_preserves_h
 def test_manual_alternatives_fresh_session_reuses_completed_stages_and_recovers_pending(case, tmp_path):
     spec, store = case; tasks = Tasks(REPO, PR)
     source = tmp_path/'request.json'
-    write(source, {'id': 'message-1', 'source': 'conversation:user:1', 'instruction': 'Review alternatives on ' + PR})
+    write(source, {'id': 'message-1', 'source': 'conversation:user:1', 'instruction': 'Review alternatives on ' + PR, 'skill': 'dk-workflows:dk-pr-review-alternatives', 'origin': 'user'})
     d = descriptor(spec, 'assessment')
     d['definition']['inputs'] = {**d['definition']['inputs'], 'alternatives_request': str(source)}
     assessment = tasks.prepare({'run': 'manual', 'cycle': 'initial', 'tasks': [d]})['tasks'][0]
@@ -412,7 +412,7 @@ def test_manual_alternatives_fresh_session_reuses_completed_stages_and_recovers_
 
 
 @pytest.mark.parametrize('value', [None, [], {}, {'id': 'message'},
-                                        {'id': 'message', 'source': 'user:1', 'instruction': ''}])
+                                        {'id': 'message', 'source': 'user:1', 'instruction': '', 'skill': 'dk-workflows:dk-pr-review-alternatives', 'origin': 'user'}])
 def test_manual_alternatives_requires_original_request_identity_before_claims(case, tmp_path, value):
     spec, store = case; tasks = Tasks(REPO, PR)
     source = tmp_path/'request.json'; write(source, value)
@@ -531,14 +531,15 @@ def test_repeated_gate_reads_do_not_duplicate_publications_or_state(case):
     assert before == {p: p.read_bytes() for p in store.root.parent.parent.rglob('*') if p.is_file()}
 
 
-def test_changed_relevant_sources_invalidate_applicability_and_block_dependents(case):
+def test_changed_requirements_leave_historical_skip_as_context_for_live_review(case):
     spec, store = case; tasks = Tasks(REPO, PR)
     refs = initial(tasks, spec, required=False)
     Path(spec['inputs']['context']).write_text('New public interface requirements')
     with pytest.raises(ValueError, match='fresh'):
         alternatives.gate(tasks, refs)
-    with pytest.raises(ValueError):
-        tasks.prepare({'tasks': [ordinary(spec, refs)]})
+    task = tasks.prepare({'tasks': [ordinary(spec, refs)]})['tasks'][0]
+    assert task['action'] == 'invoke'
+    assert any(item['id'] == 'alternatives-initial-plan' for item in task['checklist']['items'])
 
 
 def test_stage_dependencies_reject_cycles_before_claims(case):
@@ -555,8 +556,11 @@ def test_changed_invocation_local_review_skill_cannot_reuse_old_gate(case, requi
     options = {'alternatives': {'review_skill': 'team:alternatives-review'}}
     with pytest.raises(ValueError, match='skill changed'):
         alternatives.gate(tasks, refs, options=options)
-    with pytest.raises(ValueError, match='skill changed'):
-        tasks.prepare({'tasks': [ordinary(spec, refs, options)]})
+    if required:
+        with pytest.raises(ValueError, match='review_required'):
+            tasks.prepare({'tasks': [ordinary(spec, refs, options)]})
+    else:
+        assert tasks.prepare({'tasks': [ordinary(spec, refs, options)]})['tasks'][0]['action'] == 'invoke'
 
 
 @pytest.mark.parametrize('body,heading', [('', 'Decisions'), ('Summary', 'Decisions'),
@@ -902,15 +906,17 @@ def test_dependency_validation_is_shared_within_each_fresh_boundary(case, monkey
     monkeypatch.setattr(state, 'capture', capture)
     task = tasks.prepare({'tasks': [ordinary(spec, refs)]})['tasks'][0]
     assert task['action'] == 'invoke'
-    # Construction and claim are separate live boundaries, with each stage once.
-    expected = {'alternatives-' + stage + '-review': 2 for stage in ('assessment', 'comparison', 'selection', 'alignment')}
+    # Historical analysis no longer recaptures installed guidance. Construction
+    # and claim still capture the ordinary task's current inputs independently.
+    expected = {}
     assert dict(captures) == expected
+    initial_task = task
     captures.clear()
     task = tasks.prepare({'tasks': [ordinary(spec, refs)]})['tasks'][0]
     assert task['action'] == 'recover_required' and dict(captures) == expected
     Path(spec['inputs']['context']).write_text('Requirements changed after the preceding helper command')
-    with pytest.raises(ValueError, match='fresh'):
-        tasks.prepare({'tasks': [ordinary(spec, refs)]})
+    with pytest.raises(ValueError, match='changed'):
+        finish(tasks, initial_task, {'complete': True}, native=False)
 
 
 @pytest.mark.parametrize('paragraph', ['Old alternatives\n<span>\n', '-     code example\n'])
@@ -1009,7 +1015,7 @@ def test_parallel_incoming_siblings_share_two_live_validation_boundaries(case, m
         group.append(item)
     prepared = tasks.prepare({'tasks': group})['tasks']
     assert all(task['action'] == 'invoke' for task in prepared)
-    expected = {'alternatives-' + stage + '-review': 2 for stage in ('assessment', 'comparison', 'selection', 'alignment')}
+    expected = {}
     assert dict(captures) == expected and not reads
     for task in prepared:
         finish(tasks, task, {'complete': True}, native=False)

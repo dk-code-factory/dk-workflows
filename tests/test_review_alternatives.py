@@ -122,7 +122,7 @@ def test_explicit_manual_request_after_new_head_still_reviews_current_alternativ
     saved = {key: path.read_bytes() for key, path in originals.items()}
     changed = advance(spec)
     source = tmp_path/'new-request.json'
-    write(source, {'id': 'message-2', 'source': 'user:2', 'instruction': 'Reassess alternatives on this PR'})
+    write(source, {'id': 'message-2', 'source': 'user:2', 'instruction': 'Reassess alternatives on this PR', 'skill': 'dk-workflows:dk-pr-review-alternatives', 'origin': 'user'})
     refs = {}
     reports = {'assessment': {'required': True, 'reason': 'Explicit request', 'evidence': [str(source)]},
                'comparison': compared(), 'selection': selection(),

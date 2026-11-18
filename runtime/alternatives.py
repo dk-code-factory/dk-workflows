@@ -254,7 +254,19 @@ def evaluation(tasks):
         _EVALUATION.reset(token)
 
 
-def accepted(tasks, key, *, historical=False):
+def accepted(tasks, key, *, historical=False, settled=False):
+    if settled:
+        with evaluation(tasks) as context:
+            identity = ('legacy-history', key)
+            if identity in context['active']:
+                raise ValueError('Circular historical alternatives dependencies')
+            if identity not in context['accepted']:
+                context['active'].add(identity)
+                try:
+                    context['accepted'][identity] = _settled(tasks, key)
+                finally:
+                    context['active'].remove(identity)
+            return context['accepted'][identity]
     with evaluation(tasks) as context:
         identity = (key, historical)
         if identity in context['active']:
@@ -266,6 +278,25 @@ def accepted(tasks, key, *, historical=False):
             finally:
                 context['active'].remove(identity)
         return context['accepted'][identity]
+
+
+def _settled(tasks, key):
+    from alternatives_history import accepted as original_result
+    from alternatives_compat import descriptor
+    from state import resource
+    value = original_result(tasks, key)
+    managed = descriptor(value['managed'])
+    assigned = value['spec']['options'].get('alternatives', value['spec']['options'].get('architecture', {}))
+    original_inputs = value['spec']['inputs']
+    value['spec']['inputs'] = deepcopy(managed['definition'].get('inputs', {}))
+    for label, dependency in managed.get('dependencies', {}).items():
+        consumed = accepted(tasks, dependency, settled=True)
+        name = 'alternatives_' + label
+        path = value['spec']['inputs'].setdefault(name, consumed['reference'])
+        expected = original_inputs.get(name, original_inputs.get('architecture_' + label))
+        if resource(path) != expected:
+            raise ValueError('Original alternatives dependency changed; restore its consumed evidence')
+    return {**value, **assigned, 'request': value['spec']['inputs'].get('alternatives_request')}
 
 
 def _accepted(tasks, key, context, *, historical=False):
@@ -348,6 +379,13 @@ def _stage_spec(tasks, descriptor, definition, *, replay=False, authorize_reasse
     if owner == FIX_OWNER:
         from fix_alternatives import pinned_definition
         definition = pinned_definition(tasks, descriptor, definition)
+    if not replay and not authorize_reassessment:
+        from alternatives_history import guard_route
+        guard_route(tasks, owner, 'alternatives', definition)
+        source = definition.get('inputs', {}).get('alternatives_request')
+        if source:
+            from alternatives_history import request as direct_request
+            direct_request(source)
     dependencies = descriptor.get('dependencies', {})
     if not isinstance(dependencies, dict) or set(dependencies) - set(ALLOWS[stage]):
         raise ValueError('Alternatives dependencies must reference stage task keys')
@@ -360,7 +398,8 @@ def _stage_spec(tasks, descriptor, definition, *, replay=False, authorize_reasse
         if replay and stage == 'impact' and name == 'selection':
             retained[name] = impact_selection_source(tasks, key)
         else:
-            retained[name] = accepted(tasks, key, historical=(name in {'assessment', 'comparison', 'selection'}
+            retained[name] = accepted(tasks, key, settled=stage != 'impact' and 'impact' not in dependencies,
+                                     historical=(name in {'assessment', 'comparison', 'selection'}
                                                              and (stage == 'impact' or 'impact' in dependencies)))
     for name, value in retained.items():
         if value['stage'] != name:
@@ -962,8 +1001,11 @@ def enforce(spec, repository, pr, *, options=None, upstream=None):
 
 def _enforce(spec, tasks, *, options=None, upstream=None):
     execution = spec.get('options', {}).get('execution', spec.get('options', {}))
-    if not execution.get('alternatives_evidence'):
+    if not execution.get('alternatives_evidence', {}).get('impact'):
         import assessment_alternatives
+        evidence = execution.get('alternatives_evidence', {})
+        if evidence.get('review_operation'):
+            execution['alternatives_review_operation'] = evidence['review_operation']
         return assessment_alternatives.enforce(spec, tasks, OWNER, options=options, upstream=upstream)
     result = gate(tasks, execution.get('alternatives_evidence'), options=options,
                   upstream=upstream, analysis_only=execution.get('analysis_only', False))
