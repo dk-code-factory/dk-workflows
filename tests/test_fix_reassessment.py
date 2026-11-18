@@ -9,7 +9,7 @@ import pytest
 
 import alternatives
 import fix_alternatives as fix
-from state import read, write
+from state import capture, read, write
 from tasks import Tasks
 from test_state import case, REPO, PR, ROOT
 from test_fix_alternatives import descriptor, planned, complete, ordinary
@@ -39,6 +39,21 @@ def test_unauthorized_input_named_authorization_cannot_replace_initial_review(ca
     item['definition']['inputs']['alternatives_reassessment'] = str(source)
     before = store.manifest.read_bytes()
     with pytest.raises(ValueError, match='explicit reassessment'):
+        tasks.prepare({'tasks': [item]})
+    assert store.manifest.read_bytes() == before
+
+
+def test_definition_options_cannot_supply_reassessment_permission(case):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = planned(tasks, deepcopy(spec), required=False)
+    item = descriptor(deepcopy(spec), 'assessment')
+    item['definition']['assigned_instructions'] += ' Changed requirements without authorization.'
+    unsigned = tasks.spec(deepcopy(item), authorize_reassessment=True)
+    item['definition']['options']['alternatives_reassessment'] = {
+        'original_result': read(store.manifest)['entries'][refs['assessment']]['result']['hash'],
+        'fingerprint': capture(unsigned)['fingerprint']}
+    before = store.manifest.read_bytes()
+    with pytest.raises(ValueError, match='validated explicit reassessment binding'):
         tasks.prepare({'tasks': [item]})
     assert store.manifest.read_bytes() == before
 
@@ -153,6 +168,96 @@ def test_new_explicit_request_can_replace_changed_completed_authorized_inputs(ca
     task = authorize(tasks, item, tmp_path, request_id='later-user-message')
     assert task['action'] == 'invoke' and task['key'] == first['key']
     assert finish(tasks, task, {'required': False, 'reason': 'New review', 'evidence': ['diff']})['checklist_complete']
+
+
+def test_superseded_original_request_cannot_mint_a_new_binding(case, tmp_path):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    planned(tasks, deepcopy(spec), required=False)
+    item = descriptor(deepcopy(spec), 'assessment')
+    first = authorize(tasks, item, tmp_path)
+    assert finish(tasks, first, {'required': False, 'reason': 'First review', 'evidence': ['diff']})['checklist_complete']
+    Path(spec['inputs']['context']).write_text('Second authorized scope')
+    second = authorize(tasks, item, tmp_path, request_id='second-message')
+    assert finish(tasks, second, {'required': False, 'reason': 'Second review', 'evidence': ['diff']})['checklist_complete']
+    Path(spec['inputs']['context']).write_text('Third scope requires a new request')
+    before = store.manifest.read_bytes()
+    with pytest.raises(ValueError, match='superseded'):
+        authorize(Tasks(REPO, PR), item, tmp_path)
+    assert store.manifest.read_bytes() == before
+
+
+def test_new_authorization_recovers_changed_inputs_after_incomplete_replacements(case, tmp_path):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = planned(tasks, deepcopy(spec), required=False)
+    original = read(store.manifest)['entries'][refs['assessment']]['result']
+    original_path = store.root/'results'/original['file']
+    original_bytes = original_path.read_bytes()
+    item = descriptor(deepcopy(spec), 'assessment')
+    for number in range(2):
+        task = authorize(tasks, item, tmp_path, request_id='request-' + str(number))
+        assert finish(tasks, task, {'required': False, 'reason': 'Missing observations', 'evidence': ['diff']},
+                      native=False)['status'] == 'incomplete'
+        Path(spec['inputs']['context']).write_text('Changed scope ' + str(number))
+        with pytest.raises(ValueError, match='inputs changed'):
+            tasks.prepare({'tasks': [{'key': task['key']}]})
+    recovered = authorize(Tasks(REPO, PR), item, tmp_path, request_id='renewed-request')
+    assert recovered['action'] == 'invoke'
+    assert finish(tasks, recovered, {'required': False, 'reason': 'Recovered', 'evidence': ['diff']})['checklist_complete']
+    assert fix.gate(Tasks(REPO, PR))['outcome'] == 'skipped'
+    assert original_path.read_bytes() == original_bytes
+    assert read(store.manifest)['entries'][refs['assessment']]['attempts'][0]['result'] == original['file']
+
+
+@pytest.mark.parametrize('boundary', ['saved_key', 'low_level'])
+def test_incomplete_reassessment_retry_retains_run_and_budget_at_execution_boundary(case, tmp_path, boundary):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    item = descriptor(deepcopy(spec), 'assessment')
+    initial = tasks.prepare({'run': 'retained', 'cycle': 'initial', 'tasks': [item]})['tasks'][0]
+    assert finish(tasks, initial, {'required': False, 'reason': 'Initial', 'evidence': ['diff']})['checklist_complete']
+    task = authorize(tasks, item, tmp_path, run='retained', cycle='replacement')
+    assert finish(tasks, task, {'required': False, 'reason': 'Missing observations', 'evidence': ['diff']},
+                  native=False)['status'] == 'incomplete'
+
+    def start(**options):
+        if boundary == 'saved_key':
+            return Tasks(REPO, PR).prepare({'tasks': [{'key': task['key']}], **options})['tasks'][0]
+        return store.start(tasks.saved_spec(task['key']), **options)
+
+    before = store.manifest.read_bytes()
+    for options, error in (
+            ({}, 'original run'),
+            ({'run': 'different', 'cycle': 'replacement'}, 'original run'),
+            ({'run': 'retained'}, 'budgeted review cycle'),
+            ({'run': 'retained', 'cycle': 'replacement', 'ci_repair': True}, 'review-cycle allowance'),
+            ({'run': 'retained', 'cycle': 'replacement', 'ci_rerun': True}, 'review-cycle allowance'),
+            ({'run': 'retained', 'cycle': 'replacement'}, 'explicit retry')):
+        with pytest.raises(ValueError, match=error):
+            start(**options)
+        assert store.manifest.read_bytes() == before
+    unbound_spec = deepcopy(task['assignment'])
+    unbound_spec['options'].pop('alternatives_reassessment')
+    with pytest.raises(ValueError, match='original authorization binding'):
+        tasks.prepare({'tasks': [deepcopy(item)]})
+    with pytest.raises(ValueError, match='original authorization binding'):
+        store.start(unbound_spec)
+    resumed = start(run='retained', cycle='replacement', retry=True)
+    assert resumed['action'] == 'invoke' and resumed['claim']['run'] == 'retained'
+    assert read(store.manifest)['runs']['retained']['retries']['replacement:' + task['key']] == 1
+
+
+def test_completed_reassessment_reuses_without_reserving_original_run(case, tmp_path):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    item = descriptor(deepcopy(spec), 'assessment')
+    initial = tasks.prepare({'run': 'retained', 'cycle': 'initial', 'tasks': [item]})['tasks'][0]
+    assert finish(tasks, initial, {'required': False, 'reason': 'Initial', 'evidence': ['diff']})['checklist_complete']
+    task = authorize(tasks, item, tmp_path, run='retained', cycle='replacement')
+    assert finish(tasks, task, {'required': False, 'reason': 'Reassessed', 'evidence': ['diff']})['checklist_complete']
+    before = store.manifest.read_bytes()
+    for options in ({}, {'run': 'fresh-session', 'cycle': 'fresh-cycle'}):
+        reused = Tasks(REPO, PR).prepare({'tasks': [{'key': task['key']}], **options})['tasks'][0]
+        assert reused['action'] == 'reuse'
+        assert store.start(tasks.saved_spec(task['key']), **options)['action'] == 'reuse'
+    assert store.manifest.read_bytes() == before
 
 
 def test_removed_old_installation_returns_recovery_and_cli_accepts_rebuilt_definition(case, tmp_path):

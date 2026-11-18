@@ -31,6 +31,16 @@ def reassessment(tasks, request, *, request_id, authorization, source):
     if not original or not original.get('result'):
         raise ValueError('Reassessment requires retained original review evidence')
     saved, problem = tasks.store._load_saved(original)
+    prior = original.get('managed', {}).get('reassessment')
+    if not problem and saved['status'] != 'complete' and prior:
+        attempt = next((item for item in reversed(original['attempts'])
+                        if item.get('status') == 'complete' and item.get('result')), None)
+        if attempt is None:
+            raise ValueError('Original alternatives evidence is missing or damaged; restore it first')
+        filename = attempt['result']
+        saved, problem = tasks.store._load_saved({
+            'key': original['key'], 'result': {'file': filename, 'hash': Path(filename).stem,
+                                             'fingerprint': attempt['fingerprint']}})
     if problem or saved['status'] != 'complete':
         raise ValueError('Original alternatives evidence is missing, damaged or incomplete; restore it first')
     retained_run = next((attempt['run'] for attempt in reversed(original['attempts']) if attempt.get('run')), None)
@@ -46,7 +56,6 @@ def reassessment(tasks, request, *, request_id, authorization, source):
         raise ValueError('Reassessment must match the exact original user request artifact')
     request_reference = {'id': request_id, 'source': source}
     descriptor['definition'].setdefault('inputs', {})['alternatives_reassessment'] = source
-    prior = original.get('managed', {}).get('reassessment')
     # Replays reuse completed work as well as uncertain claims; changing the
     # original request requires a new identity rather than rewriting its source.
     if prior and prior['request']['id'] == request_id:
@@ -54,6 +63,8 @@ def reassessment(tasks, request, *, request_id, authorization, source):
             raise ValueError('Reassessment request source changed; use a new explicit request identity')
         descriptor['reassessment'] = deepcopy(prior)
     else:
+        if any(attempt.get('reassessment_request') == request_id for attempt in original['attempts']):
+            raise ValueError('Reassessment authorization was superseded; obtain a new explicit request identity')
         descriptor.pop('reassessment', None)
         spec = tasks.spec(descriptor, authorize_reassessment=True)
         with alternatives.evaluation(tasks) as context:
@@ -65,6 +76,8 @@ def reassessment(tasks, request, *, request_id, authorization, source):
 
 
 def bind_reassessment(tasks, descriptor, spec):
+    if 'alternatives_reassessment' in spec['options']:
+        raise ValueError('Reassessment options require a validated explicit reassessment binding')
     record = descriptor.get('reassessment')
     if record is None:
         return
@@ -132,6 +145,9 @@ def guard_completed(tasks, stage, spec):
     original = entry(tasks, stage)
     if not original or not original.get('result'):
         return
+    if (original.get('managed', {}).get('reassessment')
+            and 'alternatives_reassessment' not in spec['options']):
+        raise ValueError('Retained reassessment requires its original authorization binding or a new explicit reassessment')
     saved, problem = tasks.store._load_saved(original)
     if problem:
         raise ValueError('Initial alternatives evidence is missing or damaged; retain its recovery references')

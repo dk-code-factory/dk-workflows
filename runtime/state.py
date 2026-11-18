@@ -911,6 +911,18 @@ class Store:
             if checklist is not None and entry['checklist']['outcome'] == 'best_effort':
                 return {**previous, **reply(self, entry), 'action': 'reuse'}
             return {'action': 'reuse', **previous}
+        reassessment = options.get('alternatives_reassessment')
+        if (entry.get('components', {}).get('options', {}).get('alternatives_reassessment')
+                and not reassessment):
+            raise ValueError('Retained reassessment requires its original authorization binding')
+        if reassessment:
+            retained_run = next((attempt['run'] for attempt in reversed(entry['attempts']) if attempt.get('run')), None)
+            if retained_run and run != retained_run:
+                raise ValueError('Reassessment must retain the original run and its review/CI budget history')
+            if retained_run and not cycle:
+                raise ValueError('Reassessment in a retained run requires an explicit budgeted review cycle')
+            if ci_repair or ci_rerun:
+                raise ValueError('Reassessment requires review-cycle allowance, not a CI repair/rerun reservation')
         state = self.budget(manifest, run=run, cycle=cycle, retry=retry, ci_repair=ci_repair,
                             ci_rerun=ci_rerun, head=head, task=captured['key'],
                             limits=options.get('process_limits'))
@@ -929,6 +941,8 @@ class Store:
                  'provenance': captured['provenance']}
         entry.update(claim=claim, components=captured['components'])
         entry['attempts'].append({**claim, 'status': 'started'})
+        if reassessment:
+            entry['attempts'][-1]['reassessment_request'] = reassessment['request']['id']
         return {'action': 'invoke', 'claim': claim, 'manifest': str(self.manifest),
                 'changed': previous['changed']}
 

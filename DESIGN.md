@@ -1040,6 +1040,20 @@ explicit request identity/binding. A superseded authorization cannot restore old
 coverage. Retain the original run when one exists, so exhausted review allowances,
 same-cycle restrictions, retries, CI counts and publication recovery remain in
 force. Reassessment grants no publication/merge permission or budget renewal.
+Only validated descriptor bindings can populate the reserved reassessment option.
+New execution checks the retained run and review-cycle allowance under the task
+store lock, including saved-key and low-level retries after incomplete results;
+unchanged accepted reuse does not reserve another run. Missing bindings cannot
+turn an incomplete authorized replacement into ordinary unbudgeted execution.
+
+Each new reassessment attempt retains its request identity alongside the existing
+claim fields, so a later request cannot make an older consumed request usable
+again. The active binding remains in the managed definition; no second
+authorization history is stored.
+After an incomplete replacement, validate the latest immutable result and the
+most recent complete original through existing attempt/result references before
+binding a new request to the latest result. Changed inputs require renewed
+authorization even in that state; missing or damaged original evidence blocks.
 
 This small binding avoids repeated native reconstruction of which original result
 the user authorized replacing, and avoids repeating that replacement on the next
@@ -1048,6 +1062,10 @@ targeted loading of the reference and hashes; freshness ends at changes to the
 source, authorized inputs or replacement chain. Ordinary authorization, CI and
 publication checks remain live. Offline reuse, interruption and invalidation
 regressions establish behavior; native API dollar savings are unmeasured.
+The attempt's request identity avoids reconstructing superseded permission or
+repeating unauthorized native work in a fresh session. Its expected avoided
+recovery cost exceeds storing and checking one identity alongside the existing
+attempt; its validity follows that recorded attempt and never grants new scope.
 
 The reused original results and small owner selector avoid repeating paid
 alternatives analysis and reconstructing its recovery on subsequent cycles and

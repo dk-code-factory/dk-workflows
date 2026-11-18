@@ -247,6 +247,13 @@ lifecycle. Identical replay reuses completed work; reconcile an unfinished claim
 before explicit recovery with its original run/cycle. Do not manufacture another
 request identity to retry an unchanged instruction.
 
+An incomplete replacement can resume with the same binding while its inputs
+remain unchanged. If those inputs change, use a new sourced request; the helper
+validates the retained complete original through immutable result references in
+existing attempts. Previously consumed request identities remain superseded after
+later requests. Ordinary saved-key and low-level retries retain the original run
+and review-cycle budget; unchanged accepted reuse reserves no additional allowance.
+
 Complete affected stages in dependency order. A changed comparison requires new
 selection/alignment coverage. Explicitly bind each affected downstream stage
 after its prerequisites finish, using the same sourced instruction only if that
