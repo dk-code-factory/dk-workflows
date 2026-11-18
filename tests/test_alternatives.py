@@ -153,6 +153,11 @@ def finish(tasks, task, value, *, native=True, handle=None):
 
 def complete(tasks, spec, stage, value, deps=None, options=None):
     d = descriptor(spec, stage, deps, options)
+    if stage == 'assessment':
+        from review_alternatives import entry
+        original = entry(tasks, stage)
+        if original and original['managed']['definition']['inputs'].get('alternatives_request'):
+            d['definition']['inputs']['alternatives_request'] = original['managed']['definition']['inputs']['alternatives_request']
     if stage in {'impact', 'alignment'}:
         metadata = Path(spec['git']['checkout']).parent/'current-pr.json'
         LIVE.setdefault(PR, {'url': PR, 'body': '# Summary\n\nText\n'})
@@ -165,8 +170,17 @@ def complete(tasks, spec, stage, value, deps=None, options=None):
     return task['key']
 
 
-def initial(tasks, spec, *, required=True):
-    assessment = complete(tasks, spec, 'assessment', {'required': required, 'reason': 'State boundary changes' if required else 'Typo only', 'evidence': ['diff:1']})
+def initial(tasks, spec, *, required=True, manual=False):
+    if manual:
+        source = Path(spec['git']['checkout']).parent/'alternatives-request.json'
+        write(source, {'id': 'message-1', 'source': 'user:1', 'instruction': 'Review alternatives explicitly'})
+        d = descriptor(spec, 'assessment')
+        d['definition']['inputs']['alternatives_request'] = str(source)
+        task = tasks.prepare({'tasks': [d]})['tasks'][0]
+        assert finish(tasks, task, {'required': True, 'reason': 'Explicit request', 'evidence': [str(source)]})['checklist_complete']
+        assessment = task['key']
+    else:
+        assessment = complete(tasks, spec, 'assessment', {'required': required, 'reason': 'State boundary changes' if required else 'Typo only', 'evidence': ['diff:1']})
     if not required:
         return {'assessment': assessment}
     comparison = complete(tasks, spec, 'comparison', compared(), {'assessment': assessment})
@@ -182,8 +196,8 @@ def verified_journal(tasks, spec, *, kind, **fields):
     return operation['operation']
 
 
-def aligned(tasks, spec, refs=None, *, alignment='aligned', dependencies=None, legacy=False):
-    refs = refs or initial(tasks, spec)
+def aligned(tasks, spec, refs=None, *, alignment='aligned', dependencies=None, legacy=False, manual=False):
+    refs = refs or initial(tasks, spec, manual=manual)
     if legacy:
         c = alternatives.accepted(tasks, refs['comparison'], historical='impact' in refs)
         body = alternatives.replace_decision('# Summary\n\nText\n', alternatives.render_decision(c['report'], c['policy']['scoring'], 'implemented', selection=selection()), heading='Decisions')
@@ -228,11 +242,12 @@ def test_complete_disablement_bypasses_every_alternatives_stage_without_deleting
 def test_skill_override_stage_preflight_does_not_require_normal_reviewers():
     options = {'alternatives': {'review_skill': 'team:alternatives'}, 'tasks': [{'skill': 'unavailable:review'}]}
     calls = list(skill_config.calls(alternatives.OWNER, options=options, stage='alternatives'))
-    assert [call.get('skill') for _, call in calls] == [alternatives.OWNER, 'team:alternatives']
-    native = {calls[1][0]: CONTRACT}
-    result = invocation.preflight(calls, [alternatives.OWNER, 'team:alternatives'], PREFLIGHT_CAPABILITIES, native_reviews=native)
+    available = [alternatives.OWNER, 'team:alternatives', 'dk-workflows:dk-pr-alternatives']
+    assert [call.get('skill') for _, call in calls] == available
+    native = {location: CONTRACT for location, _ in calls[1:]}
+    result = invocation.preflight(calls, available, PREFLIGHT_CAPABILITIES, native_reviews=native)
     assert result['ready']
-    assert not invocation.preflight(calls, [alternatives.OWNER, 'team:alternatives'], {}, native_reviews=native)['ready']
+    assert not invocation.preflight(calls, available, {}, native_reviews=native)['ready']
     normal = list(skill_config.calls(alternatives.OWNER, options=options, stage='review'))
     assert any(call.get('skill') == 'unavailable:review' for _, call in normal)
 
@@ -408,9 +423,9 @@ def test_manual_alternatives_requires_original_request_identity_before_claims(ca
     assert not store.manifest.exists()
 
 
-def test_autopick_policy_refresh_preserves_alternatives(case):
+def test_manual_autopick_policy_refresh_preserves_alternatives(case):
     spec, store = case; tasks = Tasks(REPO, PR)
-    refs = initial(tasks, spec)
+    refs = initial(tasks, spec, manual=True)
     reference = alternatives.accepted(tasks, refs['comparison'])['reference']
     saved = Path(reference).read_bytes()
     options = {'alternatives': {'auto_pick': {'enabled': False}}}
@@ -424,7 +439,7 @@ def test_autopick_policy_refresh_preserves_alternatives(case):
 
 def test_changed_author_code_uses_targeted_impact_and_current_alignment(case):
     spec, store = case; tasks = Tasks(REPO, PR)
-    refs = aligned(tasks, spec)
+    refs = aligned(tasks, spec, manual=True)
     reference = alternatives.accepted(tasks, refs['comparison'])['reference']; original = Path(reference).read_bytes()
     checkout = Path(spec['git']['checkout']); (checkout/'code').write_text('same alternatives; author fix\n')
     git(checkout, 'commit', '-qam', 'Author fix')
@@ -453,7 +468,7 @@ def test_changed_author_code_uses_targeted_impact_and_current_alignment(case):
 @pytest.mark.parametrize('impact', ['material', 'uncertain'])
 def test_material_or_uncertain_impact_requires_analysis_refresh(case, impact):
     spec, store = case; tasks = Tasks(REPO, PR)
-    refs = initial(tasks, spec)
+    refs = initial(tasks, spec, manual=True)
     refs['impact'] = complete(tasks, spec, 'impact', {'impact': impact, 'reason': 'Requirements changed', 'evidence': ['discussion:1']}, {'comparison': refs['comparison']})
     assert alternatives.gate(tasks, refs)['outcome'] == 'analysis_required'
 
@@ -477,7 +492,7 @@ def test_fixed_profile_does_not_ask_for_automatic_selection_and_override_is_boun
 
 def test_manual_choice_publishes_its_actual_rationale_and_rejects_other_options(case):
     spec, store = case; tasks = Tasks(REPO, PR)
-    refs = initial(tasks, spec)
+    refs = initial(tasks, spec, manual=True)
     chosen = selection(mode='manual', choice='smaller', user_source='user:message-9',
                        reason='User prefers the smaller maintenance footprint',
                        rejection_reasons={'implemented': 'Additional state machinery exceeds current requirements'})
@@ -593,7 +608,7 @@ def test_restricted_decision_receipt_cannot_include_title_edit(case):
 
 def test_changed_author_recovery_can_draft_new_decision_without_reanalysis(case, tmp_path):
     spec, store = case; tasks = Tasks(REPO, PR)
-    refs = initial(tasks, spec)
+    refs = initial(tasks, spec, manual=True)
     original = Path(alternatives.accepted(tasks, refs['comparison'])['reference']).read_bytes()
     checkout = Path(spec['git']['checkout']); (checkout/'code').write_text('author implementation fix\n')
     git(checkout, 'commit', '-qam', 'Author update')
@@ -662,7 +677,7 @@ def test_raw_html_blocks_preserve_apparent_decisions(opener, closer):
 
 def test_removed_legacy_decision_needs_no_republication_after_current_assessment(case):
     spec, store = case; tasks = Tasks(REPO, PR)
-    refs = aligned(tasks, spec, legacy=True)
+    refs = aligned(tasks, spec, legacy=True, manual=True)
     operation = Path(refs['decision_operation']).read_bytes()
     LIVE[PR]['body'] = 'Author removed Alternatives decisions.\n'
     Path(spec['inputs']['context']).write_text('Current discussion: same design; author removed public decision')
@@ -670,7 +685,7 @@ def test_removed_legacy_decision_needs_no_republication_after_current_assessment
     refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'No solution changes; public decision was removed', 'evidence': ['discussion']}, {'comparison': refs['comparison']})
     refs['selection'] = complete(tasks, spec, 'selection', selection(), {k: refs[k] for k in ('comparison', 'impact')})
     refs['alignment'] = complete(tasks, spec, 'alignment', {'alignment': 'aligned', 'reason': 'Same state owner', 'evidence': ['code']}, {k: refs[k] for k in ('comparison', 'selection', 'impact')})
-    assert alternatives.gate(tasks, refs)['outcome'] == 'aligned'
+    assert alternatives.gate(tasks, refs, manual=True)['outcome'] == 'aligned'
     assert tasks.prepare({'tasks': [ordinary(spec, refs)]})['tasks'][0]['action'] == 'invoke'
     assert LIVE[PR]['body'] == 'Author removed Alternatives decisions.\n'
     assert Path(refs['decision_operation']).read_bytes() == operation
@@ -679,27 +694,27 @@ def test_removed_legacy_decision_needs_no_republication_after_current_assessment
 @pytest.mark.parametrize('legacy', [False, True])
 def test_unrelated_external_body_change_needs_current_impact_but_reuses_analysis(case, legacy):
     spec, store = case; tasks = Tasks(REPO, PR)
-    refs = aligned(tasks, spec, legacy=legacy)
+    refs = aligned(tasks, spec, legacy=legacy, manual=True)
     operation = refs.get('decision_operation')
     LIVE[PR]['body'] = 'Updated description.\n\n' + LIVE[PR]['body']
-    assert alternatives.gate(tasks, refs)['outcome'] == 'impact_required'
+    assert alternatives.gate(tasks, refs, manual=True)['outcome'] == 'impact_required'
     Path(spec['inputs']['context']).write_text('Current discussion: typo in unrelated description fixed')
     refs['assessment'] = complete(tasks, spec, 'assessment', {'required': True, 'reason': 'Same alternatives', 'evidence': ['discussion']})
     refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'Only unrelated description typo', 'evidence': ['discussion']}, {'comparison': refs['comparison']})
     refs['selection'] = complete(tasks, spec, 'selection', selection(), {k: refs[k] for k in ('comparison', 'impact')})
     refs['alignment'] = complete(tasks, spec, 'alignment', {'alignment': 'aligned', 'reason': 'Same implementation', 'evidence': ['code']}, {k: refs[k] for k in ('comparison', 'selection', 'impact')})
-    assert alternatives.gate(tasks, refs)['outcome'] == 'aligned'
+    assert alternatives.gate(tasks, refs, manual=True)['outcome'] == 'aligned'
     assert refs.get('decision_operation') == operation
     LIVE[PR]['body'] = 'Another external edit.\n\n' + LIVE[PR]['body']
-    assert alternatives.gate(tasks, refs)['outcome'] == 'impact_required'
+    assert alternatives.gate(tasks, refs, manual=True)['outcome'] == 'impact_required'
 
 
-def test_live_head_change_blocks_completed_alignment(case):
+def test_manual_live_head_change_blocks_completed_alignment(case):
     spec, store = case; tasks = Tasks(REPO, PR)
-    refs = aligned(tasks, spec)
+    refs = aligned(tasks, spec, manual=True)
     LIVE[PR]['headRefOid'] = 'a'*40
     with pytest.raises(ValueError, match='head changed'):
-        alternatives.gate(tasks, refs)
+        alternatives.gate(tasks, refs, manual=True)
 
 
 @pytest.mark.parametrize('failure', ['timeout', 'identity', 'missing-body', 'malformed'])
@@ -841,7 +856,7 @@ def test_closed_list_fences_do_not_become_unclosed_document_examples(opener, clo
 
 def test_historical_comparison_rejects_same_identity_changed_guidance(case):
     spec, store = case; tasks = Tasks(REPO, PR)
-    refs = initial(tasks, spec)
+    refs = initial(tasks, spec, manual=True)
     reference = alternatives.accepted(tasks, refs['comparison'])['reference']
     original = Path(reference).read_bytes()
     # The fixture's installed governing resource keeps its identity and path.
@@ -908,9 +923,17 @@ def test_inline_html_and_code_list_do_not_hide_root_siblings(paragraph):
     assert alternatives.replace_decision(updated, 'New alternatives') == updated
 
 
-def test_nonmaterial_impact_reuses_skipped_applicability(case):
+def test_legacy_nonmaterial_impact_reuses_skipped_applicability(case, monkeypatch):
+    import review_alternatives
     spec, store = case; tasks = Tasks(REPO, PR)
     refs = initial(tasks, spec, required=False)
+    # Reconstruct a pre-once-per-PR impact assignment with offline native evidence.
+    original_entry = review_alternatives.entry
+    with monkeypatch.context() as legacy:
+        legacy.setattr(review_alternatives, 'entry', lambda t, stage:
+                       {'legacy': True} if stage == 'impact' else original_entry(t, stage))
+        refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial',
+            'reason': 'Simple-change applicability remains valid', 'evidence': ['diff']}, {'assessment': refs['assessment']})
     checkout = Path(spec['git']['checkout']); (checkout/'code').write_text('another typo\n')
     git(checkout, 'commit', '-qam', 'Second typo')
     spec = deepcopy(spec); spec['git']['head'] = git(checkout, 'rev-parse', 'HEAD')
@@ -987,19 +1010,24 @@ def test_parallel_incoming_siblings_share_two_live_validation_boundaries(case, m
     prepared = tasks.prepare({'tasks': group})['tasks']
     assert all(task['action'] == 'invoke' for task in prepared)
     expected = {'alternatives-' + stage + '-review': 2 for stage in ('assessment', 'comparison', 'selection', 'alignment')}
-    assert dict(captures) == expected and len(reads) == 2
+    assert dict(captures) == expected and not reads
     for task in prepared:
         finish(tasks, task, {'complete': True}, native=False)
     captures.clear(); reads.clear()
     resumed = Tasks(REPO, PR).resume(keys=[task['key'] for task in prepared])
     assert all(task['coverage_complete'] for task in resumed['tasks'])
-    assert dict(captures) == expected and len(reads) == 2
-    # A subsequent command must see changed publication and block every sibling.
+    assert dict(captures) == expected and not reads
+    # Description-only edits do not repeat the initial alternatives review.
     LIVE[PR]['body'] = '# Summary\nDecision removed\n'
     captures.clear(); reads.clear()
     resumed = Tasks(REPO, PR).resume(keys=[task['key'] for task in prepared])
+    assert all(task['coverage_complete'] for task in resumed['tasks'])
+    assert not reads
+    # Current governing requirements still block stale ordinary review coverage.
+    Path(spec['inputs']['context']).write_text('Changed review requirements')
+    resumed = Tasks(REPO, PR).resume(keys=[task['key'] for task in prepared])
     assert all(not task['coverage_complete'] for task in resumed['tasks'])
-    assert len(reads) == 1
+    assert not reads
 
 
 @pytest.mark.parametrize('tag', ['<widget invalid@>', '</widget invalid>', '<widget a=>'])
@@ -1034,7 +1062,7 @@ def test_dense_setext_suffix_is_not_rescanned_after_known_boundary():
 @pytest.mark.parametrize('manual', [False, True])
 def test_selection_refresh_finishes_after_impact_bound_old_selection(case, tmp_path, manual):
     spec, store = case; tasks = Tasks(REPO, PR)
-    refs = initial(tasks, spec)
+    refs = initial(tasks, spec, manual=True)
     old_selection = alternatives.accepted(tasks, refs['selection'])['reference']
     old_bytes = Path(old_selection).read_bytes()
     refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'Applicability and existing choice remain valid', 'evidence': ['discussion']}, {k: refs[k] for k in ('comparison', 'selection')})
@@ -1092,7 +1120,7 @@ def test_unicode_paragraph_separators_do_not_create_markdown_line_boundaries():
 
 def test_new_impact_key_alias_does_not_imply_selection_consumed_new_result(case):
     spec, store = case; tasks = Tasks(REPO, PR)
-    refs = initial(tasks, spec)
+    refs = initial(tasks, spec, manual=True)
     refs['impact'] = complete(tasks, spec, 'impact', {'impact': 'nonmaterial', 'reason': 'Original choice remains valid', 'evidence': ['discussion']}, {k: refs[k] for k in ('comparison', 'selection')})
     refs['selection'] = complete(tasks, spec, 'selection', selection(), {k: refs[k] for k in ('comparison', 'impact')})
     prior_impact = alternatives.accepted(tasks, refs['impact'])['reference']

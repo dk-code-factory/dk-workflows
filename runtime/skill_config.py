@@ -174,7 +174,7 @@ def _domain_layer(skill, repository):
 
 def effective(skill, repository=None, upstream=None, *, options=None, domain=True):
     import invocation
-    from alternatives_compat import skill as current_skill
+    from alternatives_compat import ISSUE, PR, alternatives_settings, skill as current_skill
     skill = current_skill(skill)
     options = {} if options is None else validate(skill, options)
     def merge_options(base, layer):
@@ -237,16 +237,18 @@ def effective(skill, repository=None, upstream=None, *, options=None, domain=Tru
         provenance.update({key: str(source) for key in layer})
         shared = raw.get('skill_defaults', {}).get(skill, {})
         invocation.validate_settings(shared)
-        result = merge_options(result, validate(skill, shared.get('options', {})))
-        provenance.update({key: str(source) for key in shared.get('options', {})})
+        layer = (alternatives_settings(raw.get('skill_defaults', {}), skill) if skill in {ISSUE, PR}
+                 else shared.get('options', {}))
+        result = merge_options(result, validate(skill, layer))
+        provenance.update({key: str(source) for key in layer})
     result = merge_options(result, options)
     provenance.update({key: 'invocation' for key in options})
     validate(skill, result)
     from simplification import OWNERS, validate_policy
     if skill in OWNERS:
         validate_policy(result['simplification'])
-    if skill in {'dk-workflows:dk-pr-review', 'dk-workflows:dk-pr-fix'}:
-        scoring = result['alternatives']['scoring']
+    if skill in {'dk-workflows:dk-pr-review', 'dk-workflows:dk-pr-fix', ISSUE, PR}:
+        scoring = result['scoring'] if skill in {ISSUE, PR} else result['alternatives']['scoring']
         if scoring['profile'] == 'custom' and not invocation.text(scoring['custom_prompt']):
             raise ValueError('Custom alternatives scoring requires custom_prompt')
     if skill == 'dk-workflows:dk-pr-iter':
@@ -406,6 +408,10 @@ def calls(skill, repository=None, upstream=None, *, options=None, stage=None, wo
             if stage in {None, 'alternatives'} and settings['alternatives']['enabled']:
                 yield from visit({'skill': settings['alternatives']['review_skill'], 'required': True},
                                  location + '/alternatives', nested)
+                from assessment_alternatives import provider
+                if settings['alternatives']['review_skill'] != provider(identity):
+                    yield from visit({'skill': provider(identity), 'required': True},
+                                     location + '/assessed-alternatives', nested)
             keys = (() if stage == 'alternatives' else ('tasks',) if stage == 'review'
                     else ('finalizers',) if stage == 'finalizers' else keys)
         for key in keys:

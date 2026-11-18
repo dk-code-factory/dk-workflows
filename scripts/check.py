@@ -48,7 +48,7 @@ def package(root):
             json.loads(source.read_text())
     if manifests[0]['name']=='dk-workflows':
         assert entries[0]==['dk-alternatives-review', 'dk-asd-ste100', 'dk-ci', 'dk-ci-approve', 'dk-ci-flakes', 'dk-code-simplify', 'dk-commit-message', 'dk-commit-split',
-                            'dk-config', 'dk-issue', 'dk-plain-english', 'dk-pr-approvers', 'dk-pr-decisions',
+                            'dk-config', 'dk-issue', 'dk-issue-alternatives', 'dk-plain-english', 'dk-pr-alternatives', 'dk-pr-approvers', 'dk-pr-decisions',
                             'dk-pr-description', 'dk-pr-feedback-address',
                             'dk-pr-feedback-read', 'dk-pr-feedback-reply', 'dk-pr-fix',
                             'dk-pr-iter', 'dk-pr-publish', 'dk-pr-review', 'dk-pr-review-alternatives', 'dk-pr-review-post',

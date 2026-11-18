@@ -1,0 +1,16 @@
+{
+  "$schema": "./config.schema.json",
+  "assessment_prompt": "Assess purpose, requirements and repository evidence before comparing approaches. For small fixes favor focused implementation changes and relevant edge-case coverage. For features exclude code-change volume from ranking and assess design and maintainability through actual consequences. For mixed work identify scopes and assign applicable rubrics. Select criteria, positive percentage weights totaling 100 and explicit 0/50/100 anchors, rationale, mandatory constraints and original source references. Judge architectural decisions with that rubric and supplied evaluation guidance, without a predefined defect checklist.",
+  "evaluation_prompt": "",
+  "scoring": {
+    "profile": "auto",
+    "profile_selection_prompt": "Assess purpose and scope to select criteria, percentage weights and scoring anchors with an evidence-backed rationale. Favor focused changes and relevant edge coverage for small fixes; exclude change volume when ranking feature approaches. Assign applicable rubrics to mixed scopes.",
+    "custom_prompt": null
+  },
+  "selection": {
+    "enabled": true,
+    "prompt": "Assess confidence and sensitivity to LOC and complexity estimates. Accept a clear winner only with supported feasibility, adequate score lead and no unresolved material doubts. For a sole feasible option substantiate rejection of every alternative.",
+    "min_score_gap": 10,
+    "mode": "semi-manual"
+  }
+}

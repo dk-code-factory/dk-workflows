@@ -1,6 +1,6 @@
 # dk-workflows
 
-Version 5.11.1. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
+Version 5.12.0. Agent-led PR workflows for Codex and Claude Code, with bundled drafting, feedback, publication, cleanup and CI skills. Requires Python 3.11+, Git and authenticated gh for remote PR actions.
 
 Use `dk-workflows:dk-pr-iter` as the universal entry point: it recognizes your accounts and routes your PRs to `dk-workflows:dk-pr-fix` and other authors' PRs to `dk-workflows:dk-pr-review`. Invoke either workflow directly when the intended responsibility is explicit. Fixing runs review/fix cycles followed by [configured finalizers](docs/finalizers.md); the default ending edits changed prose once, then runs commit cleanup and final CI. Incoming review first runs the default-enabled [alternatives gate](docs/alternatives-review.md), settling alternatives and checking implementation alignment before ordinary reviewers. Alternatives analysis stays in private workflow evidence and adds no PR description section. A verified material design mismatch produces an alternatives-only rejection. Aligned review verifies candidate findings independently before posting; automatic approval and merging each require separate authorization or enabled policy.
 
@@ -10,7 +10,7 @@ Use `dk-workflows:dk-repo-onboard` for first-run repository onboarding or an exp
 
 Each skill owns its [explicit defaults and option schema](docs/skill-configuration.md). Configure `tasks` and `finalizers` as ordered lists of fully qualified invocations. Explicit `{"parallel":[...]}` groups run independent skills concurrently and wait for every sibling before proceeding. The owning skill controls repetition and completion. External installed skills are supported. Each scoped list replaces inherited finalizers; `[]` disables them. Final live checks report selected-plan completion separately from skipped cleanup, CI or other readiness evidence.
 
-PR fixing also runs the default-enabled [alternatives review once per PR](docs/alternatives-review.md#fix-workflow-once-per-pr), before its repeated tasks. It reuses the initial comparison and selected approach across commits, fix cycles, new invocations and sessions. Initial mismatches guide authorized fixes. Current code review, CI and publication checks remain independent; changed governing scope or policy requires explicit reassessment rather than an automatic repeat.
+Incoming review and PR fixing share one [purpose assessment and evaluation rubric](docs/alternatives-review.md), persisted before alternatives analysis. Fixing uses `dk-issue-alternatives` to compare whole-problem approaches; incoming review uses `dk-pr-alternatives` to inventory branch architecture, including inherited decisions, and compare questionable choices. The controller injects common assessment prompts. Both use one scoring implementation and each skill owns `selection.mode`: `automatic`, `manual`, or default `semi-manual`. Separate decision results resume across sessions without repeating completed siblings. Fixing applies settled choices within existing authorization; review reports them without code edits. Initial alternatives runs once per PR, while explicit manual requests refresh requested analysis and reuse unchanged assessment. Current review, CI, authorization and publication checks remain live.
 
 Configure [commit grouping and message policies](docs/commit-policy.md) through `dk-workflows:dk-config`: save a prompt or select a native policy skill globally or for a repository. For example, “Use dk-config to set my global commit policy to this prompt: squash each PR into one commit and use a short subject-only message.” Policies apply during selected final cleanup and direct `dk-workflows:dk-commit-split` calls, within existing rewrite and publication permissions. The default keeps current cleanup behavior.
 
@@ -25,7 +25,9 @@ Supporting skills use a subject name for broad ownership and a final action when
 | `dk-workflows:dk-repo-onboard` | Onboard a repository and report structured discovery without a source-choice prompt. |
 | `dk-workflows:dk-config` | Change, inspect and explain saved workflow settings. |
 | `dk-workflows:dk-preferences` | Admit, store, inspect and remove scoped implementation and review preferences. |
-| `dk-workflows:dk-alternatives-review` | Internal component for prepared alternatives assignments; for manual review use `dk-workflows:dk-pr-review-alternatives`. |
+| `dk-workflows:dk-issue-alternatives` | Compare whole-problem approaches from issue requirements, optionally including a candidate PR. |
+| `dk-workflows:dk-pr-alternatives` | Inventory branch architecture, including inherited decisions, and compare questionable choices. |
+| `dk-workflows:dk-alternatives-review` | Compatibility entry for the renamed whole-problem comparison and historical managed assignments. |
 | `dk-workflows:dk-pr-review-alternatives` | Manual entry point: run and record alternatives-only PR review, including a fresh manually requested review. |
 | `dk-workflows:dk-plain-english` | Edit changed PR prose in clear technical English (default finalizer). |
 | `dk-workflows:dk-asd-ste100` | Edit changed PR prose with best-effort ASD-STE100 guidance and explicit verification limits. |

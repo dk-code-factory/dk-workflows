@@ -9,8 +9,12 @@ from pathlib import Path
 SKILLS = {
     'dk-workflows:dk-architecture-review': 'dk-workflows:dk-alternatives-review',
     'dk-workflows:dk-pr-review-architect': 'dk-workflows:dk-pr-review-alternatives',
+    'dk-workflows:dk-issue-implementation-alternatives': 'dk-workflows:dk-issue-alternatives',
 }
 OWNER = 'dk-workflows:dk-pr-review'
+ISSUE = 'dk-workflows:dk-issue-alternatives'
+PR = 'dk-workflows:dk-pr-alternatives'
+ASSESSMENT = 'dk-workflows:dk-pr-assessment'  # Historical task identity/settings address only.
 STAGES = ('assessment', 'comparison', 'impact', 'selection', 'alignment', 'verification')
 
 
@@ -32,6 +36,34 @@ def aliases(value, pairs):
 
 def permissions(value):
     return aliases(value, [('edit_architecture_decisions', 'edit_alternatives_decisions')])
+
+
+def alternatives_settings(defaults, identity):
+    """Read former controller/workflow settings as per-skill fallbacks.
+
+    Canonical settings take precedence; ambiguous legacy values require an
+    explicit canonical override. No private record is rewritten.
+    """
+    import invocation
+    explicit = defaults.get(identity, {}).get('options', {})
+    shared = defaults.get(ASSESSMENT, {}).get('options', {})
+    owner = 'dk-workflows:dk-pr-fix' if identity == ISSUE else OWNER
+    old = defaults.get(owner, {}).get('options', {}).get('alternatives', {})
+    workflow = {key: deepcopy(old[key]) for key in ('scoring',) if key in old}
+    if 'auto_pick' in old:
+        workflow['selection'] = deepcopy(old['auto_pick'])
+
+    def merge(left, right, chosen):
+        result = deepcopy(left)
+        for key, value in right.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = merge(result[key], value, chosen.get(key, {}) if isinstance(chosen, dict) else {})
+            else:
+                if key in result and result[key] != value and (not isinstance(chosen, dict) or key not in chosen):
+                    raise ValueError('Alternatives configuration conflict in legacy settings: ' + key)
+                result[key] = deepcopy(value)
+        return result
+    return invocation.merge(merge(shared, workflow, explicit), explicit)
 
 
 def options(identity, value):
@@ -85,6 +117,9 @@ def descriptor(value):
         return result
     if isinstance(definition.get('skill_identity'), str):
         definition['skill_identity'] = skill(definition['skill_identity'])
+    provider = ISSUE if result.get('skill') == 'dk-workflows:dk-pr-fix' else PR
+    if result.get('kind') == 'assessed-alternatives' and result.get('stage') == 'assessment' and definition.get('skill_identity') == ASSESSMENT:
+        definition['skill_identity'] = provider
     for field in ('options', 'inputs', 'resources'):
         mapping = definition.get(field)
         if not isinstance(mapping, dict):
@@ -104,9 +139,17 @@ def descriptor(value):
         *((f'{host}/skills/{old}/{file}', f'{host}/skills/{new}/{file}')
           for host in ('codex', 'claude') for old, new in (
               ('dk-architecture-review', 'dk-alternatives-review'),
-              ('dk-pr-review-architect', 'dk-pr-review-alternatives'))
+              ('dk-pr-review-architect', 'dk-pr-review-alternatives'),
+              ('dk-issue-implementation-alternatives', 'dk-issue-alternatives'))
           for file in ('', 'SKILL.md', 'config.json', 'config.schema.json')),
     )}
+    for host in ('codex', 'claude'):
+        previous = root/host/'skills/dk-pr-assessment'
+        current = root/host/'skills'/provider.split(':')[-1]
+        paths[str(previous)] = str(current)
+        paths[str(previous/'SKILL.md')] = str(root/'runtime/pr_assessment.py')
+        for filename in ('config.json', 'config.schema.json'):
+            paths[str(previous/filename)] = str(current/filename)
     for field in ('instructions', 'resources'):
         if isinstance(definition.get(field), dict):
             definition[field] = {key: paths.get(path, path) for key, path in definition[field].items()}
@@ -115,6 +158,9 @@ def descriptor(value):
 
 def storage_identity(task, identity, options=None):
     """Keep contract-v2 keys, original attempts, claims and budgets addressable."""
+    if task == 'pr-purpose-assessment' and identity in {
+            ASSESSMENT, ISSUE, PR, 'dk-workflows:dk-issue-implementation-alternatives'}:
+        return task, ASSESSMENT
     assigned = (options or {}).get('alternatives', {})
     stage = assigned.get('stage') if isinstance(assigned, dict) else None
     if isinstance(assigned, dict) and assigned.get('owner') == 'dk-workflows:dk-pr-fix':

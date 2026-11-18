@@ -687,7 +687,116 @@ behavior without model/GitHub calls. They establish neither native adherence nor
 measured token savings. No new native execution or token evidence accompanies this
 change; helper/process counts remain proxies only.
 
+## Shared purpose assessment and architectural alternatives
+
+During initial inspection, after requirements and repository evidence collection,
+the Python controller injects the common assessment prompt into a native
+assignment. There is no installed assessment skill or separate model runner.
+The ordinary PR-wide assessment identity
+`pr-purpose-assessment` is independent of workflow, run, cycle and head. Both
+`dk-issue-alternatives` in fix and `dk-pr-alternatives` in incoming
+review consume the same original accepted result. Keep only purpose, scope,
+selected scoped criteria/weights, explicit 0/50/100 anchors, rationale, mandatory
+constraints and existing source references in that result. No copied PR metadata,
+discussion, settings snapshot, rendered summary, database or completion flag is
+added. Missing sources or damaged original evidence block reuse.
+
+The alternatives skills own their assessment/evaluation guidance, scoring options
+and selection policy. `pr_assessment.py` and `assessment_alternatives.py` construct
+native assignments with the same default assessment prompts, requirements and
+scoring contract. They do not invoke an assessment skill or launch model sessions.
+`pr_assessment.resolve` reads the invoked alternatives skill's scoped settings;
+`selection.mode` can differ between issue and PR alternatives. A shared original
+assessment remains reusable while its governing guidance is unchanged; a changed
+assessment/evaluation prompt requires explicit reassessment. Mode changes alone
+never affect that assessment. Former assessment-skill and owning-workflow settings
+remain read-only fallbacks, with canonical skill settings taking precedence at
+their scope. Ambiguous conflicting legacy values require an explicit canonical
+override. No settings file is rewritten on read. Small fixes normally favor focused implementation
+changes and relevant edge coverage. Feature ranking excludes code-change volume
+and assesses actual design and maintenance consequences. Mixed work identifies
+scopes with applicable rubrics. Native judgment identifies questionable decisions
+under those rubrics and evaluation guidance, without a predefined architectural
+defect checklist. Helpers validate structure, calculate weighted totals and build
+handoffs; the already-running native session assesses, compares and selects.
+There is no selector agent or model-session launcher.
+
+Fix alternatives starts from issue requirements and compares whole-problem
+approaches, accepting an existing PR as an optional candidate. Incoming alternatives
+first inventories architectural decisions throughout the branch, including
+inherited decisions, with inherited/introduced/materially_changed origin labels;
+it then compares alternatives for questionable decisions, including retaining the
+current implementation. Every option is evaluated against the same pinned target
+revision, counting implementation work already on the PR branch. Both skills
+share rubric enforcement and arithmetic. Per-decision comparisons and settled
+choices have separate managed identities; completed siblings survive interruption.
+Comparison definitions retain their original immutable inventory reference when
+the selected decision is unchanged, so added or changed siblings do not repeat
+unaffected comparisons. Interaction definitions likewise retain original selection
+and comparison references while the selected option and comparison are unchanged;
+a mode-only refresh does not repeat compatibility or alignment work. These small
+consumed evidence references avoid paid native recomparison/reconstruction across
+sessions, without copying decisions or storing derived status. Missing originals,
+changed decision contents, selected options or comparisons end that reuse.
+Check interactions among selected approaches before downstream handoff. Alignment
+and independent verification receive original rubric, choice and comparison
+references deterministically, avoiding native reconstruction of the dependency
+chain while retaining source freshness. Fix passes
+selected approaches and required changes into authorized implementation tasks and
+relevant tests; retaining current code needs no corresponding edit. Incoming
+review reports without code edits. Existing independent verification, review
+publication and current-head coverage boundaries remain intact, without an added
+defect-oriented architectural gate.
+
+Each alternatives skill defaults to semi-manual selection. Automatic applies existing
+feasibility, confidence, estimate sensitivity, unresolved-doubt and score-gap
+checks (default 10 points); failure returns an unresolved choice without prompting
+or implementation. Manual requires an explicit sourced choice of a feasible
+compared option. Semi-manual selects a qualifying clear winner, otherwise asks.
+Manual source paths are bound and cited in the original selection evidence, with
+rationale and every rejected option's reason. Selection grants no additional
+permission. Unresolved choices retain choice_pending behavior. Mode changes refresh
+selection alone, preserving assessment and comparisons; changed choices require
+affected interaction and alignment checks.
+
+Initial automatic alternatives completes once per PR. Explicit manual requests
+bind the actual original user request and refresh requested alternatives work
+while reusing unchanged shared assessment. Changed governing purpose, scope,
+requirements or assessment guidance requires explicit sourced reassessment.
+Original attempts, claims, fingerprints, sibling results, budgets and publication
+receipts remain retained. Ordinary implementation commits do not repeat initial
+analysis. Current review, CI and publication readiness still recapture live inputs.
+Issue-only invocation performs the same native assessment and evaluation against
+the issue and selected target branch in memory, without fabricating a PR record.
+
+New architectural responsibilities are distinct from historical whole-problem
+stage identities. Old whole-problem results cannot establish architectural
+inventory coverage. Historical skills and low-level managed gates remain
+recoverable under their existing keys and stores; no cache reset or migration is
+performed. `dk-issue-implementation-alternatives` is a read alias for
+`dk-issue-alternatives`; its task keys and explicit saved settings retain their
+original addresses. The removed `dk-pr-assessment` name survives only as the
+historical managed identity/settings fallback, never an installed skill or native
+execution requirement. The old whole-problem skill is retained as a compatibility entry for
+`dk-issue-alternatives`. New discovery uses compact `plan` output,
+then targeted original evidence reads, rather than loading a manifest in the
+native coordinator. The legacy contracts below document recovery, not the new
+initial inspection procedure.
+
+Expected avoided API cost comes from eliminating repeated purpose/rubric analysis
+and completed per-decision comparisons in the current and next session. Reusing
+small definitions and original evidence references costs less to capture, validate,
+load and explain than repeating that native work. Freshness ends at changed
+governing sources, assessment/evaluation guidance, affected comparison inputs or
+missing evidence; mode-only changes invalidate selection rather than assessment.
+No current authorization, publication receipt validation or CI check is cached.
+Offline fresh-process, partial recovery and invalidation tests establish behavior;
+process counts are proxies and native API dollar savings remain unmeasured.
+
 ## Incoming alternatives gate
+
+The following contract is retained for historical managed-stage recovery. Current
+initial inspection uses the shared assessment protocol above.
 
 The alternatives review names replace architecture review across skills, options,
 handoffs and helpers. Read old saved configuration and managed descriptors through
@@ -723,11 +832,56 @@ refreshes comparison. Replays never mint another request identity or reset limit
 Offline tests establish rerun, recovery and invalidation behavior; native API
 dollar savings have not been measured.
 
-Incoming review assesses alternatives before every configured task or parallel
-review group. Its replaceable prompt supplies examination guidance only. The
+Incoming review completes initial alternatives analysis once per PR before its
+configured task list. Its replaceable prompt supplies examination guidance only. The
 framework supplies stage assignments, mandatory checklist, weighted arithmetic,
 selection gates and publication/recovery rules. Standalone reviewer execution and
 the independent dk-architecture catalog remain separate.
+
+Pin automatic incoming assessment, comparison, selection, initial alignment and
+any independent mismatch verification to the first assessment's Git revisions.
+Keep their existing contract-v2 keys, fingerprints, original results, native
+observations, completed siblings, claims and budgets. Reuse accepted stages across
+later commits, review passes, invocations and fresh sessions. No automatic impact
+or alignment pass follows author changes. Missing original evidence and changed
+governing requirements, resources or scoring/selection policy block for explicit
+reassessment; incomplete claims, checks, pending choice and uncertain alignment
+resume as unfinished work. A sourced user choice settles pending selection,
+preserving unchanged comparison. New explicit manual requests still
+refresh analysis using their original request reference. Retained impact chains
+keep their existing replay and dependency-validation contract.
+Manual completion uses the transient `gate --manual` selector to require that
+request and current alignment. Automatic incoming gate checks can reuse the latest
+accepted explicit analysis as retained design context after later author commits;
+they do not turn a completed manual request into another automatic native pass.
+
+Ordinary incoming assignments consume immutable initial evidence as design
+context, with a mandatory checklist to assess current implementation and scope
+against it. They retain current Git pins and independent review, verification,
+CI, authorization and publication checks. A simple-change skip is likewise an
+initial assessment, never current-head coverage. Material scope changes require
+explicit reassessment. Keep original source artifacts stable; later current PR
+evidence belongs to ordinary review rather than overwriting the initial inputs.
+
+An initial confirmed mismatch still requires its independently verified
+REQUEST_CHANGES receipt and stops ordinary review at that head. After a later
+author head, that reconciled receipt and original required changes release
+ordinary review, which must verify the fixes. This release does not assert current
+alignment or clean review. Missing/uncertain receipts block, and no stale
+rejection may be published against later inputs. Repeated same-head entry keeps
+the completed rejection outcome; current publication permissions govern any new
+action. Disabled alternatives retains all evidence.
+
+This extends reuse of the existing stage records rather than adding a completion
+flag, copied decision, snapshot, store or budget. Fresh-session resume reads
+compact managed status and targeted original references. Expected avoided cost
+comes from eliminating repeated impact/alignment analysis and its coordinator
+reconstruction in the current and next session; validating the existing references
+costs less than repeating that native work. Freshness ends at changed governing
+requirements, guidance, policy or missing/damaged originals, while ordinary
+current-head coverage remains live. Offline tests cover unchanged fresh-process
+reuse, later heads, partial recovery, explicit manual reruns, rejection recovery
+and relevant-input invalidation. Native API dollar savings remain unmeasured.
 
 Use existing managed tasks for assessment, comparison, selection, impact,
 alignment and independent mismatch verification. Retain only their definitions,
@@ -739,7 +893,8 @@ launch model sessions. Missing execution/verification evidence blocks dependents
 An alternatives-only rejection is a completed, separately named outcome, with
 ordinary review and approval/merge finalizers unperformed.
 
-Comparison binds the requirements, discussion, constraints, preferences, prompt
+For explicit manual reviews and retained impact-chain recovery, the following
+freshness protocol remains supported. Comparison binds the requirements, discussion, constraints, preferences, prompt
 and original diff base/head. Selection separately binds scoring/auto-pick policy
 and the comparison reference; changing auto-pick policy repeats selection only.
 After changed live inputs, a native impact task compares the original analysis
@@ -770,7 +925,7 @@ edit or publication receipt, including for analysis-only requests. The legacy
 edits. Verified mismatch rejection still requires its independently checked
 `REQUEST_CHANGES` review and reconciled receipt under current permissions.
 
-Alignment references the existing current PR metadata artifact through
+On those manual and retained-impact paths, alignment references the existing current PR metadata artifact through
 `alternatives_current_pr`, already used by impact. The gate checks its consumed
 body and head against the live PR. This adds no durable field, copied metadata,
 rendered summary or new store. Changed description, head or other governing inputs
@@ -813,6 +968,9 @@ adds no persisted parser output, readiness cache or telemetry.
 
 ## Once-per-PR fix alternatives review
 
+This section describes historical fix-stage recovery. Current initial work uses
+shared assessment and the issue implementation alternatives component above.
+
 `dk-pr-fix` owns a default-enabled alternatives gate with the same replaceable
 reviewer, scoring and selection controls as incoming review. Before its repeated
 task list, assess the initial PR, compare reasonable approaches, settle the choice
@@ -847,8 +1005,8 @@ Material scope changes require explicit reassessment, rather than automatic
 repetition or stale acceptance. Changed governing resources, instruction sources,
 original evidence or scoring/selection policy block reuse and automatic reruns of
 completed initial stages. Missing or damaged evidence blocks recovery. Disabling
-the gate preserves its original records. Incoming and manual alternatives review
-retain their existing independent freshness and explicit-rerun behavior.
+the gate preserves its original records. Incoming review uses its own once-per-PR
+evidence; manual alternatives review retains explicit-rerun behavior.
 Every result consumed by the incoming gate must belong to the incoming workflow;
 an initial fix-plan skip or alignment cannot release incoming review.
 

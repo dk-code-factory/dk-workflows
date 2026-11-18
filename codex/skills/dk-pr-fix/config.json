@@ -123,7 +123,7 @@
   },
   "alternatives": {
     "enabled": true,
-    "review_skill": "dk-workflows:dk-alternatives-review",
+    "review_skill": "dk-workflows:dk-issue-alternatives",
     "scoring": {
       "profile": "auto",
       "profile_selection_prompt": "Assess new features, existing behavior, tests, CI and maintenance. Choose a built-in scoring profile and explain why its trade-offs fit these circumstances.",

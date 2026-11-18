@@ -57,6 +57,15 @@ GUIDANCE = {
 }
 
 
+def legacy_options(options):
+    """Old whole-problem assignments retain their original provider identity."""
+    result = deepcopy(options)
+    if result['alternatives']['review_skill'] in {
+            'dk-workflows:dk-pr-alternatives', 'dk-workflows:dk-issue-alternatives'}:
+        result['alternatives']['review_skill'] = REVIEW_SKILL
+    return result
+
+
 def text(value):
     return isinstance(value, str) and bool(value.strip()) and '\x00' not in value
 
@@ -105,7 +114,7 @@ def rubric(report, scoring):
     return weights
 
 
-def comparison(report, scoring):
+def comparison(report, scoring, *, require_pr=True):
     weights = rubric(report, scoring)
     solutions = report.get('solutions')
     if not isinstance(solutions, list) or len(solutions) < 2:
@@ -149,7 +158,7 @@ def comparison(report, scoring):
                                   or Decimal(str(option['total'])) != total):
             raise ValueError('Agent total differs from helper arithmetic')
         calculated.append({**deepcopy(option), 'total': float(total)})
-    if not {'pr', 'smallest'} <= kinds:
+    if not ({'pr', 'smallest'} if require_pr else {'smallest', 'alternative'}) <= kinds:
         raise ValueError('Comparison must include PR and smallest viable alternative')
     if not text(report.get('alternative_coverage')):
         raise ValueError('Explain reasonable alternative coverage and rejected/infeasible approaches')
@@ -273,6 +282,7 @@ def _accepted(tasks, key, context, *, historical=False):
         owner = descriptor.get('skill', OWNER)
         loaded = skill_config.effective(owner, tasks.store.subject['repository'], descriptor.get('upstream'),
                                         options=descriptor.get('options'))
+        loaded['options'] = legacy_options(loaded['options'])
         definition = {k: v for k, v in descriptor['definition'].items() if k not in {'checklist', 'required'}}
         execution = stage_execution(definition, descriptor['stage'], loaded['options'], owner=owner)
         current_spec = make_spec(**tasks.store.subject, **execution)
@@ -307,7 +317,9 @@ def _accepted(tasks, key, context, *, historical=False):
         compared = source['report']
     validate_report(spec, report, compared=compared)
     assigned = spec['options']['alternatives']
-    return {'key': key, 'spec': spec, 'report': report, 'reference': reference, 'native_handle': native['invocation']['handle'], **assigned}
+    return {'key': key, 'spec': spec, 'report': report, 'reference': reference,
+            'request': current_spec['inputs'].get('alternatives_request'),
+            'native_handle': native['invocation']['handle'], **assigned}
 
 
 def stage_spec(tasks, descriptor, definition, *, replay=False):
@@ -326,6 +338,7 @@ def _stage_spec(tasks, descriptor, definition, *, replay=False):
         raise ValueError('Alternatives owner must be the incoming or fix workflow')
     loaded = skill_config.effective(owner, tasks.store.subject['repository'], descriptor.get('upstream'),
                                     options=descriptor.get('options'))
+    loaded['options'] = legacy_options(loaded['options'])
     config = loaded['options']['alternatives']
     if not config['enabled']:
         raise ValueError('Alternatives is disabled; bypass assessment, execution and publication')
@@ -353,12 +366,11 @@ def _stage_spec(tasks, descriptor, definition, *, replay=False):
             raise ValueError('Alternatives dependencies must belong to the same workflow owner')
     if stage == 'comparison' and retained['assessment']['report']['required'] is not True:
         raise ValueError('Skipped applicability cannot start comparison')
-    if stage == 'comparison':
-        request = retained['assessment']['spec']['inputs'].get('alternatives_request')
-        if request:
-            definition = deepcopy(definition)
-            definition.setdefault('inputs', {})['alternatives_request'] = request
-            descriptor['definition'].setdefault('inputs', {})['alternatives_request'] = request
+    request = next((value['request'] for value in retained.values() if value.get('request')), None)
+    if request:
+        definition = deepcopy(definition)
+        definition.setdefault('inputs', {})['alternatives_request'] = request
+        descriptor['definition'].setdefault('inputs', {})['alternatives_request'] = request
     if 'impact' in retained and retained['impact']['report']['impact'] != 'nonmaterial':
         raise ValueError('Material or uncertain impact requires refreshed alternatives analysis')
     if stage == 'alignment' and 'impact' in retained:
@@ -367,6 +379,13 @@ def _stage_spec(tasks, descriptor, definition, *, replay=False):
         raise ValueError('Alternatives choice remains pending')
     if stage == 'verification' and retained['alignment']['report']['alignment'] != 'mismatch':
         raise ValueError('Only material mismatches require independent verification')
+    from review_alternatives import initial, pinned_definition, guard_completed, entry
+    if (owner == OWNER and stage == 'impact' and initial(definition, retained)
+            and entry(tasks, 'impact') is None):
+        raise ValueError('Initial alternatives review runs once per PR; changed scope requires explicit reassessment')
+    initial_review = owner == OWNER and stage != 'impact' and initial(definition, retained)
+    if initial_review:
+        definition = pinned_definition(tasks, descriptor, definition)
     execution = stage_execution(definition, stage, loaded['options'], owner=owner)
     execution.setdefault('inputs', {}).update({'alternatives_' + name: value['reference']
                                                for name, value in retained.items()})
@@ -376,6 +395,8 @@ def _stage_spec(tasks, descriptor, definition, *, replay=False):
     spec = make_spec(**tasks.store.subject, **execution)
     if owner == FIX_OWNER:
         from fix_alternatives import guard_completed
+        guard_completed(tasks, stage, spec)
+    elif initial_review and not replay:
         guard_completed(tasks, stage, spec)
     return spec
 
@@ -411,6 +432,7 @@ def impact_selection_source(tasks, key):
 
 def stage_execution(definition, stage, options, *, owner=OWNER):
     """Construct current guidance independently of retained analysis inputs."""
+    options = legacy_options(options)
     config = options['alternatives']
     execution = deepcopy(definition)
     if stage in {'impact', 'alignment'}:
@@ -517,9 +539,9 @@ def live_pr(pr):
         raise ValueError('Live alternatives publication identity is incomplete')
     return value
 
-def gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
+def gate(tasks, refs, *, options=None, upstream=None, analysis_only=False, manual=False):
     with evaluation(tasks):
-        return _gate(tasks, refs, options=options, upstream=upstream, analysis_only=analysis_only)
+        return _gate(tasks, refs, options=options, upstream=upstream, analysis_only=analysis_only, manual=manual)
 
 
 def incoming_evidence(tasks, key, *, historical=False):
@@ -529,14 +551,17 @@ def incoming_evidence(tasks, key, *, historical=False):
     return value
 
 
-def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
-    loaded = skill_config.effective(OWNER, tasks.store.subject['repository'], upstream, options=options)['options']
+def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False, manual=False):
+    loaded = legacy_options(skill_config.effective(OWNER, tasks.store.subject['repository'], upstream, options=options)['options'])
     if not loaded['alternatives']['enabled']:
         return {'outcome': 'disabled', 'release_reviewers': True}
     if not isinstance(refs, dict) or 'assessment' not in refs:
         raise ValueError('Incoming review requires alternatives applicability evidence')
     impact = incoming_evidence(tasks, refs['impact']) if refs.get('impact') else None
     assessment = incoming_evidence(tasks, refs['assessment'], historical=impact is not None)
+    initial_review = impact is None and not manual
+    if manual and not assessment.get('request'):
+        raise ValueError('Manual alternatives gate requires the original explicit request')
     if assessment['spec']['skill']['identity'] != loaded['alternatives']['review_skill']:
         raise ValueError('Alternatives review skill changed; refresh affected applicability and comparison')
     if assessment['stage'] != 'assessment':
@@ -548,7 +573,8 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
             linked(impact, 'assessment', assessment)
         current = impact or assessment
         return {'outcome': 'skipped', 'release_reviewers': True, 'reason': assessment['report']['reason'],
-                'current_evidence': current['key'], 'applicability_reference': assessment['reference']}
+                'current_evidence': current['key'], 'applicability_reference': assessment['reference'],
+                'initial_review': initial_review}
     compared = incoming_evidence(tasks, refs['comparison'], historical=impact is not None)
     if compared['spec']['skill']['identity'] != loaded['alternatives']['review_skill']:
         raise ValueError('Alternatives review skill changed; refresh affected comparison')
@@ -584,17 +610,21 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
     head = pins.get('head')
     if not head:
         raise ValueError('Alignment requires current pinned Git inputs')
+    result = alignment['report']['alignment']
+    governing = [compared['reference'], selection['reference'], alignment['reference']]
+    if initial_review and result == 'aligned':
+        return {'outcome': 'aligned', 'release_reviewers': True,
+                'initial_review': True, 'governing_evidence': governing}
     with evaluation(tasks) as context:
         pr = tasks.store.subject['pr']
         if pr not in context['live']:
             context['live'][pr] = live_pr(pr)
         live = context['live'][pr]
-    if live['headRefOid'] != head:
+    if live['headRefOid'] != head and not initial_review:
         raise ValueError('PR head changed after alternatives alignment')
     current_pr = read(alignment['spec']['inputs']['alternatives_current_pr'])
-    if current_pr['body'] != live['body'] or current_pr.get('headRefOid') != head:
+    if not initial_review and (current_pr['body'] != live['body'] or current_pr.get('headRefOid') != head):
         return {'outcome': 'impact_required', 'release_reviewers': False}
-    result = alignment['report']['alignment']
     if result == 'aligned':
         return {'outcome': 'aligned', 'release_reviewers': True,
                 'governing_evidence': [compared['reference'], selection['reference'], alignment['reference']]}
@@ -608,13 +638,19 @@ def _gate(tasks, refs, *, options=None, upstream=None, analysis_only=False):
         if verification['native_handle'] == alignment['native_handle']:
             raise ValueError('Alternatives mismatch verification must use an independent native agent')
         if verification['report']['disposition'] == 'confirmed':
-            if analysis_only or not loaded['permissions']['post_review']:
+            later_head = initial_review and live['headRefOid'] != head
+            if not later_head and (analysis_only or not loaded['permissions']['post_review']):
                 return {'outcome': 'publication_blocked', 'release_reviewers': False}
             review = journal(refs['review_operation'], tasks, kind='post-review', head=head)
             approved = review['request']['approved']
             if (approved['event'] != 'REQUEST_CHANGES' or approved.get('comments')
                     or approved.get('body') != verification['report']['required_changes']):
                 raise ValueError('Alternatives-only rejection requires the independently verified design changes')
+            # A delivered initial rejection stays design context after author fixes.
+            # Only ordinary current-head review can establish that those fixes work.
+            if later_head:
+                return {'outcome': 'planned', 'release_reviewers': True, 'initial_review': True,
+                        'governing_evidence': [*governing, verification['reference']]}
             return {'outcome': 'alternatives_rejected', 'release_reviewers': False, 'complete': True,
                     'ordinary_review_complete': False}
     return {'outcome': 'alignment_blocked', 'release_reviewers': False}
@@ -921,21 +957,24 @@ def enforce(spec, repository, pr, *, options=None, upstream=None):
 
 def _enforce(spec, tasks, *, options=None, upstream=None):
     execution = spec.get('options', {}).get('execution', spec.get('options', {}))
+    if not execution.get('alternatives_evidence'):
+        import assessment_alternatives
+        return assessment_alternatives.enforce(spec, tasks, OWNER, options=options, upstream=upstream)
     result = gate(tasks, execution.get('alternatives_evidence'), options=options,
                   upstream=upstream, analysis_only=execution.get('analysis_only', False))
     if not result['release_reviewers']:
         raise ValueError('Alternatives gate blocks ordinary tasks: ' + result['outcome'])
     if result['outcome'] == 'skipped':
         current = accepted(tasks, result['current_evidence'])
-        if any(spec.get('git', {}).get(k) != current['spec'].get('git', {}).get(k) for k in ('head', 'base', 'target')):
+        if not result.get('initial_review') and any(spec.get('git', {}).get(k) != current['spec'].get('git', {}).get(k) for k in ('head', 'base', 'target')):
             raise ValueError('Ordinary review pins differ from alternatives applicability')
         spec['inputs']['alternatives_applicability'] = result['applicability_reference']
         if current['stage'] == 'impact':
             spec['inputs']['alternatives_impact'] = current['reference']
-    if result['outcome'] == 'aligned':
+    if result['outcome'] in {'aligned', 'planned'}:
         alignment = accepted(tasks, execution['alternatives_evidence']['alignment'])
         for pin in ('head', 'base', 'target'):
-            if spec.get('git', {}).get(pin) != alignment['spec'].get('git', {}).get(pin):
+            if not result.get('initial_review') and spec.get('git', {}).get(pin) != alignment['spec'].get('git', {}).get(pin):
                 raise ValueError('Ordinary review pins differ from alternatives alignment')
         # Dependency paths are regenerated, never a second saved decision summary.
         for index, path in enumerate(result['governing_evidence']):
