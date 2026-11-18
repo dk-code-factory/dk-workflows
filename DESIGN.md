@@ -413,6 +413,28 @@ Reuse ends when governing instructions, discussion or relevant code/validation
 change. This adds no registry, status cache or publication receipt; pending writes
 still reconcile through the existing journal. Token savings are not measured.
 
+Feedback reply writers bundle all needed answers to one original source before
+publication, keyed transiently by canonical PR, source kind and database id.
+Each new body links that source, names its author and pairs faithful feedback
+excerpts with answers. Different sources and inline routing remain distinct.
+Repository agent instructions are not adopted for reply tasks, even through
+coordinator/publisher handoffs or copied earlier-stage guidance; code, validation
+and discussion remain factual evidence. Direct user instructions, private reply
+configuration, package contracts and host priority retain their authority.
+This is a task-local guidance boundary, not a saved source-policy mutation.
+
+No new state, cache key, fingerprint format or grouping registry is needed.
+Existing task resource bindings refresh affected reply work when these contracts
+change; original results, completed siblings and budgets remain intact. Existing
+publication intents retain their exact body, source and receipts across resume,
+including legacy attribution, rather than being rewritten for the new format.
+Grouping remains fresh only for the current discussion, obligations and supported
+answers; publication authorization and live checks remain independent. Bundling
+avoids generating and recovering multiple replies for the same source in this
+and fresh sessions without new durable loading/validation costs. Native API dollar
+savings and complete native adherence are unmeasured; offline publisher scenarios
+establish exact-body retention and recovery, not semantic grouping decisions.
+
 Evidence preflight resolves each selected reviewer occurrence's installed contract
 and checks current host observation capabilities before claims or cycle consumption.
 The requirements map and capability document are transient inputs to a read-only

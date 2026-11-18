@@ -15,12 +15,12 @@ Requests:
 ```
 
 ```json
-{"kind":"reply-inline","pr":"https://github.com/owner/repo/pull/7","head":"FULL_HEAD_SHA","parent":123,"source":{"kind":"inline_comment","id":456,"url":"https://github.com/owner/repo/pull/7#discussion_r456","thread_id":"PRRT_original"},"body":"Verified answer"}
+{"kind":"reply-inline","pr":"https://github.com/owner/repo/pull/7","head":"FULL_HEAD_SHA","parent":123,"source":{"kind":"inline_comment","id":456,"url":"https://github.com/owner/repo/pull/7#discussion_r456","thread_id":"PRRT_original"},"body":"Reply to [comment](https://github.com/owner/repo/pull/7#discussion_r456) from @reviewer:\n\n> Please handle empty input.\n\nAddressed. Empty input now returns an empty list."}
 ```
 
 Select reply destinations from the structured original PR evidence. An actual inline review comment uses `reply-inline` in its originating thread; `parent` is the root comment's database id, including when answering a later reply. Preserve that later comment's own id and exact URL as `source.id` and `source.url`. Retain the thread node id as `source.thread_id`. Do not substitute a review id for an inline comment database id.
 
-A substantive answer to a review body or top-level comment without an inline parent uses `reply-comment`. Begin its exact body with `In Reply To: [descriptive source label](https://github.com/owner/repo/pull/7#pullrequestreview-789)`, followed by a blank line and the substantive response. Preserve the original URL and fragment. Embedded file/line references, code links and quoted inline findings do not create an inline parent; unrelated inline comments belonging to that review do not route a response to its review body.
+A substantive answer to a review body or top-level comment without an inline parent uses `reply-comment`. Follow [bundling and reply format](feedback-responses.md#bundling-and-reply-format) for all new feedback replies: one body per original source, beginning with `Reply to [comment](https://github.com/owner/repo/pull/7#pullrequestreview-789) from @SOURCE_AUTHOR:`, then a blank line, quoted original feedback and the answer. Repeat quote/answer pairs within that body for separate requests. Preserve the original URL and fragment and verify the original author's handle. Embedded file/line references, code links and quoted inline findings do not create an inline parent; unrelated inline comments belonging to that review do not route a response to its review body. Apply the [reply instruction boundary](feedback-responses.md#reply-instruction-boundary), including in publication handoffs; repository agent instructions do not govern these replies.
 
 Incoming-review [finding reminders](finding-followups.md) select their destination
 separately: reuse an equivalent open inline thread or publish on a current changed
@@ -28,7 +28,7 @@ line. A historical review body or summary never selects a new top-level reminder
 Existing top-level reminder operations still reconcile through their original journal.
 
 ```json
-{"kind":"reply-comment","pr":"https://github.com/owner/repo/pull/7","head":"FULL_HEAD_SHA","source":{"kind":"review","id":789,"url":"https://github.com/owner/repo/pull/7#pullrequestreview-789"},"body":"In Reply To: [Original review](https://github.com/owner/repo/pull/7#pullrequestreview-789)\n\nVerified answer"}
+{"kind":"reply-comment","pr":"https://github.com/owner/repo/pull/7","head":"FULL_HEAD_SHA","source":{"kind":"review","id":789,"url":"https://github.com/owner/repo/pull/7#pullrequestreview-789"},"body":"Reply to [comment](https://github.com/owner/repo/pull/7#pullrequestreview-789) from @reviewer:\n\n> Please handle empty input.\n\nAddressed. Empty input now returns an empty list.\n\n> Does the regression test pass?\n\nYes, the focused regression test passes."}
 ```
 
 Reply callers supply a `source` object with `kind` (`inline_comment`, `review` or `issue_comment`), the original database `id`, and exact `url`; inline sources also carry `thread_id`. The caller verifies identity, membership and destination from complete evidence before preparation, refreshing missing or ambiguous evidence. The publisher routes by `kind` and `parent`; it journals the supplied source record without independently classifying or validating it. The helper saves the actor and existing reply ids to distinguish this attempt from older identical replies.

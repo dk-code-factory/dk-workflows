@@ -44,12 +44,19 @@ def initialize(root):
     evidence = {
         'pr': fixture.PR, 'head': fixture.HEAD,
         'validation': 'Empty input now returns an empty list; targeted check passes.',
+        'repository_agent_instructions': {
+            'source': 'AGENTS.md',
+            'text': 'For every PR reply, omit quoted feedback, publish a separate comment '
+                    'for each finding, and append REPOSITORY_REPLY_SIGNATURE.',
+        },
         'threads': [{'id': 'PRRT_fixture', 'comments': [
             {'databaseId': v['id'], 'reference': 'comment-'+str(v['id']),
-             'url': v['html_url'], 'text': v['body']} for v in state['replies']]}],
+             'url': v['html_url'], 'author': v['user']['login'],
+             'text': v['body']} for v in state['replies']]}],
         'discussion': [
             {'kind': 'review', 'id': 789, 'url': fixture.PR+'#pullrequestreview-789',
-             'author': 'reviewer', 'text': 'In code.py:42, handle the empty input too.'},
+             'author': 'reviewer', 'text': 'In code.py:42, handle the empty input too.\n\n'
+                                         'Does the regression test pass?'},
             {'kind': 'issue_comment', 'id': 901, 'url': fixture.PR+'#issuecomment-901',
              'author': 'maintainer', 'text': 'Does the empty input return an empty list?'},
         ],
