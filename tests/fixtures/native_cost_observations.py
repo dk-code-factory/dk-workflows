@@ -22,6 +22,14 @@ def require(value, message):
 def collect(path, thread, *, expected_turns, descendants):
     """Collect complete explicitly leaf-only turns; preserve failures externally."""
     require(descendants == [], 'Unexpected descendants need their own inventories')
+    result = collect_thread(path, thread, expected_turns=expected_turns)
+    result.pop('turns')
+    result['descendants_observed'] = 0
+    return result
+
+
+def collect_thread(path, thread, *, expected_turns):
+    """Collect one thread; its caller must independently account for descendants."""
     rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     records = native_usage.read_records([path])
     records = {key: value for key, value in records.items() if value['thread_id'] == thread}
@@ -87,6 +95,7 @@ def collect(path, thread, *, expected_turns, descendants):
     cost = Decimal(0)
     settings = []
     response_ids = []
+    turns = []
     for turn in starts:
         ids = observed[turn]
         require(len(ids) == len(set(ids)), 'Duplicate response observation')
@@ -101,6 +110,8 @@ def collect(path, thread, *, expected_turns, descendants):
                 'Missing actual service tier')
         settings.append({'model': control['model'], 'effort': context['effort'],
                          'service_tier': control['service_tier']})
+        turn_cost = Decimal(0)
+        turn_totals = dict(zero)
         for response, host_usage in zip(ids, counters[turn]):
             usage = records[response]['usage']
             require(usage == host_usage, 'Response usage differs from independent host event')
@@ -108,7 +119,11 @@ def collect(path, thread, *, expected_turns, descendants):
                     'Cache writes need independently observed TTLs')
             for key in totals:
                 totals[key] += usage[key]
-            cost += dollar_usage.response_cost(usage, service_tier=control['service_tier'])
+                turn_totals[key] += usage[key]
+            turn_cost += dollar_usage.response_cost(usage, service_tier=control['service_tier'])
+        cost += turn_cost
+        turns.append({'turn_id': turn, 'response_ids': ids, 'tokens': turn_totals,
+                      'settings': settings[-1], 'api_equivalent_cost_usd': str(turn_cost)})
         response_ids.extend(ids)
     require(set(response_ids) == set(records), 'Usage outside the measured scope')
     totals['fresh_input_tokens'] = totals['input_tokens'] - totals['cached_input_tokens']
@@ -117,7 +132,7 @@ def collect(path, thread, *, expected_turns, descendants):
             'api_equivalent_cost_usd': str(cost), 'rate_card': dollar_usage.RATE_CARD,
             'raw_rollout_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
             'inventory_basis': 'Advancing host token_count events, cumulative deltas and terminal outcomes',
-            'descendants_observed': 0}
+            'turns': turns}
 
 
 def starting_context(path, *, replacements):

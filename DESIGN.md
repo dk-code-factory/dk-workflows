@@ -27,6 +27,38 @@ costly recovery after uncertain writes. Do not persist derived status, rendered
 summaries, duplicate transcripts, default telemetry or whole settings snapshots.
 Read current CI and publication readiness at their existing boundaries.
 
+Complete-workflow cost exercises use test-only frozen scenarios and readers. The
+already-running native session executes the actual selected skills and their
+supported descendants; local Git/GitHub transports control external responses.
+The scenario retains both complete default plans, applicable alternatives,
+simplification, verification, fix cycles, finalizers and recovery obligations.
+Instruction-only duties cannot substitute for these skills. Freeze a historical
+pre-change baseline and candidate before trials, including resource closure,
+assignments, starting host instructions/tool schemas, controls and quality
+expectations. Keep every completed arm, even when it regresses or is inconclusive.
+
+Read the native host's parent-child graph independently of usage records. Every
+attributable turn needs matching start/terminal observations, actual controls,
+advancing cumulative counters and per-response usage. Price each unique response
+once, including reasoning within output, cache durations and context charges.
+Missing descendants, terminal evidence, controls, prices or matching frozen
+conditions make comparison inconclusive. Report recurring initial and fresh-session
+work together; keep implementation, PR review and experiment orchestration spending
+separate. Preserve the established correctness and dollar gates.
+
+Measurement artifacts are explicit opt-in test evidence, not production telemetry
+or another workflow state store. Private artifacts reference original host traces,
+Git pins, result artifacts and journals rather than copying conversations or
+settings into workflow state. Their consumer is the independent experiment verifier
+and a later session resuming an unfinished arm. Retaining these references avoids
+repeating paid completed native trials and reconstructing uncertain external
+actions; expected avoided cost exceeds hashing, validating and targeted loading.
+Freshness ends at changed frozen inputs, incomplete host inventories or damaged
+original evidence. Such changes invalidate the comparison, never erase a completed
+arm or authorize rerunning it. Ordinary tests use synthetic host records and local
+transports only. Helpers neither launch model sessions nor manufacture native
+completion. No measured savings follow from the fixture implementation alone.
+
 Fork-CI approval binds reviewed source coverage to the current PR head and live
 target branch tip. The PR REST base SHA may be historical; retain it in the
 existing context and match workflow-run base metadata to that SHA, alongside
