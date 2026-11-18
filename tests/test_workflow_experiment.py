@@ -37,6 +37,9 @@ def test_preparation_preserves_real_default_selections_and_never_resets(tmp_path
     plan = json.loads(Path(scenario['default_plan_source']).read_text())
     assert len(plan['tasks']) == task_count and len(plan['finalizers']) == finalizer_count
     assert plan['alternatives']['enabled'] and plan['simplification']['enabled']
+    settings = json.loads(Path(scenario['ordinary_reviewer_settings_source']).read_text())
+    assert settings['skill_defaults']['dk-workflows:dk-pr-reviewers-run']['options']['reviewers'] == [
+        experiment.ORDINARY_REVIEWER]
     assert any(item.get('skill') == 'dk-workflows:dk-pr-reviewers-run' for item in plan['tasks'])
     assert 'preparation-only' in scenario['status']
     original = (root/'remote.json').read_bytes()
@@ -90,6 +93,21 @@ def test_incomplete_preflight_cannot_seal_an_arm(tmp_path, source):
     with pytest.raises(ValueError, match='Missing observed'):
         experiment.freeze(root, conditions=path, external_resources=[])
     assert not (root/'freeze.json').exists()
+
+
+def test_explicit_ordinary_prerequisite_is_frozen_and_cannot_drift(tmp_path, source):
+    checkout, revision = source
+    root = tmp_path/'arm'
+    scenario = experiment.initialize(root, checkout, revision, 'review')
+    settings = Path(scenario['ordinary_reviewer_settings_source'])
+    original = settings.read_bytes()
+    settings.write_text('{"skill_defaults":{}}')
+    with pytest.raises(ValueError, match='reviewer prerequisite changed'):
+        experiment.freeze(root, conditions=conditions(root), external_resources=[])
+    settings.write_bytes(original)
+    experiment.freeze(root, conditions=conditions(root), external_resources=[])
+    settings.write_text('{"skill_defaults":{}}')
+    assert not experiment.verify_freeze(root)['passed']
 
 
 def test_controlled_partial_restore_keeps_original_freeze_and_inputs(tmp_path, source):
@@ -254,6 +272,10 @@ def test_real_helpers_collect_complete_stable_feedback_through_local_transport(t
 
     routed = execute('scripts/pr_route.py', '--pr', experiment.PR)
     assert routed['ownership'] == ownership
+    ordinary = execute('scripts/config.py', '--repository', 'github.com/owner/repo',
+                       '--checkout', root/'checkout', 'skill-plan',
+                       '--skill', 'dk-workflows:dk-pr-reviewers-run', '--kind', 'reviewers')
+    assert ordinary['groups'] == [[experiment.ORDINARY_REVIEWER]]
     threads = execute('runtime/dk-pr-feedback-address/scripts/fetch_unresolved_review_threads.py',
                       '--pr', experiment.PR, '--cwd', root/'checkout')
     assert threads['complete'] and threads['itemCount'] == 0

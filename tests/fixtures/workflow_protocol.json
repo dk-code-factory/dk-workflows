@@ -6,9 +6,9 @@
   "original_constraints": "Read inputs/simplification-context.md as a required original maintainer source for every simplifier. Include its original reference in governing inputs. The normal skill contract still owns preparation, claims, native evidence, recording, retries and completion checks.",
   "phases": {
     "initial": {
-      "work": "Start the default workflow, including initial alternatives and actual ordinary reviewers. After accepting the ordinary review and preparing the first simplifier, pause before native simplifier dispatch.",
+      "work": "Start the default workflow, including initial alternatives and actual ordinary reviewers. Honor the resolved parallel groups and host capacity. Prepare the ordinary/simplifier group and dispatch ordinary work normally; pause only the first simplifier before its native dispatch. Do not wait for ordinary completion merely to serialize this checkpoint.",
       "checkpoint": "Send the caller simplifier-ready with the prepared task reference, key and claim. Wait for missing-context-dispatch. Then invoke the actual native simplifier with its original required source reference. Missing evidence must remain incomplete.",
-      "recovery": "After the child terminates incomplete, send simplifier-incomplete with its actual handle, original report and observations. Wait for context-restored. Retain the actual incomplete result under the existing recovery contract, and end this phase without repeating accepted ordinary review or completing the full workflow.",
+      "recovery": "After the child terminates incomplete, send simplifier-incomplete with its actual handle, original report and observations. Wait for context-restored. Retain the actual incomplete result under the existing recovery contract. Wait for already launched ordinary siblings and accept their actual completed results before ending this phase; never abandon those siblings or repeat completed review. Full workflow completion remains false.",
       "expected_boundary": "A real incomplete leaf and completed ordinary sibling remain recoverable; overall workflow completion is false."
     },
     "recover": {

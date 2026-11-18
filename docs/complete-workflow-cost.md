@@ -15,6 +15,17 @@ plan of four tasks and three finalizers. Read their original selected resources;
 do not replace the lists with instruction-only duties or disable alternatives or
 simplification. Record the complete resource closure for external native reviewers.
 
+The bundled ordinary-reviewer list is empty. A representative complete scenario
+therefore needs an explicit ordinary provider before freezing: this fixture selects
+`code-review-ad:code-review-ad` in isolated initial settings, identically for both
+sources. This is a scenario prerequisite, not a change to production defaults or
+either default workflow plan. Resolve and verify the real ordinary and composed
+plans before native claims, and bind that small explicit setting in the freeze.
+An earlier initiated arm discovered the missing prerequisite before any descendant
+or alternatives analysis. Retain its incomplete claim, original observations and
+full coordinator cost as an inconclusive attempt; it supplies no complete-workflow
+or savings evidence. Do not erase it, overwrite its freeze or relabel it as a pilot.
+
 `tests/fixtures/workflow_experiment.py` prepares a real local Git PR and exports
 the pinned package. It retains the default selections through their original
 resource reference and hash, without a settings snapshot. Local transports reuse

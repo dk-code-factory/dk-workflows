@@ -23,6 +23,7 @@ PR = 'https://github.com/owner/repo/pull/7'
 BASELINE = '1befef223aca04f481a0417d8368238b5cc9b5df'
 CANDIDATE = 'b478a6689fa65ff3412cfc158f54741f40b9599c'
 ORDERS = [['baseline', 'candidate'], ['candidate', 'baseline'], ['baseline', 'candidate']]
+ORDINARY_REVIEWER = {'skill': 'code-review-ad:code-review-ad', 'options': {}, 'required': True}
 SIMPLIFICATION_CONTEXT = ('Keep changes within the greeting feature and its original requirements.\n'
                           'Preserve safe HTML text and independent per-call history.\n')
 
@@ -79,6 +80,12 @@ def initialize(root, source, revision, route):
         files.extractall(package, filter='data')
     for folder in ('artifacts', 'inputs', 'bin', 'state', 'config', 'data', 'git-template', 'control'):
         (root/folder).mkdir()
+    # Explicit representative prerequisite, not a bundled ordinary-review default.
+    # Seed initial isolated fixture data before any native invocation or freeze.
+    settings = root/'config/dk-workflows/v2/user.json'
+    settings.parent.mkdir(parents=True)
+    save(settings, {'skill_defaults': {'dk-workflows:dk-pr-reviewers-run': {
+        'options': {'reviewers': [ORDINARY_REVIEWER]}}}})
     checkout = root/'checkout'
     checkout.mkdir()
     real_git = shutil.which('git')
@@ -159,6 +166,9 @@ def initialize(root, source, revision, route):
     scenario = {'schema': 1, 'route': route, 'pr': PR, 'base': base, 'head': head,
                 'revision': revision, 'default_plan_source': str(plan_path),
                 'default_plan_sha256': sha(plan_path),
+                'ordinary_reviewer': ORDINARY_REVIEWER,
+                'ordinary_reviewer_settings_source': str(settings),
+                'ordinary_reviewer_settings_sha256': sha(settings),
                 'recovery_cases': ['unchanged-fresh-session', 'partial-failure-with-completed-siblings',
                                    'relevant-input-invalidation', 'uncertain-publication'],
                 'status': 'preparation-only; transport and host freeze required before native trials'}
@@ -173,6 +183,11 @@ def initialize(root, source, revision, route):
         'or synthetic native observations cannot substitute for execution. Preserve original results, '
         'claims, completed siblings, budgets and publication operations. Native tools own execution; '
         'never start another model session through a command or helper.\n'
+        'This representative scenario explicitly configures code-review-ad:code-review-ad as its ordinary '
+        'reviewer prerequisite in the isolated settings referenced by scenario.json. The bundled ordinary '
+        'reviewer default is empty. Resolve the actual composed plan before claiming work; keep all default '
+        'workflow tasks, finalizers, alternatives and simplification. Use the external provider resources '
+        'recorded in freeze.json, with actual independent native passes and original observations.\n'
         'Do not start a paired arm until freeze.json and independent transport/host preflight are complete. '
         'Read inputs/protocol.json and the external caller phase in control/phase.json. Follow its '
         'controlled recovery checkpoints, communicating with your native caller before dispatch when requested. '
@@ -258,7 +273,11 @@ def freeze(root, *, conditions, external_resources):
                 'assignment_sha256', 'quality_oracle_sha256', 'transport_verification_sha256')
     if not all(isinstance(value.get(key), str) and len(value[key]) == 64 for key in required):
         raise ValueError('Missing observed host, assignment, quality or transport freeze')
-    paths = [root/'inputs', root/'package', root/'bin', root/'environment.sh', conditions,
+    scenario = json.loads((root/'inputs/scenario.json').read_text())
+    settings = Path(scenario['ordinary_reviewer_settings_source'])
+    if sha(settings) != scenario['ordinary_reviewer_settings_sha256']:
+        raise ValueError('Ordinary reviewer prerequisite changed before freeze')
+    paths = [root/'inputs', root/'package', root/'bin', root/'environment.sh', conditions, settings,
              ROOT/'tests/fixtures/workflow_experiment.py', ROOT/'tests/fixtures/workflow_protocol.json',
              ROOT/'tests/fixtures/workflow_cost.py', ROOT/'tests/fixtures/native_cost_observations.py',
              ROOT/'tests/fixtures/workflow_quality.py',
