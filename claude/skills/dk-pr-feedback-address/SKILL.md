@@ -23,6 +23,8 @@ Apply [feedback response obligations](../../../docs/pr/feedback-responses.md) to
 
 Before implementation, follow [preference retrieval and handoffs](../../../docs/preferences.md#workflow-handoffs-and-reuse) in `implementation` mode. Use a current complete caller handoff or resolve preferences and evaluate conditions directly. Preserve records and applicable paths. Refresh when paths, relevant records or condition context change, including before edits expand to new paths. Include the selection and condition decisions in managed task inputs.
 
+For historical reports, use [deterministic finding resolution](../../../docs/pr/finding-followups.md). Select returned source/finding IDs; never choose an anchor SHA or use prose as proof. Unsupported or unavailable source history remains unknown under the existing authorized fallback.
+
 Record each finding's disposition with evidence and source links. Follow the caller's permissions for pushes, replies and thread resolution. Local fixes alone do not authorize remote changes. Use the publication and reply skills for authorized remote changes. Return tested fixes, dispositions and remaining blockers.
 
 For managed feedback and reviewer-finding fixes, use the prepared checklist to check every finding disposition, assigned deliverable and relevant test. Supply complete initial checklist evidence or finish the caller's recheck with the same agent before reporting accepted completion. Follow [completion checks](../../../docs/task-state.md#completion-checks).

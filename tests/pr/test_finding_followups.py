@@ -3,6 +3,7 @@ from copy import deepcopy
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -44,9 +45,27 @@ def linear_history(members):
     return followups.github_history(items, members[-1], members)
 
 
+def inspect(inline, top, history, retained):
+    """Planner fixtures supply already-resolved provenance, never native SHAs.
+
+    Real source-history collection and resolution are exercised separately in
+    test_finding_anchors.py; these tests isolate routing and publication recovery.
+    """
+    resolved = {}
+    for ref, source in followups.sources(inline, top).items():
+        anchor = source['reviewCommit']
+        if source['kind'] == 'issue_comment':
+            item = next(item for item in top['items'] if item['reference'] == ref)
+            match = re.search(r'\[head\]\([^)]*/commits/([0-9a-f]{40})\)', item['text'])
+            anchor = match[1] if match else None
+        resolved[ref] = {ref: {'findingId': ref, 'status': 'resolved' if anchor else 'unknown',
+                              'anchor': anchor, 'source': ref, 'revision': 'fixture-original'}}
+    return followups.inspect(inline, top, history, retained, resolved)
+
+
 def context(history=None, retained=None):
     history = [A, B, C] if history is None else history
-    return followups.inspect(*inputs(), linear_history(history) if isinstance(history, list) else history,
+    return inspect(*inputs(), linear_history(history) if isinstance(history, list) else history,
                              retained or {})
 
 
@@ -88,7 +107,7 @@ def test_zero_and_one_commit_boundary_for_each_source(source, anchor, age, statu
     inline, top = inputs()
     top['reviews'][0]['commitId'] = anchor
     top['comments'][0]['text'] = f'Empty input fails at [head]({PR}/commits/{anchor}).'
-    value = followups.inspect(inline, top, linear_history([A, C]), {})
+    value = inspect(inline, top, linear_history([A, C]), {})
     native = assessment(value, source=source)
     if source == 'issuecomment-901':
         native['findings'][0]['requests'][0]['commit'] = anchor
@@ -162,7 +181,7 @@ def test_summary_without_inline_destination_never_falls_back_to_top_level(source
 def test_resolved_equivalent_thread_is_not_reused_for_a_summary():
     inline, top = inputs()
     inline['threads'][0]['isResolved'] = True
-    value = followups.inspect(inline, top, linear_history([A, B, C]), {})
+    value = inspect(inline, top, linear_history([A, B, C]), {})
     native = assessment(value, source='issuecomment-901')
     native['findings'][0]['requests'].append({'reference': 'C99'})
     result = followups.plan(value, native, {})['findings'][0]
@@ -177,7 +196,7 @@ def test_nonactionable_dispositions_never_remind(disposition):
 def test_resolved_thread_never_reminds():
     inline, top = inputs()
     inline['threads'][0]['isResolved'] = True
-    value = followups.inspect(inline, top, linear_history([A, B, C]), {})
+    value = inspect(inline, top, linear_history([A, B, C]), {})
     assert outcome(value)['status'] == 'excluded'
 
 
@@ -189,20 +208,20 @@ def test_recent_equivalent_request_resets_age_for_every_author(author, anchor, a
               'url': PR + '#issuecomment-902', 'author': author,
               'text': f'Please handle empty input at [head]({PR}/commits/{anchor}).'}
     top['items'].append(recent)
-    value = followups.inspect(inline, top, linear_history([A, B, C]), {})
+    value = inspect(inline, top, linear_history([A, B, C]), {})
     requests = [{'reference': 'C99'}, {'reference': recent['reference'], 'commit': anchor,
                                      'anchorEvidence': 'Equivalent substantive request explicitly binds this head.'}]
     assert outcome(value, requests=requests, latestRequest=recent['reference'])['newCommits'] == age
     assert outcome(value, requests=requests, latestRequest=recent['reference'])['status'] == status
 
 
-def test_unknown_equivalent_request_and_unsupported_link_are_uncertain():
+def test_native_sha_overrides_cannot_replace_resolved_provenance():
     value = context()
     assert outcome(value, requests=[{'reference': 'C99'}, {'reference': 'issuecomment-901'}],
-                   latestRequest='issuecomment-901')['status'] == 'uncertain_age'
+                   latestRequest='issuecomment-901')['newCommits'] == 2
     assert outcome(value, source='issuecomment-901', coverage=None, requests=[{
-        'reference': 'issuecomment-901', 'commit': B, 'anchorEvidence': 'Unproven guess'}])['status'] == 'uncertain_age'
-    assert outcome(value, requests=[{'reference': 'C99', 'commit': D}])['status'] == 'uncertain_age'
+        'reference': 'issuecomment-901', 'commit': B, 'anchorEvidence': 'Unproven guess'}])['newCommits'] == 2
+    assert outcome(value, requests=[{'reference': 'C99', 'commit': D}])['newCommits'] == 2
 
 
 def test_later_evidenced_request_can_supersede_an_unanchored_original():
@@ -215,10 +234,10 @@ def test_later_evidenced_request_can_supersede_an_unanchored_original():
 
 def test_formatting_only_bot_summary_edit_keeps_each_findings_anchor():
     inline, top = inputs()
-    before = followups.inspect(inline, top, linear_history([A, B, C]), {})
+    before = inspect(inline, top, linear_history([A, B, C]), {})
     top['comments'][0].update(author='robot[bot]', updatedAt='2026-11-13T23:59:59Z')
     top['comments'][0]['text'] = '**Summary**\n\n' + top['comments'][0]['text']
-    after = followups.inspect(inline, top, linear_history([A, B, C]), {})
+    after = inspect(inline, top, linear_history([A, B, C]), {})
     assert before['discussion'] != after['discussion']  # semantic reassessment is required
     assert outcome(after, source='issuecomment-901')['newCommits'] == 2
     with pytest.raises(ValueError, match='inputs changed'):
@@ -229,11 +248,14 @@ def test_one_summary_edit_does_not_reset_every_findings_substantive_age():
     inline, top = inputs()
     top['comments'][0]['text'] += f'\nNew request about generators at [head]({PR}/commits/{B}).'
     top['comments'][0]['updatedAt'] = '2026-11-13T23:59:59Z'
-    value = followups.inspect(inline, top, linear_history([A, B, C]), {})
+    value = inspect(inline, top, linear_history([A, B, C]), {})
     native = assessment(value, source='issuecomment-901')
     second = deepcopy(native['findings'][0])
     second.update(key='generator-consumption', correction='Please materialize the generator only once.')
-    second['requests'][0].update(commit=B, anchorEvidence='This distinct generator request was newly added at B.')
+    second['requests'][0].update(findingId='fixture-generator')
+    value['resolutions']['issuecomment-901']['fixture-generator'] = {
+        'status': 'resolved', 'anchor': B, 'revision': 'fixture-second'}
+    native['context'] = evidence.digest(value)
     native['findings'].append(second)
     result = followups.plan(value, native, {})
     assert [(item['status'], item['newCommits']) for item in result['findings']] == [
@@ -295,7 +317,7 @@ def test_source_repository_casing_preserves_exact_publication_url(source):
     items = [*inline['threads'][0]['comments'], *top['items']]
     for item in items:
         item['url'] = item['url'].replace('/owner/repo/', '/Owner/Repo/')
-    value = followups.inspect(inline, top, linear_history([A, B, C]), {})
+    value = inspect(inline, top, linear_history([A, B, C]), {})
     result = outcome(value, source=source)
     url = value['sources'][source]['url']
     record = result['request']['source'] if source == 'C99' else result['sourceRecord']
@@ -360,7 +382,7 @@ def test_default_inspection_lists_candidate_ages_and_preserves_missing_anchors()
 def test_changed_inputs_reject_only_plan_without_modifying_originals(change):
     saved = {'/original/operation.json': retained('verified', A)}
     inline, top = inputs()
-    old = followups.inspect(inline, top, linear_history([A, B, C]), saved)
+    old = inspect(inline, top, linear_history([A, B, C]), saved)
     native = assessment(old, operations=list(saved))
     if change == 'head':
         inline['pullRequest']['headRefOid'] = D
@@ -368,7 +390,7 @@ def test_changed_inputs_reject_only_plan_without_modifying_originals(change):
         top['items'][0]['text'] += ' Actually, preserve the exception.'
     else:
         saved['/original/operation.json']['status'] = 'pending'
-    new = followups.inspect(inline, top, linear_history([A, B, C]), saved)
+    new = inspect(inline, top, linear_history([A, B, C]), saved)
     with pytest.raises(ValueError, match='changed'):
         followups.plan(new, native, saved)
 
@@ -441,7 +463,7 @@ def test_capped_list_uses_pinned_local_membership_without_target_only_commits(la
     inline, top = inputs()
     inline['pullRequest']['headRefOid'] = head
     top['reviews'][0]['commitId'] = features[-1]
-    value = followups.inspect(inline, top, captured, {})
+    value = inspect(inline, top, captured, {})
     result = outcome(value)
     assert result['newCommits'] == expected
     assert result['status'] == 'eligible'
@@ -514,11 +536,12 @@ def test_inspect_cli_defaults_to_compact_with_full_evidence_opt_in(monkeypatch, 
     monkeypatch.setattr(sys, 'argv', argv + (['--full-commits'] if full else []))
     with patch.object(evidence, 'load_handoff', return_value=({}, *inputs())), \
          patch.object(evidence, 'verify'), patch.object(followups, 'operations', return_value={}), \
-         patch.object(followups, 'commits', return_value=linear_history([A, B, C])):
+         patch.object(followups, 'commits', return_value=linear_history([A, B, C])), \
+         patch.object(followups.finding_anchors, 'collect', return_value={}):
         assert followups.main() == 0
     result = json.loads(capsys.readouterr().out)
     assert ('commits' in result) is full
-    assert result['context'] == evidence.digest(context())
+    assert result['context'] == evidence.digest(followups.inspect(*inputs(), linear_history([A, B, C]), {}, {}))
 
 
 def load_exercise():
@@ -720,7 +743,7 @@ def test_small_api_graph_counts_new_commits_since_each_request_not_timestamp_or_
     elif source == 'receipt':
         saved = {'/original/operation.json': retained('verified', request_head)}
         latest = next(iter(saved))
-    value = followups.inspect(inline, top, captured, saved)
+    value = inspect(inline, top, captured, saved)
     before = deepcopy(saved)
     native = assessment(value, requests=requests, operations=list(saved), latestRequest=latest)
     result = followups.plan(value, native, saved)['findings'][0]
@@ -777,7 +800,8 @@ def unanchored_case(*, rewritten=False, replies=False, reviews=True, saved=None)
     top['comments'][0].update(author='qodo[bot]', text='Changed routing keys select stale replicas.')
     if rewritten:
         top['comments'][0]['text'] += f' Report head: {PR}/commits/{D}'
-    value = followups.inspect(inline, top, linear_history([A, B, C]), saved or {})
+    value = inspect(inline, top, linear_history([A, B, C]), saved or {})
+    value['resolutions']['C99']['C99'].update(status='unknown', anchor=None)
     native = assessment(value, source='issuecomment-901',
                         requests=[{'reference': 'issuecomment-901', 'commit': D if rewritten else None,
                                    'anchorEvidence': 'Explicit report-head label.'}],
@@ -1056,7 +1080,7 @@ def test_fallback_rejects_stale_coverage_without_discarding_original_evidence(ch
     else:
         saved['/new/review.json'] = retained('verified')
         saved['/new/review.json']['request']['kind'] = 'post-review'
-    current = followups.inspect(inline, top, linear_history([A, B, C]), saved)
+    current = inspect(inline, top, linear_history([A, B, C]), saved)
     with pytest.raises(ValueError, match='changed'):
         followups.plan(current, native, saved)
     assert native == original
