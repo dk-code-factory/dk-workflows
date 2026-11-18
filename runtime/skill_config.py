@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import os
 import re
+from shared.recovery_diagnostics import Condition, condition, configuration_validation
 
 ROOT = Path(__file__).resolve().parents[1]
 DIRECTORY = ROOT/'codex/skills'
@@ -31,8 +32,11 @@ def catalog():
 def _read(path):
     try:
         return json.loads(Path(path).read_text())
-    except (OSError, ValueError) as exc:
-        raise ValueError('Cannot read skill configuration: ' + str(path)) from exc
+    except OSError as exc:
+        raise condition('evidence_missing' if isinstance(exc, FileNotFoundError) else 'evidence_unavailable',
+                        'Cannot read skill configuration: ' + str(path), path) from exc
+    except ValueError as exc:
+        raise condition('configuration_invalid', 'Cannot read skill configuration: ' + str(path), path) from exc
 
 
 def _validate(value, schema, location='options'):
@@ -100,6 +104,7 @@ def _validate(value, schema, location='options'):
             _validate(item, properties.get(key, {}), location + '/' + key)
 
 
+@configuration_validation
 def validate(skill, options):
     from alternatives_compat import skill as current_skill, options as current_options
     skill = current_skill(skill)
@@ -127,7 +132,13 @@ def scope_path(repository=None):
 def _scope_record(path):
     # Apply the same migration and permission validation at every entry point.
     import config
-    return config.validate(_read(path))
+    try:
+        return config.validate(_read(path))
+    except Condition as exc:
+        artifacts = exc.action.setdefault('artifacts', [])
+        if str(path) not in artifacts:
+            artifacts.append(str(path))
+        raise
 
 
 def repository_key(cwd=None, pr=None):
@@ -302,10 +313,10 @@ def check_options(spec):
             or binding['upstream'] is not None and not isinstance(binding['upstream'], str)):
         raise ValueError('Malformed skill option configuration binding')
     if 'call' in binding and configured_call(binding['call'], binding['repository'], binding['upstream']) != spec['options'].get('invocation'):
-        raise ValueError('Inputs changed: selected skill instructions or native controls changed')
+        raise condition('stale_inputs', 'Inputs changed: selected skill instructions or native controls changed')
     parameters = {key: value for key, value in binding.items() if key != 'call'}
     if effective(**parameters)['options'] != spec['options'].get('configured'):
-        raise ValueError('Inputs changed: selected skill options changed')
+        raise condition('stale_inputs', 'Inputs changed: selected skill options changed')
 
 
 def groups(plan):
@@ -532,8 +543,13 @@ def check_selection(spec):
             or selection['repository'].lower() != spec['repository'].lower()
             or selection['upstream'] is not None and not isinstance(selection['upstream'], str)):
         raise ValueError('Skill configuration must retain its original repository scope')
-    value, owner = select(selection['skill'], selection['kind'], selection['index'], selection['repository'],
-                          selection['upstream'], options=selection['options'], workflow=selection.get('workflow'))
+    try:
+        value, owner = select(selection['skill'], selection['kind'], selection['index'], selection['repository'],
+                              selection['upstream'], options=selection['options'], workflow=selection.get('workflow'))
+    except Condition:
+        raise
+    except (ValueError, KeyError) as exc:
+        raise condition('stale_inputs', 'Inputs changed: configured invocation no longer resolves') from exc
     call = invocation.normalize(value)
     actual = effective(call['skill'], selection['repository'], selection['upstream'], options=call.get('options', {}))['options'] if 'skill' in call else call.get('options', {})
     from simplification import OWNERS, RUNNER, compose
@@ -553,4 +569,4 @@ def check_selection(spec):
             and digest(owner['workflow_assignment']) != spec['options'].get('workflow_assignment')
             or owner.get('workflow_limits', owner['options'].get('limits', {})) != selection['owner_limits']
             or owner.get('workflow_permissions', owner['options'].get('permissions', {})) != selection['owner_permissions']):
-        raise ValueError('Inputs changed: skill configuration, assignment or policy changed')
+        raise condition('stale_inputs', 'Inputs changed: skill configuration, assignment or policy changed')

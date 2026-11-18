@@ -6,14 +6,15 @@ import os
 from pathlib import Path
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'runtime'))
-from state import read
-from config_requests import apply_bound
-import config
-import invocation
-import skill_config
-import settings
 
 def main():
+    from state import read
+    from config_requests import apply_bound
+    import config
+    import invocation
+    import skill_config
+    import settings
+
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--repository',required=True)
     p.add_argument('--upstream')
@@ -94,5 +95,6 @@ def main():
 if __name__=='__main__':
     os.umask(0o077)
     try:main()
-    except (ValueError,KeyError,TypeError,OSError) as exc:
-        print(json.dumps({'status':'blocked','reason':str(exc)}));sys.exit(2)
+    except (ValueError,KeyError,TypeError,OSError,RuntimeError) as exc:
+        from shared.recovery_diagnostics import cli_failure
+        print(json.dumps(cli_failure(exc, sys.argv[1:])));sys.exit(2)

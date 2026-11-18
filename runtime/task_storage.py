@@ -8,6 +8,7 @@ import hashlib
 import os
 from task_primitives import CONTRACT, digest, has_output_content, identity, read
 from shared.storage_paths import location
+from shared.recovery_diagnostics import EvidenceProblem, condition
 
 class TaskStorage:
     def __init__(self, repository, pr, *, checkout=None, read_only=False):
@@ -31,10 +32,15 @@ class TaskStorage:
 
 
     def _manifest(self):
-        manifest = read(self.manifest) if self.manifest.exists() else {
-            'contract': CONTRACT, 'subject': self.subject, 'entries': {}, 'runs': {}}
+        try:
+            manifest = read(self.manifest) if self.manifest.exists() else {
+                'contract': CONTRACT, 'subject': self.subject, 'entries': {}, 'runs': {}}
+        except ValueError as exc:
+            raise condition('evidence_damaged', str(exc), self.manifest) from exc
+        if not isinstance(manifest, dict):
+            raise condition('evidence_damaged', 'Unsupported or damaged manifest; do not reset retained budgets', self.manifest)
         if manifest.get('contract') != CONTRACT or manifest.get('subject') != self.subject:
-            raise ValueError('Unsupported or damaged manifest; do not reset retained budgets')
+            raise condition('evidence_damaged', 'Unsupported or damaged manifest; do not reset retained budgets', self.manifest)
         return manifest
 
 
@@ -82,5 +88,7 @@ class TaskStorage:
             return {'path': str(path), **result}, None
         except FileNotFoundError:
             return None, 'missing_result_artifact'
-        except (ValueError, OSError, KeyError, TypeError):
+        except OSError:
+            return None, EvidenceProblem('damaged_result', 'evidence_unavailable')
+        except (ValueError, KeyError, TypeError):
             return None, 'damaged_result'

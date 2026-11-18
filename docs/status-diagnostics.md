@@ -33,3 +33,49 @@ Explained and ordinary status use the same capture and reuse decision. `blockers
 A task without prior capture reports `no_previous_capture` and additions; it does not imply a change from an earlier review. Missing governing resources still block capture before claim or budget changes.
 
 Diagnostics do not change fingerprints or coverage, allocate cycles, recover claims, or authorize reuse, publication or completion. Without `--explain`, detailed comparisons are omitted and compact output keeps its existing size limit.
+
+## Structured recovery fields
+
+Task and configuration helpers add `diagnostic` without replacing existing
+`status`, `action`, `reason`, `detail` or exit behavior. Each diagnostic contains
+`code`, a useful `message`, a typed `action`, `dispatched` and `outcome`.
+Configuration preflight adds `diagnostics` for independently unsupported calls.
+The legacy `pr_config.py` error text remains on stderr and its additive JSON
+response is on stdout; failures still exit with status 2.
+
+| Code | Supported recovery |
+| --- | --- |
+| `stale_inputs` | Rebuild affected assignments under current inputs, retaining original evidence and allowances. |
+| `evidence_missing`, `evidence_damaged`, `evidence_unavailable` | Restore the referenced original artifact or access before reuse. |
+| `definition_required` | Supply the original task's current explicit definition. |
+| `execution_contract_missing` | Resolve the installed contract before native execution. |
+| `execution_capability_missing` | Use a supported host and native tools; leave required work incomplete until available. |
+| `execution_evidence_missing`, `execution_evidence_invalid` | Establish required original native observations; a complete report alone is insufficient. |
+| `active_claim` | Reconcile the referenced original claim and domain effects before explicit recovery. |
+| `allowance_exhausted` | Obtain an applicable explicit human decision; never reset counters or infer permission from a resume. |
+| `configuration_invalid`, `admission_required` | Correct configuration or finish the original configuration admission. |
+| `publication_uncertain` | Run the supplied read-only reconciliation for the original operation. |
+| `configuration_write_uncertain` | Inspect the original configuration request through its read-only resume command. |
+| `unclassified_failure` | Inspect original evidence; provenance is unknown and no specific cause is inferred. |
+
+Action `kind` is `command`, `agent_task` or `human_input`, retaining the shared
+Diagnostic vocabulary. Commands supply an argument array. `agent_task` means work
+in the already-running native session. Artifacts are targeted original paths,
+manifest paths with JSON Pointer fragments, or labeled identities such as a run or
+request ID. Recovery never starts another model session.
+
+`dispatched` describes the affected operation, not every earlier external action.
+It is true for a retained pending publication, false for a proven local condition,
+and null when dispatch cannot be established. `outcome:unknown` preserves an
+unresolved outcome; the legacy outer status may still be `blocked` or `applying`.
+A local preparation failure cannot establish non-delivery of an earlier write.
+For an interrupted configuration request, `admission_diagnostic` can explain
+stale inputs while the primary diagnostic retains original write uncertainty.
+Neither field authorizes applying the request or discarding its intents/receipts.
+
+Classification uses exception types marked at authoritative validation sites or
+existing structured state, never explanation wording. Untyped legacy errors keep
+unknown provenance. Inspection derives these fields in memory and leaves original
+manifests, results, claims, counters and journals unchanged. Inspect again after
+relevant input or evidence changes; diagnostics never establish current review,
+CI, permission or publication readiness.

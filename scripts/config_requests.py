@@ -8,10 +8,11 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'runtime'))
-from config_requests import Requests
 
 
 def main(arguments=None):
+    from config_requests import Requests
+
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     start = sub.add_parser('start')
@@ -52,5 +53,6 @@ if __name__ == '__main__':
     try:
         print(json.dumps(main(), sort_keys=True))
     except (ValueError, KeyError, TypeError, OSError, RuntimeError, subprocess.CalledProcessError) as exc:
-        print(json.dumps({'status': 'blocked', 'reason': str(exc)}))
+        from shared.recovery_diagnostics import cli_failure
+        print(json.dumps(cli_failure(exc, sys.argv[1:])))
         sys.exit(2)

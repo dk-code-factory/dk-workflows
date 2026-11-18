@@ -5,13 +5,21 @@ import json
 from pathlib import Path
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'runtime'))
-from shared import ci_exceptions, pr_size, pr_partition_policy
-from shared.repository_scope import identities, repository
-from config_requests import apply_bound
-from settings import domain_load, domain_path
-import commit_policy
+try:
+    from shared import ci_exceptions, pr_size, pr_partition_policy
+    from shared.repository_scope import identities, repository
+    from config_requests import apply_bound
+    from settings import domain_load, domain_path
+    import commit_policy
 
-import invocation
+    import invocation
+except (ValueError,KeyError,TypeError,OSError,RuntimeError) as exc:
+    if __name__ != '__main__':
+        raise
+    from shared.recovery_diagnostics import cli_failure
+    print(json.dumps(cli_failure(exc, sys.argv[1:])))
+    print(str(exc), file=sys.stderr)
+    sys.exit(2)
 
 
 def main(arguments=None):
@@ -91,5 +99,7 @@ def main(arguments=None):
 
 if __name__=='__main__':
     try:print(json.dumps(main(),sort_keys=True))
-    except (ValueError,KeyError,OSError,RuntimeError) as exc:
+    except (ValueError,KeyError,TypeError,OSError,RuntimeError) as exc:
+        from shared.recovery_diagnostics import cli_failure
+        print(json.dumps(cli_failure(exc, sys.argv[1:])))
         print(str(exc),file=sys.stderr);sys.exit(2)
