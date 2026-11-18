@@ -79,7 +79,7 @@ def evidence_required(value):
 
 def binding(components, claim):
     """Expected identities for a collector; never synthesizes observed events."""
-    from state import digest
+    from task_primitives import digest
     expected = components.get('native_review')
     if expected is None:
         raise ValueError('Reviewer execution requirements were not captured before invocation')

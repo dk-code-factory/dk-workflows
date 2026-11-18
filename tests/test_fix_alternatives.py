@@ -11,6 +11,7 @@ import alternatives
 import config
 import fix_alternatives as fix
 import skill_config
+import task_capture
 from state import read, write
 from tasks import Tasks
 from test_state import case, REPO, PR, ROOT, git
@@ -143,7 +144,7 @@ def test_completed_plan_shares_git_capture_only_within_each_live_boundary(case, 
     def captured(source, **kwargs):
         calls.append(deepcopy(source))
         return original(source, **kwargs)
-    monkeypatch.setattr(state, '_capture_git', captured)
+    monkeypatch.setattr(task_capture, '_capture_git', captured)
     for _ in range(2):
         calls.clear()
         result = fix.gate(tasks)

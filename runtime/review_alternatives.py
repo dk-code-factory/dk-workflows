@@ -38,7 +38,7 @@ def pinned_definition(tasks, descriptor, definition):
             result.setdefault('inputs', {})['alternatives_current_pr'] = source
     if 'git' not in result:
         raise ValueError('Initial alternatives review requires pinned Git inputs')
-    from state import git
+    from task_primitives import git
     for name in ('target', 'base', 'head'):
         result['git'][name] = git(result['git']['checkout'], 'rev-parse', '--verify',
                                   result['git'][name] + '^{commit}').decode().strip()
@@ -49,7 +49,7 @@ def pinned_definition(tasks, descriptor, definition):
 
 
 def guard_completed(tasks, stage, spec):
-    from state import capture
+    from task_policy import capture
     original = entry(tasks, stage)
     if not original or not original.get('result'):
         return

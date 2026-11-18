@@ -4,7 +4,7 @@ from copy import deepcopy
 import re
 import uuid
 
-from state import digest, read, write
+from task_primitives import digest, read, write
 
 
 def contract(spec, definition):

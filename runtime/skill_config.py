@@ -119,7 +119,7 @@ def defaults(skill):
 
 def scope_path(repository=None):
     from shared.storage_paths import location
-    from state import digest
+    from task_primitives import digest
     name = digest(repository.lower()) if repository else 'user'
     return location('config')/(name + '.json')
 
@@ -431,7 +431,8 @@ def calls(skill, repository=None, upstream=None, *, options=None, stage=None, wo
 
 def make_spec(*, repository, pr, skill, kind, index, definition, upstream=None, run=None, options=None, workflow=None):
     import invocation
-    from state import make_spec as task_spec, digest
+    from task_policy import make_spec as task_spec
+    from task_primitives import digest
     selected, owner = select(skill, kind, index, repository, upstream, options=options, workflow=workflow)
     call = invocation.normalize(selected)
     runner = call.get('skill', skill)
@@ -520,7 +521,7 @@ def make_spec(*, repository, pr, skill, kind, index, definition, upstream=None, 
 
 def check_selection(spec):
     import invocation
-    from state import digest
+    from task_primitives import digest
     selection = spec.get('skill_configuration')
     if selection is None:
         return

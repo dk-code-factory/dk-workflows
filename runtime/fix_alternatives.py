@@ -5,7 +5,9 @@ import re
 
 import alternatives
 import skill_config
-from state import capture, digest, git, read, task_key
+from task_policy import capture
+from task_primitives import digest, git, read, task_key
+
 
 OWNER = alternatives.FIX_OWNER
 STAGES = ('assessment', 'comparison', 'selection', 'alignment')
@@ -253,7 +255,7 @@ def _gate(tasks, *, options=None, upstream=None):
 
 def enforce(spec, repository, pr, *, options=None, upstream=None):
     from tasks import Tasks
-    from state import identity
+    from task_primitives import identity
     context = alternatives._EVALUATION.get()
     tasks = (context['tasks'] if context is not None and context['tasks'].store.subject == identity(repository, pr)
              else Tasks(repository, pr))

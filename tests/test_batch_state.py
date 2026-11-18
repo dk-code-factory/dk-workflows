@@ -10,6 +10,8 @@ import pytest
 
 from test_state import case, done, git, require_git_context_paths, REPO, PR, ROOT
 import state
+import task_capture
+import task_policy
 from state import capture, read
 
 
@@ -215,7 +217,7 @@ def test_batch_captures_each_task_freshly_even_when_noncacheable(case, monkeypat
         value = original(spec, **kwargs)
         observed.append(value)
         return value
-    monkeypatch.setattr(state, 'capture', collect)
+    monkeypatch.setattr(task_policy, 'capture', collect)
     result = store.start_batch(specs())
     assert observed[0] == before
     assert observed[1] == capture(b)
@@ -279,7 +281,7 @@ def test_start_batch_process_count_comparison(case, tmp_path, monkeypatch, linke
     def counted(*args):
         calls.append(args)
         return original(*args)
-    monkeypatch.setattr(state, 'git', counted)
+    monkeypatch.setattr(task_capture, 'git', counted)
     def probe(batch):
         calls.clear()
         assert all(t['reusable'] for t in store.status(specs)['tasks'])

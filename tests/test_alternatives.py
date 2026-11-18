@@ -11,6 +11,7 @@ import alternatives
 import config
 import invocation
 import skill_config
+import task_policy
 from state import read, write
 from tasks import Tasks
 from test_state import case, REPO, PR, ROOT, git
@@ -903,7 +904,7 @@ def test_dependency_validation_is_shared_within_each_fresh_boundary(case, monkey
         if 'alternatives' in assignment.get('options', {}):
             captures[assignment['task']['id']] += 1
         return original_capture(assignment, **kwargs)
-    monkeypatch.setattr(state, 'capture', capture)
+    monkeypatch.setattr(task_policy, 'capture', capture)
     task = tasks.prepare({'tasks': [ordinary(spec, refs)]})['tasks'][0]
     assert task['action'] == 'invoke'
     # Historical analysis no longer recaptures installed guidance. Construction
@@ -1002,7 +1003,7 @@ def test_parallel_incoming_siblings_share_two_live_validation_boundaries(case, m
         if 'alternatives' in assignment.get('options', {}):
             captures[assignment['task']['id']] += 1
         return original_capture(assignment, **kwargs)
-    monkeypatch.setattr(state, 'capture', capture)
+    monkeypatch.setattr(task_policy, 'capture', capture)
     def live(pr):
         reads.append(pr)
         return deepcopy(LIVE[pr])

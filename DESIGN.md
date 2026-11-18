@@ -92,6 +92,51 @@ accept only SKIPPED/NEUTRAL in that bucket, and reject other nonpassing buckets
 or unknown states. REST and GraphQL repository readiness must still be clean
 and review requirements satisfied; skipped checks cannot override those gates.
 
+## Task module boundaries
+
+Task coordination uses these dependency directions:
+
+- `task_primitives` owns canonical JSON hashing, identity compatibility, file
+  reads and the existing private atomic-write helper. It does not load workflow
+  configuration or task state.
+- `task_capture` owns exact resource and Git input capture. It accepts a built
+  spec and returns the existing components, fingerprint and provenance. Its Git
+  context is transient and shared only within the existing validation boundary.
+  It does not select workflows or interpret live configuration.
+- `task_policy` builds specs, validates current instruction/configuration and
+  invocation selections, then calls raw capture. This validated capture is used
+  independently at prepare, status and finish; moving code never removes a live
+  check. Configuration may use its spec builder without importing storage.
+- `task_storage` owns the existing private directory, manifest validation,
+  locking and immutable result reads. It depends on primitives and filesystem
+  helpers, not capture, configuration, native evidence or workflow selection.
+- `task_runtime.Store` retains the existing task admission, reuse, checklist,
+  native-evidence and allowance rules above storage. `Tasks` and workflow owners
+  continue to select assignments and native work. Storage never makes those
+  decisions.
+
+`state` remains a compatibility import facade over these implementations. New
+internal consumers import their owning layer directly. Existing public functions
+and `Store` methods retain their arguments and responses. Private instrumentation
+hooks belong to their implementation modules; they are not a second protocol.
+
+The extraction preserves contract-v2 identity mappings, fingerprint components
+and bytes, provenance, storage locations, private permissions, lock scope, atomic
+writes, result envelopes, original attempts, claims and bounded allowances. No
+migration, task redefinition, cache clearing or new durable record is needed.
+Frozen pre-extraction captures and retained state test exact compatibility;
+fresh processes reopen original results and incomplete siblings without repeating
+completed analysis. Existing admission and drift checks still protect claims and
+completion, while publication retains its independent live boundary.
+
+The expected cost benefit is reducing repeated source reconstruction when a native
+session must change or diagnose one responsibility. Named interfaces let it read
+the relevant layer while retaining existing compact recovery and command-local
+capture sharing. There is no extra state to create, validate or reload in this or
+a fresh session. This benefit ends when the task needs evidence from other layers;
+those reads still count. Native API dollar savings are unmeasured. Offline
+compatibility and recovery tests establish behavior, not a dollar comparison.
+
 ## Managed task interface
 
 `scripts/dk.py prepare --file REQUEST.json` accepts explicit task definitions.
