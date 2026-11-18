@@ -934,6 +934,16 @@ keep their ordinary live capture boundary. Preparing original recovery keys in
 one group validates all originals before reserving any checks. No new state,
 fingerprint or allowance is introduced. This avoids repeating completed analysis
 when an installation changes or disappears while its checklist is unfinished.
+An expected entry digest binds the transient assignment snapshot to the locked
+operation; a concurrent replacement requires a fresh handoff rather than mixing
+two primary results. This digest is never persisted.
+
+Legacy whole-problem history predates the shared purpose/rubric assessment. A
+dedicated fresh request may establish that missing shared assessment before its
+new comparison. The shared assessment alone cannot switch the retained chain;
+once a requested modern chain starts, both automatic routes consume it ahead of
+legacy-only context. Original legacy records and pre-rename request bindings
+remain intact and recoverable, without a second canonical-history registry.
 
 ## Incoming alternatives gate
 

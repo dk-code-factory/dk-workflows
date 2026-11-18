@@ -385,3 +385,87 @@ def test_original_checklist_rejects_changed_primary_binding_and_wrong_claim(case
     with pytest.raises(ValueError, match='intact complete primary'):
         tasks.prepare({'tasks': [{'key': task['key']}]})
     assert files(store) == before
+
+
+@pytest.mark.parametrize('owner', [assessment.FIX, assessment.REVIEW])
+def test_dedicated_request_after_legacy_history_establishes_shared_rubric(case, tmp_path, monkeypatch, owner):
+    from test_alternatives import aligned
+    spec, store = case; tasks = Tasks(REPO, PR)
+    legacy = planned(tasks, spec) if owner == assessment.FIX else aligned(tasks, spec)
+    originals = {key: deepcopy(read(store.manifest)['entries'][key]['result']) for key in legacy.values()}
+    source = manual(tmp_path, 2)
+    monkeypatch.setattr(alternatives, 'live_pr', lambda pr: {'body': 'Original PR scope', 'headRefOid': spec['git']['head']})
+    reports = {'assessment': purpose(), 'inventory': inventory(('storage', 'inherited')),
+               'comparison': comparison(spec), 'selection': selection(),
+               'interactions': {'compatible': True, 'reason': 'One selected approach', 'evidence': ['code:1']},
+               'alignment': {'alignment': 'aligned', 'reason': 'Current implementation matches', 'evidence': ['code:1']}}
+    for stage, report in reports.items():
+        result = plans.gate(tasks, assessment.REVIEW, request=source)
+        assert result['stage'] == stage
+        next_task = result['next_task']
+        d = descriptor(spec, stage, next_task['dependencies'], decision=next_task.get('decision'))
+        d['definition']['inputs'].update(next_task['definition'].get('inputs', {}))
+        task = tasks.prepare({'tasks': [d]})['tasks'][0]
+        finish(tasks, task, report)
+    expected = plans.gate(tasks, assessment.REVIEW, request=source)
+    assert expected['outcome'] == 'planned'
+    for consumer in (assessment.FIX, assessment.REVIEW):
+        result = plans.gate(tasks, consumer)
+        assert result['references'] == expected['references']
+    assert all(read(store.manifest)['entries'][key]['result'] == result for key, result in originals.items())
+
+
+def test_pre_rename_request_binding_resumes_original_architecture_claim(case, tmp_path, monkeypatch):
+    import alternatives_history
+    from test_alternatives import descriptor as legacy_descriptor
+    spec, store = case; tasks = Tasks(REPO, PR)
+    source = tmp_path/'old-request.json'
+    write(source, {'id': 'old-message', 'source': 'conversation:old', 'instruction': 'Review architecture again'})
+    d = legacy_descriptor(spec, 'assessment')
+    d['definition']['inputs']['alternatives_request'] = str(source)
+    with monkeypatch.context() as previous:
+        previous.setattr(alternatives_history, 'request', lambda path, **kwargs: read(path))
+        old_spec = tasks.spec(d)
+    old_spec['inputs']['architecture_request'] = old_spec['inputs'].pop('alternatives_request')
+    pending = store.start(old_spec)
+    key = pending['claim']['key']
+    d['kind'] = 'architecture'
+    inputs = d['definition']['inputs']
+    inputs['architecture_request'] = inputs.pop('alternatives_request')
+    with store.locked() as manifest:
+        manifest['entries'][key]['managed'] = d
+        write(store.manifest, manifest)
+    before = files(store)
+    result = plans.gate(tasks, assessment.REVIEW, request=str(source))
+    assert result['outcome'] == 'recovery_required' and result['next_task'] == {'key': key}
+    replay = tasks.prepare({'tasks': [result['next_task']]})['tasks'][0]
+    assert replay['action'] == 'recover_required' and replay['unfinished']['id'] == pending['claim']['id']
+    assert files(store) == before
+
+
+def test_original_completion_rejects_concurrent_primary_replacement(case, tmp_path, monkeypatch):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    shared = complete(tasks, spec, 'assessment', purpose())
+    d = descriptor(spec, 'inventory', {'assessment': shared})
+    task = tasks.prepare({'tasks': [d]})['tasks'][0]
+    report = {'complete': True, 'findings': [], **inventory(('storage', 'inherited'))}
+    original = json.dumps(report).encode()
+    tasks.finish(task['key'], task['claim']['id'], original, report,
+                 native_evidence=observations(task['assignment'], task['claim'], original))
+    original_checks = tasks.store.original_checks
+    retained = {}
+    def interleave(keys, **kwargs):
+        other = Tasks(REPO, PR)
+        replacement = descriptor(spec, 'inventory', {'assessment': shared},
+                                 inputs={'alternatives_request': manual(tmp_path, 2)})
+        new = other.prepare({'tasks': [replacement]})['tasks'][0]
+        assert new['action'] == 'invoke'
+        result = other.finish(new['key'], new['claim']['id'], original, report,
+                              native_evidence=observations(new['assignment'], new['claim'], original))
+        assert result['action'] == 'recheck'
+        retained.update(files(store))
+        return original_checks(keys, **kwargs)
+    monkeypatch.setattr(tasks.store, 'original_checks', interleave)
+    with pytest.raises(ValueError, match='Original completion changed'):
+        tasks.prepare({'tasks': [{'key': task['key']}]})
+    assert files(store) == retained

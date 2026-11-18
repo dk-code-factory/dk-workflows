@@ -6,7 +6,7 @@ from pathlib import Path
 from config import make_completion_spec, make_finalizer_spec, make_hook_spec
 from checklists import contract as checklist_contract
 from native_review import binding, required
-from state import Store, make_spec, task_key
+from state import Store, digest, make_spec, task_key
 import skill_config
 
 
@@ -132,7 +132,7 @@ class Tasks:
                 if any(request.get(flag) for flag in ('recover', 'retry', 'ci_repair', 'ci_rerun')):
                     raise ValueError('Original completion cannot reserve primary recovery or retry allowances')
                 assignments = {key: self._completion_assignment(entries[key]) for key in keys}
-                result = self.store.original_checks(keys)
+                result = self.store.original_checks(keys, expected={key: digest(entries[key]) for key in keys})
                 for task in result['tasks']:
                     if task['action'] == 'complete':
                         task['action'] = 'reuse'
@@ -317,7 +317,7 @@ class Tasks:
         if round_id is not None and self._original_completion(entry):
             if status is not None or progress is not None or native_evidence is not None:
                 raise ValueError('Checklist follow-ups retain primary status, progress and native evidence')
-            result = self.store.original_checks([key], claim_id=claim, round_id=round_id,
+            result = self.store.original_checks([key], expected={key: digest(entry)}, claim_id=claim, round_id=round_id,
                                                 original=original, report=report)['tasks'][0]
             if result.get('action') == 'recheck' and not compact:
                 result['assignment'] = self._completion_assignment(entry)

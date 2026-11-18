@@ -12,6 +12,7 @@ from state import digest
 
 KINDS = {'assessed-alternatives', 'alternatives', 'architecture'}
 MANUAL = 'dk-workflows:dk-pr-review-alternatives'
+REQUEST_FIELDS = ('alternatives_request', 'alternatives_reassessment', 'architecture_request')
 
 
 def definition_valid(value):
@@ -33,7 +34,7 @@ def request(path, *, tasks=None):
         for entry in entries(tasks).values():
             definition = entry['managed'].get('definition')
             inputs = definition.get('inputs', {}) if definition_valid(definition) else {}
-            for name in ('alternatives_request', 'alternatives_reassessment'):
+            for name in REQUEST_FIELDS:
                 prior = inputs.get(name)
                 if prior and Path(prior).absolute() == Path(path).absolute():
                     expected = entry.get('components', {}).get('inputs', {}).get(name)
@@ -51,7 +52,7 @@ def request(path, *, tasks=None):
     return value
 
 
-def guard_route(tasks, owner, kind, definition):
+def guard_route(tasks, owner, kind, definition, *, stage=None):
     """A downstream automatic call cannot create another initial chain."""
     sources = [definition.get('inputs', {}).get(name) for name in ('alternatives_request', 'alternatives_reassessment')]
     if any(sources):
@@ -60,6 +61,11 @@ def guard_route(tasks, owner, kind, definition):
             retained = route(tasks, owner, request_source=source)
             if retained and (retained['owner'] != owner or retained['kind'] != kind):
                 raise ValueError('Resume this manual request in its original alternatives chain')
+        return
+    # The shared purpose assessment has one identity across routes and is not
+    # another comparison. Legacy whole-problem records predate this assessment;
+    # a later dedicated request must be able to establish its missing rubric.
+    if kind == 'assessed-alternatives' and stage == 'assessment':
         return
     values = entries(tasks)
     chains = [value['managed'] for value in values.values()
@@ -127,9 +133,12 @@ def route(tasks, owner, *, request_source=None):
         consumed = resource(request_source)
         candidates = [value for value in candidates if any(
             value.get('components', {}).get('inputs', {}).get(name) == consumed
-            for name in ('alternatives_request', 'alternatives_reassessment'))]
+            for name in REQUEST_FIELDS)]
     if not candidates:
         return None
+    # A requested modern chain supersedes legacy-only context without deleting
+    # it. A shared assessment alone was excluded above and cannot switch chains.
+    candidates = [value for value in candidates if value['managed']['kind'] == 'assessed-alternatives'] or candidates
     # Existing requested-route work stays authoritative. Otherwise resume the
     # route that owns the retained chain, including an unfinished initial claim.
     selected = next((value for value in candidates if value['managed'].get('skill') == owner), candidates[0])

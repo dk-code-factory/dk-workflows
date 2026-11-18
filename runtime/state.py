@@ -1144,14 +1144,14 @@ class Store:
             write(self.manifest, manifest)
             return result
 
-    def original_checks(self, keys, *, claim_id=None, round_id=None, original=None, report=None):
+    def original_checks(self, keys, *, expected, claim_id=None, round_id=None, original=None, report=None):
         """Finish original checklists, never start or replace primary analysis.
 
         Callers decide whether historical completion applies. The original
         fingerprint stays unchanged and supplies no current-input coverage.
         """
         from checklists import reply, reserve, submit
-        if (not keys or len(set(keys)) != len(keys)
+        if (not keys or len(set(keys)) != len(keys) or not isinstance(expected, dict) or set(expected) != set(keys)
                 or report is not None and (len(keys) != 1 or not has_output_content(original))):
             raise ValueError('Original completion requires unique keys and nonempty response output')
         with self.locked() as manifest:
@@ -1159,6 +1159,8 @@ class Store:
             originals = []
             for key in keys:
                 entry = manifest['entries'].get(key, {})
+                if digest(entry) != expected[key]:
+                    raise ValueError('Original completion changed; prepare its current recovery assignment')
                 saved, problem = self._load_saved(entry)
                 if (problem or saved['status'] != 'complete' or saved['cacheable'] is not True
                         or digest(entry.get('components')) != saved['fingerprint']):

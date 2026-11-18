@@ -161,7 +161,7 @@ def stage_spec(tasks, descriptor, definition, *, replay=False):
     definition = pinned(tasks, descriptor, definition)
     if not replay:
         from alternatives_history import guard_route
-        guard_route(tasks, owner, KIND, definition)
+        guard_route(tasks, owner, KIND, definition, stage=stage)
     for name in ('alternatives_request', 'alternatives_reassessment'):
         source = definition.get('inputs', {}).get(name)
         if source:
