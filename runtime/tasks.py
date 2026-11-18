@@ -210,6 +210,9 @@ class Tasks:
         options = {key: value for key, value in request.items() if key != 'tasks'}
         if occurrence:
             options.pop('cycle', None)
+        if kinds <= {'alternatives', 'assessed-alternatives'}:
+            from alternatives_history import admit
+            options['admission'] = admit
         with evaluation(self):
             result = self.store.start_batch(specs, retained=retained, checklists=checklists, **options)
         # Read committed bindings, including after a lost-response recovery. They

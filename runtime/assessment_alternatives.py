@@ -84,8 +84,12 @@ def _historical_accepted(tasks, task):
     # Keep the existing spec interface for gate dependency comparisons. Paths
     # come from retained definitions/results, never a copied settings snapshot.
     value['spec']['inputs'] = deepcopy(value['managed']['definition'].get('inputs', {}))
+    inherited_requests = set()
     for label, dependency in value['managed'].get('dependencies', {}).items():
         consumed = accepted(tasks, dependency, historical=True)
+        if (consumed.get('request')
+                and value['spec']['inputs'].get('assessed_' + label, consumed['reference']) == consumed['reference']):
+            inherited_requests.add(consumed['request'])
         value['spec']['inputs'].setdefault('assessed_' + label, consumed['reference'])
         for name, path in consumed['spec']['inputs'].items():
             if name.startswith('assessed_'):
@@ -97,6 +101,9 @@ def _historical_accepted(tasks, task):
                 value['spec']['inputs'].pop(name)
             elif resource(path) != original[name]:
                 raise ValueError('Original alternatives dependency changed; restore its consumed evidence')
+    value['request'] = value['spec']['inputs'].get('alternatives_request')
+    if not value['request'] and len(inherited_requests) == 1:
+        value['request'] = next(iter(inherited_requests))
     return value
 
 
@@ -158,6 +165,27 @@ def stage_spec(tasks, descriptor, definition, *, replay=False):
     policy = pr_assessment.resolve(tasks.store.subject['repository'], descriptor.get('upstream'), owner=owner,
                                    options=descriptor.get('options'), policy_options=descriptor.get('policy_options'),
                                    alternatives_options=descriptor.get('alternatives_options'))
+    deps = descriptor.get('dependencies', {})
+    if not isinstance(deps, dict) or any(not alternatives.text(k) or not alternatives.text(v) for k, v in deps.items()):
+        raise ValueError('Dependencies require labeled accepted task keys')
+    required = {'assessment': set(), 'inventory': {'assessment'},
+                'comparison': {'assessment', 'inventory'}, 'selection': {'assessment', 'comparison'},
+                'interactions': {'assessment', 'inventory'}, 'alignment': {'assessment', 'interactions'},
+                'verification': {'alignment'}}[stage]
+    if required - deps.keys():
+        raise ValueError('Assessed alternatives stage is missing prerequisites')
+    retained = {name: accepted(tasks, ref, historical=True) for name, ref in deps.items()}
+    inherited_requests = {value['request'] for value in retained.values() if value.get('request')}
+    if not definition.get('inputs', {}).get('alternatives_request') and inherited_requests:
+        if len(inherited_requests) != 1:
+            raise ValueError('Ambiguous original manual request; supply a distinct direct request')
+        source = next(iter(inherited_requests))
+        from alternatives_history import request as original_request
+        original_request(source, tasks=tasks)
+        if not replay:
+            definition = deepcopy(definition)
+            definition.setdefault('inputs', {})['alternatives_request'] = source
+            descriptor['definition'].setdefault('inputs', {})['alternatives_request'] = source
     definition = pinned(tasks, descriptor, definition)
     if not replay:
         from alternatives_history import guard_route
@@ -173,16 +201,6 @@ def stage_spec(tasks, descriptor, definition, *, replay=False):
         source = definition.get('inputs', {}).get('alternatives_current_pr')
         if not source or not isinstance(read(source).get('body'), str):
             raise ValueError('Alignment requires the existing alternatives_current_pr metadata source')
-    deps = descriptor.get('dependencies', {})
-    if not isinstance(deps, dict) or any(not alternatives.text(k) or not alternatives.text(v) for k, v in deps.items()):
-        raise ValueError('Dependencies require labeled accepted task keys')
-    required = {'assessment': set(), 'inventory': {'assessment'},
-                'comparison': {'assessment', 'inventory'}, 'selection': {'assessment', 'comparison'},
-                'interactions': {'assessment', 'inventory'}, 'alignment': {'assessment', 'interactions'},
-                'verification': {'alignment'}}[stage]
-    if required - deps.keys():
-        raise ValueError('Assessed alternatives stage is missing prerequisites')
-    retained = {name: accepted(tasks, ref, historical=True) for name, ref in deps.items()}
     for name, value in retained.items():
         assigned = value['spec']['options']['assessed_alternatives']
         expected_stage = 'selection' if name.startswith('selection_') else name
@@ -458,17 +476,17 @@ def gate(tasks, owner, *, options=None, policy_options=None, alternatives_option
                 return None, {'outcome': 'recovery_required', 'release_reviewers': False,
                               'stage': stage, 'next_task': {'key': task}, 'references': refs,
                               'reason': 'Restore the original alternatives definition'}
-            prior_request = (definition or {}).get('inputs', {}).get('alternatives_request')
-            continuing = bool(request and prior_request and read(prior_request)['id'] == read(request)['id'])
-            reuse_history = _historical or continuing or stage == 'assessment' and bool(request)
             value = None
             problem = None
             if original and original.get('result'):
                 try:
-                    value = accepted(tasks, task, historical=reuse_history)
+                    value = accepted(tasks, task, historical=_historical or bool(request))
                 except ValueError as exc:
                     problem = str(exc)
             if value is not None:
+                prior_request = value.get('request', value['spec']['inputs'].get('alternatives_request'))
+                continuing = bool(request and prior_request and read(prior_request)['id'] == read(request)['id'])
+                reuse_history = _historical or continuing or stage == 'assessment' and bool(request)
                 assigned = value['spec']['options']['assessed_alternatives']
                 expected_policy = (pr_assessment.assessment_policy(policy) if stage in {'assessment', 'inventory', 'comparison'} else
                                    {'selection': policy['selection']} if stage == 'selection' else {})
@@ -479,7 +497,7 @@ def gate(tasks, owner, *, options=None, policy_options=None, alternatives_option
                     if stage == 'interactions' and name.startswith('selection_') else
                     value['spec']['inputs'].get('assessed_' + name) == retained[ref]['reference']
                     for name, ref in dependencies.items())
-                same_request = not request or stage == 'assessment' or value['spec']['inputs'].get('alternatives_request') == request
+                same_request = not request or stage == 'assessment' or prior_request == request
                 if (reuse_history or assigned['policy'] == expected_policy) and same_deps and same_request:
                     retained[task] = value
                     refs[stage + (':' + decision if decision else '')] = task

@@ -238,7 +238,8 @@ def test_incoming_gate_rejects_each_fix_owned_result(case, stage, monkeypatch):
     incoming = aligned(tasks, spec)
     # Retain the pre-existing mixed-route records that older versions allowed.
     with monkeypatch.context() as legacy:
-        legacy.setattr('alternatives_history.guard_route', lambda *args: None)
+        legacy.setattr('alternatives_history.guard_route', lambda *args, **kwargs: None)
+        legacy.setattr('alternatives_history.admit', lambda *args, **kwargs: None)
         fixed = planned(tasks, spec)
     incoming[stage] = fixed[stage]
     monkeypatch.setattr(alternatives, 'live_pr', lambda pr: pytest.fail('Foreign evidence reached live checks'))

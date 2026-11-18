@@ -480,6 +480,7 @@ def test_mixed_pre_upgrade_chains_resume_the_discovered_owner(case, monkeypatch,
     # Before canonical routing, both workflows could retain partial inventories.
     with monkeypatch.context() as previous:
         previous.setattr(alternatives_history, 'guard_route', lambda *args, **kwargs: None)
+        previous.setattr(alternatives_history, 'admit', lambda *args, **kwargs: None)
         for route in (assessment.FIX, assessment.REVIEW):
             inventories[route] = complete(tasks, spec, 'inventory', inventory(('storage', 'inherited')),
                                            {'assessment': shared}, owner=route)

@@ -978,7 +978,7 @@ class Store:
                     'requirements': captured['components']['native_review']}
 
     def start_batch(self, specs, *, recover=None, run=None, cycle=None, retry=False,
-                    ci_repair=False, ci_rerun=False, head=None, retained=None, checklists=None):
+                    ci_repair=False, ci_rerun=False, head=None, retained=None, checklists=None, admission=None):
         """Claim a set of tasks atomically, sharing only command-local Git work.
 
         All captures and checks must succeed before one manifest replacement.
@@ -1014,6 +1014,8 @@ class Store:
         if checklists.keys() - retained.keys():
             raise ValueError('Checklists require a retained managed definition')
         with self.locked() as manifest:
+            if admission is not None:
+                admission(manifest['entries'], captures, retained)
             before = digest(manifest)
             # Explicit recovery mistakes reject the whole batch before staging
             # sibling starts. A missing recovery request is a normal outcome.

@@ -381,7 +381,7 @@ def _stage_spec(tasks, descriptor, definition, *, replay=False, authorize_reasse
         definition = pinned_definition(tasks, descriptor, definition)
     if not replay and not authorize_reassessment:
         from alternatives_history import guard_route
-        guard_route(tasks, owner, 'alternatives', definition)
+        guard_route(tasks, owner, 'alternatives', definition, stage=stage)
         source = definition.get('inputs', {}).get('alternatives_request')
         if source:
             from alternatives_history import request as direct_request

@@ -950,6 +950,29 @@ does not invalidate that recovery. A legacy fix-owned mismatch can receive
 independent verification pinned to its original alignment. Existing verification
 and rejection-publication requirements still govern incoming review.
 
+In assessment-only history, original legacy applicability (including a completed
+skip) stays authoritative until a dedicated request starts nonassessment work.
+Filter by the original request binding before choosing its retained stages, so
+another request's later stages cannot hide its unfinished applicability task.
+Read renamed alignment inputs through their existing compatibility adapter.
+
+Canonical admission runs again under the existing batch-claim lock, using the
+task layer's deterministic callback over captured inputs and retained entries.
+The shared rubric does not reserve a comparison owner; the first admitted chain
+does. Earlier siblings in one batch are considered before admitting later ones.
+A competing route rejects the batch before claims or budgets change. Captures
+remain outside the lock, and finish retains ordinary live-input validation.
+No canonical marker, queue or readiness cache is persisted. The existing claimed
+definition makes the winner discoverable in another session. This avoids duplicate
+paid comparisons during concurrent preparations; native API dollar savings are
+unmeasured and end when a distinct sourced request authorizes another comparison.
+New dependent assignments bind the original request reference inherited from
+their accepted prerequisites. Historical readers derive omitted older references
+only when the original consumed result matches that prerequisite, rather than
+borrowing a newer replacement's request. Replay leaves original captured input
+maps unchanged. This uses existing input references and immutable results, with
+no copied request contents or new durable request registry.
+
 ## Incoming alternatives gate
 
 The following contract is retained for historical managed-stage recovery. Current

@@ -65,7 +65,7 @@ def guard_route(tasks, owner, kind, definition, *, stage=None):
     # a later dedicated request must be able to establish its missing rubric.
     if kind == 'assessed-alternatives' and stage == 'assessment':
         return
-    retained = route(tasks, owner, include_assessment=False)
+    retained = _automatic_route(entries(tasks), owner, stage)
     if retained and (retained['owner'] != owner or retained['kind'] != kind):
         raise ValueError('Resume the original alternatives chain with the same workflow owner; only a direct dedicated user invocation can start a fresh comparison')
 
@@ -116,22 +116,26 @@ def accepted(tasks, key):
 
 def route(tasks, owner, *, request_source=None, include_assessment=True):
     """Choose retained work before constructing another route's initial plan."""
-    values = entries(tasks)
+    from state import resource
+    return _route(entries(tasks), owner, request_binding=resource(request_source) if request_source else None,
+                  include_assessment=include_assessment)
+
+
+def _route(values, owner, *, request_binding=None, include_assessment=True):
+    values = list(values.values())
+    if request_binding is not None:
+        values = [value for value in values if any(
+            value.get('components', {}).get('inputs', {}).get(name) == request_binding
+            for name in REQUEST_FIELDS)]
     # A shared purpose assessment alone is not a second whole-problem plan.
-    candidates = [value for value in values.values()
+    candidates = [value for value in values
                   if value['managed'].get('stage') != 'assessment']
     if not candidates and include_assessment:
-        candidates = list(values.values())
-    if request_source:
-        from state import resource
-        consumed = resource(request_source)
-        candidates = [value for value in candidates if any(
-            value.get('components', {}).get('inputs', {}).get(name) == consumed
-            for name in REQUEST_FIELDS)]
+        candidates = [value for value in values if value['managed']['kind'] != 'assessed-alternatives'] or values
     if not candidates:
         return None
-    # A requested modern chain supersedes legacy-only context without deleting
-    # it. A shared assessment alone was excluded above and cannot switch chains.
+    # A modern chain supersedes legacy context only after nonassessment work
+    # starts. Assessment-only history keeps legacy decisions authoritative.
     candidates = [value for value in candidates if value['managed']['kind'] == 'assessed-alternatives'] or candidates
     # Existing requested-route work stays authoritative. Otherwise resume the
     # route that owns the retained chain, including an unfinished initial claim.
@@ -139,6 +143,42 @@ def route(tasks, owner, *, request_source=None, include_assessment=True):
     managed = selected['managed']
     return {'owner': managed.get('skill', 'dk-workflows:dk-pr-review'),
             'kind': 'alternatives' if managed['kind'] == 'architecture' else managed['kind']}
+
+
+def admit(entries, captures, retained):
+    """Recheck canonical admission under the claim lock, without new state."""
+    values = {key: value for key, value in entries.items()
+              if value.get('managed', {}).get('kind') in KINDS}
+    for captured in captures:
+        managed = retained.get(captured['key'], {})
+        kind = managed.get('kind')
+        if kind not in KINDS:
+            continue
+        kind = 'alternatives' if kind == 'architecture' else kind
+        owner = managed.get('skill', 'dk-workflows:dk-pr-review')
+        bindings = [captured['components'].get('inputs', {}).get(name) for name in REQUEST_FIELDS]
+        if any(bindings):
+            for binding in filter(None, bindings):
+                selected = _route(values, owner, request_binding=binding)
+                if selected and (selected['owner'] != owner or selected['kind'] != kind):
+                    raise ValueError('Resume this manual request in its original alternatives chain')
+        elif not (kind == 'assessed-alternatives' and managed.get('stage') == 'assessment'):
+            selected = _automatic_route(values, owner, managed.get('stage'))
+            if selected and (selected['owner'] != owner or selected['kind'] != kind):
+                raise ValueError('Canonical alternatives route changed before claim; resume the original chain')
+        # Include this batch's earlier definitions before admitting a sibling.
+        values[captured['key']] = {'managed': managed, 'components': captured['components']}
+
+
+def _automatic_route(values, owner, stage):
+    selected = _route(values, owner, include_assessment=False)
+    if selected or stage == 'assessment':
+        return selected
+    # A shared rubric does not reserve a comparison owner. Legacy applicability
+    # does govern its old comparison chain, including a completed skip.
+    legacy = {key: value for key, value in values.items()
+              if value['managed']['kind'] != 'assessed-alternatives'}
+    return _route(legacy, owner)
 
 
 def legacy_gate(tasks, owner, *, consumer=None, review_operation=None, analysis_only=False, request_source=None):
@@ -177,7 +217,7 @@ def legacy_gate(tasks, owner, *, consumer=None, review_operation=None, analysis_
     if request_source:
         from state import read
         live = alternatives.live_pr(tasks.store.subject['pr'])
-        source = alignment['managed']['definition'].get('inputs', {}).get('alternatives_current_pr')
+        source = alignment['spec']['inputs'].get('alternatives_current_pr')
         current = read(source) if source else {}
         if (live['headRefOid'] != alignment['spec']['git']['head']
                 or any(current.get(name) != live.get(name) for name in ('body', 'headRefOid'))):
