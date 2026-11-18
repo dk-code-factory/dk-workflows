@@ -26,7 +26,7 @@ class Tasks:
     def spec(self, descriptor, *, replay=False):
         if (not isinstance(descriptor, dict) or set(descriptor) - {
                 'kind', 'definition', 'run', 'cycle', 'phase', 'index', 'process', 'finalizer', 'upstream',
-                'skill', 'selection', 'options', 'stage', 'dependencies', 'workflow'}):
+                'skill', 'selection', 'options', 'stage', 'dependencies', 'workflow', 'decision', 'policy_options', 'alternatives_options'}):
             raise ValueError('Task requires a definition and optional occurrence selector')
         if not isinstance(descriptor.get('definition'), dict):
             raise ValueError('Task requires an explicit definition')
@@ -47,6 +47,9 @@ class Tasks:
             return make_spec(**self.store.subject, **definition)
         if kind == 'alternatives':
             from alternatives import stage_spec
+            return stage_spec(self, descriptor, definition, replay=replay)
+        if kind == 'assessed-alternatives':
+            from assessment_alternatives import stage_spec
             return stage_spec(self, descriptor, definition, replay=replay)
         if kind == 'skill':
             return skill_config.make_spec(**common, skill=descriptor['skill'], kind=descriptor['selection'],
@@ -130,7 +133,7 @@ class Tasks:
         selections = {item.get('selection') for item in descriptors} if kinds == {'skill'} else set()
         if len(selections) > 1:
             raise ValueError('Prepare one skill-owned list kind at a time')
-        occurrence = bool(kinds - {'task', 'skill', 'alternatives'} or selections == {'finalizers'})
+        occurrence = bool(kinds - {'task', 'skill', 'alternatives', 'assessed-alternatives'} or selections == {'finalizers'})
         if occurrence and any(request.get(key) for key in ('retry', 'ci_repair', 'ci_rerun')):
             raise ValueError('Occurrence tasks do not reserve reviewer or CI retry budgets')
         from alternatives import evaluation
@@ -167,6 +170,11 @@ class Tasks:
                     scores = scoring_handoff(assignments[task['key']])
                     if scores is not None:
                         task['alternatives_scores'] = scores
+                if task['action'] == 'invoke' and retained[task['key']].get('kind') == 'assessed-alternatives':
+                    from assessment_alternatives import scores
+                    handoff = scores(assignments[task['key']])
+                    if handoff is not None:
+                        task['alternatives_scores'] = handoff
                 if task['action'] == 'invoke':
                     entry = manifest['entries'][task['key']]
                     if required(entry['components']):
@@ -202,7 +210,7 @@ class Tasks:
                     legacy.append({'key': key, 'task': entry.get('components', {}).get('task', {}).get('id'),
                                    'reason': 'definition_required'})
                     continue
-                occurrence = (descriptor.get('kind', 'task') not in {'task', 'skill', 'alternatives', 'architecture'} or
+                occurrence = (descriptor.get('kind', 'task') not in {'task', 'skill', 'alternatives', 'architecture', 'assessed-alternatives'} or
                               descriptor.get('kind') == 'skill' and descriptor.get('selection') == 'finalizers')
                 if (run is not None and occurrence
                         and descriptor.get('run') != run):
@@ -255,6 +263,8 @@ class Tasks:
         if round_id is None:
             from alternatives import validate_report
             validate_report(spec, report)
+            from assessment_alternatives import validate_report as validate_assessed_report
+            validate_assessed_report(spec, report)
             from prose import validate_report as validate_prose_report
             validate_prose_report(spec, report)
         if round_id is not None:

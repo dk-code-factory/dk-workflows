@@ -61,11 +61,14 @@ def ordinary(spec, options=None):
 
 def test_default_fix_gate_has_shared_policy_and_isolates_alternatives_preflight(case):
     defaults = skill_config.defaults(fix.OWNER)
-    assert defaults['alternatives'] == skill_config.defaults(alternatives.OWNER)['alternatives']
+    incoming = skill_config.defaults(alternatives.OWNER)['alternatives']
+    assert defaults['alternatives']['scoring'] == incoming['scoring']
+    assert defaults['alternatives']['auto_pick'] == incoming['auto_pick']
     calls = list(skill_config.calls(fix.OWNER, options={'tasks': ['missing:review']}, stage='alternatives'))
-    assert [call['skill'] for _, call in calls] == [fix.OWNER, alternatives.REVIEW_SKILL]
-    native = {calls[1][0]: CONTRACT}
-    assert invocation.preflight(calls, [fix.OWNER, alternatives.REVIEW_SKILL], PREFLIGHT_CAPABILITIES,
+    assert [call['skill'] for _, call in calls] == [fix.OWNER,
+                                                 'dk-workflows:dk-issue-alternatives']
+    native = {location: CONTRACT for location, _ in calls[1:]}
+    assert invocation.preflight(calls, [call['skill'] for _, call in calls], PREFLIGHT_CAPABILITIES,
                                 native_reviews=native)['ready']
     with pytest.raises(ValueError, match='custom_prompt'):
         skill_config.effective(fix.OWNER, options={'alternatives': {'scoring': {'profile': 'custom'}}})

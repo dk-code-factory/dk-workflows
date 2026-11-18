@@ -1,15 +1,12 @@
 ---
 name: dk-alternatives-review
-description: Internal workflow component for prepared alternatives assignments. For manual PR reviews use dk-workflows:dk-pr-review-alternatives.
+description: Compatibility entry for dk-issue-alternatives and retained whole-problem managed assignments.
 license: MIT
 metadata:
-  short-description: Internal only; use dk-pr-review-alternatives
+  short-description: Whole-problem alternatives compatibility
 ---
 
-This skill consumes prepared alternatives assignments from `dk-workflows:dk-pr-review`,
-`dk-workflows:dk-pr-fix` or `dk-workflows:dk-pr-review-alternatives`. If invoked without one, explain its
-internal role and direct the user to `dk-workflows:dk-pr-review-alternatives` with
-a PR URL. Do not ask the user to construct an internal workflow assignment.
+For a new whole-problem comparison, execute `dk-workflows:dk-issue-alternatives` with the supplied issue requirements and optional candidate PR. For an architectural PR comparison, execute `dk-workflows:dk-pr-alternatives`. Retained prepared assignments continue through their legacy managed contract and original task keys.
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
@@ -17,30 +14,10 @@ Before repository guidance reads or handoffs, follow [repository instruction sou
 
 Persist workflow state only when it reduces total API dollar cost, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
 
-Set PACKAGE_ROOT to this plugin's root directory. Examine only the prepared alternatives assignment. Use the framework's mandatory
-checklist and [alternatives contract](../../../docs/alternatives-review.md).
-This prompt supplies what to examine; it does not schedule tasks, choose a
-solution, set scores/weights, store state or publish. Return original analysis
-and source evidence to the already running native coordinator.
+Set PACKAGE_ROOT to this installed plugin root.
 
-Start from functional requirements, operational requirements and repository
-constraints. Compare the PR with materially distinct reasonable approaches,
-including the smallest viable alternative. Explain infeasible approaches and
-coverage limits. Favor demonstrated needs over hypothetical scale. Examine
-component boundaries, interfaces, dependencies, state ownership, concurrency,
-compatibility and security. Consider partial failure, retry idempotence,
-migration, rollback and recovery. Account for maintainability, deployment and
-operational complexity, including API dollar cost where relevant.
+For new whole-problem comparisons use [dk-issue-alternatives](../dk-issue-alternatives/SKILL.md), the renamed capability. Start from issue requirements and consume the shared purpose assessment, persisted rubric and evaluation guidance. For new architectural PR analysis use [dk-pr-alternatives](../dk-pr-alternatives/SKILL.md), which inventories inherited and changed decisions before comparing questionable choices.
 
-Describe trade-offs and consequences, including unhandled edge cases. Estimate
-production LOC as added plus deleted lines relative to the pinned diff base;
-include executable infrastructure configuration and exclude tests, documentation
-and generated output. Explain complexity and intrusiveness. Use shared anchored
-ratings and evidence under the assigned rubric. Identify material doubts and
-estimate sensitivity. Do not replace feasibility requirements with a high score.
-Use a diagram only when it clarifies interactions. A rejected approach needs a
-specific reason. Keep the full comparison private; the coordinator prepares the
-settled design reasoning for Decisions.
+Retained historical managed assignments still execute their exact prepared contract under [legacy recovery](../../../docs/alternatives-review.md#legacy-alternatives-recovery). Preserve task keys, claims, original evidence, siblings and budgets. Legacy whole-problem results do not establish new architectural inventory coverage. Architectural judgment uses the applicable rubric and supplied guidance; do not impose a predefined defect checklist on new analysis. Keep full comparisons private.
 
-Adapted from Jeff Allan's [architecture-designer](https://github.com/jeffallan/claude-skills/blob/078a25cc5bfd8011459be7b91d004e900c1d02d3/skills/architecture-designer/SKILL.md),
-MIT licensed. The [original license and attribution](../../../docs/licenses/architecture-designer-MIT.txt) are retained.
+Adapted from Jeff Allan's [architecture-designer](https://github.com/jeffallan/claude-skills/blob/078a25cc5bfd8011459be7b91d004e900c1d02d3/skills/architecture-designer/SKILL.md), MIT licensed. The [original license and attribution](../../../docs/licenses/architecture-designer-MIT.txt) are retained.

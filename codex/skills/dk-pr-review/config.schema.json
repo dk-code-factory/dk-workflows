@@ -199,7 +199,7 @@
         "review_skill": {
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*:[A-Za-z0-9][A-Za-z0-9_.-]*$",
-          "default": "dk-workflows:dk-alternatives-review"
+          "default": "dk-workflows:dk-pr-alternatives"
         },
         "scoring": {
           "type": "object",
@@ -273,7 +273,7 @@
       "additionalProperties": false,
       "default": {
         "enabled": true,
-        "review_skill": "dk-workflows:dk-alternatives-review",
+        "review_skill": "dk-workflows:dk-pr-alternatives",
         "scoring": {
           "profile": "auto",
           "profile_selection_prompt": "Assess new features, existing behavior, tests, CI and maintenance. Choose a built-in scoring profile and explain why its trade-offs fit these circumstances.",

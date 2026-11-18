@@ -1,302 +1,258 @@
-# Alternatives review
+# Shared PR assessment and alternatives
 
-`dk-pr-review` owns this default-enabled gate, before all configured tasks and
-parallel groups. `dk-pr-reviewers-run` used independently is unchanged. The
-independent dk-architecture catalog is separate. Resolve the owner's
-`alternatives` options through skill-owned configuration. Keep analysis and
-selection in private managed results; never add them to the PR description.
-`permissions.edit_alternatives_decisions` remains accepted for saved-setting
-compatibility but has no effect. Disabling alternatives bypasses assessment, execution,
-selection and new alternatives publications; keep existing evidence.
+## Shared assessment
 
-Saved configuration and assignments using the former architecture review names
-are read through compatibility aliases; conflicting old and new settings are
-rejected. Task keys, original results, claims, budgets and publication receipts
-stay in their existing stores. Renamed guidance is checked through the ordinary
-freshness rules. Historical Decisions headings still reconcile with exact
-publication receipts. New invocations and settings use the alternatives names.
+After collecting requirements and repository evidence during initial inspection,
+the controller scripts (`pr_assessment.py` and `assessment_alternatives.py`)
+inject the assessment prompt into native assignments. There is no separate
+assessment skill to invoke or configure. Both alternatives skills use the same
+default prompt and consume the same original PR-wide assessment result while
+its governing guidance is unchanged. Its stable identity is independent of
+workflow, run, cycle and head. Persist purpose, scope, scoped rubrics, rationale,
+mandatory constraints and existing source references, without copying PR metadata,
+discussion, settings or rendered reports.
 
-## Fix workflow: once per PR
+Each alternatives skill owns `assessment_prompt`, optional `evaluation_prompt`
+(default `""`), `scoring` guidance and `selection` settings. Configure
+`skill_defaults["dk-workflows:dk-issue-alternatives"].options.selection.mode` for
+issue/implementation comparisons and
+`skill_defaults["dk-workflows:dk-pr-alternatives"].options.selection.mode` for
+architectural PR comparisons. These modes are independent. For example:
 
-`dk-workflows:dk-pr-fix` independently owns the same default-enabled `alternatives`
-options: reviewer, scoring profile and automatic or sourced selection. Run the
-initial assessment, comparison, selection and alignment before the repeated fix
-task list. A simple-change applicability skip completes the initial gate. A
-material initial mismatch supplies required design changes for authorized fixing;
-this path never publishes an alternatives rejection review or description section.
+```json
+{
+  "skill_defaults": {
+    "dk-workflows:dk-issue-alternatives": {
+      "options": {"selection": {"mode": "automatic"}}
+    },
+    "dk-workflows:dk-pr-alternatives": {
+      "options": {"selection": {"mode": "manual"}}
+    }
+  }
+}
+```
 
-Call `scripts/alternatives.py --repository HOST/OWNER/REPO --pr URL fix-gate`,
-with the same optional `--options FILE` and `--upstream` before the subcommand.
-The read-only helper discovers the existing PR task records and returns compact
-`references` plus either `release_reviewers:true` or the next missing stage and
-`next_task`. On first work, add the ordinary explicit `definition` with complete
-original evidence, installed resources and actual `native_review` contract to
-that descriptor. It already selects `kind:"alternatives"`,
-`skill:"dk-workflows:dk-pr-fix"`, stage, dependencies and owner options. Use the
-configured reviewer for assessment/comparison and the fix skill for
-selection/alignment. Preflight `--stage alternatives` only when there is missing
-native work; later task/finalizer preflight uses its own stage.
+Read a skill's effective policy with `alternatives.py --repository HOST/OWNER/REPO
+--skill dk-workflows:dk-issue-alternatives policy` (or `dk-pr-alternatives`). Both
+use the ordinary user, upstream and repository configuration scopes. Former
+`dk-pr-assessment` options and owning-workflow `alternatives.scoring`/`auto_pick`
+remain read-only compatibility fallbacks for the corresponding skill. Explicit
+canonical values take precedence at their scope; conflicting ambiguous legacy
+values require a canonical override. `review_skill` remains available for old
+managed-stage recovery. Changed assessment/evaluation guidance requires explicit
+reassessment; mode-only changes preserve the original assessment and comparisons.
 
-Reference the original PR metadata in `definition.inputs.alternatives_current_pr`
-and retain original requirements, discussion, preferences and Git sources. Do not
-overwrite these artifacts with subsequent PR snapshots. The helper pins original
-Git revisions and carries them through later stages and repeated preparations.
-All stages share one PR-wide identity independent of run, cycle and head. Their
-evidence is separate from incoming/manual review and never satisfies that gate.
-No new completion marker or copied decision is saved.
+Return `purpose`, `scope`, `work_type:small_fix|feature|mixed`, `rationale`,
+`mandatory_constraints:[strings]`, `evidence:[source references]`, and `rubrics`.
+Each rubric has unique `id`, `scope`, `work_type:small_fix|feature`, `rationale`,
+`evidence`, `weights:{criterion:positive integer percent}` totaling 100, and
+`anchors:{criterion:{"0":text,"50":text,"100":text}}`. Small fixes normally favor
+focused implementation changes and relevant edge-case coverage. Feature rubrics
+exclude change-volume ranking, including `low_loc` and `low_intrusiveness`;
+design and maintainability are judged by actual consequences. Mixed work assigns
+rubrics to its identified scopes. The model selects and explains appropriate
+criteria; architectural analysis has no predefined defect checklist.
 
-When `fix-gate` returns a saved `next_task.key`, use managed preparation and the
-normal claim/retry/checklist recovery. Resume missing work, never completed
-siblings. A pending selection blocks fixing until a sourced choice settles the
-same selection task; comparison remains reusable. Uncertain alignment and missing
-or damaged evidence remain incomplete. New invocations and sessions do not renew
-budgets or restart completed initial review.
+## Current managed protocol
 
-After `planned` or `skipped`, reuse the original result references throughout all
-fix cycles, pushes, commit cleanup and CI repairs. The helper supplies them to
-managed task/finalizer/reviewer assignments and completion. Current work must
-still fit the initial requirements and selected approach. Changed governing
-sources or selection policy block for explicit reassessment; they never silently
-grant stale coverage or trigger another automatic alternatives review. Ordinary
-code reviewers assess current implementation and verify fixes, while current
-scope, CI, permissions and publication checks retain their own live boundaries.
-Disabling `alternatives.enabled` bypasses the gate without deleting its evidence.
+Use `scripts/alternatives.py --repository HOST/OWNER/REPO --pr URL plan
+--workflow fix|review` to discover missing work or accepted original references.
+Optional `--options FILE`, `--alternatives-options FILE` and `--upstream` precede
+the subcommand. `--options` contains owning-workflow options;
+`--alternatives-options` contains invocation-local options of the corresponding
+alternatives skill, such as `{"selection":{"mode":"manual"}}`. The former
+`--policy-options` input stays readable for recovery. Preserve explicit skill
+invocation options downstream as `alternatives_skill_options` when needed;
+do not save an expanded settings snapshot.
+
+The helper returns a compact `next_task`. Add or complete its ordinary explicit
+`definition` with installed skill identity/resources, original instructions,
+complete governing input references, pinned `git:{checkout,target,base,head}` and
+actual `native_review` contract. Execute through managed `dk.py prepare` and
+`finish` under the existing [task contract](task-state.md). Definitions select
+`kind:assessed-alternatives`, owning `skill:dk-workflows:dk-pr-fix|dk-pr-review`,
+`stage`, optional `decision` and `dependencies` mapping stage labels to accepted
+task keys. The helper constructs assignments, captures inputs, claims work and
+records original output and checklist evidence. The already-running native agent
+performs assessment, comparison and selection; no separate selector is required.
+Unavailable native execution or evidence leaves affected work incomplete.
+
+1. `assessment` has no dependencies. The controller injects its prompt directly;
+   no assessment skill needs to be installed or invoked.
+2. `inventory` depends on `assessment`. Return `coverage`, `evidence`, and
+   `decisions:[{id,origin,scope,rubric,decision,questionable,reason,evidence}]`.
+   IDs are stable alphanumeric identifiers with dots, underscores or hyphens.
+   Origins are `inherited`, `introduced` or `materially_changed`. Explain which
+   architectural decisions are questionable under the applicable persisted rubric.
+3. For each questionable decision, `comparison` depends on `assessment` and
+   `inventory`, with its `decision` ID. Return `rubric`, `target_revision`,
+   `alternative_coverage`, `evidence` and `solutions` using the comparison solution fields below. The helper supplies the persisted
+   rubric; do not select another profile or replace its weights/anchors.
+   Every option uses the same pinned **target revision**, counting implementation
+   work already on the PR branch. Include retaining the current implementation
+   (`kind:pr`) and a smallest viable approach (`kind:smallest`). If they coincide,
+   explain that and include a materially distinct alternative. Helpers calculate
+   weighted totals using the same implementation for both skills.
+4. Each `selection` depends on `assessment` and its `comparison`. Return the
+   existing automatic or sourced manual selection fields below. The assignment
+   receives transient helper totals as `alternatives_scores`. A manual source
+   must be an original input path bound in `definition.inputs.user_choice` and cited in
+   `evidence`. Keep final rationale and rejection reasons for every unchosen
+   option. A choice grants no additional edit or publication permission.
+5. `interactions` depends on `assessment`, `inventory` and exactly every settled
+   `selection_DECISION_ID`. Return `compatible:bool`, `reason`, `evidence` and
+   substantive `required_changes` when incompatible. Check the combination of
+   selected approaches and retained decisions. Pending choices or interactions
+   block dependent stages.
+6. `alignment` depends on `assessment` and `interactions`. The helper also
+   supplies the original rubric, choices and comparison references to alignment
+   and independent verification, so a fresh native agent can judge the selected
+   approaches without reconstructing their dependency chain. Return
+   `alignment:aligned|mismatch|uncertain`, `reason`, `evidence` and substantive
+   `required_changes` for mismatch. Reference the existing PR metadata artifact
+   in `definition.inputs.alternatives_current_pr`; keep original inputs stable.
+7. Incoming material mismatch retains the independent native `verification`
+   stage, depending on `alignment`, and the existing publication boundary.
+   Return `disposition:confirmed|rejected|uncertain`, `reason`, `evidence` and
+   substantive `required_changes` when confirmed. Distinct native handles remain
+   mandatory. An authorized rejection publishes exactly the verified changes as
+   `REQUEST_CHANGES` without ordinary inline findings. Pass the reconciled
+   operation to `plan --workflow review --review-operation PATH`. Same-head
+   rejection completes alternatives only; after author commits, its original
+   required changes become context for ordinary current-head review.
+
+Every report includes `complete`, `findings` and the prepared checklist. Missing,
+stale, damaged or incomplete evidence cannot release downstream work. Definitions,
+claims, original results, checks, retained limits and receipts use the existing
+private task store and publication journals. No completion marker is added.
+
+## Comparison solution fields
+
+Each solution has unique `id`, `kind:pr|smallest|alternative`, `approach`,
+`components`, `pros`, `cons`, `handled_edges`, `unhandled_edges` with consequences,
+`evidence`, `complexity` and `intrusiveness` integers from 0 to 100 with
+`complexity_reason` and `intrusiveness_reason`, `feasible:bool`,
+`feasibility_reason`, `material_doubts:[strings]`, `recommended:bool` and
+`recommendation_reason`. `production_loc:{min,expected,max,reason}` contains
+ordered nonnegative integer added plus deleted production lines against the
+pinned target, including executable infrastructure configuration and excluding
+tests, documentation and generated output. Estimates inform actual consequences;
+feature ranking still excludes change volume.
+
+`ratings` and `rating_evidence` cover exactly the persisted rubric criteria.
+Ratings are integers from 0 to 100, higher is better. Optional totals must equal
+sum(weight × rating)/100. Native selection returns `mode:auto`, `choice:ID|null`,
+`confident:bool`, `sensitivity`, `evidence` and, for a sole feasible option,
+`rejected_alternatives`. Sourced manual selection returns `mode:manual`, `choice`,
+`user_source`, `reason` and `evidence`. Every settled choice has final `reason`
+and `rejection_reasons` for every unchosen evaluated option.
+
+## Selection modes
+
+Each alternatives skill owns `selection.mode`, defaulting to `semi-manual`.
+
+| Mode | Behavior |
+| --- | --- |
+| automatic | Select a qualifying clear winner. If checks cannot settle it, return null without prompting or implementing that decision. |
+| manual | Present evaluated options and require an explicit sourced user choice of a feasible option. |
+| semi-manual | Select a qualifying clear winner; ask only when checks cannot settle it. |
+
+Feasibility, confidence, estimate sensitivity, unresolved material doubts, unique
+winner and configurable score lead (default 10 points) still apply. The existing
+`selection.enabled` compatibility switch disables automatic picking; sourced
+manual choices remain available in manual and semi-manual modes. An unresolved
+choice retains `choice_pending` and blocks dependent work. Mode-only changes
+refresh selection while preserving valid original assessment and comparisons.
+When the selected options and original comparisons stay unchanged, interaction
+and alignment evidence also remains reusable. Definitions retain only consumed
+original evidence references for that check; no choice/status copy is saved.
+Added or changed inventory siblings preserve unchanged decision comparisons.
+Do not ask for a choice in automatic mode. Elapsed time never supplies a choice.
+
+## Fix workflow once per PR
+
+`dk-pr-fix` uses `dk-workflows:dk-issue-alternatives`. Start from
+issue requirements and compare whole-problem implementation approaches, accepting
+an existing PR as an optional candidate. Complete shared assessment and initial
+alternatives once before the repeated task list with `plan --workflow fix`.
+Pass settled choices, interaction evidence and required changes into authorized
+implementation tasks; apply selected approaches and run relevant tests. Retaining
+the current approach requires no corresponding edit. Selection does not authorize
+editing or publication. Current code review, verification, CI and publication
+checks remain independent live boundaries.
+
+## Incoming workflow once per PR
+
+`dk-pr-review` uses `dk-workflows:dk-pr-alternatives`: inventory architecture
+throughout the branch, including inherited decisions, then compare questionable
+decisions under the shared assessment. Use `plan --workflow review` before its
+configured task list. This path reports recommendations without changing code or
+commits and never adds a PR description comparison. Architectural recommendations
+are governed by the rubric, with existing independent verification and publication
+boundaries; this introduces no separate defect-oriented gate.
+
+Both workflows reuse their accepted initial analysis across ordinary
+implementation commits, invocations and fresh sessions. Current scope must still
+fit the governing sources; changed requirements, scope or assessment guidance
+requires explicit sourced reassessment, not stale reuse or an automatic rerun.
+The helper's read-only next-work output never claims current-head code review,
+CI, authorization or publication readiness. Disabling alternatives retains all
+evidence and bypasses alternatives stages.
 
 ## Manual alternatives review
 
-Invoke `dk-workflows:dk-pr-review-alternatives` with a PR URL to run only this
-alternatives process and record its results, even after a prior completed review.
-For example: `Use dk-workflows:dk-pr-review-alternatives on https://HOST/OWNER/REPO/pull/N`.
-`dk-alternatives-review` is the internal, replaceable examination component. Its
-discovery description and short picker description identify it as internal and
-point to this manual entry point; it remains available for prepared workflow
-assignments under its alternatives identity.
-Use `dk-pr-review`'s current reviewer, rubric, selection policy, retained limits
-and publication permissions. Pass invocation-local `alternatives.enabled:true`
-through preflight, every managed stage and publication/gate checks. This enables
-the requested manual review even when the automatic gate is disabled; it changes
-no saved configuration. Preflight only the alternatives stage, never ordinary
-reviewers or finalizers. Collect complete original PR evidence and scoped review
-preferences before preparing analysis.
+Explicitly invoke `dk-workflows:dk-pr-alternatives` (historical manual entry point
+`dk-pr-review-alternatives`) for a fresh requested analysis. Reuse an unchanged
+shared assessment. Pass `--request FILE` to `plan`, binding the existing original
+request artifact with nonempty `id`, `source` and exact `instruction`; preserve
+that actual message identity on recovery. Add current Git pins and evidence to
+returned definitions. Requested inventory/comparisons refresh; completed siblings
+of the same request resume without repeating work. To change governing shared
+assessment inputs, bind an explicit original request in
+`definition.inputs.alternatives_reassessment`. Original results remain retained
+in task attempts. A new request never renews retained budgets.
 
-Each new explicit invocation requests fresh assessment and comparison. Reference
-the original request artifact in assessment `definition.inputs.alternatives_request`.
-It is a JSON object containing nonempty `id`, `source` and `instruction`: a stable
-identity for the actual user message, its source reference and exact instruction.
-Reuse an existing original input artifact when available; otherwise retain only
-that request excerpt in the existing private input area. A repeated instruction
-from a distinct user message has a different source identity. Never manufacture a
-new identity for automatic recovery or replace the old artifact in place.
+Explicit manual completion validates current head and body against alignment's
+consumed PR evidence. Automatic entry can reuse that completed analysis as design
+context across later author commits. Stop after requested alternatives, without
+ordinary tasks, finalizers, code edits, PR approval or merging. An analysis-only
+request suppresses publication and cannot claim a completed rejection.
 
-The helper binds this input to assessment and propagates it into comparison,
-constructs the manual assignment and rejects a simple-change applicability skip.
-Changed request content refreshes those stages under the same existing task keys;
-dependent selection and alignment bind the new immutable source results. Preserve
-the retained run and budgets; a new request is not a counter reset. Use a new
-cycle when governing inputs change and existing bounded continuation rules if
-the allowance is exhausted. No `invalidate`, cache deletion or new review store
-is needed. An interruption retains the request reference: start with compact
-`resume`, reconcile claims, reuse completed stages and finish outstanding stages
-through the normal managed lifecycle. Governing PR or policy changes still
-refresh affected work under this contract.
+## Issue-only evaluation
 
-Complete comparison, selection and current
-alignment, including independent mismatch verification when needed. Use the same
-publication journal and gate validation below. Stop after alternatives: an aligned
-manual result completes only this assignment, without executing incoming-review
-tasks or finalizers. A verified rejection remains alternatives-only. Analysis-only
-instructions can complete aligned analysis while suppressing all external writes.
-Report pending selection, unavailable execution, review publication permission
-failures and uncertain publication privately; never claim ordinary review passed.
+Before a PR exists, use `dk-issue-alternatives` with the same native
+assessment procedure against issue requirements and a selected target branch.
+Keep this analysis in memory or existing issue evidence; never fabricate a PR URL
+or PR-scoped task record. Native output can be checked with `alternatives.py
+--repository HOST/OWNER/REPO --checkout PATH issue-evaluate --assessment FILE
+--comparison FILE --selection FILE --target BRANCH`. Assessment uses the same
+rubric structure; comparisons include `smallest` and a materially distinct
+`alternative` without requiring a PR candidate. The helper validates the pinned
+target and calculates totals and choice without creating durable state.
 
-After inspection, preflight only `--stage alternatives` with `config.py
-skill-preflight`. Resolve the installed review prompt's native contract and host
-capabilities before claims. Do not preflight normal reviewers until alignment
-releases them; use `--stage review` and later `--stage finalizers`. Unavailable
-native execution/evidence blocks the affected work privately. Helpers never start
-Codex or Claude Code, including for recovery.
+## Compatibility and cost
 
-## Managed assignments
+The historical `dk-alternatives-review` whole-problem capability redirects to
+`dk-issue-alternatives`. The former name `dk-issue-implementation-alternatives`
+is also a read alias, preserving its saved settings and original task keys. Historical skill names, contract-v2 task
+keys, claims, original evidence, siblings, budgets and publication receipts stay
+recoverable through the legacy managed protocol below. Old whole-problem results
+never count as the new architectural inventory. New managed definitions use
+distinct responsibilities, retaining the stable shared assessment key.
 
-Use `dk.py prepare` and `finish`, with descriptor `kind:"alternatives"`,
-`stage`, `dependencies` (stage name to accepted task key), optional owner
-invocation `options` and `upstream`, and the ordinary explicit `definition`.
-The helper constructs assignments, input references and mandatory checklists,
-including the owning workflow's retained limits. Alternatives analysis is read-only;
-publication permissions are checked live rather than copied into each stage.
-Selection invocations also receive transient `alternatives_scores` calculated by
-the helper; pass these with the assignment for confidence assessment. These
-derived totals are never saved as a second report.
-Supply complete governing original sources, discussion, requirements, Decisions,
-preferences and pinned `git` inputs, plus the installed skill resources and
-`native_review` contract. Use the same retained run/retry budgets as other managed
-analysis. Required native observations, original output and checklist acceptance
-remain mandatory. Read compact `resume` and targeted `result` sections in a new
-session; reconcile unfinished claims before retrying.
+Expected savings come from avoiding repeated purpose assessment, rubric selection
+and completed decision comparisons in the current and next session. Small task
+selectors and references cost less to validate and consume than repeating native
+analysis; compact status and targeted original-result reads serve fresh sessions.
+Freshness ends at changed governing sources/guidance, relevant dependency changes
+or missing evidence. Mode-only changes affect selection; changed choices require
+interaction/alignment checks. No new database, settings snapshot, copied report,
+completion flag or telemetry store is admitted. Native API dollar savings remain
+unmeasured; offline call/process counts establish behavior rather than savings.
 
-Stages run in this order:
+## Legacy alternatives recovery
 
-1. `assessment`: return `required:bool`, `reason` and `evidence:[source refs]`.
-   Material boundaries, interfaces, dependencies, state, concurrency, recovery or
-   operational choices require comparison. Simple changes may skip with evidence.
-2. `comparison`: depends on assessment. Execute `alternatives.review_skill`
-   (default `dk-workflows:dk-alternatives-review`). Return the comparison below.
-3. `selection`: depends on comparison. Return selection below. A pending choice
-   blocks every normal reviewer. Ask the user for the actual choice and retain
-   its source; elapsed time supplies no authorization. Bind the new choice source
-   as an additional selection input to refresh selection without repeating
-   unchanged alternatives analysis.
-4. `alignment`: depends on comparison and selection. Compare the current pinned
-   implementation; return `alignment:aligned|mismatch|uncertain`, `reason`,
-   `evidence` and substantive `required_changes` for mismatch.
-   Reference the existing current PR metadata artifact (including `body` and
-   `headRefOid`) in `definition.inputs.alternatives_current_pr`. The gate compares
-   that consumed evidence with the live PR without creating a published summary.
-5. For mismatch, `verification` depends on alignment and runs in a fresh independent
-   native agent. Return `disposition:confirmed|rejected|uncertain`, `reason`,
-   `evidence` and `required_changes` when confirmed. Publish exactly those design
-   changes as `REQUEST_CHANGES`, with no ordinary findings, through `publish.py`.
-   Rejected or uncertain mismatch verification requires resolution privately.
-
-Every report includes `complete:bool`, `findings:[]` and the prepared checklist.
-Supply evidence explaining irrelevant checklist items; omissions do not disappear.
-Primary reports may satisfy the entire checklist; bounded completion checks reuse
-the original analysis. Never use a bare flag or a PR text marker as coverage.
-
-Call `scripts/alternatives.py --repository HOST/OWNER/REPO --pr URL gate --file
-REFS.json`. Refs contains `assessment`, and when required `comparison`,
-`selection`, `alignment`, plus `verification` and
-`review_operation` for rejection. Entries are managed task keys or existing
-publication operation paths. Missing/stale/corrupt evidence blocks the gate.
-For ordinary `dk-pr-review` task/finalizer definitions, pass these refs in
-`definition.options.alternatives_evidence`; managed skill occurrences enforce the
-gate before claims and recapture it at completion. Include `analysis_only:true`
-under execution options when applicable. Both skipped and aligned gates can
-release analysis-only review tasks. Ordinary publications remain disabled by the caller.
-
-`aligned` releases normal tasks with the decision's immutable source results as
-governing inputs. `alternatives_rejected` is a completed alternatives-only review,
-with `ordinary_review_complete:false`: stop without running ordinary reviewers,
-fork CI approval, PR approval or merge finalizers. Never imply code review ran.
-An alternatives-only rejection still requires authorized, reconciled review
-publication. Denied permission or analysis-only instructions keep that outcome
-privately incomplete; aligned analysis requires no publication.
-
-## Comparison and scoring
-
-Return `profile`, `profile_rationale`, `anchors` (criterion to shared rating
-anchors explaining 0, 50 and 100), `alternative_coverage`, `evidence` and at least
-two `solutions`. Cover every materially distinct reasonable repository-supported
-approach, including `kind:pr` and `kind:smallest`; explain rejected/infeasible
-approaches without claiming every theoretical solution was considered. If those
-approaches coincide, explain that and compare a materially distinct alternative.
-
-Each solution has a unique `id`, `kind:pr|smallest|alternative`, and:
-
-- `approach`, `components`, `pros`, `cons`, `handled_edges`, `unhandled_edges`
-  (including consequences), and source `evidence`.
-- `production_loc:{min,expected,max,reason}` as nonnegative integer added plus
-  deleted production lines relative to the pinned diff base, including executable
-  infrastructure configuration and excluding tests, docs and generated output.
-- `complexity` and `intrusiveness` (0–100; higher means more), with
-  `complexity_reason` and `intrusiveness_reason`.
-- `ratings` (criterion to integer 0–100, higher is better), `rating_evidence`
-  for each criterion, `feasible:bool`, `feasibility_reason`,
-  `material_doubts:[strings]`, `recommended:bool`, `recommendation_reason`.
-  An optional `total` must match helper arithmetic exactly.
-
-The framework checklist covers requirements, alternatives, compatibility,
-security, concurrency, partial failure, retries, migration, rollback, operational
-cost, estimates, scoring, uncertainties and recommendation evidence.
-
-| Profile | edge_coverage | quality | simplicity | low_intrusiveness | low_loc | low_operational_cost |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| minimal_change_edge_coverage | 40 | 15 | 15 | 15 | 10 | 5 |
-| quality | 25 | 30 | 20 | 10 | 5 | 10 |
-| minimal_change | 15 | 15 | 20 | 25 | 20 | 5 |
-
-`scoring.profile:auto` asks the alternatives agent to assess new features,
-existing behavior, tests, CI and maintenance with `profile_selection_prompt` and
-choose a built-in profile with rationale. A fixed profile bypasses that choice.
-`custom` requires `custom_prompt`, a shared `weights` map of positive integer
-percentages summing to 100, shared anchors and normalized evidence-backed ratings
-for every option. Helpers calculate sum(weight × rating)/100. Mandatory
-requirements are feasibility gates for every profile.
-
-Selection returns `mode:auto`, `confident:bool`, `sensitivity` (confidence under
-estimate changes), `evidence`, and `choice` (ID or null). A sole feasible option
-also requires supported `rejected_alternatives`. The default auto-pick prompt
-cannot override a unique feasible winner, the default 10-point `min_score_gap`,
-or unresolved material doubts. Ties, insufficient lead, no feasible option,
-uncertainty or disabled auto-pick leave choice pending. Manual selection returns
-`mode:manual`, feasible `choice`, exact `user_source`, `reason` and `evidence`.
-Every settled selection supplies its final `reason` and `rejection_reasons` map
-for every unchosen option, including after a user chooses a different approach.
-
-## Publication and freshness
-
-Keep chosen approach, rationale, alternatives, scores and rejection reasons in
-the original private comparison and selection results. Pass their immutable
-references to downstream reviewers. Do not publish an Alternatives decisions
-section or another alternatives summary in the PR description, including through
-Decisions or description skills. Existing public entries are not automatically
-rewritten or removed. A missing section or old `decision_operation` is not a gate
-requirement. Review publication remains required only for an independently
-confirmed alternatives mismatch, using the existing journal and substantive
-required changes as `REQUEST_CHANGES`.
-
-Before releasing reviewers, check the live PR head and body against alignment's
-consumed `alternatives_current_pr` evidence. Changed inputs require affected
-analysis and current alignment; a description edit cannot silently reuse old
-coverage. No description edit permission or publication receipt is needed for
-aligned analysis.
-
-After a change, prepare `impact` against the retained comparison and selection
-(or the retained assessment for an alternatives skip) and current sources. Assess
-applicability, feasible choices, confidence, estimate sensitivity and any sourced
-user choice; nonmaterial means these remain valid. Supply `definition.inputs.alternatives_current_pr` as a reference to the existing
-current PR metadata evidence (including `body` and `headRefOid`); no second body
-snapshot is needed. Only evidence-backed `impact:nonmaterial` permits historical alternatives
-reuse; material or uncertain impact requires refreshed affected analysis. Keep
-accepted assessment and selection results when impact is nonmaterial; run only
-impact and current alignment. Include `impact` in the new alignment dependencies
-and gate refs. The impact task must reference the retained selection when reusing
-it, or assessment when reusing a skip. New selections after policy or user choice
-changes depend on comparison and impact. All stages use original immutable result
-references, without rebinding unchanged analysis through another invocation.
-The helper keeps impact bound to the exact selection it originally assessed when
-that selection is later refreshed; it does not treat historical context as current
-selection coverage. Missing original sources block recovery. Exact result
-bindings distinguish a new impact attempt from an older result under the same
-task key; alignment cannot start with an unassessed retained selection.
-Always run current implementation alignment after author changes. Changed scoring
-or review guidance refreshes comparison, including changed prompt contents under
-the same skill identity; historical reuse recaptures that guidance. Changed auto-pick policy refreshes only
-selection. Keep originals, completed siblings, claims, budgets and publication
-recovery references. Treat a historical workflow Decisions edit as self-produced only
-when reconciled journals match the exact before/after body lineage. Trace successive
-own edits back to the original governing body; stop at an external edit. Ambiguous
-or circular lineage blocks normalization privately. External edits still require
-current impact assessment. Use `alternatives.py governing-body --body FILE --operation FILE` to recognize
-that exact self-produced body deterministically. Capture normalized governing context
-without the recognized self-produced subsection; retain the live body as a
-publication input, not a copied analysis snapshot.
-
-The legacy bounded editor retained for journal recovery recognizes [CommonMark heading and HTML block boundaries](https://spec.commonmark.org/0.31.2/#html-blocks), treating block HTML and list containers as opaque. Complete unknown HTML tags
-start blocks only outside an open paragraph; code-starting list items do not
-create lazy paragraph continuations that hide a root heading. Quoted HTML
-attributes retain their complete-tag grammar, and list-contained HTML/fences
-retain block state so closing them cannot create a false paragraph. Only eligible
-markers interrupt paragraphs: ordered lists start at 1 and empty items cannot
-interrupt. Boundary scanning stops at the nearest heading and avoids rescanning
-previous Setext headings.
-
-Sibling task preparation and resume share prerequisite validation and one live PR
-read within each construction/capture boundary. A separate boundary and every
-subsequent command recapture live evidence; no readiness result is saved.
-Read body files without newline translation. Public option descriptions are inline
-prose paragraphs so inserting them cannot absorb a following indented sibling
-into a generated alternatives list; full private comparisons retain formatting.
-
-Offline acceptance establishes reuse, invalidation and recovery behavior. Native
-API dollar savings remain unmeasured; see the [design](../DESIGN.md#incoming-alternatives-gate).
+Historical stage keys, claims, results and receipts remain addressable through
+`kind:alternatives`, `fix-gate` and `gate`. See the [retained managed protocol](legacy-alternatives.md)
+for recovery only. These results do not establish new architectural inventory
+coverage. Use `plan` for current workflows.

@@ -72,7 +72,7 @@ def gate(tasks, *, options=None, upstream=None):
 
 
 def _gate(tasks, *, options=None, upstream=None):
-    policy = skill_config.effective(OWNER, tasks.store.subject['repository'], upstream, options=options)['options']['alternatives']
+    policy = alternatives.legacy_options(skill_config.effective(OWNER, tasks.store.subject['repository'], upstream, options=options)['options'])['alternatives']
     if not policy['enabled']:
         return {'outcome': 'disabled', 'release_reviewers': True}
     refs, retained = {}, {}
@@ -126,6 +126,9 @@ def enforce(spec, repository, pr, *, options=None, upstream=None):
     context = alternatives._EVALUATION.get()
     tasks = (context['tasks'] if context is not None and context['tasks'].store.subject == identity(repository, pr)
              else Tasks(repository, pr))
+    import assessment_alternatives as shared
+    if shared.entry(tasks, OWNER, 'assessment') is not None or entry(tasks, 'assessment') is None:
+        return shared.enforce(spec, tasks, OWNER, options=options, upstream=upstream)
     result = gate(tasks, options=options, upstream=upstream)
     if not result['release_reviewers']:
         raise ValueError('Initial alternatives gate blocks fix work: ' + result['outcome'])

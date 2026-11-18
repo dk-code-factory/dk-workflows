@@ -25,7 +25,7 @@ def contract(spec, definition):
         {'id': 'deliverables', 'text': 'Supply every assigned deliverable and an explicit complete primary report.'},
     ]
     role = spec['task']['id'].split(':', 1)[0]
-    if (not spec.get('options', {}).get('alternatives') and
+    if (not spec.get('options', {}).get('alternatives') and not spec.get('options', {}).get('assessed_alternatives') and
             ('fix' in role or role in {'feedback', 'ci-repair'}
              or spec['skill']['identity'].split(':')[-1] == 'dk-pr-feedback-address')):
         items += [
@@ -37,8 +37,16 @@ def contract(spec, definition):
         from alternatives import CHECKS
         items += [{'id': 'alternatives-' + key, 'text': value + ' Explain irrelevance with evidence.'}
                   for key, value in CHECKS.items()]
+    assessed = spec.get('options', {}).get('assessed_alternatives')
+    if assessed:
+        items.append({'id': 'assessment-rubric', 'text': 'Apply the shared purpose, scope, mandatory constraints and applicable persisted rubric consistently. Judge architectural recommendations by that rubric and evaluation guidance; do not add a predefined defect checklist.'})
+        if assessed['stage'] == 'comparison':
+            items.append({'id': 'target-estimates', 'text': 'Compare every option against the same pinned target revision, including implementation work already on the PR branch. Supply evidence for ratings, feasibility and estimate uncertainty.'})
     if any(key.startswith('alternatives_fix_governing_') for key in spec.get('inputs', {})):
         items.append({'id': 'alternatives-plan', 'text': 'Read the retained initial alternatives plan and apply its selected approach and required changes. Verify current work remains within its sourced requirements and constraints; material scope changes require explicit reassessment. The original plan is not current-head code review, CI or publication evidence.'})
+    if ('alternatives_applicability' in spec.get('inputs', {})
+            or any(key.startswith('alternatives_governing_') for key in spec.get('inputs', {}))):
+        items.append({'id': 'alternatives-initial-plan', 'text': 'Read the retained alternatives assessment and any selected approach or required design changes. Review the current implementation against that context and verify current scope still fits its sourced requirements and constraints. Material scope changes require explicit reassessment. The initial alternatives review does not supply current-head code review, CI or publication coverage.'})
     if role == 'finding-verification':
         items.append({'id': 'verification', 'text': 'Challenge every candidate independently and return confirmed, rejected or uncertain with evidence and required locations.'})
     if 'native_review' in spec:

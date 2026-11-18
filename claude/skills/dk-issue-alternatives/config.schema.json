@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/dk-code-factory/dk-workflows/main/codex/skills/dk-issue-alternatives/config.schema.json",
+  "title": "dk-workflows:dk-issue-alternatives options",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "assessment_prompt": {
+      "type": "string",
+      "minLength": 1,
+      "default": "Assess purpose, requirements and repository evidence before comparing approaches. For small fixes favor focused implementation changes and relevant edge-case coverage. For features exclude code-change volume from ranking and assess design and maintainability through actual consequences. For mixed work identify scopes and assign applicable rubrics. Select criteria, positive percentage weights totaling 100 and explicit 0/50/100 anchors, rationale, mandatory constraints and original source references. Judge architectural decisions with that rubric and supplied evaluation guidance, without a predefined defect checklist."
+    },
+    "evaluation_prompt": {
+      "type": "string",
+      "default": ""
+    },
+    "scoring": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "minimal_change_edge_coverage",
+            "quality",
+            "minimal_change",
+            "custom"
+          ],
+          "default": "auto"
+        },
+        "profile_selection_prompt": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*\\u0000)[\\s\\S]*$",
+          "default": "Assess purpose and scope to select criteria, percentage weights and scoring anchors with an evidence-backed rationale. Favor focused changes and relevant edge coverage for small fixes; exclude change volume when ranking feature approaches. Assign applicable rubrics to mixed scopes."
+        },
+        "custom_prompt": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*\\u0000)[\\s\\S]*$"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "profile": "auto",
+        "profile_selection_prompt": "Assess purpose and scope to select criteria, percentage weights and scoring anchors with an evidence-backed rationale. Favor focused changes and relevant edge coverage for small fixes; exclude change volume when ranking feature approaches. Assign applicable rubrics to mixed scopes.",
+        "custom_prompt": null
+      }
+    },
+    "selection": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*\\u0000)[\\s\\S]*$",
+          "default": "Assess confidence and sensitivity to LOC and complexity estimates. Accept a clear winner only with supported feasibility, adequate score lead and no unresolved material doubts. For a sole feasible option substantiate rejection of every alternative."
+        },
+        "min_score_gap": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 10
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "automatic",
+            "manual",
+            "semi-manual"
+          ],
+          "default": "semi-manual"
+        }
+      },
+      "additionalProperties": false,
+      "default": {
+        "enabled": true,
+        "prompt": "Assess confidence and sensitivity to LOC and complexity estimates. Accept a clear winner only with supported feasibility, adequate score lead and no unresolved material doubts. For a sole feasible option substantiate rejection of every alternative.",
+        "min_score_gap": 10,
+        "mode": "semi-manual"
+      }
+    }
+  },
+  "additionalProperties": false
+}
