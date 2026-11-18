@@ -11,6 +11,7 @@ from task_primitives import digest, task_key
 from tasks import Tasks
 from shared import publication
 from shared.workflow_storage import operations_root
+from shared.recovery_diagnostics import from_exception, publication as publication_diagnostic
 
 
 def reference(store, key, field='managed'):
@@ -27,12 +28,15 @@ def _publications(tasks, supplied):
             value = publication.load(path)
         except (ValueError, KeyError, TypeError, OSError) as exc:
             items.append({'action': 'restore_evidence', 'operation': str(path),
-                          'reason': 'publication_evidence_unavailable', 'detail': str(exc)[:512]})
+                          'reason': 'publication_evidence_unavailable', 'detail': str(exc)[:512],
+                          'diagnostic': from_exception(exc, path)})
             continue
         if value['status'] in {'prepared', 'pending'}:
             items.append({'action': 'reconcile_publication' if value['status'] == 'pending'
                           else 'inspect_publication', 'operation': str(path),
-                          'status': value['status'], 'kind': value['request']['kind']})
+                          'status': value['status'], 'kind': value['request']['kind'],
+                          **({'diagnostic': publication_diagnostic(value, path)}
+                             if value['status'] == 'pending' else {})})
     return items
 
 
@@ -110,7 +114,8 @@ def _budget(tasks, request, spec, captured, manifest, location):
             and state.get('ci_reruns', {}).get(request['git']['head'], 0)
             >= limits.get('ci_reruns_per_head', 3))
         return {'action': 'exhausted_allowance' if exhausted else 'blocked_prerequisite',
-                'reason': 'budget_rejected', 'detail': str(exc)[:512]}
+                'reason': 'budget_rejected', 'detail': str(exc)[:512],
+                'diagnostic': from_exception(exc, tasks.store.manifest)}
     if cycle and not (flags['ci_repair'] or flags['ci_rerun']):
         original = state.get('review_tasks', {}).get(cycle, {}).get(captured['key'])
         if original and original != captured['fingerprint']:
@@ -133,9 +138,11 @@ def _row(tasks, request, location, call, entries, manifest):
         spec, captured, entry, status = _status(tasks, descriptor, entries)
     except (ValueError, KeyError, TypeError, OSError, RuntimeError) as exc:
         return {**row, 'action': 'definition_required', 'reason': 'definition_unavailable',
-                'detail': str(exc)[:512]}
+                'detail': str(exc)[:512], 'diagnostic': from_exception(exc, tasks.store.manifest)}
     key = captured['key']
     row.update(key=key, fingerprint=captured['fingerprint'], reason=status['reason'])
+    if 'diagnostic' in status:
+        row['diagnostic'] = status['diagnostic']
     if entry:
         row['assignment'] = reference(tasks.store, key)
     if status['result']:

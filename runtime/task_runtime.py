@@ -10,6 +10,7 @@ import task_policy
 from task_capture import _CaptureContext
 from task_primitives import CONTRACT, digest, has_output_content, read, task_key, write
 from task_storage import TaskStorage
+from shared.recovery_diagnostics import allowance, annotate, condition, evidence_code, from_exception
 
 REVIEW_CYCLES = 5
 
@@ -145,6 +146,18 @@ class Store(TaskStorage):
                 'previous_capture_fingerprint': digest(old) if 'components' in entry else None,
                 'result_fingerprint': saved['fingerprint'] if saved else None,
             }
+        reference = str(self.manifest) + '#' + _pointer(('entries', captured['key']))
+        if entry.get('claim'):
+            return annotate(described, 'active_claim', 'The original task claim remains active.', reference + '/claim')
+        if entry.get('invalidated') or 'components' in entry and changed:
+            return annotate(described, 'stale_inputs', 'Current governing inputs differ from retained coverage.', reference)
+        if native_problem:
+            code = ('execution_contract_missing' if native_problem['code'] == 'missing_contract' else
+                    'execution_evidence_missing' if native_problem['code'] == 'unavailable_provenance' else 'execution_evidence_invalid')
+            return annotate(described, code, native_problem['reason'], reference + '/result')
+        if entry.get('result') and result_problem:
+            code = evidence_code(result_problem)
+            return annotate(described, code, 'Original result evidence is unavailable: ' + result_problem, reference + '/result')
         return described
 
 
@@ -160,7 +173,8 @@ class Store(TaskStorage):
                 unavailable.append({
                     'key': task_key(self.subject, spec['task']['id'], spec['skill']['identity'], options=spec.get('options')),
                     'reusable': False, 'coverage_complete': False,
-                    'reason': 'refresh_required', 'detail': str(exc)})
+                    'reason': 'refresh_required', 'detail': str(exc),
+                    'diagnostic': from_exception(exc, self.manifest)})
         if any(c['subject'] != self.subject for c in captures):
             raise ValueError('Specs refer to another PR')
         with self.locked() as manifest:
@@ -220,7 +234,7 @@ class Store(TaskStorage):
         limit, requests = state.get('limits', {}).get('review_cycles', REVIEW_CYCLES), set()
         allowances = state.get('review_allowances', [])
         if not isinstance(allowances, list):
-            raise ValueError('Damaged review allowance history; do not reset retained budgets')
+            raise condition('evidence_damaged', 'Damaged review allowance history; do not reset retained budgets')
         for allowance in allowances:
             if (not isinstance(allowance, dict)
                     or any(not isinstance(allowance.get(key), str) or not allowance[key].strip()
@@ -230,7 +244,7 @@ class Store(TaskStorage):
                     or not 1 <= allowance['cycles'] <= REVIEW_CYCLES
                     or allowance.get('previous_limit') != limit
                     or allowance.get('cycle_limit') != limit + allowance['cycles']):
-                raise ValueError('Damaged review allowance history; do not reset retained budgets')
+                raise condition('evidence_damaged', 'Damaged review allowance history; do not reset retained budgets')
             requests.add(allowance['request_id'])
             limit = allowance['cycle_limit']
         used = len(state['cycles'])
@@ -302,8 +316,8 @@ class Store(TaskStorage):
             budget = Store.review_budget(state)
             if not budget['remaining']:
                 label = 'Five' if budget['limit'] == REVIEW_CYCLES else str(budget['limit'])
-                raise ValueError(label + ' review-and-fix cycle limit reached; '
-                                 'explicit user continuation is required')
+                raise allowance(label + ' review-and-fix cycle limit reached; '
+                                'explicit user continuation is required', run=run, kind='review cycle')
             state['cycles'].append(cycle)
         if retry:
             if not cycle:
@@ -311,21 +325,21 @@ class Store(TaskStorage):
             key = cycle + ':' + task
             if state['retries'].get(key, 0) >= limits['retries_per_task']:
                 if limits['retries_per_task'] == 0:
-                    raise ValueError('Same-cycle retries are disabled')
-                raise ValueError('Same-cycle retry already consumed')
+                    raise allowance('Same-cycle retries are disabled', run=run, kind='same-cycle retry')
+                raise allowance('Same-cycle retry already consumed', run=run, kind='same-cycle retry')
             state['retries'][key] = state['retries'].get(key, 0) + 1
         if ci_repair:
             key = cycle or '0'
             if state['ci_repairs'].get(key, 0) >= limits['ci_repairs_per_cycle']:
                 count = 'Five' if limits['ci_repairs_per_cycle'] == 5 else str(limits['ci_repairs_per_cycle'])
-                raise ValueError(count + ' CI repair attempts per cycle reached')
+                raise allowance(count + ' CI repair attempts per cycle reached', run=run, kind='CI repair')
             state['ci_repairs'][key] = state['ci_repairs'].get(key, 0) + 1
         if ci_rerun:
             if not head:
                 raise ValueError('CI rerun requires exact head')
             if state['ci_reruns'].get(head, 0) >= limits['ci_reruns_per_head']:
                 count = 'Three' if limits['ci_reruns_per_head'] == 3 else str(limits['ci_reruns_per_head'])
-                raise ValueError(count + ' CI reruns per head reached')
+                raise allowance(count + ' CI reruns per head reached', run=run, kind='CI rerun')
             state['ci_reruns'][head] = state['ci_reruns'].get(head, 0) + 1
         return state
 
@@ -354,7 +368,9 @@ class Store(TaskStorage):
             guard_reassessment(captured, entry, options['alternatives_reassessment'])
         if entry.get('claim'):
             if recover != entry['claim']['id']:
-                return {'action': 'recover_required', **previous}
+                return annotate({'action': 'recover_required', **previous}, 'active_claim',
+                    'The original task claim remains active.',
+                    str(self.manifest) + '#' + _pointer(('entries', captured['key'], 'claim')))
             if run != entry['claim']['run'] or (
                     captured['fingerprint'] == entry['claim']['fingerprint']
                     and cycle != entry['claim']['cycle']):
@@ -411,7 +427,9 @@ class Store(TaskStorage):
         if reassessment:
             entry['attempts'][-1]['reassessment_request'] = reassessment['request']['id']
         return {'action': 'invoke', 'claim': claim, 'manifest': str(self.manifest),
-                'changed': previous['changed']}
+                'changed': previous['changed'],
+                **({'diagnostic': previous['diagnostic']} if 'diagnostic' in previous
+                   and previous['diagnostic']['code'] != 'active_claim' else {})}
 
 
     def start(self, spec, *, recover=None, run=None, cycle=None, retry=False,
@@ -440,7 +458,8 @@ class Store(TaskStorage):
             if not claim or claim['id'] != claim_id:
                 raise ValueError('Claim is absent or owned by another attempt')
             if claim['fingerprint'] != captured['fingerprint']:
-                raise ValueError('Inputs changed during execution; retain claim and explicitly recover')
+                raise condition('stale_inputs', 'Inputs changed during execution; retain claim and explicitly recover',
+                                str(self.manifest) + '#' + _pointer(('entries', captured['key'], 'claim')))
             return {'binding': binding(captured['components'], claim),
                     'requirements': captured['components']['native_review']}
 
@@ -541,7 +560,8 @@ class Store(TaskStorage):
             if not claim or claim['id'] != claim_id:
                 raise ValueError('Claim is absent or owned by another attempt')
             if claim['fingerprint'] != captured['fingerprint']:
-                raise ValueError('Inputs changed during execution; retain claim and explicitly recover')
+                raise condition('stale_inputs', 'Inputs changed during execution; retain claim and explicitly recover',
+                                str(self.manifest) + '#' + _pointer(('entries', captured['key'], 'claim')))
             if checklist is not None:
                 from checklists import attach
                 attach(self, entry, captured, checklist)
@@ -594,8 +614,14 @@ class Store(TaskStorage):
             write(self.manifest, manifest)
             if followup is not None:
                 return followup
-            return {'status': status, 'result': str(path), 'reusable': status == 'complete' and captured['cacheable'],
-                    **({'execution_diagnostic': native['diagnostic']} if native and native['diagnostic'] else {})}
+            result = {'status': status, 'result': str(path), 'reusable': status == 'complete' and captured['cacheable'],
+                      **({'execution_diagnostic': native['diagnostic']} if native and native['diagnostic'] else {})}
+            if native and native['diagnostic']:
+                problem = native['diagnostic']
+                code = ('execution_contract_missing' if problem['code'] == 'missing_contract' else
+                        'execution_evidence_missing' if problem['code'] == 'unavailable_provenance' else 'execution_evidence_invalid')
+                result = annotate(result, code, problem['reason'], path)
+            return result
 
 
     def check(self, spec, claim_id, round_id, original, report):

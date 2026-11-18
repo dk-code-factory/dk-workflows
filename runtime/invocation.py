@@ -188,7 +188,20 @@ def preflight(calls, available, capabilities=None, *, native_reviews=None):
                     reason = 'Requested reasoning effort is unsupported'
             if reason:
                 unsupported.append({'location': location, 'reason': reason, 'agent': deepcopy(agent)})
+    from shared.recovery_diagnostics import condition
+    diagnostics = []
+    if missing or ambiguous:
+        diagnostics.append(condition('execution_capability_missing',
+            'Selected native skills are missing or ambiguous.').envelope()['diagnostic'])
+    if unsupported:
+        diagnostics.append(condition('execution_capability_missing',
+            'Requested native agent controls are unavailable.').envelope()['diagnostic'])
+    for item in evidence:
+        code = ('execution_contract_missing' if item['location'] not in native_reviews
+                else 'execution_capability_missing')
+        diagnostics.append(condition(code, item['reason'], item['location']).envelope()['diagnostic'])
     return {'ready': not (missing or ambiguous or unsupported or evidence),
             'missing_selected_skills': sorted(missing), 'ambiguous_selected_skills': ambiguous,
             'unsupported_agents': unsupported, 'resolved_skills': resolved,
-            'unsupported_native_reviews': evidence}
+            'unsupported_native_reviews': evidence,
+            **({'diagnostics': diagnostics} if diagnostics else {})}

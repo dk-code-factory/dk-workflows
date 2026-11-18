@@ -139,6 +139,33 @@ compatibility and recovery tests establish behavior, not a dollar comparison.
 
 ## Managed task interface
 
+### Structured recovery diagnostics
+
+Task and configuration boundaries add the shared `diagnostic` envelope while
+retaining existing status, action, reason and exit behavior. Authoritative
+conditions use a `ValueError`-compatible typed diagnostic; projections use
+existing structured capture, claim, result, execution and publication facts.
+Classification never matches explanation text. Untyped legacy failures retain
+unknown provenance and dispatch certainty rather than guessing a recovery route.
+
+Supported actions distinguish commands, native tasks and human input. References
+identify original task/claim/result or configuration/publication evidence.
+Uncertain external writes direct read-only reconciliation of their original
+operation; a local input failure establishes nothing about an earlier write.
+Configuration recovery retains its original request, intents and receipts.
+Diagnostics cannot authorize recovery, replenish allowances, bypass native
+evidence or replace current CI/publication checks. Native tasks execute in the
+already-running session.
+
+Diagnostics are transient projections, never saved summaries or a second recovery
+registry. Existing task identities, capture bytes, original results, completed
+siblings, claims, counters and journals keep their formats and validity rules.
+Targeted actions avoid repeated interpretation of helper-specific prose during
+this run and fresh-session recovery, without additional durable-state creation,
+validation or loading cost. Freshness ends when governing inputs or referenced
+state change; callers inspect again before acting. Offline preservation and
+recovery tests establish behavior; native API dollar savings are unmeasured.
+
 `scripts/dk.py prepare --file REQUEST.json` accepts explicit task definitions.
 One helper call builds specs, captures current inputs, claims eligible work and
 returns `invoke`, `reuse`, `recheck`, `failed` or `recover_required`. It includes expected native

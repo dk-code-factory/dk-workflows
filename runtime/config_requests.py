@@ -16,6 +16,8 @@ import skill_config
 from shared.private_state import atomic_text, write, sync_directory
 from shared.repository_scope import checkout_roots, repository
 from shared.storage_paths import location
+from shared.recovery_diagnostics import condition, from_exception
+from shared.diagnostics import command
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -145,7 +147,19 @@ class Requests:
         return self.root/(request_id + '.json')
 
     def _read(self, request_id):
-        return json.loads(self._path(request_id).read_text())
+        path = self._path(request_id)
+        try:
+            return json.loads(path.read_text())
+        except ValueError as exc:
+            raise condition('evidence_damaged', str(exc), path) from exc
+
+    def _condition(self, request, code, message):
+        reference = self._path(request['id'])
+        if request['status'] == 'applying':
+            return condition(code, message, action=command([
+                'python3', ROOT/'scripts/config_requests.py', 'resume',
+                '--request-id', request['id']], reference), dispatched=None, outcome='unknown')
+        return condition(code, message, reference)
 
     def _save(self, request, event):
         path = self._path(request['id'])
@@ -223,7 +237,7 @@ class Requests:
         recovering = request['status'] == 'applying'
         if recovering and (len(operations) != len(request['operations']) or not all(
                 adapters.matches(saved, op) for saved, op in zip(request['operations'], operations))):
-            raise ValueError('Recovery must retain the exact original operations and receipts')
+            raise self._condition(request, 'stale_inputs', 'Recovery must retain the exact original operations and receipts')
         progress, decisions = [], []
         for index, (op, path) in enumerate(zip(operations, destinations)):
             before = read_text(path)
@@ -232,12 +246,12 @@ class Requests:
                 observed = digest(before)
                 if original.get('receipt') or original.get('intent') and observed == original['after']:
                     if observed != original['after']:
-                        raise ValueError('Completed operation changed unexpectedly; recovery blocked')
+                        raise self._condition(request, 'stale_inputs', 'Completed operation changed unexpectedly; recovery blocked')
                     adapters.validate_observed(request['context'], op, before)
                 elif observed != original['before']:
-                    raise ValueError('Unexpected value after interruption; recovery blocked')
+                    raise self._condition(request, 'stale_inputs', 'Unexpected value after interruption; recovery blocked')
                 elif digest(adapters.project(request['context'], op, before)) != original['after']:
-                    raise ValueError('Recovery projection changed; reconcile original intent')
+                    raise self._condition(request, 'stale_inputs', 'Recovery projection changed; reconcile original intent')
                 progress.append(deepcopy(original))
                 decisions.extend(deepcopy(d) for d in request['decisions'] if d['operation'] == index)
                 continue
@@ -291,7 +305,8 @@ class Requests:
                             scope_identity(request['context']['repository']), scope_identity(request['context'].get('upstream'))} or
                         op['scope'] == 'pr' and pending['context'].get('pr') == request['context'].get('pr')
                         for op in pending['operations']):
-                    raise ValueError('Reconcile uncertain configuration request first: ' + pending['id'])
+                    raise self._condition(pending, 'configuration_write_uncertain',
+                                          'Reconcile uncertain configuration request first: ' + pending['id'])
             with self._stores(request['context'], operations):
                 progress, decisions, inputs, candidates, binding = self._proposal(request, operations)
                 assessment = proposal.get('assessment')
@@ -386,7 +401,8 @@ class Requests:
         with self.locked():
             request = self._read(request_id)
             if request['status'] in {'applying', 'applied'}:
-                raise ValueError('Reconcile uncertain writes first; applied changes need a new request')
+                raise self._condition(request, 'configuration_write_uncertain' if request['status'] == 'applying' else 'stale_inputs',
+                                      'Reconcile uncertain writes first; applied changes need a new request')
             if request['status'] != 'cancelled':
                 request.update(status='cancelled', outcome=text(reason))
                 self._save(request, 'cancel')
@@ -394,83 +410,91 @@ class Requests:
 
     def _fresh(self, request):
         if not request.get('assessment') or request['assessment']['unresolved']:
-            raise ValueError('Request has missing or unresolved admission')
+            raise self._condition(request, 'admission_required', 'Request has missing or unresolved admission')
         if fingerprint(self.candidates(request)) != request['candidate_fingerprint']:
-            raise ValueError('Earlier decisions changed; prepare and assess again')
+            raise self._condition(request, 'stale_inputs', 'Earlier decisions changed; prepare and assess again')
         if self._inputs(request, request['operations']) != request['inputs']:
-            raise ValueError('Configuration, admission context or governing inputs changed; fresh preparation required')
+            raise self._condition(request, 'stale_inputs', 'Configuration, admission context or governing inputs changed; fresh preparation required')
         for index, op in enumerate(request['operations']):
             progress = request['progress'][index]
             observed = digest(read_text(adapters.destination(request['context'], op)[0]))
             expected = {progress['after']} if progress.get('receipt') else (
                 {progress['before'], progress['after']} if progress.get('intent') else {progress['before']})
             if observed not in expected:
-                raise ValueError('Configuration changed unexpectedly; fresh preparation or recovery required')
+                raise self._condition(request, 'stale_inputs', 'Configuration changed unexpectedly; fresh preparation or recovery required')
 
     def apply(self, request_id, operation=None, context=None):
-        with self.locked():
-            request = self._read(request_id)
-            if context is not None:
-                # Legacy commands must bind to their current repository and scope.
-                supplied = context_value(context)
-                if any(request['context'].get(k) != v for k, v in supplied.items() if k in context or k == 'checkout'):
-                    raise ValueError('Request context does not match this command')
-            if operation is not None:
-                normalized = adapters.normalize(operation)
-                if len(request.get('operations', [])) != 1 or not adapters.matches(request['operations'][0], normalized):
-                    raise ValueError('Request is not bound to this exact single operation; use config_requests apply for a batch')
-            if request['status'] not in {'prepared', 'applying', 'applied'}:
-                raise ValueError('Request has missing or unresolved admission')
-            if request['status'] == 'applied':
-                if self._git('status', '--porcelain', '--', self._path(request_id).name):
+        request = None
+        try:
+            with self.locked():
+                request = self._read(request_id)
+                if context is not None:
+                    # Legacy commands must bind to their current repository and scope.
+                    supplied = context_value(context)
+                    if any(request['context'].get(k) != v for k, v in supplied.items() if k in context or k == 'checkout'):
+                        raise ValueError('Request context does not match this command')
+                if operation is not None:
+                    normalized = adapters.normalize(operation)
+                    if len(request.get('operations', [])) != 1 or not adapters.matches(request['operations'][0], normalized):
+                        raise ValueError('Request is not bound to this exact single operation; use config_requests apply for a batch')
+                if request['status'] not in {'prepared', 'applying', 'applied'}:
+                    raise self._condition(request, 'admission_required', 'Request has missing or unresolved admission')
+                if request['status'] == 'applied':
+                    if self._git('status', '--porcelain', '--', self._path(request_id).name):
+                        self._committed(request)
+                    return self._status(request)  # Original receipt, never replay an old write.
+                self._private(request['context']['checkout'])
+                with self._stores(request['context'], request['operations']):
+                    self._fresh(request)
                     self._committed(request)
-                return self._status(request)  # Original receipt, never replay an old write.
-            self._private(request['context']['checkout'])
-            with self._stores(request['context'], request['operations']):
-                self._fresh(request)
-                self._committed(request)
-                # Validate the complete batch before any write. Completed siblings
-                # retain receipts and are never replayed.
-                desired = {}
-                for index, op in enumerate(request['operations']):
-                    progress = request['progress'][index]
-                    path = adapters.destination(request['context'], op)[0]
-                    raw = read_text(path)
-                    observed = digest(raw)
-                    if progress.get('receipt'):
-                        if observed != progress['after']:
-                            raise ValueError('Completed operation changed unexpectedly; recovery blocked')
-                        continue
-                    if progress.get('intent') and observed == progress['after']:
-                        continue
-                    if observed != progress['before']:
-                        raise ValueError('Unexpected value after interruption; recovery blocked')
-                    after = adapters.project(request['context'], op, raw)
-                    if digest(after) != progress['after']:
-                        raise ValueError('Projection changed; repeat admission')
-                    desired[index] = after
-                for index, op in enumerate(request['operations']):
-                    progress = request['progress'][index]
-                    if progress.get('receipt'):
-                        continue
-                    path = adapters.destination(request['context'], op)[0]
-                    if not progress.get('intent'):
-                        progress['intent'] = True
-                        request['status'] = 'applying'
-                        self._save(request, 'write intent ' + str(index))
-                    if index in desired and digest(read_text(path)) != progress['after']:
-                        if desired[index] is None:
-                            path.unlink(missing_ok=True)
-                            sync_directory(path.parent)
-                        else:
-                            atomic_text(path, desired[index])
-                    if digest(read_text(path)) != progress['after']:
-                        raise ValueError('Configuration readback mismatch; recovery blocked')
-                    progress['receipt'] = {'path': str(path), 'sha256': progress['after']}
-                    self._save(request, 'readback receipt ' + str(index))
-                request['status'] = 'applied'
-                self._save(request, 'complete')
-                return self._status(request)
+                    # Validate the complete batch before any write. Completed siblings
+                    # retain receipts and are never replayed.
+                    desired = {}
+                    for index, op in enumerate(request['operations']):
+                        progress = request['progress'][index]
+                        path = adapters.destination(request['context'], op)[0]
+                        raw = read_text(path)
+                        observed = digest(raw)
+                        if progress.get('receipt'):
+                            if observed != progress['after']:
+                                raise self._condition(request, 'stale_inputs', 'Completed operation changed unexpectedly; recovery blocked')
+                            continue
+                        if progress.get('intent') and observed == progress['after']:
+                            continue
+                        if observed != progress['before']:
+                            raise self._condition(request, 'stale_inputs', 'Unexpected value after interruption; recovery blocked')
+                        after = adapters.project(request['context'], op, raw)
+                        if digest(after) != progress['after']:
+                            raise self._condition(request, 'stale_inputs', 'Projection changed; repeat admission')
+                        desired[index] = after
+                    for index, op in enumerate(request['operations']):
+                        progress = request['progress'][index]
+                        if progress.get('receipt'):
+                            continue
+                        path = adapters.destination(request['context'], op)[0]
+                        if not progress.get('intent'):
+                            progress['intent'] = True
+                            request['status'] = 'applying'
+                            self._save(request, 'write intent ' + str(index))
+                        if index in desired and digest(read_text(path)) != progress['after']:
+                            if desired[index] is None:
+                                path.unlink(missing_ok=True)
+                                sync_directory(path.parent)
+                            else:
+                                atomic_text(path, desired[index])
+                        if digest(read_text(path)) != progress['after']:
+                            raise self._condition(request, 'stale_inputs', 'Configuration readback mismatch; recovery blocked')
+                        progress['receipt'] = {'path': str(path), 'sha256': progress['after']}
+                        self._save(request, 'readback receipt ' + str(index))
+                    request['status'] = 'applied'
+                    self._save(request, 'complete')
+                    return self._status(request)
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            from shared.diagnostics import Diagnostic
+            if not isinstance(exc, Diagnostic) and request is not None and request['status'] in {'applying', 'applied'}:
+                exc.workflow_diagnostic = self._condition({**request, 'status': 'applying'}, 'configuration_write_uncertain',
+                    'Original configuration write or receipt is unresolved: ' + str(exc))
+            raise
 
     def _status(self, request):
         result = {'id': request['id'], 'status': request['status'],
@@ -485,6 +509,9 @@ class Requests:
                                                'reconcile' if request['progress'][i].get('intent') else 'pending'}
                                     for i, op in enumerate(request['operations'])]
             result['questions'] = (request.get('assessment') or {}).get('unresolved', [])
+        if request['status'] == 'applying':
+            result['diagnostic'] = self._condition(request, 'configuration_write_uncertain',
+                'Original configuration intents or receipts require reconciliation.').envelope()['diagnostic']
         return result
 
     def resume(self, request_id):
@@ -496,6 +523,8 @@ class Requests:
                 result['admission'] = 'reusable'
             except (ValueError, OSError) as exc:
                 result.update(admission='stale', reason=str(exc))
+                result['admission_diagnostic'] = from_exception(exc, self._path(request_id))
+                result.setdefault('diagnostic', result['admission_diagnostic'])
         return result
 
     def show(self, request_id, section='status'):

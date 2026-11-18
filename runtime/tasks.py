@@ -10,6 +10,7 @@ from task_runtime import Store
 from task_primitives import digest, task_key
 from task_policy import make_spec
 import skill_config
+from shared.recovery_diagnostics import annotate, condition, evidence_code, from_exception
 
 
 class Tasks:
@@ -23,7 +24,7 @@ class Tasks:
         checkout = definition.get('git', {}).get('checkout', definition.get('instruction_policy', {}).get('checkout', self.checkout))
         if ('instruction_policy' not in definition
                 and instruction_sources.binding(checkout, self.store.subject['repository']) is not None):
-            raise ValueError('Legacy repository guidance requires a rebuilt assignment and handoff')
+            raise condition('stale_inputs', 'Legacy repository guidance requires a rebuilt assignment and handoff')
 
     def spec(self, descriptor, *, replay=False, authorize_reassessment=False):
         if (not isinstance(descriptor, dict) or set(descriptor) - {
@@ -202,7 +203,8 @@ class Tasks:
                 item['definition']['instruction_policy'] = deepcopy(spec['instruction_policy'])
         for spec in specs:
             if required(spec) and 'native_review' not in spec:
-                raise ValueError('Reviewer tasks require their native execution contract before preparation')
+                raise condition('execution_contract_missing',
+                    'Reviewer tasks require their native execution contract before preparation')
         # Key computation needs only identity, not a second expensive capture.
         retained = {task_key(self.store.subject, spec['task']['id'], spec['skill']['identity'], options=spec.get('options')): item
                     for spec, item in zip(specs, descriptors)}
@@ -252,7 +254,8 @@ class Tasks:
     def saved_spec(self, key):
         entry = self._entries().get(key, {})
         if 'managed' not in entry:
-            raise ValueError('Task has no retained definition')
+            raise condition('definition_required', 'Task has no retained definition',
+                            str(self.store.manifest) + '#/entries/' + key)
         self._retained_policy(entry['managed'])
         return self.spec(entry['managed'], replay=True)
 
@@ -268,8 +271,10 @@ class Tasks:
                     continue
                 descriptor = entry.get('managed')
                 if descriptor is None:
-                    legacy.append({'key': key, 'task': entry.get('components', {}).get('task', {}).get('id'),
-                                   'reason': 'definition_required'})
+                    legacy.append(annotate({'key': key, 'task': entry.get('components', {}).get('task', {}).get('id'),
+                                   'reason': 'definition_required'}, 'definition_required',
+                                   'The original task has no managed definition.',
+                                   str(self.store.manifest) + '#/entries/' + key))
                     continue
                 occurrence = (descriptor.get('kind', 'task') not in {'task', 'skill', 'alternatives', 'architecture', 'assessed-alternatives'} or
                               descriptor.get('kind') == 'skill' and descriptor.get('selection') == 'finalizers')
@@ -283,7 +288,9 @@ class Tasks:
                     specs.append(spec)
                 except (ValueError, KeyError, TypeError, OSError, RuntimeError) as exc:
                     blocked.append({'key': key, 'reusable': False, 'coverage_complete': False,
-                                    'reason': 'refresh_required', 'detail': str(exc)})
+                                    'reason': 'refresh_required', 'detail': str(exc),
+                                    'diagnostic': from_exception(exc,
+                                        str(self.store.manifest) + '#/entries/' + key + '/managed')})
         with evaluation(self):
             result = self.store.status(specs, compact=True, run=run, explain=explain, tolerate_missing=True)
         result['tasks'] = [self.compact(task) for task in result['tasks']] + blocked
@@ -360,7 +367,9 @@ class Tasks:
                 raise ValueError('Unknown task key')
             saved, problem = self.store._load_saved(entry)
             if problem:
-                raise ValueError('Result unavailable: ' + problem)
+                raise condition(evidence_code(problem),
+                                'Result unavailable: ' + problem,
+                                str(self.store.manifest) + '#/entries/' + key + '/result')
             if section == 'checklist':
                 from checklists import load_response
                 gate = deepcopy(entry.get('checklist'))

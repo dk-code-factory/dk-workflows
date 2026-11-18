@@ -2,6 +2,7 @@
 import hashlib
 import json
 import re
+from shared.recovery_diagnostics import condition
 
 DRIVER_REPORT = 'NATIVE_REVIEW_DRIVERS_JSON='
 
@@ -82,7 +83,8 @@ def binding(components, claim):
     from task_primitives import digest
     expected = components.get('native_review')
     if expected is None:
-        raise ValueError('Reviewer execution requirements were not captured before invocation')
+        raise condition('execution_contract_missing', 'Reviewer execution requirements were not captured before invocation',
+                        'claim:' + claim.get('id', 'unknown'), 'key:' + claim.get('key', 'unknown'))
     contract(expected)
     if not evidence_required(expected):
         raise ValueError('Native execution evidence is not required by this declaration')

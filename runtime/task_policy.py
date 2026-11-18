@@ -3,6 +3,7 @@ from copy import deepcopy
 from pathlib import Path
 import os
 import invocation
+from shared.recovery_diagnostics import condition
 import task_capture
 from task_primitives import digest, identity
 
@@ -69,7 +70,7 @@ def make_spec(*, repository, pr, skill_identity, resources, responsibility,
     checkout = git['checkout'] if git is not None else (instruction_policy or {}).get('checkout', Path.cwd())
     live_policy = instruction_sources.binding(checkout, subject['repository'])
     if instruction_policy is not None and instruction_policy != live_policy:
-        raise ValueError('Repository instruction choice or sources changed; rebuild assignment and handoff')
+        raise condition('stale_inputs', 'Repository instruction choice or sources changed; rebuild assignment and handoff')
     if live_policy is not None:
         spec['instruction_policy'] = live_policy
     digest(spec)  # Reject values that cannot survive the JSON task-spec contract.
@@ -83,7 +84,7 @@ def validate_current(spec):
     checkout = spec.get('git', {}).get('checkout', policy['checkout'] if policy else Path.cwd())
     live_policy = instruction_sources.binding(checkout, spec['repository'])
     if policy != live_policy:
-        raise ValueError('Repository instruction choice or sources changed; rebuild assignment and handoff')
+        raise condition('stale_inputs', 'Repository instruction choice or sources changed; rebuild assignment and handoff')
     if policy is not None:
         instruction_sources.check_paths(checkout, spec['repository'], [
             *spec.get('instructions', {}).values(), *spec.get('inputs', {}).values(),

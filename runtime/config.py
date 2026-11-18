@@ -3,6 +3,7 @@ from copy import deepcopy
 from pathlib import Path
 import os
 import re
+from shared.recovery_diagnostics import condition, configuration_validation
 
 import invocation
 from task_primitives import digest, read
@@ -63,6 +64,7 @@ def finalizer_groups(finalizers):
     return groups
 
 
+@configuration_validation
 def validate(settings):
     if not isinstance(settings, dict) or set(settings) - (DEFAULTS.keys() | {'$schema'}):
         raise ValueError('Unknown workflow setting; use the process configuration format')
@@ -164,7 +166,7 @@ def effective(repository, upstream=None, *, expanded=True):
     for repo in [None] + ([upstream] if upstream else []) + [repository]:
         source = path(repo)
         if source.exists():
-            settings = validate(read(source))
+            settings = skill_config._scope_record(source)
             result = _merge_settings(result, {key: value for key, value in settings.items() if key != '$schema'})
             sources.append(str(source))
     if expanded:
@@ -332,7 +334,7 @@ def check_selection(spec):
     settings = deepcopy(DEFAULTS)
     for source in selection['sources']:
         if Path(source).exists():
-            value = validate(read(source))
+            value = skill_config._scope_record(source)
             settings = _merge_settings(settings, {key: item for key, item in value.items() if key != '$schema'})
     if 'upstream' in selection:
         settings = effective(spec['repository'], selection['upstream'])['settings']
@@ -341,7 +343,7 @@ def check_selection(spec):
         call = invocation.configured(call, settings['skill_defaults'], identity=spec['skill']['identity'])
         process = settings['processes'][selection['process']]
     except (ValueError, KeyError) as exc:
-        raise ValueError('Inputs changed: configured invocation no longer resolves') from exc
+        raise condition('stale_inputs', 'Inputs changed: configured invocation no longer resolves') from exc
     options = spec['options']
     changed = (call != options.get('invocation')
                or process.get('limits', dict(LIMITS)) != options.get('process_limits'))
@@ -354,7 +356,7 @@ def check_selection(spec):
     if 'finalization' in options:
         changed = changed or process.get('finalizers', []) != options['finalization']['plan']
     if changed:
-        raise ValueError('Inputs changed: configured invocation, policy or hook list changed')
+        raise condition('stale_inputs', 'Inputs changed: configured invocation, policy or hook list changed')
 
 
 def make_completion_spec(*, repository, pr, run, definition, upstream=None, options=None):

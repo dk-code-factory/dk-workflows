@@ -6,13 +6,14 @@ import os
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'runtime'))
-from state import Store, make_spec, read
-import skill_config
-from config import (CYCLE_PHASES, effective, finalizer_groups, make_finalizer_spec,
-                    make_hook_spec, make_invocation_spec, hook_phase)
 
 
 def main():
+    from state import Store, make_spec, read
+    import skill_config
+    from config import (CYCLE_PHASES, effective, finalizer_groups, make_finalizer_spec,
+                        make_hook_spec, make_invocation_spec, hook_phase)
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repository', required=True, help='HOST/OWNER/REPO')
     parser.add_argument('--pr', required=True, help='Canonical https PR URL')
@@ -242,5 +243,6 @@ if __name__ == '__main__':
     try:
         main()
     except (ValueError, KeyError, TypeError, OSError, RuntimeError) as exc:
-        print(json.dumps({'status': 'blocked', 'reason': str(exc)}))
+        from shared.recovery_diagnostics import cli_failure
+        print(json.dumps(cli_failure(exc, sys.argv[1:])))
         sys.exit(2)
