@@ -885,6 +885,9 @@ class Store:
             snapshots[phase_key] = phase
         entry = manifest['entries'].setdefault(captured['key'], {'key': captured['key'], 'attempts': []})
         previous = self.describe(captured, entry)
+        if 'alternatives_reassessment' in options:
+            from fix_alternatives import guard_reassessment
+            guard_reassessment(captured, entry, options['alternatives_reassessment'])
         if entry.get('claim'):
             if recover != entry['claim']['id']:
                 return {'action': 'recover_required', **previous}

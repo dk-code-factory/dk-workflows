@@ -253,6 +253,9 @@ validates the retained complete original through immutable result references in
 existing attempts. Previously consumed request identities remain superseded after
 later requests. Ordinary saved-key and low-level retries retain the original run
 and review-cycle budget; unchanged accepted reuse reserves no additional allowance.
+The locked start boundary also rejects changed authorized inputs and superseded
+requests on low-level retries. Starting a newer request supersedes the previous
+one even if the newer claim has not recorded a result.
 
 Complete affected stages in dependency order. A changed comparison requires new
 selection/alignment coverage. Explicitly bind each affected downstream stage

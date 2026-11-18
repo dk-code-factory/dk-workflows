@@ -75,20 +75,40 @@ def reassessment(tasks, request, *, request_id, authorization, source):
     return result
 
 
+def _binding(record, expected_key):
+    if (not isinstance(record, dict)
+            or set(record) != {'request', 'key', 'original_result', 'fingerprint', 'binding'}
+            or not isinstance(record['request'], dict)
+            or set(record['request']) != {'id', 'source'}
+            or any(not alternatives.text(v) for v in record['request'].values())
+            or record['key'] != expected_key
+            or record['binding'] != digest({k: v for k, v in record.items() if k != 'binding'})):
+        raise ValueError('Reassessment authorization binding changed; obtain a new explicit reassessment')
+
+
+def guard_reassessment(captured, original, record):
+    """Check input freshness and consumed authorization at the locked start boundary."""
+    _binding(record, captured['key'])
+    unsigned = deepcopy(captured['components'])
+    unsigned['options'].pop('alternatives_reassessment', None)
+    if digest(unsigned) != record['fingerprint']:
+        raise ValueError('Authorized reassessment inputs changed; obtain a new explicit reassessment')
+    active = (original or {}).get('components', {}).get('options', {}).get('alternatives_reassessment')
+    consumed = any(attempt.get('reassessment_request') == record['request']['id']
+                   for attempt in (original or {}).get('attempts', []))
+    if (not original or not original.get('result') or
+            (active != record and
+             (consumed or original['result']['hash'] != record['original_result']))):
+        raise ValueError('Reassessment authorization was superseded; obtain a new explicit reassessment')
+
+
 def bind_reassessment(tasks, descriptor, spec):
     if 'alternatives_reassessment' in spec['options']:
         raise ValueError('Reassessment options require a validated explicit reassessment binding')
     record = descriptor.get('reassessment')
     if record is None:
         return
-    if (not isinstance(record, dict)
-            or set(record) != {'request', 'key', 'original_result', 'fingerprint', 'binding'}
-            or not isinstance(record['request'], dict)
-            or set(record['request']) != {'id', 'source'}
-            or any(not alternatives.text(v) for v in record['request'].values())
-            or record['key'] != key(tasks, descriptor['stage'])
-            or record['binding'] != digest({k: v for k, v in record.items() if k != 'binding'})):
-        raise ValueError('Reassessment authorization binding changed; obtain a new explicit reassessment')
+    _binding(record, key(tasks, descriptor['stage']))
     request = read(record['request']['source'])
     if (not isinstance(request, dict) or request.get('id') != record['request']['id']
             or any(not alternatives.text(request.get(k)) for k in ('id', 'source', 'instruction'))):
@@ -96,13 +116,7 @@ def bind_reassessment(tasks, descriptor, spec):
     spec['inputs']['alternatives_reassessment'] = record['request']['source']
     with alternatives.evaluation(tasks) as context:
         current = capture(spec, _context=context['capture'])
-    if current['fingerprint'] != record['fingerprint']:
-        raise ValueError('Authorized reassessment inputs changed; obtain a new explicit reassessment')
-    original = entry(tasks, descriptor['stage'])
-    if (not original or not original.get('result') or
-            (original['result']['hash'] != record['original_result'] and
-             original.get('components', {}).get('options', {}).get('alternatives_reassessment') != record)):
-        raise ValueError('Reassessment authorization was superseded; obtain a new explicit reassessment')
+    guard_reassessment(current, entry(tasks, descriptor['stage']), record)
     spec['options']['alternatives_reassessment'] = deepcopy(record)
 
 

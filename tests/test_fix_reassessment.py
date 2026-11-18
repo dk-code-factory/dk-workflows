@@ -400,3 +400,50 @@ def test_superseded_authorization_cannot_replace_newer_incomplete_reassessment(c
     with pytest.raises(ValueError, match='superseded'):
         tasks.prepare({'tasks': [old_descriptor]})
     assert store.manifest.read_bytes() == before
+
+
+@pytest.mark.parametrize('boundary', ['descriptor', 'low_level'])
+def test_superseded_authorization_cannot_recover_replacement_before_any_result(case, tmp_path, boundary):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = planned(tasks, deepcopy(spec), required=False)
+    original = read(store.manifest)['entries'][refs['assessment']]['result']
+    item = descriptor(deepcopy(spec), 'assessment')
+    first = authorize(tasks, item, tmp_path)
+    old_descriptor = deepcopy(read(store.manifest)['entries'][first['key']]['managed'])
+    second = authorize(tasks, item, tmp_path, request_id='later-user-message',
+                       recover={first['key']: first['claim']['id']})
+    assert read(store.manifest)['entries'][first['key']]['result'] == original
+    before = store.manifest.read_bytes()
+    with pytest.raises(ValueError, match='superseded'):
+        if boundary == 'descriptor':
+            Tasks(REPO, PR).prepare({'tasks': [old_descriptor],
+                                    'recover': {second['key']: second['claim']['id']}})
+        else:
+            store.start(first['assignment'], recover=second['claim']['id'])
+    assert store.manifest.read_bytes() == before
+    resumed = Tasks(REPO, PR).prepare({'tasks': [{'key': second['key']}],
+                                      'recover': {second['key']: second['claim']['id']}})['tasks'][0]
+    assert resumed['action'] == 'invoke'
+    assert finish(tasks, resumed, {'required': False, 'reason': 'Recovered', 'evidence': ['diff']})['checklist_complete']
+
+
+@pytest.mark.parametrize('change', ['resource', 'context', 'request'])
+def test_low_level_reassessment_retry_rejects_changed_authorized_inputs(case, tmp_path, change):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    item = descriptor(deepcopy(spec), 'assessment')
+    initial = tasks.prepare({'run': 'retained', 'cycle': 'initial', 'tasks': [item]})['tasks'][0]
+    assert finish(tasks, initial, {'required': False, 'reason': 'Initial', 'evidence': ['diff']})['checklist_complete']
+    task = authorize(tasks, item, tmp_path, run='retained', cycle='replacement')
+    assert finish(tasks, task, {'required': False, 'reason': 'Missing observations', 'evidence': ['diff']},
+                  native=False)['status'] == 'incomplete'
+    paths = {'resource': spec['skill']['resources']['entry'], 'context': spec['inputs']['context'],
+             'request': tmp_path/'message-215.json'}
+    path = Path(paths[change])
+    if change == 'request':
+        value = read(path); value['instruction'] += ' Changed scope'; write(path, value)
+    else:
+        path.write_text('Changed after authorization')
+    before = store.manifest.read_bytes()
+    with pytest.raises(ValueError, match='inputs changed'):
+        store.start(task['assignment'], run='retained', cycle='changed-inputs')
+    assert store.manifest.read_bytes() == before

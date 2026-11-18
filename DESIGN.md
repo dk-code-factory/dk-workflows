@@ -1045,6 +1045,9 @@ New execution checks the retained run and review-cycle allowance under the task
 store lock, including saved-key and low-level retries after incomplete results;
 unchanged accepted reuse does not reserve another run. Missing bindings cannot
 turn an incomplete authorized replacement into ordinary unbudgeted execution.
+The same locked boundary checks the captured unsigned inputs and consumed request
+identity before recovering a claim or reserving allowance. A newer claimed request
+supersedes its predecessor even before either replacement records a result.
 
 Each new reassessment attempt retains its request identity alongside the existing
 claim fields, so a later request cannot make an older consumed request usable
