@@ -44,6 +44,13 @@ After actual terminal execution, call `finish --key KEY --claim CLAIM_ID --repor
 
 ## Completion checks
 
+For explicitly authorized replacement of a completed historical initial fix
+alternatives stage, use [historical fix reassessment](alternatives-review.md#historical-fix-reassessment).
+`reassess` binds the exact original user-request source and current inputs before
+entering this same managed lifecycle. Ordinary `prepare` and `resume` never infer
+that permission from a new input. Preserve task identities, original results,
+claims, retained run/CI budgets and publication recovery.
+
 Every managed task automatically supplements its assignment with built-in items
 for scope, evidence, validation and deliverables. Reviewers with native contracts
 also check required native evidence; verification checks every candidate; fixers

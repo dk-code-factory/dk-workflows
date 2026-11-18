@@ -1010,6 +1010,45 @@ evidence; manual alternatives review retains explicit-rerun behavior.
 Every result consumed by the incoming gate must belong to the incoming workflow;
 an initial fix-plan skip or alignment cannot release incoming review.
 
+Historical fix-stage recovery has an explicit `dk.py reassess` entry point. It
+requires one rebuilt stage descriptor and the original request artifact's stable
+message identity, exact instruction and source. Bind that artifact through the
+existing input map, and retain only its reference/identity, affected task key,
+original immutable result hash and authorized replacement fingerprint with a
+content binding in the existing managed definition. No copied instruction,
+conversation, result, settings snapshot or separate authorization store is added.
+Ordinary preparation cannot turn an arbitrary authorization input into permission.
+The native coordinator verifies that the cited instruction authorizes the selected
+stage; helpers validate the exact artifact and binding, never semantic consent.
+
+Reassessment replaces only that stage's active coverage through the normal
+claim/native-evidence/checklist transaction. Original attempts, results and sourced
+choices remain historical evidence. Unchanged prerequisites and siblings reuse
+their accepted results. A changed dependency result blocks completed downstream
+coverage until each affected stage is explicitly bound and freshly completed;
+the same original instruction may cover those stages only when its scope says so.
+Missing old installation resources produce a compact `reassessment_required`
+fix-gate handoff; rebuilt definitions resolve current resources without reading
+the removed installation. Missing or damaged original results still require
+restoration. Original Git pins and initial PR sources remain pinned.
+
+Repeated identical authorization reuses its original binding and completed
+analysis, including from a fresh session. Interrupted claims require explicit
+recovery; preparing another authorization cannot overwrite them. Source bytes,
+governing inputs or a binding change revoke that authorization, requiring a new
+explicit request identity/binding. A superseded authorization cannot restore old
+coverage. Retain the original run when one exists, so exhausted review allowances,
+same-cycle restrictions, retries, CI counts and publication recovery remain in
+force. Reassessment grants no publication/merge permission or budget renewal.
+
+This small binding avoids repeated native reconstruction of which original result
+the user authorized replacing, and avoids repeating that replacement on the next
+session. Its expected avoided API dollar cost exceeds capture, validation and
+targeted loading of the reference and hashes; freshness ends at changes to the
+source, authorized inputs or replacement chain. Ordinary authorization, CI and
+publication checks remain live. Offline reuse, interruption and invalidation
+regressions establish behavior; native API dollar savings are unmeasured.
+
 The reused original results and small owner selector avoid repeating paid
 alternatives analysis and reconstructing its recovery on subsequent cycles and
 fresh-session entry. Their expected avoided API dollar cost exceeds capturing,

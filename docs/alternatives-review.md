@@ -218,6 +218,46 @@ context across later author commits. Stop after requested alternatives, without
 ordinary tasks, finalizers, code edits, PR approval or merging. An analysis-only
 request suppresses publication and cannot claim a completed rejection.
 
+## Historical fix reassessment
+
+For retained `kind: alternatives`, `skill: dk-workflows:dk-pr-fix` stage records,
+use `alternatives.py fix-gate` to discover the first unfinished stage. Missing old
+installation paths return `reassessment_required` with its stage, dependency keys
+and recovery guidance. Restore the original sources for unchanged reuse, or use
+the user's explicit reassessment instruction. Keep the original results and
+source artifacts; do not invalidate the cache or renew the run's allowances.
+
+Use the original user-request JSON artifact with nonempty `id`, `source` and exact
+`instruction`. Verify that instruction authorizes the affected stage and the
+consumed current guidance. Rebuild a normal [prepare request](task-state.md#prepare-invoke-and-finish)
+with exactly one fix alternatives descriptor, its current installed resources,
+complete governing inputs and accepted dependency keys. Retain its original run
+and an explicit budgeted review cycle when a run exists. Reassessment cannot use
+CI repair/rerun reservations instead of review allowance. Run:
+
+```sh
+python3 PLUGIN_ROOT/scripts/dk.py --repository HOST/OWNER/REPO --pr PR_URL --checkout REPO reassess --file REQUEST.json --request-id ORIGINAL_MESSAGE_ID --authorization 'EXACT_USER_INSTRUCTION' --source ORIGINAL_REQUEST.json
+```
+
+`--request-id` and `--authorization` must exactly match the original artifact.
+The helper binds its bytes, the existing task identity, original immutable result
+and current replacement inputs, then returns the usual managed action. It never
+launches a skill. Execute native work and finish its checklist through the normal
+lifecycle. Identical replay reuses completed work; reconcile an unfinished claim
+before explicit recovery with its original run/cycle. Do not manufacture another
+request identity to retry an unchanged instruction.
+
+Complete affected stages in dependency order. A changed comparison requires new
+selection/alignment coverage. Explicitly bind each affected downstream stage
+after its prerequisites finish, using the same sourced instruction only if that
+instruction covers it. Unaffected upstream analysis and siblings remain reusable;
+original sourced choices remain historical evidence. Missing original results
+require restoration. Changed request bytes, source, governing inputs or a
+superseded binding block reuse; obtain a new explicit request for changed work.
+This operation cannot grant publication or merge permission, renew review/CI
+allowances, close claims silently or release dependent work before fresh native
+execution and checklist acceptance.
+
 ## Issue-only evaluation
 
 Before a PR exists, use `dk-issue-alternatives` with the same native

@@ -21,6 +21,12 @@ def main():
     p = sub.add_parser('prepare', help='Define, capture and claim native tasks in one call')
     p.add_argument('--file', type=Path, required=True, help='Tasks and retained run/cycle options')
     p.add_argument('--compact', action='store_true', help='Omit known assignments unless invoking new work')
+    p = sub.add_parser('reassess', help='Explicitly authorize one retained initial fix alternatives replacement')
+    p.add_argument('--file', type=Path, required=True, help='Prepare request with one rebuilt alternatives definition')
+    p.add_argument('--request-id', required=True, help='Original explicit user message identity')
+    p.add_argument('--authorization', required=True, help='Exact user instruction authorizing reassessment only')
+    p.add_argument('--source', required=True, help='Original request JSON artifact with id, source and exact instruction')
+    p.add_argument('--compact', action='store_true')
     p = sub.add_parser('resume', help='Recapture saved task definitions and return compact status')
     p.add_argument('--key', action='append', default=[])
     p.add_argument('--run')
@@ -131,11 +137,15 @@ def main():
     p.add_argument('--reason', required=True)
     p.add_argument('--recover', help='Close this stopped claim without invoking; reconcile domain writes first')
     args = parser.parse_args()
-    if args.command in {'prepare', 'resume', 'finish', 'result', 'progress'}:
+    if args.command in {'prepare', 'reassess', 'resume', 'finish', 'result', 'progress'}:
         from tasks import Tasks
         tasks = Tasks(args.repository, args.pr, checkout=args.checkout)
         if args.command == 'prepare':
             result = tasks.prepare(read(args.file), compact=args.compact)
+        elif args.command == 'reassess':
+            result = tasks.reassess(read(args.file), request_id=args.request_id,
+                                    authorization=args.authorization, source=args.source,
+                                    compact=args.compact)
         elif args.command == 'resume':
             result = tasks.resume(keys=args.key, run=args.run, explain=args.explain)
         elif args.command == 'result':
