@@ -1,0 +1,1076 @@
+{
+  "source_revision": "b9122f3a7f8a61cfad95ee4acfad39dad95d7707",
+  "contract": 2,
+  "captures": {
+    "complete": {
+      "key": "98294f75b0c8fe31f7cb556b227a1d3f8a80166f497370d71c52ed3defc7c53d",
+      "fingerprint": "852975f1086b9c9fc9d52888c63af8df0e1a5f8c04eaa37aee3c673243f23e9e",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "complete",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {},
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "failed": {
+      "key": "27f12c53d0d34496e8c42d3df6b4c08d2d3469f4da746fbff99f3e4b316a91ff",
+      "fingerprint": "5d557f226d71b2f67ed5df95071b34c469dc8c14116f3beadee885dca68e2b4d",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "failed",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {},
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "pending": {
+      "key": "577b2229871f322ea8b183740f42c282f14b76f64a2f164fd6f444d17d2b5288",
+      "fingerprint": "7119b44ce2bfa5bd542b35da5fe5b3a00283692dbaaa4e4fad121bb13215e71a",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "pending",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {},
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "incomplete": {
+      "key": "17c46fb6c1b47e0cc4cf81f9a744f0f97aaf42cd61a34e1b3fdb5939fb76bbab",
+      "fingerprint": "97c0de48aa0216ecbb627009613c9afc8c90193ef94991ccfbc55b85cfb8a4f2",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "incomplete",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {},
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "missing": {
+      "key": "8fdbb376f2782219bf730c892572fe016ed252d1ba4e8da0b444105aeb8d7b63",
+      "fingerprint": "17d05225ba88abca238ce6e3694ed676080cfa71e8e873a8eccf12667299f4cf",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "missing",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {},
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "damaged": {
+      "key": "09359017f38d3d1fc3afbb255b5ecb4087d5d3b866f5b11844a7c33b6fe02dfa",
+      "fingerprint": "030f5071f7bf99454b8fa3b0b505a1553ad1518a418f3a9fcac698b8cb24ee7c",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "damaged",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {},
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "legacy": {
+      "key": "dc71d9060d195e01394357e00523dfaacfe5331b5212c3e626ec6f613706da91",
+      "fingerprint": "358704d45a1f291eee77dcf5e7527b878e4a0837a0076173c30bc6450a4df79e",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "legacy",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {},
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "managed": {
+      "key": "50492cbf36a26f5de2125ed1cdcc4961f99ef2fdf06327df3e320c419e118225",
+      "fingerprint": "e9bfb3032f006855fe551456bc8fa7d7c0910d3320431a601594b49c32e1d094",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "managed",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {},
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "noncacheable": {
+      "key": "98294f75b0c8fe31f7cb556b227a1d3f8a80166f497370d71c52ed3defc7c53d",
+      "fingerprint": "852975f1086b9c9fc9d52888c63af8df0e1a5f8c04eaa37aee3c673243f23e9e",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "complete",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {},
+      "cacheable": false,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "no-declaration": {
+      "key": "98294f75b0c8fe31f7cb556b227a1d3f8a80166f497370d71c52ed3defc7c53d",
+      "fingerprint": "d3531ce0aeba3619bee8e341dcaa123131570dd2e31f83965ff8d3f913d4eeb6",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "complete",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          }
+        },
+        "options": {}
+      },
+      "provenance": {},
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "git-label": {
+      "key": "98294f75b0c8fe31f7cb556b227a1d3f8a80166f497370d71c52ed3defc7c53d",
+      "fingerprint": "76c58062ae07990c20ba53fceab18e433d1a1738184a4f8d4b5a93a60f95d246",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "complete",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "git": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {},
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "hook": {
+      "key": "98294f75b0c8fe31f7cb556b227a1d3f8a80166f497370d71c52ed3defc7c53d",
+      "fingerprint": "852975f1086b9c9fc9d52888c63af8df0e1a5f8c04eaa37aee3c673243f23e9e",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "complete",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {},
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": {
+        "occurrence": {
+          "run": "fixture"
+        },
+        "hooks": []
+      }
+    },
+    "old-assessment": {
+      "key": "6e1ccf53e8b6d591fb02fc2263383e35ef5f464a66be440b7b2ee290e2ff4839",
+      "fingerprint": "cd7018b4e69e320e3e6ae7b147402586c8860c1b254f6f01f12dde9719da98d5",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "pr-purpose-assessment",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "dk-workflows:dk-pr-assessment",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {},
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "new-assessment": {
+      "key": "6e1ccf53e8b6d591fb02fc2263383e35ef5f464a66be440b7b2ee290e2ff4839",
+      "fingerprint": "48c270495ea8a6a9e5dfdbfb3a1080706da0ae6bc0aad3d51a7fddc972fd3252",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "pr-purpose-assessment",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "dk-workflows:dk-issue-alternatives",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {},
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "renamed-review": {
+      "key": "6486f626211b4bebb8dfbb1f56e9c7f25e44b9d2592af9575861e643696914dc",
+      "fingerprint": "b6e8eb1b3a62722ca40287c5a14a166c52f468d6d5a488ee924d9eb316edbf60",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "alternatives-alignment-review",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "dk-workflows:dk-pr-review-architect",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {},
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "git-False-False": {
+      "key": "98294f75b0c8fe31f7cb556b227a1d3f8a80166f497370d71c52ed3defc7c53d",
+      "fingerprint": "b6baab851355cba7ce0231ebd6981dc03f2f4ad3efa7f8fa17096232ff2775d3",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "complete",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          },
+          "git": {
+            "trees": {
+              "target": "2ca32c66f39a511bff44d64fb410f6b1dddaf4f4",
+              "base": "2ca32c66f39a511bff44d64fb410f6b1dddaf4f4",
+              "head": "f27816eceefd137286bc649f229cd1e4524c6b65"
+            },
+            "diff_sha256": "d899c03b0e1488e11adc568fb8451d13cbfe583de84db213e93ca45d21833242"
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {
+        "checkout": "$CHECKOUT",
+        "commits": {
+          "target": "a2852fbaa049c4230b351d1f6cc72a0c72d62f3b",
+          "base": "a2852fbaa049c4230b351d1f6cc72a0c72d62f3b",
+          "head": "3d8886e558279261a2cd92a9c42b3fdc726d6931"
+        }
+      },
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "git-True-False": {
+      "key": "98294f75b0c8fe31f7cb556b227a1d3f8a80166f497370d71c52ed3defc7c53d",
+      "fingerprint": "48728b3e3a8d5c20e5d6d88a3afa8968c613240126de6c9c088a6938c03d2e4e",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "complete",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          },
+          "git": {
+            "trees": {
+              "target": "2ca32c66f39a511bff44d64fb410f6b1dddaf4f4",
+              "base": "2ca32c66f39a511bff44d64fb410f6b1dddaf4f4",
+              "head": "f27816eceefd137286bc649f229cd1e4524c6b65"
+            },
+            "diff_sha256": "d899c03b0e1488e11adc568fb8451d13cbfe583de84db213e93ca45d21833242",
+            "history": "1800d8e587d540ec276116c4faafa9866b518ba2cdead26d3645b00a90f8ada4"
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {
+        "checkout": "$CHECKOUT",
+        "commits": {
+          "target": "a2852fbaa049c4230b351d1f6cc72a0c72d62f3b",
+          "base": "a2852fbaa049c4230b351d1f6cc72a0c72d62f3b",
+          "head": "3d8886e558279261a2cd92a9c42b3fdc726d6931"
+        }
+      },
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "git-False-True": {
+      "key": "98294f75b0c8fe31f7cb556b227a1d3f8a80166f497370d71c52ed3defc7c53d",
+      "fingerprint": "fead550ac7cab3c092a006213cc3ce0ecf528445008b90dfd573a6c69465ad13",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "complete",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          },
+          "git": {
+            "trees": {
+              "target": "2ca32c66f39a511bff44d64fb410f6b1dddaf4f4",
+              "base": "2ca32c66f39a511bff44d64fb410f6b1dddaf4f4",
+              "head": "f27816eceefd137286bc649f229cd1e4524c6b65"
+            },
+            "diff_sha256": "d899c03b0e1488e11adc568fb8451d13cbfe583de84db213e93ca45d21833242",
+            "commits": {
+              "target": "a2852fbaa049c4230b351d1f6cc72a0c72d62f3b",
+              "base": "a2852fbaa049c4230b351d1f6cc72a0c72d62f3b",
+              "head": "3d8886e558279261a2cd92a9c42b3fdc726d6931"
+            }
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {
+        "checkout": "$CHECKOUT",
+        "commits": {
+          "target": "a2852fbaa049c4230b351d1f6cc72a0c72d62f3b",
+          "base": "a2852fbaa049c4230b351d1f6cc72a0c72d62f3b",
+          "head": "3d8886e558279261a2cd92a9c42b3fdc726d6931"
+        }
+      },
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    },
+    "git-True-True": {
+      "key": "98294f75b0c8fe31f7cb556b227a1d3f8a80166f497370d71c52ed3defc7c53d",
+      "fingerprint": "ebf86b38a678981c816d4d5edf9a9e9b39be17c6720b0ece838486d5963e2d2c",
+      "components": {
+        "contract": 2,
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7",
+        "task": {
+          "id": "complete",
+          "instructions": "Inspect the supplied fixture and return original evidence."
+        },
+        "skill": {
+          "identity": "fixture:worker",
+          "resources": {
+            "skill": {
+              "kind": "file",
+              "sha256": "7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569",
+              "executable": false,
+              "link": null
+            }
+          }
+        },
+        "instructions": {
+          "user": {
+            "kind": "file",
+            "sha256": "99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4",
+            "executable": false,
+            "link": null
+          }
+        },
+        "inputs": {
+          "context": {
+            "kind": "file",
+            "sha256": "ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754",
+            "executable": false,
+            "link": null
+          },
+          "git": {
+            "trees": {
+              "target": "2ca32c66f39a511bff44d64fb410f6b1dddaf4f4",
+              "base": "2ca32c66f39a511bff44d64fb410f6b1dddaf4f4",
+              "head": "f27816eceefd137286bc649f229cd1e4524c6b65"
+            },
+            "diff_sha256": "d899c03b0e1488e11adc568fb8451d13cbfe583de84db213e93ca45d21833242",
+            "history": "1800d8e587d540ec276116c4faafa9866b518ba2cdead26d3645b00a90f8ada4",
+            "commits": {
+              "target": "a2852fbaa049c4230b351d1f6cc72a0c72d62f3b",
+              "base": "a2852fbaa049c4230b351d1f6cc72a0c72d62f3b",
+              "head": "3d8886e558279261a2cd92a9c42b3fdc726d6931"
+            }
+          }
+        },
+        "options": {},
+        "native_review": {
+          "schema": 2,
+          "required": false
+        }
+      },
+      "provenance": {
+        "checkout": "$CHECKOUT",
+        "commits": {
+          "target": "a2852fbaa049c4230b351d1f6cc72a0c72d62f3b",
+          "base": "a2852fbaa049c4230b351d1f6cc72a0c72d62f3b",
+          "head": "3d8886e558279261a2cd92a9c42b3fdc726d6931"
+        }
+      },
+      "cacheable": true,
+      "subject": {
+        "repository": "github.com/acme/project",
+        "pr": "https://github.com/acme/project/pull/7"
+      },
+      "hook_phase": null
+    }
+  },
+  "files": {
+    "manifest.json": "{\n  \"contract\": 2,\n  \"entries\": {\n    \"09359017f38d3d1fc3afbb255b5ecb4087d5d3b866f5b11844a7c33b6fe02dfa\": {\n      \"attempts\": [\n        {\n          \"cacheable\": true,\n          \"cycle\": \"cycle-3\",\n          \"fingerprint\": \"030f5071f7bf99454b8fa3b0b505a1553ad1518a418f3a9fcac698b8cb24ee7c\",\n          \"finished\": 1000.0,\n          \"id\": \"00000000000000000000000000000006\",\n          \"key\": \"09359017f38d3d1fc3afbb255b5ecb4087d5d3b866f5b11844a7c33b6fe02dfa\",\n          \"provenance\": {},\n          \"result\": \"d9c2dad16b04863db6d0074d75cbf8b0a0d691527b07e44c4ce8fb86d3b47c8e.json\",\n          \"run\": \"retained\",\n          \"started\": 1000.0,\n          \"status\": \"complete\"\n        }\n      ],\n      \"components\": {\n        \"contract\": 2,\n        \"inputs\": {\n          \"context\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754\"\n          }\n        },\n        \"instructions\": {\n          \"user\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4\"\n          }\n        },\n        \"native_review\": {\n          \"required\": false,\n          \"schema\": 2\n        },\n        \"options\": {},\n        \"pr\": \"https://github.com/acme/project/pull/7\",\n        \"repository\": \"github.com/acme/project\",\n        \"skill\": {\n          \"identity\": \"fixture:worker\",\n          \"resources\": {\n            \"skill\": {\n              \"executable\": false,\n              \"kind\": \"file\",\n              \"link\": null,\n              \"sha256\": \"7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569\"\n            }\n          }\n        },\n        \"task\": {\n          \"id\": \"damaged\",\n          \"instructions\": \"Inspect the supplied fixture and return original evidence.\"\n        }\n      },\n      \"key\": \"09359017f38d3d1fc3afbb255b5ecb4087d5d3b866f5b11844a7c33b6fe02dfa\",\n      \"result\": {\n        \"file\": \"d9c2dad16b04863db6d0074d75cbf8b0a0d691527b07e44c4ce8fb86d3b47c8e.json\",\n        \"fingerprint\": \"030f5071f7bf99454b8fa3b0b505a1553ad1518a418f3a9fcac698b8cb24ee7c\",\n        \"hash\": \"d9c2dad16b04863db6d0074d75cbf8b0a0d691527b07e44c4ce8fb86d3b47c8e\"\n      }\n    },\n    \"17c46fb6c1b47e0cc4cf81f9a744f0f97aaf42cd61a34e1b3fdb5939fb76bbab\": {\n      \"attempts\": [\n        {\n          \"cacheable\": true,\n          \"cycle\": \"cycle-2\",\n          \"fingerprint\": \"97c0de48aa0216ecbb627009613c9afc8c90193ef94991ccfbc55b85cfb8a4f2\",\n          \"finished\": 1000.0,\n          \"id\": \"00000000000000000000000000000004\",\n          \"key\": \"17c46fb6c1b47e0cc4cf81f9a744f0f97aaf42cd61a34e1b3fdb5939fb76bbab\",\n          \"provenance\": {},\n          \"result\": \"f57aed10489ab47b05e5e80940c15e81a70ed06ffa99144cbc96ccebff20abc7.json\",\n          \"run\": \"retained\",\n          \"started\": 1000.0,\n          \"status\": \"incomplete\"\n        }\n      ],\n      \"components\": {\n        \"contract\": 2,\n        \"inputs\": {\n          \"context\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754\"\n          }\n        },\n        \"instructions\": {\n          \"user\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4\"\n          }\n        },\n        \"native_review\": {\n          \"required\": false,\n          \"schema\": 2\n        },\n        \"options\": {},\n        \"pr\": \"https://github.com/acme/project/pull/7\",\n        \"repository\": \"github.com/acme/project\",\n        \"skill\": {\n          \"identity\": \"fixture:worker\",\n          \"resources\": {\n            \"skill\": {\n              \"executable\": false,\n              \"kind\": \"file\",\n              \"link\": null,\n              \"sha256\": \"7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569\"\n            }\n          }\n        },\n        \"task\": {\n          \"id\": \"incomplete\",\n          \"instructions\": \"Inspect the supplied fixture and return original evidence.\"\n        }\n      },\n      \"key\": \"17c46fb6c1b47e0cc4cf81f9a744f0f97aaf42cd61a34e1b3fdb5939fb76bbab\",\n      \"result\": {\n        \"file\": \"f57aed10489ab47b05e5e80940c15e81a70ed06ffa99144cbc96ccebff20abc7.json\",\n        \"fingerprint\": \"97c0de48aa0216ecbb627009613c9afc8c90193ef94991ccfbc55b85cfb8a4f2\",\n        \"hash\": \"f57aed10489ab47b05e5e80940c15e81a70ed06ffa99144cbc96ccebff20abc7\"\n      }\n    },\n    \"27f12c53d0d34496e8c42d3df6b4c08d2d3469f4da746fbff99f3e4b316a91ff\": {\n      \"attempts\": [\n        {\n          \"cacheable\": true,\n          \"cycle\": \"cycle-1\",\n          \"fingerprint\": \"5d557f226d71b2f67ed5df95071b34c469dc8c14116f3beadee885dca68e2b4d\",\n          \"finished\": 1000.0,\n          \"id\": \"00000000000000000000000000000002\",\n          \"key\": \"27f12c53d0d34496e8c42d3df6b4c08d2d3469f4da746fbff99f3e4b316a91ff\",\n          \"provenance\": {},\n          \"result\": \"d260be442bfd8650b9f6a834fb006552c7433326faeb3e8121be81e2d5626d9d.json\",\n          \"run\": \"retained\",\n          \"started\": 1000.0,\n          \"status\": \"failed\"\n        }\n      ],\n      \"components\": {\n        \"contract\": 2,\n        \"inputs\": {\n          \"context\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754\"\n          }\n        },\n        \"instructions\": {\n          \"user\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4\"\n          }\n        },\n        \"native_review\": {\n          \"required\": false,\n          \"schema\": 2\n        },\n        \"options\": {},\n        \"pr\": \"https://github.com/acme/project/pull/7\",\n        \"repository\": \"github.com/acme/project\",\n        \"skill\": {\n          \"identity\": \"fixture:worker\",\n          \"resources\": {\n            \"skill\": {\n              \"executable\": false,\n              \"kind\": \"file\",\n              \"link\": null,\n              \"sha256\": \"7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569\"\n            }\n          }\n        },\n        \"task\": {\n          \"id\": \"failed\",\n          \"instructions\": \"Inspect the supplied fixture and return original evidence.\"\n        }\n      },\n      \"key\": \"27f12c53d0d34496e8c42d3df6b4c08d2d3469f4da746fbff99f3e4b316a91ff\",\n      \"result\": {\n        \"file\": \"d260be442bfd8650b9f6a834fb006552c7433326faeb3e8121be81e2d5626d9d.json\",\n        \"fingerprint\": \"5d557f226d71b2f67ed5df95071b34c469dc8c14116f3beadee885dca68e2b4d\",\n        \"hash\": \"d260be442bfd8650b9f6a834fb006552c7433326faeb3e8121be81e2d5626d9d\"\n      }\n    },\n    \"50492cbf36a26f5de2125ed1cdcc4961f99ef2fdf06327df3e320c419e118225\": {\n      \"attempts\": [\n        {\n          \"cacheable\": true,\n          \"cycle\": \"cycle-5\",\n          \"fingerprint\": \"e9bfb3032f006855fe551456bc8fa7d7c0910d3320431a601594b49c32e1d094\",\n          \"finished\": 1000.0,\n          \"id\": \"00000000000000000000000000000008\",\n          \"key\": \"50492cbf36a26f5de2125ed1cdcc4961f99ef2fdf06327df3e320c419e118225\",\n          \"provenance\": {},\n          \"result\": \"bd59b6cc0c5c87f1c7b70f1a97bc0ed239922fbf6e40e3d9c5ce46e64f0f11c6.json\",\n          \"run\": \"retained\",\n          \"started\": 1000.0,\n          \"status\": \"complete\"\n        }\n      ],\n      \"checklist\": {\n        \"contract\": {\n          \"items\": [\n            {\n              \"id\": \"scope\",\n              \"text\": \"Cover the entire assigned scope under current governing instructions and permissions.\"\n            },\n            {\n              \"id\": \"evidence\",\n              \"text\": \"Support conclusions with retained source or execution evidence; preserve disagreements and blockers.\"\n            },\n            {\n              \"id\": \"validation\",\n              \"text\": \"Perform the validation required by the assignment and report its results or limitations.\"\n            },\n            {\n              \"id\": \"deliverables\",\n              \"text\": \"Supply every assigned deliverable and an explicit complete primary report.\"\n            }\n          ],\n          \"max_checks\": 3,\n          \"required\": true\n        },\n        \"fingerprint\": \"e9bfb3032f006855fe551456bc8fa7d7c0910d3320431a601594b49c32e1d094\",\n        \"initial_submission\": \"40d2deeb4d4bd73714284e3a6cc74a45ac3a65a1ad9bbab9de07ec9078b1fa11\",\n        \"outcome\": \"complete\",\n        \"result\": \"bd59b6cc0c5c87f1c7b70f1a97bc0ed239922fbf6e40e3d9c5ce46e64f0f11c6\",\n        \"rounds\": []\n      },\n      \"components\": {\n        \"contract\": 2,\n        \"inputs\": {\n          \"context\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754\"\n          }\n        },\n        \"instructions\": {\n          \"user\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4\"\n          }\n        },\n        \"native_review\": {\n          \"required\": false,\n          \"schema\": 2\n        },\n        \"options\": {},\n        \"pr\": \"https://github.com/acme/project/pull/7\",\n        \"repository\": \"github.com/acme/project\",\n        \"skill\": {\n          \"identity\": \"fixture:worker\",\n          \"resources\": {\n            \"skill\": {\n              \"executable\": false,\n              \"kind\": \"file\",\n              \"link\": null,\n              \"sha256\": \"7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569\"\n            }\n          }\n        },\n        \"task\": {\n          \"id\": \"managed\",\n          \"instructions\": \"Inspect the supplied fixture and return original evidence.\"\n        }\n      },\n      \"key\": \"50492cbf36a26f5de2125ed1cdcc4961f99ef2fdf06327df3e320c419e118225\",\n      \"managed\": {\n        \"definition\": {\n          \"assigned_instructions\": \"Inspect the supplied fixture and return original evidence.\",\n          \"governing_inputs_complete\": true,\n          \"inputs\": {\n            \"context\": \"context.txt\"\n          },\n          \"instructions\": {\n            \"user\": \"user.txt\"\n          },\n          \"native_review\": {\n            \"required\": false,\n            \"schema\": 2\n          },\n          \"options\": {},\n          \"resources\": {\n            \"skill\": \"skill.md\"\n          },\n          \"responsibility\": \"managed\",\n          \"skill_identity\": \"fixture:worker\"\n        },\n        \"kind\": \"task\"\n      },\n      \"result\": {\n        \"file\": \"bd59b6cc0c5c87f1c7b70f1a97bc0ed239922fbf6e40e3d9c5ce46e64f0f11c6.json\",\n        \"fingerprint\": \"e9bfb3032f006855fe551456bc8fa7d7c0910d3320431a601594b49c32e1d094\",\n        \"hash\": \"bd59b6cc0c5c87f1c7b70f1a97bc0ed239922fbf6e40e3d9c5ce46e64f0f11c6\"\n      }\n    },\n    \"577b2229871f322ea8b183740f42c282f14b76f64a2f164fd6f444d17d2b5288\": {\n      \"attempts\": [\n        {\n          \"cacheable\": true,\n          \"cycle\": \"cycle-2\",\n          \"fingerprint\": \"7119b44ce2bfa5bd542b35da5fe5b3a00283692dbaaa4e4fad121bb13215e71a\",\n          \"id\": \"00000000000000000000000000000003\",\n          \"key\": \"577b2229871f322ea8b183740f42c282f14b76f64a2f164fd6f444d17d2b5288\",\n          \"provenance\": {},\n          \"run\": \"retained\",\n          \"started\": 1000.0,\n          \"status\": \"started\"\n        }\n      ],\n      \"claim\": {\n        \"cacheable\": true,\n        \"cycle\": \"cycle-2\",\n        \"fingerprint\": \"7119b44ce2bfa5bd542b35da5fe5b3a00283692dbaaa4e4fad121bb13215e71a\",\n        \"id\": \"00000000000000000000000000000003\",\n        \"key\": \"577b2229871f322ea8b183740f42c282f14b76f64a2f164fd6f444d17d2b5288\",\n        \"provenance\": {},\n        \"run\": \"retained\",\n        \"started\": 1000.0\n      },\n      \"components\": {\n        \"contract\": 2,\n        \"inputs\": {\n          \"context\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754\"\n          }\n        },\n        \"instructions\": {\n          \"user\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4\"\n          }\n        },\n        \"native_review\": {\n          \"required\": false,\n          \"schema\": 2\n        },\n        \"options\": {},\n        \"pr\": \"https://github.com/acme/project/pull/7\",\n        \"repository\": \"github.com/acme/project\",\n        \"skill\": {\n          \"identity\": \"fixture:worker\",\n          \"resources\": {\n            \"skill\": {\n              \"executable\": false,\n              \"kind\": \"file\",\n              \"link\": null,\n              \"sha256\": \"7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569\"\n            }\n          }\n        },\n        \"task\": {\n          \"id\": \"pending\",\n          \"instructions\": \"Inspect the supplied fixture and return original evidence.\"\n        }\n      },\n      \"key\": \"577b2229871f322ea8b183740f42c282f14b76f64a2f164fd6f444d17d2b5288\"\n    },\n    \"8fdbb376f2782219bf730c892572fe016ed252d1ba4e8da0b444105aeb8d7b63\": {\n      \"attempts\": [\n        {\n          \"cacheable\": true,\n          \"cycle\": \"cycle-3\",\n          \"fingerprint\": \"17d05225ba88abca238ce6e3694ed676080cfa71e8e873a8eccf12667299f4cf\",\n          \"finished\": 1000.0,\n          \"id\": \"00000000000000000000000000000005\",\n          \"key\": \"8fdbb376f2782219bf730c892572fe016ed252d1ba4e8da0b444105aeb8d7b63\",\n          \"provenance\": {},\n          \"result\": \"6f06f74a8ee7b160618b2b2832f610dc4a268baac0054bdf16caff3706b6630e.json\",\n          \"run\": \"retained\",\n          \"started\": 1000.0,\n          \"status\": \"complete\"\n        }\n      ],\n      \"components\": {\n        \"contract\": 2,\n        \"inputs\": {\n          \"context\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754\"\n          }\n        },\n        \"instructions\": {\n          \"user\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4\"\n          }\n        },\n        \"native_review\": {\n          \"required\": false,\n          \"schema\": 2\n        },\n        \"options\": {},\n        \"pr\": \"https://github.com/acme/project/pull/7\",\n        \"repository\": \"github.com/acme/project\",\n        \"skill\": {\n          \"identity\": \"fixture:worker\",\n          \"resources\": {\n            \"skill\": {\n              \"executable\": false,\n              \"kind\": \"file\",\n              \"link\": null,\n              \"sha256\": \"7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569\"\n            }\n          }\n        },\n        \"task\": {\n          \"id\": \"missing\",\n          \"instructions\": \"Inspect the supplied fixture and return original evidence.\"\n        }\n      },\n      \"key\": \"8fdbb376f2782219bf730c892572fe016ed252d1ba4e8da0b444105aeb8d7b63\",\n      \"result\": {\n        \"file\": \"6f06f74a8ee7b160618b2b2832f610dc4a268baac0054bdf16caff3706b6630e.json\",\n        \"fingerprint\": \"17d05225ba88abca238ce6e3694ed676080cfa71e8e873a8eccf12667299f4cf\",\n        \"hash\": \"6f06f74a8ee7b160618b2b2832f610dc4a268baac0054bdf16caff3706b6630e\"\n      }\n    },\n    \"98294f75b0c8fe31f7cb556b227a1d3f8a80166f497370d71c52ed3defc7c53d\": {\n      \"attempts\": [\n        {\n          \"cacheable\": true,\n          \"cycle\": \"cycle-1\",\n          \"fingerprint\": \"852975f1086b9c9fc9d52888c63af8df0e1a5f8c04eaa37aee3c673243f23e9e\",\n          \"finished\": 1000.0,\n          \"id\": \"00000000000000000000000000000001\",\n          \"key\": \"98294f75b0c8fe31f7cb556b227a1d3f8a80166f497370d71c52ed3defc7c53d\",\n          \"provenance\": {},\n          \"result\": \"5f44c73c8d0fb6a3994b191685bc43c2d25b340c9233f31b9b662e243f6a7364.json\",\n          \"run\": \"retained\",\n          \"started\": 1000.0,\n          \"status\": \"complete\"\n        }\n      ],\n      \"components\": {\n        \"contract\": 2,\n        \"inputs\": {\n          \"context\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754\"\n          }\n        },\n        \"instructions\": {\n          \"user\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4\"\n          }\n        },\n        \"native_review\": {\n          \"required\": false,\n          \"schema\": 2\n        },\n        \"options\": {},\n        \"pr\": \"https://github.com/acme/project/pull/7\",\n        \"repository\": \"github.com/acme/project\",\n        \"skill\": {\n          \"identity\": \"fixture:worker\",\n          \"resources\": {\n            \"skill\": {\n              \"executable\": false,\n              \"kind\": \"file\",\n              \"link\": null,\n              \"sha256\": \"7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569\"\n            }\n          }\n        },\n        \"task\": {\n          \"id\": \"complete\",\n          \"instructions\": \"Inspect the supplied fixture and return original evidence.\"\n        }\n      },\n      \"key\": \"98294f75b0c8fe31f7cb556b227a1d3f8a80166f497370d71c52ed3defc7c53d\",\n      \"result\": {\n        \"file\": \"5f44c73c8d0fb6a3994b191685bc43c2d25b340c9233f31b9b662e243f6a7364.json\",\n        \"fingerprint\": \"852975f1086b9c9fc9d52888c63af8df0e1a5f8c04eaa37aee3c673243f23e9e\",\n        \"hash\": \"5f44c73c8d0fb6a3994b191685bc43c2d25b340c9233f31b9b662e243f6a7364\"\n      }\n    },\n    \"dc71d9060d195e01394357e00523dfaacfe5331b5212c3e626ec6f613706da91\": {\n      \"attempts\": [\n        {\n          \"cacheable\": true,\n          \"cycle\": \"cycle-4\",\n          \"fingerprint\": \"358704d45a1f291eee77dcf5e7527b878e4a0837a0076173c30bc6450a4df79e\",\n          \"finished\": 1000.0,\n          \"id\": \"00000000000000000000000000000007\",\n          \"key\": \"dc71d9060d195e01394357e00523dfaacfe5331b5212c3e626ec6f613706da91\",\n          \"provenance\": {},\n          \"result\": \"80ce615e225f83c05937672a705e0265002938e0f79cc062b9d046bb275be947.json\",\n          \"run\": \"retained\",\n          \"started\": 1000.0,\n          \"status\": \"complete\"\n        }\n      ],\n      \"components\": {\n        \"contract\": 2,\n        \"inputs\": {\n          \"context\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"ae87e9d1b8ed0ec685e214bb58001597d99530d589e3339514eaf34d56708754\"\n          }\n        },\n        \"instructions\": {\n          \"user\": {\n            \"executable\": false,\n            \"kind\": \"file\",\n            \"link\": null,\n            \"sha256\": \"99f8bb3ad5c2c44282824cf595f6148b3e9b47ea5667a8b90f14917b826a44c4\"\n          }\n        },\n        \"native_review\": {\n          \"required\": false,\n          \"schema\": 2\n        },\n        \"options\": {},\n        \"pr\": \"https://github.com/acme/project/pull/7\",\n        \"repository\": \"github.com/acme/project\",\n        \"skill\": {\n          \"identity\": \"fixture:worker\",\n          \"resources\": {\n            \"skill\": {\n              \"executable\": false,\n              \"kind\": \"file\",\n              \"link\": null,\n              \"sha256\": \"7f43c82acd1fc899900dbbdc5ee5dcdbab70ca77b4af89a0874e6b16be1ff569\"\n            }\n          }\n        },\n        \"task\": {\n          \"id\": \"legacy\",\n          \"instructions\": \"Inspect the supplied fixture and return original evidence.\"\n        }\n      },\n      \"key\": \"dc71d9060d195e01394357e00523dfaacfe5331b5212c3e626ec6f613706da91\",\n      \"result\": {\n        \"file\": \"80ce615e225f83c05937672a705e0265002938e0f79cc062b9d046bb275be947.json\",\n        \"fingerprint\": \"358704d45a1f291eee77dcf5e7527b878e4a0837a0076173c30bc6450a4df79e\",\n        \"hash\": \"80ce615e225f83c05937672a705e0265002938e0f79cc062b9d046bb275be947\"\n      }\n    }\n  },\n  \"runs\": {\n    \"retained\": {\n      \"ci_repairs\": {},\n      \"ci_reruns\": {},\n      \"cycles\": [\n        \"cycle-1\",\n        \"cycle-2\",\n        \"cycle-3\",\n        \"cycle-4\",\n        \"cycle-5\"\n      ],\n      \"limits\": {\n        \"ci_repairs_per_cycle\": 5,\n        \"ci_reruns_per_head\": 3,\n        \"retries_per_task\": 1,\n        \"review_cycles\": 5\n      },\n      \"progress\": [],\n      \"retries\": {},\n      \"review_tasks\": {\n        \"cycle-1\": {\n          \"27f12c53d0d34496e8c42d3df6b4c08d2d3469f4da746fbff99f3e4b316a91ff\": \"5d557f226d71b2f67ed5df95071b34c469dc8c14116f3beadee885dca68e2b4d\",\n          \"98294f75b0c8fe31f7cb556b227a1d3f8a80166f497370d71c52ed3defc7c53d\": \"852975f1086b9c9fc9d52888c63af8df0e1a5f8c04eaa37aee3c673243f23e9e\"\n        },\n        \"cycle-2\": {\n          \"17c46fb6c1b47e0cc4cf81f9a744f0f97aaf42cd61a34e1b3fdb5939fb76bbab\": \"97c0de48aa0216ecbb627009613c9afc8c90193ef94991ccfbc55b85cfb8a4f2\",\n          \"577b2229871f322ea8b183740f42c282f14b76f64a2f164fd6f444d17d2b5288\": \"7119b44ce2bfa5bd542b35da5fe5b3a00283692dbaaa4e4fad121bb13215e71a\"\n        },\n        \"cycle-3\": {\n          \"09359017f38d3d1fc3afbb255b5ecb4087d5d3b866f5b11844a7c33b6fe02dfa\": \"030f5071f7bf99454b8fa3b0b505a1553ad1518a418f3a9fcac698b8cb24ee7c\",\n          \"8fdbb376f2782219bf730c892572fe016ed252d1ba4e8da0b444105aeb8d7b63\": \"17d05225ba88abca238ce6e3694ed676080cfa71e8e873a8eccf12667299f4cf\"\n        },\n        \"cycle-4\": {\n          \"dc71d9060d195e01394357e00523dfaacfe5331b5212c3e626ec6f613706da91\": \"358704d45a1f291eee77dcf5e7527b878e4a0837a0076173c30bc6450a4df79e\"\n        },\n        \"cycle-5\": {\n          \"50492cbf36a26f5de2125ed1cdcc4961f99ef2fdf06327df3e320c419e118225\": \"e9bfb3032f006855fe551456bc8fa7d7c0910d3320431a601594b49c32e1d094\"\n        }\n      }\n    }\n  },\n  \"subject\": {\n    \"pr\": \"https://github.com/acme/project/pull/7\",\n    \"repository\": \"github.com/acme/project\"\n  }\n}\n",
+    "results/bd59b6cc0c5c87f1c7b70f1a97bc0ed239922fbf6e40e3d9c5ce46e64f0f11c6.json": "{\n  \"cacheable\": true,\n  \"claim\": \"00000000000000000000000000000008\",\n  \"contract\": 2,\n  \"fingerprint\": \"e9bfb3032f006855fe551456bc8fa7d7c0910d3320431a601594b49c32e1d094\",\n  \"key\": \"50492cbf36a26f5de2125ed1cdcc4961f99ef2fdf06327df3e320c419e118225\",\n  \"normalized\": {\n    \"checklist\": [\n      {\n        \"evidence\": [\n          \"Original fixture evidence\"\n        ],\n        \"id\": \"scope\",\n        \"status\": \"completed\"\n      },\n      {\n        \"evidence\": [\n          \"Original fixture evidence\"\n        ],\n        \"id\": \"evidence\",\n        \"status\": \"completed\"\n      },\n      {\n        \"evidence\": [\n          \"Original fixture evidence\"\n        ],\n        \"id\": \"validation\",\n        \"status\": \"completed\"\n      },\n      {\n        \"evidence\": [\n          \"Original fixture evidence\"\n        ],\n        \"id\": \"deliverables\",\n        \"status\": \"completed\"\n      }\n    ],\n    \"complete\": true,\n    \"findings\": []\n  },\n  \"original\": \"T3JpZ2luYWwgbWFuYWdlZCBldmlkZW5jZQ==\",\n  \"original_sha256\": \"1b831e368030ec4d109b982df73f3c10d369028273339f1d0914890449c36e5f\",\n  \"provenance\": {},\n  \"status\": \"complete\"\n}\n",
+    "results/80ce615e225f83c05937672a705e0265002938e0f79cc062b9d046bb275be947.json": "{\n  \"cacheable\": true,\n  \"claim\": \"00000000000000000000000000000007\",\n  \"contract\": 2,\n  \"fingerprint\": \"358704d45a1f291eee77dcf5e7527b878e4a0837a0076173c30bc6450a4df79e\",\n  \"key\": \"dc71d9060d195e01394357e00523dfaacfe5331b5212c3e626ec6f613706da91\",\n  \"normalized\": {\n    \"complete\": true,\n    \"findings\": []\n  },\n  \"original\": \"T3JpZ2luYWwgbGVnYWN5IGV2aWRlbmNl\",\n  \"original_sha256\": \"8161d1493fd567f2d24b7e3406ae098a648a5cbe583d93128e88fd7cbf52b8ba\",\n  \"provenance\": {},\n  \"status\": \"complete\"\n}\n",
+    "results/d9c2dad16b04863db6d0074d75cbf8b0a0d691527b07e44c4ce8fb86d3b47c8e.json": "damaged original artifact\n",
+    "results/f57aed10489ab47b05e5e80940c15e81a70ed06ffa99144cbc96ccebff20abc7.json": "{\n  \"cacheable\": true,\n  \"claim\": \"00000000000000000000000000000004\",\n  \"contract\": 2,\n  \"fingerprint\": \"97c0de48aa0216ecbb627009613c9afc8c90193ef94991ccfbc55b85cfb8a4f2\",\n  \"key\": \"17c46fb6c1b47e0cc4cf81f9a744f0f97aaf42cd61a34e1b3fdb5939fb76bbab\",\n  \"normalized\": {\n    \"complete\": false,\n    \"findings\": []\n  },\n  \"original\": \"T3JpZ2luYWwgaW5jb21wbGV0ZSBldmlkZW5jZQ==\",\n  \"original_sha256\": \"eb9513f512ee97a22f02800880eed9c3fcd3a93edd9460628a068bfbe5ba1023\",\n  \"provenance\": {},\n  \"status\": \"incomplete\"\n}\n",
+    "results/d260be442bfd8650b9f6a834fb006552c7433326faeb3e8121be81e2d5626d9d.json": "{\n  \"cacheable\": true,\n  \"claim\": \"00000000000000000000000000000002\",\n  \"contract\": 2,\n  \"fingerprint\": \"5d557f226d71b2f67ed5df95071b34c469dc8c14116f3beadee885dca68e2b4d\",\n  \"key\": \"27f12c53d0d34496e8c42d3df6b4c08d2d3469f4da746fbff99f3e4b316a91ff\",\n  \"normalized\": {\n    \"complete\": false,\n    \"findings\": []\n  },\n  \"original\": \"T3JpZ2luYWwgZmFpbGVkIGV2aWRlbmNl\",\n  \"original_sha256\": \"9f622a39743372bd1e13c3dc25ab9e28338e4e13ba25565012f9155b05961c5a\",\n  \"provenance\": {},\n  \"status\": \"failed\"\n}\n",
+    "results/5f44c73c8d0fb6a3994b191685bc43c2d25b340c9233f31b9b662e243f6a7364.json": "{\n  \"cacheable\": true,\n  \"claim\": \"00000000000000000000000000000001\",\n  \"contract\": 2,\n  \"fingerprint\": \"852975f1086b9c9fc9d52888c63af8df0e1a5f8c04eaa37aee3c673243f23e9e\",\n  \"key\": \"98294f75b0c8fe31f7cb556b227a1d3f8a80166f497370d71c52ed3defc7c53d\",\n  \"normalized\": {\n    \"complete\": true,\n    \"findings\": [\n      {\n        \"id\": \"original\",\n        \"text\": \"Retained finding\"\n      }\n    ]\n  },\n  \"original\": \"T3JpZ2luYWwgY29tcGxldGUgZXZpZGVuY2U=\",\n  \"original_sha256\": \"2c456fedd20aa7345d1315796ea54742c2a41a622ca904eeff66f24574992729\",\n  \"provenance\": {},\n  \"status\": \"complete\"\n}\n"
+  }
+}

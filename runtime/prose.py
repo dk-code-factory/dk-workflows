@@ -7,7 +7,8 @@ from pathlib import Path
 import re
 
 from checklists import contract as checklist_contract
-from state import capture, git
+from task_policy import capture
+from task_primitives import git
 
 
 LABEL = 'prose_previous'

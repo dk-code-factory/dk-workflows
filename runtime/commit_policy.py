@@ -8,7 +8,7 @@ import invocation
 from shared.ci_exceptions import data_root
 from shared.private_state import read
 from shared.repository_scope import scope_keys
-from state import capture, make_spec
+from task_policy import capture, make_spec
 
 
 def validate(value):

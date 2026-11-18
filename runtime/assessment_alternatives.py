@@ -12,7 +12,9 @@ import re
 import alternatives
 import pr_assessment
 import skill_config
-from state import capture, git, make_spec, read, task_key
+from task_policy import capture, make_spec
+from task_primitives import git, read, task_key
+
 
 KIND = 'assessed-alternatives'
 STAGES = ('assessment', 'inventory', 'comparison', 'selection', 'interactions', 'alignment', 'verification')
@@ -76,7 +78,7 @@ def accepted(tasks, task, *, historical=False):
 
 def _historical_accepted(tasks, task):
     from alternatives_history import accepted as original_result
-    from state import resource
+    from task_capture import resource
     value = original_result(tasks, task)
     original_inputs = value['spec']['inputs']
     if value['managed']['kind'] != KIND:
@@ -312,7 +314,7 @@ def stage_spec(tasks, descriptor, definition, *, replay=False):
             previous = original['managed']['definition'].get('inputs', {})
             prior_request = previous.get('alternatives_reassessment') or previous.get('alternatives_request')
             if prior_request:
-                from state import resource
+                from task_capture import resource
                 field = 'alternatives_reassessment' if previous.get('alternatives_reassessment') else 'alternatives_request'
                 if resource(prior_request) != original['components']['inputs'].get(field):
                     raise ValueError('Original manual request changed; restore its original source')

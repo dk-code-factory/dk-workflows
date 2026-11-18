@@ -7,7 +7,7 @@ from copy import deepcopy
 import base64
 import json
 
-from state import digest
+from task_primitives import digest
 
 
 KINDS = {'assessed-alternatives', 'alternatives', 'architecture'}
@@ -22,14 +22,14 @@ def definition_valid(value):
 
 def request(path, *, tasks=None):
     """Bind new comparison authorization to the dedicated direct invocation."""
-    from state import read
+    from task_primitives import read
     value = read(path)
     basic = isinstance(value, dict) and all(isinstance(value.get(field), str) and value[field].strip()
                                           for field in ('id', 'source', 'instruction'))
     bound = False
     if tasks is not None:
         from pathlib import Path
-        from state import resource
+        from task_capture import resource
         current = resource(path)
         for entry in entries(tasks).values():
             definition = entry['managed'].get('definition')
@@ -116,7 +116,7 @@ def accepted(tasks, key):
 
 def route(tasks, owner, *, request_source=None, include_assessment=True):
     """Choose retained work before constructing another route's initial plan."""
-    from state import resource
+    from task_capture import resource
     return _route(entries(tasks), owner, request_binding=resource(request_source) if request_source else None,
                   include_assessment=include_assessment)
 
@@ -215,7 +215,7 @@ def legacy_gate(tasks, owner, *, consumer=None, review_operation=None, analysis_
                     'next_task': {'key': task}}
     alignment = retained['alignment']
     if request_source:
-        from state import read
+        from task_primitives import read
         live = alternatives.live_pr(tasks.store.subject['pr'])
         source = alignment['spec']['inputs'].get('alternatives_current_pr')
         current = read(source) if source else {}

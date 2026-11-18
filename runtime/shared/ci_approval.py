@@ -4,7 +4,9 @@ import subprocess
 
 import config
 import skill_config
-from state import capture, digest, read, resource
+from task_policy import capture
+from task_primitives import digest, read
+from task_capture import resource
 from shared import publication
 from shared.diagnostics import Diagnostic
 from shared.pr_ownership import classify

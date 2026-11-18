@@ -11,6 +11,8 @@ import sys
 import pytest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'runtime'))
 import state
+import task_capture
+import task_policy
 from state import Store, capture, read
 
 REPO='github.com/acme/project'
@@ -410,7 +412,7 @@ def test_status_batch_process_count_comparison(case, tmp_path, monkeypatch, link
     def counted(*args):
         calls.append(args)
         return original_git(*args)
-    monkeypatch.setattr(state, 'git', counted)
+    monkeypatch.setattr(task_capture, 'git', counted)
     def probe():
         calls.clear()
         assert all(t['reusable'] for t in store.status([a, b])['tasks'])
@@ -445,7 +447,7 @@ def test_status_batch_mixed_modes_process_count_comparison(case, monkeypatch):
     def counted(*args):
         calls.append(args)
         return original(*args)
-    monkeypatch.setattr(state, 'git', counted)
+    monkeypatch.setattr(task_capture, 'git', counted)
     def probe():
         calls.clear()
         assert all(task['reusable'] for task in store.status(specs)['tasks'])
@@ -487,7 +489,7 @@ def test_status_captures_git_reported_system_paths(case, tmp_path, monkeypatch, 
                 else b'GIT_ATTR_GLOBAL='+global_attributes if line.startswith(b'GIT_ATTR_GLOBAL=')
                 else line for line in result.split(b'\n'))
         return result
-    monkeypatch.setattr(state, 'git', installation)
+    monkeypatch.setattr(task_capture, 'git', installation)
     b = deepcopy(a); b['skill']['identity'] = 'reviewer:b'
     done(store, a); done(store, b)
     def specs():
@@ -524,7 +526,7 @@ def test_batch_capture_matches_independent_fingerprints_and_provenance(case, mon
         value = original(spec, **kwargs)
         observed.append(value)
         return value
-    monkeypatch.setattr(state, 'capture', collect)
+    monkeypatch.setattr(task_policy, 'capture', collect)
     store.status([a, b])
     assert observed == expected
     observed[0]['components']['inputs']['git']['trees']['head'] = 'altered'
@@ -550,7 +552,7 @@ def test_status_batch_separates_different_git_inputs(case, tmp_path, monkeypatch
         value = original(spec, **kwargs)
         observed.append(value)
         return value
-    monkeypatch.setattr(state, 'capture', collect)
+    monkeypatch.setattr(task_policy, 'capture', collect)
     store.status([a, b])
     assert observed == expected
 
@@ -583,7 +585,7 @@ def test_status_does_not_share_unpinned_git_calculations(case, monkeypatch, revi
     def counted(*args):
         calls.append(args)
         return original(*args)
-    monkeypatch.setattr(state, 'git', counted)
+    monkeypatch.setattr(task_capture, 'git', counted)
     store.status([spec, deepcopy(spec)])
     assert len(calls) == 14
 
@@ -600,7 +602,7 @@ def test_status_does_not_share_hex_ref_names(case, monkeypatch, packed):
     def counted(*args):
         calls.append(args)
         return original(*args)
-    monkeypatch.setattr(state, 'git', counted)
+    monkeypatch.setattr(task_capture, 'git', counted)
     store.status([spec, deepcopy(spec)])
     assert len(calls) == 14
 
@@ -642,7 +644,7 @@ def test_status_rechecks_packed_replacements_within_one_batch(case, monkeypatch)
         value = original(spec, **kwargs)
         observed.append(value)
         return value
-    monkeypatch.setattr(state, 'capture', collect)
+    monkeypatch.setattr(task_policy, 'capture', collect)
     tasks = store.status(specs())['tasks']
     assert expected[0]['fingerprint'] != before['fingerprint']
     assert observed == [before, expected[0]]
@@ -662,7 +664,7 @@ def test_status_falls_back_for_unsorted_packed_refs(case, monkeypatch):
     def counted(*args):
         calls.append(args)
         return original(*args)
-    monkeypatch.setattr(state, 'git', counted)
+    monkeypatch.setattr(task_capture, 'git', counted)
     store.status([spec, deepcopy(spec)])
     assert len(calls) == 14
 
@@ -708,7 +710,7 @@ def test_status_batch_refreshes_changed_execution_context(case, monkeypatch, kin
     def counted(*args, **kwargs):
         calculations.append(args)
         return original(*args, **kwargs)
-    monkeypatch.setattr(state, '_capture_git', counted)
+    monkeypatch.setattr(task_capture, '_capture_git', counted)
     def specs():
         yield a
         if kind == 'config': git(checkout, 'config', 'diff.noprefix', 'true')
@@ -837,7 +839,7 @@ def test_status_refreshes_indirect_diff_configuration(case, tmp_path, monkeypatc
         value = original(spec, **kwargs)
         observed.append(value)
         return value
-    monkeypatch.setattr(state, 'capture', collect)
+    monkeypatch.setattr(task_policy, 'capture', collect)
     tasks = store.status(specs())['tasks']
     assert expected[0]['fingerprint'] != before['fingerprint']
     assert observed == [before, expected[0]]
@@ -875,7 +877,7 @@ def test_status_refreshes_replacement_refs_with_continued_reftable_config(case, 
         value = original(spec, **kwargs)
         observed.append(value)
         return value
-    monkeypatch.setattr(state, 'capture', collect)
+    monkeypatch.setattr(task_policy, 'capture', collect)
     tasks = store.status(specs())['tasks']
     assert expected[0]['fingerprint'] != before['fingerprint']
     assert observed == [before, expected[0]]
@@ -928,7 +930,7 @@ def test_status_preserves_whitespace_in_git_metadata_paths(case, tmp_path, monke
         value = original(spec, **kwargs)
         observed.append(value)
         return value
-    monkeypatch.setattr(state, 'capture', collect)
+    monkeypatch.setattr(task_policy, 'capture', collect)
     tasks = store.status(specs())['tasks']
     assert expected[0]['fingerprint'] != before['fingerprint']
     assert observed == [before, expected[0]]
@@ -961,14 +963,14 @@ def test_status_does_not_cache_context_that_changed_during_capture(case, monkeyp
             else: attributes.unlink()
             return captured
         return original(source, **kwargs)
-    monkeypatch.setattr(state, '_capture_git', interleaved)
+    monkeypatch.setattr(task_capture, '_capture_git', interleaved)
     observed = []
     original_capture = state.capture
     def collect(spec, **kwargs):
         captured = original_capture(spec, **kwargs)
         observed.append(captured)
         return captured
-    monkeypatch.setattr(state, 'capture', collect)
+    monkeypatch.setattr(task_policy, 'capture', collect)
     store.status([a, b])
     assert changed
     assert observed[0]['components']['inputs']['git'] != expected['components']['inputs']['git']
@@ -990,14 +992,14 @@ def test_status_declines_cache_hit_when_context_changes_after_snapshot(case, mon
         if count == 2:
             git(checkout, 'config', 'diff.noprefix', 'true')
         return context
-    monkeypatch.setattr(state, '_git_context', interleaved)
+    monkeypatch.setattr(task_capture, '_git_context', interleaved)
     observed = []
     original_capture = state.capture
     def collect(spec, **kwargs):
         captured = original_capture(spec, **kwargs)
         observed.append(captured)
         return captured
-    monkeypatch.setattr(state, 'capture', collect)
+    monkeypatch.setattr(task_policy, 'capture', collect)
     store.status([a, b])
     assert count == 2
     assert observed[0]['components']['inputs']['git'] != observed[1]['components']['inputs']['git']

@@ -5,7 +5,8 @@ import os
 import re
 
 import invocation
-from state import digest, make_spec, read
+from task_primitives import digest, read
+from task_policy import make_spec
 from shared.storage_paths import location
 
 # Compatibility process views are derived from the owning skill defaults.

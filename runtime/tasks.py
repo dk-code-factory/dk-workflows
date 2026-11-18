@@ -6,7 +6,9 @@ from pathlib import Path
 from config import make_completion_spec, make_finalizer_spec, make_hook_spec
 from checklists import contract as checklist_contract
 from native_review import binding, required
-from state import Store, digest, make_spec, task_key
+from task_runtime import Store
+from task_primitives import digest, task_key
+from task_policy import make_spec
 import skill_config
 
 

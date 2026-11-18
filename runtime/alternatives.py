@@ -12,7 +12,8 @@ import re
 import subprocess
 from pathlib import Path
 
-from state import make_spec, read
+from task_policy import make_spec
+from task_primitives import read
 import skill_config
 
 OWNER = 'dk-workflows:dk-pr-review'
@@ -245,7 +246,7 @@ def evaluation(tasks):
     if existing is not None and existing['tasks'] is tasks:
         yield existing
         return
-    from state import _CaptureContext
+    from task_capture import _CaptureContext
     context = {'tasks': tasks, 'accepted': {}, 'active': set(), 'capture': _CaptureContext(), 'live': {}}
     token = _EVALUATION.set(context)
     try:
@@ -283,7 +284,7 @@ def accepted(tasks, key, *, historical=False, settled=False):
 def _settled(tasks, key):
     from alternatives_history import accepted as original_result
     from alternatives_compat import descriptor
-    from state import resource
+    from task_capture import resource
     value = original_result(tasks, key)
     managed = descriptor(value['managed'])
     assigned = value['spec']['options'].get('alternatives', value['spec']['options'].get('architecture', {}))
@@ -301,7 +302,7 @@ def _settled(tasks, key):
 
 def _accepted(tasks, key, context, *, historical=False):
     """Validate original evidence and checklist; historical comparisons need impact."""
-    from state import capture
+    from task_policy import capture
     # Historical checks regenerate guidance without resolving live dependencies.
     # Impact, rather than another invocation of each old stage, governs changed inputs.
     with tasks.store.locked() as manifest:
@@ -341,7 +342,7 @@ def _accepted(tasks, key, context, *, historical=False):
     native = json.loads(base64.b64decode(saved['native_execution']['evidence']))
     compared = None
     if historical and spec['options']['alternatives']['stage'] == 'selection':
-        from state import resource
+        from task_capture import resource
         source = accepted(tasks, spec['options']['alternatives']['dependencies']['comparison'], historical=True)
         if spec['inputs']['alternatives_comparison'] != resource(source['reference']):
             raise ValueError('Alternatives selection refers to a changed comparison')
@@ -451,7 +452,8 @@ def impact_selection_source(tasks, key):
     New impact preparation accepts the current selection normally. Replaying that
     assignment keeps its exact immutable source while selection is refreshed.
     """
-    from state import task_key, resource
+    from task_primitives import task_key
+    from task_capture import resource
     impact_key = task_key(tasks.store.subject, 'alternatives-impact-review', OWNER)
     with tasks.store.locked() as manifest:
         impact = manifest['entries'][impact_key]
@@ -544,7 +546,7 @@ def linked(value, name, other):
 
 def validate_selection_impact(impact, selection):
     """Stable task keys alone do not identify the impact a choice consumed."""
-    from state import resource
+    from task_capture import resource
     def bound(value, label):
         source = value['spec']['inputs'].get(label)
         return resource(source) if isinstance(source, str) else source
@@ -994,7 +996,7 @@ def render_decision(report, scoring, choice, *, selection=None):
 def enforce(spec, repository, pr, *, options=None, upstream=None):
     """Only incoming-review occurrences use this gate; standalone review is unchanged."""
     from tasks import Tasks
-    from state import identity
+    from task_primitives import identity
     context = _EVALUATION.get()
     tasks = (context['tasks'] if context is not None and context['tasks'].store.subject == identity(repository, pr)
              else Tasks(repository, pr))
