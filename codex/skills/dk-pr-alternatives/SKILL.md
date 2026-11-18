@@ -13,6 +13,8 @@ Set PACKAGE_ROOT to this installed plugin root.
 
 The controller injects the common assessment prompt into native assignments and reuses accepted assessment evidence. There is no separate assessment skill to invoke. This skill owns `selection.mode` and the remaining `selection` options in its configuration; the default is `semi-manual`. Configure issue and PR alternatives independently. Pass invocation-local skill options to the helper with `--alternatives-options`.
 
+Follow [decision reconciliation](../../../docs/decision-reconciliation.md). Consume effective agreements and arbitrary user-directed revisions, conditions and exceptions as scoped inputs. Label conflicts in advised or selected approaches and return them to the coordinator before dependent implementation. Reference original selections and applicable sourced resolutions; do not create duplicate decision records. Automatic ranking still does not prompt; separate unresolved agreement conflicts follow the coordinator's reconciliation policy. This read-only assessment does not authorize edits.
+
 For a prepared managed stage, execute only its generated assignment and checklist, then return original evidence. Do not restart the full process or recursively invoke this skill. Unprepared invocations follow the procedure below.
 
 Resolve [skill-owned configuration](../../../docs/skill-configuration.md), including this skill's [defaults](config.json) and [schema](config.schema.json). Use the already-running native session. Helpers construct assignments, claim tasks and retain original results under the [shared alternatives contract](../../../docs/alternatives-review.md). Unavailable native execution or required evidence leaves affected work incomplete. Never start another model session.

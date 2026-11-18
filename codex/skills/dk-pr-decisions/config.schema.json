@@ -4,6 +4,12 @@
   "title": "dk-workflows:dk-pr-decisions options",
   "type": "object",
   "properties": {
+    "reconciliation_prompt": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?=[\\s\\S]*\\S)(?![\\s\\S]*\\u0000)[\\s\\S]*$",
+      "description": "Native policy for reconciling PR decisions, advised/selected alternatives and arbitrary user instructions. Replaces inherited prompt text through ordinary scoped or invocation-local configuration."
+    },
     "language_review_passes": {
       "type": "integer",
       "minimum": 1,

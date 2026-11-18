@@ -74,6 +74,8 @@ Commit grouping policies and PR size settings also consume their skill-owned opt
 
 Additional validation commands are argument arrays, supplement relevant checks, and must never launch Codex or Claude Code. Feedback replies honor `resolve_answered_threads` only within caller authorization. Partial review publication always uses `COMMENT`; configurable review events never authorize approval. Publisher merge defaults only fill an omitted method in an already authorized concrete request; all live merge guards still apply.
 
+Decision reconciliation is owned by `dk-workflows:dk-pr-decisions.options.reconciliation_prompt`, with its explicit default in [config.json](../codex/skills/dk-pr-decisions/config.json). Set it through ordinary user/upstream/repository scopes or selected invocation-local options; the effective text replaces inherited prompt text. Apply [decision reconciliation](decision-reconciliation.md) before dependent implementation. Arbitrary direct user instructions can revise agreements or add conditions and exceptions without changing configuration or using a special phrase. Reuse applicable sourced answers before asking about unresolved decision/alternative conflicts.
+
 Feedback reply wording is owned by `dk-workflows:dk-pr-feedback-reply.options.reply_prompt`. The single explicit default is in the skill's [config.json](../codex/skills/dk-pr-feedback-reply/config.json), and the skill uses the effective prompt for every new reply. Set `reply_prompt` under that skill's `skill_defaults` entry's `options` at user or repository scope, or supply it as an invocation-local option. For example:
 
 ```json

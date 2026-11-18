@@ -58,6 +58,8 @@ def test_each_skill_owns_complete_explicit_defaults_and_a_valid_schema(skill):
     (FIX, {'limits': {'review_cycles': 6}}),
     ('dk-workflows:dk-commit-split', {'policy': {'prompt': 'x', 'skill': 'team:policy'}}),
     ('dk-workflows:dk-pr-decisions', {'language_review_passes': 4}),
+    *[('dk-workflows:dk-pr-decisions', {'reconciliation_prompt': value})
+      for value in ('', ' \n\t', None, False, 1, 'reconcile\x00text')],
     ('dk-workflows:dk-pr-feedback-address', {'additional_validation_commands': ['pytest -q']}),
     *[('dk-workflows:dk-pr-feedback-reply', {'reply_prompt': value})
       for value in ('', ' \n\t', None, False, 1, 'reply\x00text')],

@@ -2,6 +2,13 @@
 
 ## Shared assessment
 
+Apply [decision reconciliation](decision-reconciliation.md) during requirements
+collection and before dependent implementation. Supply effective commitments and
+arbitrary user-directed revisions, conditions and exceptions as scoped inputs.
+Keep original selections authoritative for analysis; reference them from necessary
+conflict resolutions instead of making duplicate decision records. Advised
+alternatives can also conflict with an agreement before selection is settled.
+
 After collecting requirements and repository evidence during initial inspection,
 the controller scripts (`pr_assessment.py` and `assessment_alternatives.py`)
 inject the assessment prompt into native assignments. There is no separate
@@ -176,7 +183,11 @@ issue requirements and compare whole-problem implementation approaches, acceptin
 an existing PR as an optional candidate. Complete shared assessment and initial
 alternatives once before the repeated task list with `plan --workflow fix`.
 Pass settled choices, interaction evidence and required changes into authorized
-implementation tasks; apply selected approaches and run relevant tests. Retaining
+implementation tasks together with sourced decision reconciliation and user
+exceptions; resolve governing conflicts before applying selected approaches and
+run relevant tests. Reuse applicable user answers across sessions. The separate
+reconciliation policy governs questions about existing agreements even when
+automatic ranking cannot ask for a selection. Retaining
 the current approach requires no corresponding edit. Selection does not authorize
 editing or publication. Current code review, verification, CI and publication
 checks remain independent live boundaries.
