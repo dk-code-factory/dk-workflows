@@ -62,6 +62,25 @@ findings and complete selected-stage evidence, rather than trust a coordinator's
 `complete` flag. A lower bill cannot compensate for a missed finding, skipped
 finalizer, stale coverage or weakened authorization/publication checks.
 
+The immutable exercise protocol selects four phases: initial execution with an
+incomplete simplifier, fresh recovery, unchanged fresh-session reuse, and relevant
+invalidation. A mutable external dispatch marker schedules these phases; it is
+neither workflow readiness nor a global semantic input to completed analysis.
+The controller removes an original required simplification source only after the
+claim is prepared, observes an actual incomplete native leaf, then restores the
+same bytes. The native workflow retains its result and completed siblings.
+
+Relevant invalidation adds a normative empty-name requirement in a real PR
+commit: display `guest`, retaining the original empty name in per-call history.
+The independent feature probe checks the published clean source, first against
+both original requirements and then against all three. These behavioral probes
+do not replace independent verification of native findings or stage coverage.
+Incoming reviewers remain read-only; the external controller supplies actual
+author corrections through the original publication contract. Each pushed head
+gets pending CI with historical runs retained. After a native current-head check
+read, the controller runs real unit tests against that published clean commit,
+retaining one original test result per run/attempt without repeating completed CI.
+
 ## Accounting
 
 `tests/fixtures/workflow_cost.py` reads the host database's complete parent-child

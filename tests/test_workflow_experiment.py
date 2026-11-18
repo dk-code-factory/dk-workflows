@@ -8,6 +8,8 @@ import sys
 import pytest
 
 import workflow_experiment as experiment
+import workflow_remote
+import workflow_quality
 
 
 @pytest.fixture
@@ -88,6 +90,115 @@ def test_incomplete_preflight_cannot_seal_an_arm(tmp_path, source):
     with pytest.raises(ValueError, match='Missing observed'):
         experiment.freeze(root, conditions=path, external_resources=[])
     assert not (root/'freeze.json').exists()
+
+
+def test_controlled_partial_restore_keeps_original_freeze_and_inputs(tmp_path, source):
+    checkout, revision = source
+    root = tmp_path/'arm'
+    experiment.initialize(root, checkout, revision, 'fix')
+    experiment.freeze(root, conditions=conditions(root), external_resources=[])
+    original = (root/'freeze.json').read_bytes()
+    experiment.partial_context(root, available=False)
+    assert not experiment.verify_freeze(root)['passed']
+    experiment.partial_context(root, available=True)
+    experiment.phase(root, 'recover')
+    assert experiment.verify_freeze(root)['passed']
+    assert (root/'freeze.json').read_bytes() == original
+    assert json.loads((root/'control/phase.json').read_text())['phase'] == 'recover'
+
+
+def test_quality_probes_require_published_clean_source_and_preserve_original_requirements(tmp_path, source):
+    checkout, revision = source
+    root = tmp_path/'arm'
+    experiment.initialize(root, checkout, revision, 'review')
+    original = workflow_quality.probe(root)
+    assert original['probe_complete']
+    assert set(original['violated_requirements']) == {'html-text', 'per-call-history'}
+
+    def publish():
+        experiment.git(root/'checkout', 'add', '.')
+        experiment.git(root/'checkout', 'commit', '-qm', 'Controlled author correction')
+        head = experiment.git(root/'checkout', 'rev-parse', 'HEAD').decode().strip()
+        experiment.git(root/'checkout', 'push', str(root/'remote.git'), 'HEAD:pr-branch')
+        state = json.loads((root/'remote.json').read_text())
+        workflow_remote.Remote(state).pushed('pr-branch', head)
+        experiment.save(root/'remote.json', state)
+
+    implementation = root/'checkout/greeting.py'
+    implementation.write_text('from html import escape\n\ndef greeting(name):\n'
+                              '    return "<p>Hello, " + escape(name) + "</p>", [name]\n')
+    with pytest.raises(ValueError, match='unpublished'):
+        workflow_quality.probe(root)
+    publish()
+    corrected = workflow_quality.probe(root)
+    assert corrected['probe_complete'] and corrected['violated_requirements'] == []
+    requirements = root/'checkout/README.md'
+    requirements.write_text(requirements.read_text() +
+        '\nAn empty name displays guest but keeps the original name in per-call history.\n')
+    publish()
+    changed = workflow_quality.probe(root, guest_required=True)
+    assert changed['violated_requirements'] == ['empty-name']
+    assert changed['source']['requirements_sha256'] != original['source']['requirements_sha256']
+    implementation.write_text('from html import escape\n\ndef greeting(name):\n'
+                              '    display = name if name else "guest"\n'
+                              '    return "<p>Hello, " + escape(display) + "</p>", [name]\n')
+    experiment.git(root/'checkout', 'add', '.')
+    experiment.git(root/'checkout', 'commit', '-qm', 'Unpublished guest correction')
+    with pytest.raises(ValueError, match='differs from published'):
+        workflow_quality.probe(root, guest_required=True)
+    # The controller publishes this already committed correction.
+    head = experiment.git(root/'checkout', 'rev-parse', 'HEAD').decode().strip()
+    experiment.git(root/'checkout', 'push', str(root/'remote.git'), 'HEAD:pr-branch')
+    state = json.loads((root/'remote.json').read_text())
+    workflow_remote.Remote(state).pushed('pr-branch', head)
+    experiment.save(root/'remote.json', state)
+    final = workflow_quality.probe(root, guest_required=True)
+    assert final['probe_complete'] and final['violated_requirements'] == []
+
+
+def test_ci_release_requires_current_observation_and_actual_clean_source_tests(tmp_path, source):
+    checkout, revision = source
+    root = tmp_path/'arm'
+    scenario = experiment.initialize(root, checkout, revision, 'review')
+    with pytest.raises(ValueError, match='No observed'):
+        experiment.release_ci(root)
+
+    def observe():
+        result = subprocess.run(['sh', '-c', '. "$1/environment.sh"; gh pr checks '
+            +experiment.PR+' --json name,bucket,state', 'fixture', str(root)],
+            text=True, capture_output=True, check=True)
+        return json.loads(result.stdout)
+
+    assert observe()[0]['bucket'] == 'pending'
+    released = experiment.release_ci(root)
+    assert released['head'] == scenario['head'] and released['returncode'] == 0
+    original_evidence = {path: path.read_bytes() for path in (root/'artifacts').glob('ci-controller-*.json')}
+    assert len(original_evidence) == 1
+    assert experiment.release_ci(root) == released
+    assert all(path.read_bytes() == content for path, content in original_evidence.items())
+    assert observe()[0]['bucket'] == 'pass'
+    (root/'checkout/test_failure.py').write_text('import unittest\nclass Failing(unittest.TestCase):\n'
+                                              '    def test_failure(self):\n        self.fail("CI fails")\n')
+    with pytest.raises(ValueError, match='unpublished'):
+        experiment.release_ci(root)
+    experiment.git(root/'checkout', 'add', '.')
+    experiment.git(root/'checkout', 'commit', '-qm', 'Introduce controlled test failure')
+    head = experiment.git(root/'checkout', 'rev-parse', 'HEAD').decode().strip()
+    experiment.git(root/'checkout', 'push', str(root/'remote.git'), 'HEAD:pr-branch')
+    state = json.loads((root/'remote.json').read_text())
+    workflow_remote.Remote(state).pushed('pr-branch', head)
+    assert state['historical_runs'][0]['head_sha'] == scenario['head']
+    assert state['historical_runs'][0]['conclusion'] == 'success'
+    assert state['run']['id'] != state['historical_runs'][0]['id']
+    experiment.save(root/'remote.json', state)
+    with pytest.raises(ValueError, match='No observed'):
+        experiment.release_ci(root)
+    observe()
+    failed = experiment.release_ci(root)
+    assert failed['head'] == head and failed['returncode'] != 0
+    assert observe()[0]['bucket'] == 'fail'
+    assert len(list((root/'artifacts').glob('ci-controller-*.json'))) == 2
+    assert all(path.read_bytes() == content for path, content in original_evidence.items())
 
 
 @pytest.mark.parametrize('override', ['repository', 'execution'])

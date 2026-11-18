@@ -20,6 +20,29 @@ spec.loader.exec_module(base)
 
 
 class Remote(base.Remote):
+    def pushed(self, branch, head):
+        self.state['branches'][branch] = head
+        if branch != 'pr-branch' or self.state['metadata']['headRefOid'] == head:
+            return
+        old = deepcopy(self.state['run'])
+        self.state.setdefault('historical_runs', []).append(old)
+        self.state['metadata']['headRefOid'] = head
+        self.state['run'].update(id=old['id']+1, head_sha=head, run_attempt=1,
+                                 status='in_progress', conclusion=None)
+        for check in self.state['checks']:
+            check.update(bucket='pending', state='PENDING',
+                         link='https://github.com/owner/repo/actions/runs/'+str(old['id']+1))
+
+    def runs(self):
+        repository = {'id': 10, 'full_name': 'owner/repo', 'name': 'repo',
+                      'owner': {'login': 'owner'}}
+        return [{**deepcopy(run), 'event': 'pull_request', 'head_branch': 'pr-branch',
+            'repository': repository, 'head_repository': repository,
+            'pull_requests': [{'number': 7,
+                'head': {'sha': run['head_sha'], 'ref': 'pr-branch', 'repo': repository},
+                'base': {'sha': self.state['branches']['main'], 'ref': 'main', 'repo': repository}}]}
+            for run in [*self.state.get('historical_runs', []), self.state['run']]]
+
     def local_git(self, *args):
         return subprocess.check_output([os.environ['DK_RECIPE_GIT'], '--no-lazy-fetch',
             '-C', os.environ['DK_RECIPE_BARE'], *args], text=True).strip()
@@ -40,6 +63,8 @@ class Remote(base.Remote):
                           'owner': {'login': 'owner'}, 'clone_url': 'https://github.com/owner/repo.git'}
             value['head'].update(ref='pr-branch', repo=repository)
             value['base'].update(repo=repository)
+            value.update(title=self.state['metadata']['title'], body=self.state['metadata']['body'],
+                         labels=[], milestone=None)
             return value
         if suffix == '/pulls/7/files':
             revisions = (self.state['branches']['main'], self.state['metadata']['headRefOid'])
@@ -63,10 +88,23 @@ class Remote(base.Remote):
             import base64
             return {'encoding': 'base64', 'content': base64.b64encode(result.stdout.encode()).decode()}
         if suffix == '/actions/runs':
-            return {'total_count': 1, 'workflow_runs': [deepcopy(self.state['run'])]}
-        if suffix in ('/actions/runs/77/jobs', '/actions/runs/77/attempts/1/jobs'):
-            return {'total_count': 1, 'jobs': [{'id': 771, 'run_id': 77, 'name': 'test',
-                'status': self.state['run']['status'], 'conclusion': self.state['run']['conclusion']}]}
+            runs = self.runs()
+            query = parse_qs(urlsplit(path).query)
+            if 'head_sha' in query:
+                runs = [run for run in runs if run['head_sha'] == query['head_sha'][0]]
+            return {'total_count': len(runs), 'workflow_runs': runs}
+        if suffix and suffix.startswith('/actions/runs/'):
+            parts = suffix.strip('/').split('/')
+            run = next((value for value in self.runs() if str(value['id']) == parts[2]), None)
+            if run is None:
+                raise OSError('HTTP 404: Not Found')
+            if len(parts) == 3:
+                return run
+            if parts[-1] == 'jobs':
+                return {'total_count': 1, 'jobs': [{'id': run['id']*10+1, 'run_id': run['id'],
+                    'name': 'test', 'status': run['status'], 'conclusion': run['conclusion']}]}
+            if parts[-1] == 'pending_deployments':
+                return []
         return super().api(pr, path, payload=payload)
 
     def graphql(self, payload):

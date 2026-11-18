@@ -119,10 +119,11 @@ def test_missing_cache_duration_or_unknown_prices_stay_incomplete(tmp_path):
         workflow_cost.collect(database, {'initial': 'workflow-initial'})
 
 
-def test_actual_tool_schemas_and_instructions_are_independently_frozen(tmp_path):
+@pytest.mark.parametrize('tool_record', ['message', 'additional_tools'])
+def test_actual_tool_schemas_and_instructions_are_independently_frozen(tmp_path, tool_record):
     path = tmp_path/'trace.jsonl'
     rows = write_trace(path, 'initial')
-    tools = {'type': 'response_item', 'payload': {'type': 'message', 'role': 'developer',
+    tools = {'type': 'response_item', 'payload': {'type': tool_record, 'role': 'developer',
         'tools': [{'name': 'native-delegation', 'schema': {'type': 'object'}}]}}
     instruction = {'type': 'response_item', 'payload': {'type': 'message', 'role': 'user',
         'content': [{'text': 'Complete workflow in /arm/baseline'}]}}
@@ -138,7 +139,31 @@ def test_actual_tool_schemas_and_instructions_are_independently_frozen(tmp_path)
     assert changed['tools'] != before['tools'] and changed['instructions'] == before['instructions']
     instruction['payload']['content'][0]['text'] = 'Skip finalizers in /arm/candidate'
     path.write_text('\n'.join(map(json.dumps, rows))+'\n')
-    assert workflow_cost.starting_context(path, replacements={'/arm/candidate': 'ARM'})['instructions'] != before['instructions']
+    changed = workflow_cost.starting_context(path, replacements={'/arm/candidate': 'ARM'})
+    assert changed['instructions'] != before['instructions']
+    assert changed['assignment'] != before['assignment']
+    assert changed['host_instructions'] == before['host_instructions']
+
+
+def test_context_freeze_stops_at_the_first_native_agent_response(tmp_path):
+    path = tmp_path/'trace.jsonl'
+    rows = write_trace(path, 'initial')
+    prefix = [
+        {'type': 'response_item', 'payload': {'type': 'additional_tools', 'role': 'developer',
+         'tools': [{'type': 'function', 'name': 'read', 'parameters': {'type': 'object'}}]}},
+        {'type': 'response_item', 'payload': {'type': 'message', 'role': 'user',
+         'content': [{'text': 'Initial assignment.'}]}},
+        {'type': 'response_item', 'payload': {'type': 'agent_message', 'author': 'assistant',
+         'recipient': 'all', 'content': [{'text': 'Native execution starts.'}]}},
+        {'type': 'response_item', 'payload': {'type': 'message', 'role': 'user',
+         'content': [{'text': 'Later runtime notification.'}]}},
+    ]
+    rows[1:1] = prefix
+    path.write_text('\n'.join(map(json.dumps, rows))+'\n')
+    before = workflow_cost.starting_context(path, replacements={})
+    prefix[-1]['payload']['content'][0]['text'] = 'Different later notification.'
+    path.write_text('\n'.join(map(json.dumps, rows))+'\n')
+    assert workflow_cost.starting_context(path, replacements={}) == before
 
 
 def test_graph_change_during_collection_invalidates_the_measurement(tmp_path, monkeypatch):

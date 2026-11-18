@@ -5,6 +5,7 @@ transport coverage and host conditions before starting any paired arm. Unlike th
 historical instruction-only fixture, this assignment retains default skill lists.
 """
 import hashlib
+import fcntl
 import importlib.util
 import io
 import json
@@ -13,6 +14,7 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 import tarfile
 
 
@@ -21,6 +23,8 @@ PR = 'https://github.com/owner/repo/pull/7'
 BASELINE = '1befef223aca04f481a0417d8368238b5cc9b5df'
 CANDIDATE = 'b478a6689fa65ff3412cfc158f54741f40b9599c'
 ORDERS = [['baseline', 'candidate'], ['candidate', 'baseline'], ['baseline', 'candidate']]
+SIMPLIFICATION_CONTEXT = ('Keep changes within the greeting feature and its original requirements.\n'
+                          'Preserve safe HTML text and independent per-call history.\n')
 
 
 def save(path, value):
@@ -50,7 +54,8 @@ def git_environment():
 
 
 def git(checkout, *args):
-    return subprocess.check_output(['git', '--no-lazy-fetch', '-C', str(checkout), *args],
+    return subprocess.check_output([os.environ.get('DK_RECIPE_GIT', 'git'), '--no-lazy-fetch',
+                                   '-C', str(checkout), *args],
                                    env=git_environment())
 
 
@@ -72,7 +77,7 @@ def initialize(root, source, revision, route):
     archive = git(source, 'archive', '--format=tar', revision)
     with tarfile.open(fileobj=io.BytesIO(archive)) as files:
         files.extractall(package, filter='data')
-    for folder in ('artifacts', 'inputs', 'bin', 'state', 'config', 'data', 'git-template'):
+    for folder in ('artifacts', 'inputs', 'bin', 'state', 'config', 'data', 'git-template', 'control'):
         (root/folder).mkdir()
     checkout = root/'checkout'
     checkout.mkdir()
@@ -90,6 +95,7 @@ def initialize(root, source, revision, route):
     local('config', 'user.email', 'fixture@example.test')
     (checkout/'greeting.py').write_text('def greeting(name):\n    return "Hello, " + name\n')
     (checkout/'AGENTS.md').write_text('Keep changes within the greeting feature. Run python3 -m unittest discover.\n')
+    (checkout/'.gitignore').write_text('__pycache__/\n.pytest_cache/\n')
     local('add', '.')
     local('commit', '-qm', 'Add plain greeting')
     base = local('rev-parse', 'HEAD')
@@ -97,7 +103,7 @@ def initialize(root, source, revision, route):
     (checkout/'greeting.py').write_text('def greeting(name, history=[]):\n    history.append(name)\n'
                                       '    return "<p>Hello, " + name + "</p>", list(history)\n')
     (checkout/'README.md').write_text('# HTML greeting\n\n'
-        '`greeting(name)` returns an HTML paragraph and a list containing only that call\'s name. '
+        'For a string name, `greeting(name)` returns an HTML paragraph and a list containing only that call\'s name. '
         'Render user-supplied names as text, including HTML metacharacters. Calls are independent.\n')
     (checkout/'test_greeting.py').write_text('import unittest\nfrom greeting import greeting\n\n'
         'class GreetingTest(unittest.TestCase):\n'
@@ -121,11 +127,16 @@ def initialize(root, source, revision, route):
     remote['merge_gate'].update(baseRefOid=base, reviewDecision='')
     remote['pull']['base']['sha'] = base
     remote['branches'] = {'main': base, 'pr-branch': head}
-    remote['run'].update(head_sha=head, status='completed', conclusion='success')
+    remote['run'].update(head_sha=head, status='in_progress', conclusion=None)
+    remote['checks'][0].update(bucket='pending', state='PENDING')
+    remote['lose_response'] = ['push' if route == 'fix' else 'post-review']
     patch = local('diff', base, head, '--', 'greeting.py')
     remote['files'] = [{'filename': 'greeting.py', 'patch': patch}]
     remote['thread']['comments'] = []
     save(root/'remote.json', remote)
+    save(root/'control/phase.json', {'phase': 'initial', 'checkpoint': 'run'})
+    (root/'inputs/simplification-context.md').write_text(SIMPLIFICATION_CONTEXT)
+    (root/'inputs/protocol.json').write_bytes((ROOT/'tests/fixtures/workflow_protocol.json').read_bytes())
     for name in ('git', 'gh'):
         script = root/'bin'/name
         script.write_text('#!'+os.sys.executable+'\n'+
@@ -135,6 +146,7 @@ def initialize(root, source, revision, route):
                    'XDG_DATA_HOME': str(root/'data'), 'DK_RECIPE_REMOTE': str(root/'remote.json'),
                    'DK_RECIPE_FIXTURE': str(ROOT/'tests/fixtures/workflow_remote.py'),
                    'DK_RECIPE_BARE': str(bare), 'DK_RECIPE_GIT': real_git,
+                   'PYTHONDONTWRITEBYTECODE': '1',
                    **{key: env[key] for key in ('GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM',
                        'GIT_CONFIG_NOSYSTEM', 'GIT_ATTR_NOSYSTEM', 'GIT_ALLOW_PROTOCOL',
                        'GIT_TEMPLATE_DIR', 'GIT_TERMINAL_PROMPT')}}
@@ -162,9 +174,77 @@ def initialize(root, source, revision, route):
         'claims, completed siblings, budgets and publication operations. Native tools own execution; '
         'never start another model session through a command or helper.\n'
         'Do not start a paired arm until freeze.json and independent transport/host preflight are complete. '
+        'Read inputs/protocol.json and the external caller phase in control/phase.json. Follow its '
+        'controlled recovery checkpoints, communicating with your native caller before dispatch when requested. '
         'Report stage evidence, findings, unresolved requirements and readiness accurately. '
         'Recovery is subsequent work on the original state, never a new trial or a reset.\n')
     return scenario
+
+
+def phase(root, name, *, checkpoint='run'):
+    protocol = json.loads((Path(root)/'inputs/protocol.json').read_text())
+    if name not in protocol['phases']:
+        raise ValueError('Unknown exercise phase')
+    if checkpoint not in ('run', 'missing-context-dispatch', 'context-restored'):
+        raise ValueError('Unknown controlled checkpoint')
+    save(Path(root)/'control/phase.json', {'phase': name, 'checkpoint': checkpoint})
+
+
+def partial_context(root, *, available):
+    if type(available) is not bool:
+        raise ValueError('Context availability must be boolean')
+    path = Path(root)/'inputs/simplification-context.md'
+    if path.exists() and path.read_text() != SIMPLIFICATION_CONTEXT:
+        raise ValueError('Original simplification context changed')
+    if available:
+        path.write_text(SIMPLIFICATION_CONTEXT)
+    elif path.exists():
+        path.unlink()
+
+
+def release_ci(root):
+    root = Path(root)
+    with (root/'remote.json.lock').open('a') as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        return _release_ci(root)
+
+
+def _release_ci(root):
+    path = root/'remote.json'
+    state = json.loads(path.read_text())
+    head = state['metadata']['headRefOid']
+    reads = state.get('check_reads', [])
+    if not reads or reads[-1] != head:
+        raise ValueError('No observed current-head CI read')
+    if git(root/'checkout', 'rev-parse', 'HEAD').decode().strip() != head:
+        raise ValueError('CI checkout differs from observed head')
+    if git(root/'checkout', 'status', '--porcelain', '--untracked-files=all').strip():
+        raise ValueError('CI checkout has unpublished changes')
+    run = state['run']
+    evidence_path = root/'artifacts'/('ci-controller-'+head+'-'+str(run['id'])+'-'+
+                                      str(run.get('run_attempt', 1))+'.json')
+    if evidence_path.exists():
+        evidence = json.loads(evidence_path.read_text())
+        expected = 'success' if evidence['returncode'] == 0 else 'failure'
+        if run['status'] != 'completed' or run['conclusion'] != expected:
+            raise ValueError('Retained CI result differs from current run')
+        return evidence
+    result = subprocess.run([sys.executable, '-m', 'unittest', 'discover'],
+        cwd=root/'checkout', env={**git_environment(), 'PYTHONDONTWRITEBYTECODE': '1'},
+        text=True, capture_output=True)
+    if git(root/'checkout', 'rev-parse', 'HEAD').decode().strip() != head:
+        raise ValueError('CI checkout changed during tests')
+    if git(root/'checkout', 'status', '--porcelain', '--untracked-files=all').strip():
+        raise ValueError('CI checkout changed during tests')
+    evidence = {'head': head, 'returncode': result.returncode,
+                'stdout': result.stdout, 'stderr': result.stderr}
+    save(evidence_path, evidence)
+    success = result.returncode == 0
+    state['run'].update(status='completed', conclusion='success' if success else 'failure')
+    for check in state['checks']:
+        check.update(bucket='pass' if success else 'fail', state='SUCCESS' if success else 'FAILURE')
+    save(path, state)
+    return evidence
 
 
 def freeze(root, *, conditions, external_resources):
@@ -179,6 +259,10 @@ def freeze(root, *, conditions, external_resources):
     if not all(isinstance(value.get(key), str) and len(value[key]) == 64 for key in required):
         raise ValueError('Missing observed host, assignment, quality or transport freeze')
     paths = [root/'inputs', root/'package', root/'bin', root/'environment.sh', conditions,
+             ROOT/'tests/fixtures/workflow_experiment.py', ROOT/'tests/fixtures/workflow_protocol.json',
+             ROOT/'tests/fixtures/workflow_cost.py', ROOT/'tests/fixtures/native_cost_observations.py',
+             ROOT/'tests/fixtures/workflow_quality.py',
+             ROOT/'tests/fixtures/native_usage.py', ROOT/'tests/fixtures/dollar_usage.py',
              ROOT/'tests/fixtures/workflow_remote.py', ROOT/'tests/pr/fixtures/github_remote.py',
              ROOT/'tests/fixtures/recipe/remote_cli.py',
              *map(Path, external_resources)]

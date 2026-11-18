@@ -59,10 +59,14 @@ def starting_context(path, *, replacements):
     messages, tools = [], []
     for row in rows:
         payload = row['payload']
-        if row['type'] != 'response_item' or payload.get('type') != 'message':
+        if row['type'] != 'response_item':
             continue
-        if payload.get('role') == 'assistant':
+        kind = payload.get('type')
+        if kind in ('agent_message', 'reasoning', 'function_call', 'custom_tool_call') or (
+                kind == 'message' and payload.get('role') == 'assistant'):
             break
+        if kind not in ('message', 'additional_tools'):
+            continue
         if payload.get('role') not in ('system', 'developer', 'user'):
             continue
         if 'content' in payload:
@@ -88,6 +92,9 @@ def starting_context(path, *, replacements):
         return hashlib.sha256(text.encode()).hexdigest()
 
     return {'instructions': normalized({'base': meta['base_instructions'], 'messages': messages}),
+            'host_instructions': normalized({'base': meta['base_instructions'],
+                'messages': [message for message in messages if message['role'] != 'user']}),
+            'assignment': normalized([message for message in messages if message['role'] == 'user']),
             'tools': normalized(tools), 'controls': normalized(controls)}
 
 
