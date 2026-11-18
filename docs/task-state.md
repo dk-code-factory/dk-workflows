@@ -144,6 +144,15 @@ changed governing task inputs still refresh primary work. Resume flags an old
 contract as requiring refresh and never silently accepts it. Original evidence,
 cache identities, siblings and retry/review budgets remain intact.
 
+Historical alternatives have a narrower completion boundary: prepare their
+original recovery keys and submit the original pending rounds even if installed
+guidance changed or disappeared. The helper validates retained primary bytes,
+native evidence, fingerprint, checklist, claim and bounded rounds without
+recapturing today's installation. Its assignment sets
+`historical_completion_only:true`; complete only that original checklist.
+This preserves design context and establishes no current-code coverage. Current
+reviews, alignment, authorization, CI and publication retain live checks.
+
 Follow-up reports may include additional `findings`. Findings retrieval,
 normalized results and status append these to the primary findings without
 replacing the original report. Exact duplicate findings appear once. Result

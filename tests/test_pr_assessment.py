@@ -494,6 +494,7 @@ def test_new_design_rejection_preserves_verification_publication_and_later_head_
     live['headRefOid'] = 'f' * 40
     result = plans.gate(Tasks(REPO, PR), assessment.REVIEW, review_operation=operation)
     assert result['outcome'] == 'planned' and result['release_reviewers']
+    assert result['design_context'] and result['current_alignment_required']
     assert store.manifest.read_bytes() == before
     assert Path(spec['git']['checkout'], 'code').read_text() == 'review me\n'
 

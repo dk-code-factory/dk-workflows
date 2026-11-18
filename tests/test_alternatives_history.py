@@ -17,6 +17,8 @@ from test_state import case, REPO, PR, ROOT, git
 from test_pr_assessment import initial, complete, comparison, descriptor, purpose, inventory
 from test_alternatives import finish, selection
 from test_fix_alternatives import planned
+from native_review_observations import observations
+from checklist_reports import report as checklist_report
 
 
 def files(store):
@@ -46,7 +48,7 @@ def test_both_routes_reuse_completed_comparison_after_changed_guidance_and_head(
     for route in ('fix', 'review'):
         command = [sys.executable, str(ROOT/'scripts/alternatives.py'), '--repository', REPO,
                    '--pr', PR, 'plan', '--workflow', route]
-        result = json.loads(subprocess.check_output(command, text=True))
+        result = json.loads(subprocess.check_output(command, text=True, timeout=60))
         assert result['outcome'] == 'planned'
         assert result['references'] == refs
         assert result['design_context'] and result['current_alignment_required']
@@ -133,8 +135,9 @@ def test_only_direct_dedicated_manual_requests_authorize_new_comparisons(case, t
     assert files(store) == before
 
 
-def test_distinct_direct_invocations_refresh_and_interrupted_request_resumes_same_work(case, tmp_path):
+def test_distinct_direct_invocations_refresh_and_interrupted_request_resumes_same_work(case, tmp_path, monkeypatch):
     spec, store = case; tasks = Tasks(REPO, PR)
+    monkeypatch.setattr(alternatives, 'live_pr', lambda pr: {'body': 'Original PR scope', 'headRefOid': spec['git']['head']})
     refs = initial(tasks, spec)
     shared = read(store.manifest)['entries'][refs['assessment']]['result']
     for number in (2, 3):
@@ -163,6 +166,11 @@ def test_distinct_direct_invocations_refresh_and_interrupted_request_resumes_sam
             task = tasks.prepare({'tasks': [plans.gate(tasks, assessment.REVIEW, request=source)['next_task']]})['tasks'][0]
             finish(tasks, task, report)
         assert plans.gate(tasks, assessment.REVIEW)['outcome'] == 'planned'
+        before = files(store)
+        for owner in (assessment.FIX, assessment.REVIEW):
+            settled = plans.gate(tasks, owner, request=source)
+            assert settled['outcome'] == 'planned' and settled['design_context']
+        assert files(store) == before
         assert read(store.manifest)['entries'][refs['assessment']]['result'] == shared
     assert len(read(store.manifest)['entries'][refs['comparison:storage']]['attempts']) == 3
 
@@ -277,4 +285,103 @@ def test_completed_manual_request_cannot_be_replaced_by_mutating_its_artifact(ca
     before = files(store)
     with pytest.raises(ValueError, match='Original manual request changed'):
         plans.gate(tasks, assessment.REVIEW, request=source)
+    assert files(store) == before
+
+
+def test_cross_route_reuse_does_not_validate_consumer_options_as_retained_owner(case):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = initial(tasks, spec)
+    result = plans.gate(tasks, assessment.FIX,
+        options={'completion_instructions': 'Retain the selected completion duties'})
+    assert result['outcome'] == 'planned' and result['references'] == refs
+    assert result['current_alignment_required']
+
+
+@pytest.mark.parametrize('definition', [None, 'damaged', {'inputs': []}])
+def test_damaged_nested_definition_retains_original_recovery_key(case, definition):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = initial(tasks, spec)
+    key = refs['comparison:storage']
+    with store.locked() as manifest:
+        manifest['entries'][key]['managed']['definition'] = definition
+        write(store.manifest, manifest)
+    before = files(store)
+    for owner in (assessment.FIX, assessment.REVIEW):
+        result = plans.gate(tasks, owner)
+        assert result['outcome'] == 'recovery_required' and result['next_task'] == {'key': key}
+    assert files(store) == before
+
+
+def test_same_manual_request_resumes_its_owner_after_switching_routes(case, tmp_path):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = initial(tasks, spec)
+    source = manual(tmp_path, 2)
+    next_task = plans.gate(tasks, assessment.REVIEW, request=source)['next_task']
+    task = tasks.prepare({'tasks': [next_task]})['tasks'][0]
+    finish(tasks, task, inventory(('storage', 'inherited'), ('boundary', 'materially_changed')))
+    before = files(store)
+    resumed = plans.gate(tasks, assessment.FIX, request=source)
+    assert resumed['stage'] == 'comparison' and resumed['next_task']['skill'] == assessment.REVIEW
+    assert resumed['next_task']['dependencies']['inventory'] == refs['inventory']
+    other = descriptor(spec, 'inventory', {'assessment': refs['assessment']}, owner=assessment.FIX,
+                       inputs={'alternatives_request': source})
+    with pytest.raises(ValueError, match='original alternatives chain'):
+        tasks.prepare({'tasks': [other]})
+    assert files(store) == before
+
+
+@pytest.mark.parametrize('change', ['changed', 'removed'])
+def test_original_checklist_finishes_in_fresh_process_after_guidance_update(case, tmp_path, change):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    task = tasks.prepare({'tasks': [descriptor(spec, 'assessment')]})['tasks'][0]
+    report = {'complete': True, 'findings': [], **purpose()}
+    original = json.dumps(report).encode()
+    pending = tasks.finish(task['key'], task['claim']['id'], original, report,
+                           native_evidence=observations(task['assignment'], task['claim'], original))
+    assert pending['action'] == 'recheck'
+    entry = read(store.manifest)['entries'][task['key']]
+    primary = deepcopy(entry['result']); attempts = deepcopy(entry['attempts'])
+    path = Path(spec['skill']['resources']['entry'])
+    if change == 'changed':
+        path.write_text('Updated installed guidance')
+    else:
+        path.unlink()
+    request = tmp_path/'recheck.json'; write(request, {'tasks': [{'key': task['key']}]})
+    command = [sys.executable, str(ROOT/'scripts/dk.py'), '--repository', REPO, '--pr', PR]
+    replay = json.loads(subprocess.check_output([*command, 'prepare', '--file', str(request)], text=True, timeout=60))['tasks'][0]
+    assert replay['action'] == 'recheck' and replay['round'] == pending['round']
+    assert replay['assignment']['historical_completion_only']
+    followup = tmp_path/'followup.json'; write(followup, checklist_report(replay['checklist']))
+    result = json.loads(subprocess.check_output([*command, 'finish', '--key', task['key'],
+        '--claim', task['claim']['id'], '--round', replay['round'], '--report', str(followup)], text=True, timeout=60))
+    assert result['checklist_complete'] and result['action'] == 'complete'
+    before = files(store)
+    # A lost response replays the same original round without another allowance.
+    result = tasks.finish(task['key'], task['claim']['id'], followup.read_bytes(), read(followup), round_id=replay['round'])
+    assert result['checklist_complete'] and files(store) == before
+    entry = read(store.manifest)['entries'][task['key']]
+    assert entry['result'] == primary and entry['attempts'] == attempts
+    assert len(entry['checklist']['rounds']) == 1
+    assert plans.gate(tasks, assessment.REVIEW)['stage'] == 'inventory'
+
+
+def test_original_checklist_rejects_changed_primary_binding_and_wrong_claim(case):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    task = tasks.prepare({'tasks': [descriptor(spec, 'assessment')]})['tasks'][0]
+    report = {'complete': True, 'findings': [], **purpose()}
+    original = json.dumps(report).encode()
+    pending = tasks.finish(task['key'], task['claim']['id'], original, report,
+                           native_evidence=observations(task['assignment'], task['claim'], original))
+    followup = checklist_report(pending['checklist'])
+    before = files(store)
+    with pytest.raises(ValueError, match='original claim'):
+        tasks.finish(task['key'], 'another-claim', json.dumps(followup).encode(), followup,
+                     round_id=pending['round'])
+    assert files(store) == before
+    with store.locked() as manifest:
+        manifest['entries'][task['key']]['components']['options']['changed'] = True
+        write(store.manifest, manifest)
+    before = files(store)
+    with pytest.raises(ValueError, match='intact complete primary'):
+        tasks.prepare({'tasks': [{'key': task['key']}]})
     assert files(store) == before

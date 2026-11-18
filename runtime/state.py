@@ -1144,6 +1144,50 @@ class Store:
             write(self.manifest, manifest)
             return result
 
+    def original_checks(self, keys, *, claim_id=None, round_id=None, original=None, report=None):
+        """Finish original checklists, never start or replace primary analysis.
+
+        Callers decide whether historical completion applies. The original
+        fingerprint stays unchanged and supplies no current-input coverage.
+        """
+        from checklists import reply, reserve, submit
+        if (not keys or len(set(keys)) != len(keys)
+                or report is not None and (len(keys) != 1 or not has_output_content(original))):
+            raise ValueError('Original completion requires unique keys and nonempty response output')
+        with self.locked() as manifest:
+            before = digest(manifest)
+            originals = []
+            for key in keys:
+                entry = manifest['entries'].get(key, {})
+                saved, problem = self._load_saved(entry)
+                if (problem or saved['status'] != 'complete' or saved['cacheable'] is not True
+                        or digest(entry.get('components')) != saved['fingerprint']):
+                    raise ValueError('Original completion requires intact complete primary evidence')
+                captured = {'key': key, 'components': entry['components'],
+                            'fingerprint': saved['fingerprint'], 'cacheable': saved['cacheable']}
+                # Check the original contract and native observations, rather
+                # than generating today's contract for yesterday's analysis.
+                described = self.describe(captured, {k: v for k, v in entry.items() if k != 'managed'})
+                gate = entry.get('checklist')
+                if (not described.get('analysis_complete') or not gate
+                        or described['checklist']['outcome'] == 'stale'
+                        or gate['fingerprint'] != saved['fingerprint']
+                        or gate['result'] != entry['result']['hash']
+                        or report is not None and saved['claim'] != claim_id):
+                    raise ValueError('Original completion requires its native evidence, checklist and original claim')
+                originals.append(entry)
+            results = []
+            for entry in originals:
+                if report is None:
+                    reserve(entry['checklist'])
+                    results.append(reply(self, entry))
+                else:
+                    results.append(submit(self, entry, round_id, original, report))
+            if digest(manifest) != before:
+                write(self.manifest, manifest)
+            return {'tasks': results, 'manifest': str(self.manifest),
+                    'unfinished': [entry['claim'] for entry in manifest['entries'].values() if entry.get('claim')]}
+
     def invalidate(self, keys, reason, *, recover=None):
         if not reason:
             raise ValueError('An invalidation reason is required')

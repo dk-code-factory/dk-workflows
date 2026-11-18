@@ -230,6 +230,10 @@ instructions as current governing rules. Missing/damaged evidence returns
 `recovery_required` with its original task key; unfinished claims and checklists
 keep their existing recovery action and allowances. Restore missing artifacts and
 finish missing deliverables without restarting completed comparisons.
+For completed primary work with pending checklist evidence, prepare the returned
+original key and finish its original round under
+[historical completion](task-state.md#completion-checks). Changed or removed
+installed guidance does not replace its checklist or repeat primary analysis.
 
 Automatic settings or guidance changes preserve settled original analysis and
 choices. Current tasks still assess requirements and implementation alignment

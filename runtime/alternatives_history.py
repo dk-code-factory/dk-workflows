@@ -14,6 +14,11 @@ KINDS = {'assessed-alternatives', 'alternatives', 'architecture'}
 MANUAL = 'dk-workflows:dk-pr-review-alternatives'
 
 
+def definition_valid(value):
+    return (isinstance(value, dict) and isinstance(value.get('git'), dict)
+            and all(isinstance(value.get(name, {}), dict) for name in ('resources', 'instructions', 'inputs')))
+
+
 def request(path, *, tasks=None):
     """Bind new comparison authorization to the dedicated direct invocation."""
     from state import read
@@ -26,7 +31,8 @@ def request(path, *, tasks=None):
         from state import resource
         current = resource(path)
         for entry in entries(tasks).values():
-            inputs = entry['managed']['definition'].get('inputs', {})
+            definition = entry['managed'].get('definition')
+            inputs = definition.get('inputs', {}) if definition_valid(definition) else {}
             for name in ('alternatives_request', 'alternatives_reassessment'):
                 prior = inputs.get(name)
                 if prior and Path(prior).absolute() == Path(path).absolute():
@@ -51,6 +57,9 @@ def guard_route(tasks, owner, kind, definition):
     if any(sources):
         for source in filter(None, sources):
             request(source, tasks=tasks)
+            retained = route(tasks, owner, request_source=source)
+            if retained and (retained['owner'] != owner or retained['kind'] != kind):
+                raise ValueError('Resume this manual request in its original alternatives chain')
         return
     values = entries(tasks)
     chains = [value['managed'] for value in values.values()
@@ -71,7 +80,9 @@ def accepted(tasks, key):
     """Validate historical acceptance, never current installed resources."""
     with tasks.store.locked() as manifest:
         original = deepcopy(manifest['entries'].get(key))
-    if not original or original.get('managed', {}).get('kind') not in KINDS:
+    if (not original or not isinstance(original.get('managed'), dict)
+            or original['managed'].get('kind') not in KINDS
+            or not definition_valid(original['managed'].get('definition'))):
         raise ValueError('Original alternatives definition is missing; restore its evidence')
     saved, problem = tasks.store._load_saved(original)
     if problem or saved['status'] != 'complete':
@@ -103,7 +114,7 @@ def accepted(tasks, key):
             'reference': saved['path'], 'managed': original['managed']}
 
 
-def route(tasks, owner):
+def route(tasks, owner, *, request_source=None):
     """Choose retained work before constructing another route's initial plan."""
     values = entries(tasks)
     # A shared purpose assessment alone is not a second whole-problem plan.
@@ -111,6 +122,12 @@ def route(tasks, owner):
                   if value['managed'].get('stage') != 'assessment']
     if not candidates:
         candidates = list(values.values())
+    if request_source:
+        from state import resource
+        consumed = resource(request_source)
+        candidates = [value for value in candidates if any(
+            value.get('components', {}).get('inputs', {}).get(name) == consumed
+            for name in ('alternatives_request', 'alternatives_reassessment'))]
     if not candidates:
         return None
     # Existing requested-route work stays authoritative. Otherwise resume the
@@ -121,7 +138,7 @@ def route(tasks, owner):
             'kind': 'alternatives' if managed['kind'] == 'architecture' else managed['kind']}
 
 
-def legacy_gate(tasks, owner, *, consumer=None, review_operation=None, analysis_only=False):
+def legacy_gate(tasks, owner, *, consumer=None, review_operation=None, analysis_only=False, request_source=None):
     """Resume historical whole-problem chains without inventing an inventory."""
     import alternatives
     consumer = consumer or owner
@@ -154,6 +171,14 @@ def legacy_gate(tasks, owner, *, consumer=None, review_operation=None, analysis_
             return {'outcome': 'choice_pending', 'release_reviewers': False, 'references': refs,
                     'next_task': {'key': task}}
     alignment = retained['alignment']
+    if request_source:
+        from state import read
+        live = alternatives.live_pr(tasks.store.subject['pr'])
+        source = alignment['managed']['definition'].get('inputs', {}).get('alternatives_current_pr')
+        current = read(source) if source else {}
+        if (live['headRefOid'] != alignment['spec']['git']['head']
+                or any(current.get(name) != live.get(name) for name in ('body', 'headRefOid'))):
+            return {'outcome': 'alignment_blocked', 'release_reviewers': False, 'references': refs}
     result = alignment['report']['alignment']
     governing = [value['reference'] for stage, value in retained.items()
                  if consumer == alternatives.FIX_OWNER or stage != 'assessment']

@@ -924,6 +924,17 @@ No current authorization, publication receipt validation or CI check is cached.
 Offline fresh-process, partial recovery and invalidation tests establish behavior;
 process counts are proxies and native API dollar savings remain unmeasured.
 
+Original alternatives checklist recovery uses the existing primary result and
+original checklist under the store lock. A completion-only store operation checks
+the immutable primary, captured fingerprint, native evidence, original claim and
+bounded checklist rounds before reserving or accepting a response. It cannot
+start primary work or replace a report. The managed controller selects this path
+only for retained alternatives checklist completion or its replay; current-code tasks
+keep their ordinary live capture boundary. Preparing original recovery keys in
+one group validates all originals before reserving any checks. No new state,
+fingerprint or allowance is introduced. This avoids repeating completed analysis
+when an installation changes or disappears while its checklist is unfinished.
+
 ## Incoming alternatives gate
 
 The following contract is retained for historical managed-stage recovery. Current

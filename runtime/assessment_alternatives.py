@@ -424,38 +424,48 @@ def gate(tasks, owner, *, options=None, policy_options=None, alternatives_option
     if request:
         from alternatives_history import request as original_request
         original_request(request, tasks=tasks)
-    if not request and not _historical:
+    if not _historical and _consumer is None:
         from alternatives_history import route
-        retained_route = route(tasks, owner)
+        retained_route = route(tasks, owner, request_source=request)
         if retained_route:
             if retained_route['kind'] == KIND:
                 return gate(tasks, retained_route['owner'], options=options, policy_options=policy_options,
                             alternatives_options=alternatives_options, upstream=upstream,
-                            review_operation=review_operation, analysis_only=analysis_only, _historical=True,
+                            review_operation=review_operation, analysis_only=analysis_only, request=request,
+                            _historical=not bool(request),
                             _consumer=owner)
             from alternatives_history import legacy_gate
             return legacy_gate(tasks, retained_route['owner'], review_operation=review_operation,
-                               analysis_only=analysis_only, consumer=owner)
-    policy = pr_assessment.resolve(tasks.store.subject['repository'], upstream, owner=owner, options=options,
+                               analysis_only=analysis_only, consumer=owner, request_source=request)
+    owner_options = options if owner == consumer else None
+    policy = pr_assessment.resolve(tasks.store.subject['repository'], upstream, owner=owner, options=owner_options,
                                    policy_options=policy_options, alternatives_options=alternatives_options)
     retained, refs = {}, {}
     with alternatives.evaluation(tasks):
         def require(stage, dependencies, decision=None):
             task = key(tasks, owner, stage, decision)
             descriptor = {'kind': KIND, 'skill': owner, 'stage': stage, 'dependencies': dependencies,
-                          'options': options or {}, 'policy_options': policy_options or {},
+                          'options': owner_options or {}, 'policy_options': policy_options or {},
                           'alternatives_options': alternatives_options or {}, 'upstream': upstream,
                           'definition': {'skill_identity': identity(owner, stage, decision)[1]}}
             if decision:
                 descriptor['decision'] = decision
             original = entry(tasks, owner, stage, decision)
-            prior_request = (original or {}).get('managed', {}).get('definition', {}).get('inputs', {}).get('alternatives_request')
+            managed = (original or {}).get('managed')
+            definition = managed.get('definition') if isinstance(managed, dict) else None
+            from alternatives_history import definition_valid
+            if original and not definition_valid(definition):
+                return None, {'outcome': 'recovery_required', 'release_reviewers': False,
+                              'stage': stage, 'next_task': {'key': task}, 'references': refs,
+                              'reason': 'Restore the original alternatives definition'}
+            prior_request = (definition or {}).get('inputs', {}).get('alternatives_request')
             continuing = bool(request and prior_request and read(prior_request)['id'] == read(request)['id'])
+            reuse_history = _historical or continuing or stage == 'assessment' and bool(request)
             value = None
             problem = None
             if original and original.get('result'):
                 try:
-                    value = accepted(tasks, task, historical=_historical or continuing or stage == 'assessment' and bool(request))
+                    value = accepted(tasks, task, historical=reuse_history)
                 except ValueError as exc:
                     problem = str(exc)
             if value is not None:
@@ -470,7 +480,7 @@ def gate(tasks, owner, *, options=None, policy_options=None, alternatives_option
                     value['spec']['inputs'].get('assessed_' + name) == retained[ref]['reference']
                     for name, ref in dependencies.items())
                 same_request = not request or stage == 'assessment' or value['spec']['inputs'].get('alternatives_request') == request
-                if (_historical or continuing or stage == 'assessment' and request or assigned['policy'] == expected_policy) and same_deps and same_request:
+                if (reuse_history or assigned['policy'] == expected_policy) and same_deps and same_request:
                     retained[task] = value
                     refs[stage + (':' + decision if decision else '')] = task
                     return value, None
@@ -551,8 +561,9 @@ def gate(tasks, owner, *, options=None, policy_options=None, alternatives_option
                     if request and live['headRefOid'] != head:
                         raise ValueError('Explicit manual alternatives requires current alignment')
                     if live['headRefOid'] != head:
-                        return {'outcome': 'planned', 'release_reviewers': True, 'references': refs,
-                                'governing_evidence': [*governing, verification['reference']]}
+                        from alternatives_history import context
+                        return context({'outcome': 'planned', 'release_reviewers': True, 'references': refs,
+                                        'governing_evidence': [*governing, verification['reference']]})
                     return {'outcome': 'alternatives_rejected', 'release_reviewers': False,
                             'complete': True, 'ordinary_review_complete': False, 'references': refs}
                 permissions = skill_config.effective(consumer, tasks.store.subject['repository'], upstream, options=options)['options']['permissions']
