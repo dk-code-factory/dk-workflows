@@ -42,8 +42,16 @@ def resource_hash(path):
     return hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
 
 
+def git_environment():
+    return {**{key: value for key, value in os.environ.items() if not key.startswith('GIT_')},
+            'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_SYSTEM': os.devnull,
+            'GIT_CONFIG_NOSYSTEM': '1', 'GIT_ATTR_NOSYSTEM': '1',
+            'GIT_TERMINAL_PROMPT': '0', 'GIT_ALLOW_PROTOCOL': 'file'}
+
+
 def git(checkout, *args):
-    return subprocess.check_output(['git', '--no-lazy-fetch', '-C', str(checkout), *args])
+    return subprocess.check_output(['git', '--no-lazy-fetch', '-C', str(checkout), *args],
+                                   env=git_environment())
 
 
 def default_plan(checkout, revision, route):
@@ -69,7 +77,7 @@ def initialize(root, source, revision, route):
     checkout = root/'checkout'
     checkout.mkdir()
     real_git = shutil.which('git')
-    env = {**os.environ, 'GIT_AUTHOR_DATE': '2026-11-01T00:00:00Z',
+    env = {**git_environment(), 'GIT_AUTHOR_DATE': '2026-11-01T00:00:00Z',
            'GIT_COMMITTER_DATE': '2026-11-01T00:00:00Z',
            'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1',
            'GIT_TEMPLATE_DIR': str(root/'git-template'), 'GIT_TERMINAL_PROMPT': '0'}
@@ -127,9 +135,13 @@ def initialize(root, source, revision, route):
                    'XDG_DATA_HOME': str(root/'data'), 'DK_RECIPE_REMOTE': str(root/'remote.json'),
                    'DK_RECIPE_FIXTURE': str(ROOT/'tests/fixtures/workflow_remote.py'),
                    'DK_RECIPE_BARE': str(bare), 'DK_RECIPE_GIT': real_git,
-                   **{key: env[key] for key in ('GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM',
-                                               'GIT_TEMPLATE_DIR', 'GIT_TERMINAL_PROMPT')}}
-    (root/'environment.sh').write_text(''.join('export '+key+'='+shlex.quote(value)+'\n'
+                   **{key: env[key] for key in ('GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM',
+                       'GIT_CONFIG_NOSYSTEM', 'GIT_ATTR_NOSYSTEM', 'GIT_ALLOW_PROTOCOL',
+                       'GIT_TEMPLATE_DIR', 'GIT_TERMINAL_PROMPT')}}
+    reset = ('for dk_workflow_git_name in $(env | sed -n '
+             "'s/^\\(GIT_[A-Za-z0-9_]*\\)=.*/\\1/p'); "
+             'do unset "$dk_workflow_git_name"; done\n')
+    (root/'environment.sh').write_text(reset+''.join('export '+key+'='+shlex.quote(value)+'\n'
         for key, value in environment.items())+'export PATH='+shlex.quote(str(root/'bin'))+':"$PATH"\n')
     plan_path = package/'codex/skills'/('dk-pr-'+route)/'config.json'
     scenario = {'schema': 1, 'route': route, 'pr': PR, 'base': base, 'head': head,

@@ -90,6 +90,45 @@ def test_incomplete_preflight_cannot_seal_an_arm(tmp_path, source):
     assert not (root/'freeze.json').exists()
 
 
+@pytest.mark.parametrize('override', ['repository', 'execution'])
+def test_preparation_isolates_inherited_git_state_and_execution(tmp_path, source, monkeypatch, override):
+    checkout, revision = source
+    original = {str(path.relative_to(checkout)): path.read_bytes()
+                for path in checkout.rglob('*') if path.is_file()}
+    marker = tmp_path/'hook-executed'
+    if override == 'repository':
+        monkeypatch.setenv('GIT_DIR', str(checkout/'.git'))
+        monkeypatch.setenv('GIT_WORK_TREE', str(checkout))
+        monkeypatch.setenv('GIT_INDEX_FILE', str(checkout/'.git/index'))
+    else:
+        hooks = tmp_path/'hooks'
+        hooks.mkdir()
+        script = hooks/'pre-commit'
+        script.write_text('#!/bin/sh\ntouch "'+str(marker)+'"\nexit 91\n')
+        script.chmod(0o755)
+        monkeypatch.setenv('GIT_CONFIG_COUNT', '1')
+        monkeypatch.setenv('GIT_CONFIG_KEY_0', 'core.hooksPath')
+        monkeypatch.setenv('GIT_CONFIG_VALUE_0', str(hooks))
+    before_environment = dict(os.environ)
+    error = None
+    try:
+        experiment.initialize(tmp_path/'isolated-arm', checkout, revision, 'fix')
+    except subprocess.CalledProcessError as caught:
+        error = caught
+    assert {str(path.relative_to(checkout)): path.read_bytes()
+            for path in checkout.rglob('*') if path.is_file()} == original
+    assert not marker.exists()
+    assert dict(os.environ) == before_environment
+    assert error is None
+    root = tmp_path/'isolated-arm'
+    result = subprocess.run(['sh', '-c', '. "$1/environment.sh"; git -C "$1/checkout" '
+                             'rev-parse --show-toplevel', 'fixture', str(root)],
+                            text=True, capture_output=True, check=True)
+    assert result.stdout.strip() == str(root/'checkout')
+    assert {str(path.relative_to(checkout)): path.read_bytes()
+            for path in checkout.rglob('*') if path.is_file()} == original
+
+
 @pytest.mark.parametrize('route,ownership', [('fix', 'mine'), ('review', 'others')])
 def test_real_helpers_collect_complete_stable_feedback_through_local_transport(tmp_path, route, ownership):
     revision = subprocess.check_output(['git', '-C', str(experiment.ROOT), 'rev-parse', 'HEAD']).decode().strip()
