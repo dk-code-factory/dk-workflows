@@ -1,5 +1,10 @@
 # Status output details
 
+For bounded current selected obligations and original recovery references, use
+the read-only [next-action interface](next-actions.md). Unlike retained-entry
+discovery, it derives the current task/finalizer selection from live configuration.
+It never establishes CI, authorization or publication readiness.
+
 Routine coordination uses `resume`, `result` and `progress` under [task state](task-state.md). Resume recaptures retained definitions, replaces finding bodies with `finding_count` and includes saved Git pins for comparison with the current PR. It is read-only and does not establish completeness of the current selected task set. Missing-source/removed-occurrence tasks report `refresh_required`; legacy entries report `definition_required` under `unmanaged`. Supply those current definitions once through prepare to attach replay information without resetting results or budgets. `--key` restricts saved tasks, while unfinished claims remain PR-wide.
 
 `result --key KEY --section findings|normalized|original` validates the saved envelope and reads the requested section. It exposes historical evidence, not a current-coverage verdict. `progress --run RUN_ID --after OFFSET --limit N` returns original progress records, a total and the next offset. Read every page relevant to dispositions, acceptances and recovery. None of these views persists a rendered summary or a second index.

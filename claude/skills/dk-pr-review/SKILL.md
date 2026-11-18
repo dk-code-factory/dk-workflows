@@ -15,6 +15,8 @@ Set PLUGIN_ROOT to this plugin's root directory. Follow [the incoming review rec
 
 Resolve configuration for `dk-workflows:dk-pr-review` through [skill-owned configuration](../../../docs/skill-configuration.md) before work, including scoped and invocation-local options. This skill owns its [explicit defaults](config.json) and [option schema](config.schema.json). Preserve original additional instructions alongside the governing assignment.
 
+Use the read-only [next-action interface](../../../docs/next-actions.md) for bounded current obligations and original recovery references. Native execution, semantic decisions and existing prepare/finish, CI and publication checks remain authoritative; the projection grants no execution or write permission.
+
 For a prepared alternatives stage assignment, execute only its generated stage guidance and checklist from the [alternatives contract](../../../docs/alternatives-review.md). Return original evidence; do not coordinate tasks, publish or recursively invoke this workflow.
 
 For an explicit verification-only assignment, perform only the independent finding-verification procedure on the supplied candidates and pinned context, then return dispositions and evidence. Do not execute workflow tasks/finalizers, edit, publish or recursively coordinate another review.

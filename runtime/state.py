@@ -536,7 +536,7 @@ def _component_changes(old, new, parts=()):
 
 
 class Store:
-    def __init__(self, repository, pr, *, checkout=None):
+    def __init__(self, repository, pr, *, checkout=None, read_only=False):
         self.subject = identity(repository, pr)
         self.root = (location('tasks')/digest(self.subject)).resolve()
         from shared.repository_scope import checkout_roots
@@ -548,19 +548,35 @@ class Store:
         roots.extend(checkout_roots(probe))
         if any(self.root.is_relative_to(p) for p in roots):
             raise ValueError('Workflow state must be outside repositories and the plugin')
-        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if type(read_only) is not bool:
+            raise ValueError('Read-only mode must be boolean')
+        if not read_only:
+            self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.manifest = self.root/'manifest.json'
+        self._read_view = self._manifest() if read_only else None
+
+    def _manifest(self):
+        manifest = read(self.manifest) if self.manifest.exists() else {
+            'contract': CONTRACT, 'subject': self.subject, 'entries': {}, 'runs': {}}
+        if manifest.get('contract') != CONTRACT or manifest.get('subject') != self.subject:
+            raise ValueError('Unsupported or damaged manifest; do not reset retained budgets')
+        return manifest
+
+    def _writable(self):
+        if self._read_view is not None:
+            raise ValueError('Read-only inspection cannot change retained state')
 
     @contextmanager
     def locked(self):
+        if self._read_view is not None:
+            # Atomic manifest replacement supplies one immutable command-local
+            # view. No lock file, directory or persisted observation is created.
+            yield deepcopy(self._read_view)
+            return
         with (self.root/'.lock').open('a') as lock:
             os.chmod(lock.name, 0o600)
             fcntl.flock(lock, fcntl.LOCK_EX)
-            manifest = read(self.manifest) if self.manifest.exists() else {
-                'contract': CONTRACT, 'subject': self.subject, 'entries': {}, 'runs': {}}
-            if manifest.get('contract') != CONTRACT or manifest.get('subject') != self.subject:
-                raise ValueError('Unsupported or damaged manifest; do not reset retained budgets')
-            yield manifest
+            yield self._manifest()
 
     def saved(self, entry):
         return self._load_saved(entry)[0]
@@ -736,6 +752,7 @@ class Store:
 
     def reconcile_hooks(self, phase, expected, reason):
         """Record a deliberate phase-list change after prior effects are reconciled."""
+        self._writable()
         if (not isinstance(phase, dict) or set(phase) != {'occurrence', 'hooks'}
                 or not isinstance(phase['occurrence'], dict) or not isinstance(phase['hooks'], list)
                 or not isinstance(reason, str) or not reason.strip()):
@@ -784,6 +801,7 @@ class Store:
         not authentication of the supplied evidence. Replays retain the original
         grant, including after later cycles have consumed it.
         """
+        self._writable()
         if any(not isinstance(value, str) or not value.strip()
                for value in (run, request_id, authorization, source)):
             raise ValueError('Run, stable request id, exact user authorization and source are required')
@@ -951,6 +969,7 @@ class Store:
 
     def start(self, spec, *, recover=None, run=None, cycle=None, retry=False,
               ci_repair=False, ci_rerun=False, head=None):
+        self._writable()
         captured = capture(spec)
         if captured['subject'] != self.subject:
             raise ValueError('Spec refers to another PR')
@@ -988,6 +1007,7 @@ class Store:
         If the response is lost, status exposes every committed claim; callers
         must reconcile those claims rather than silently retry an invocation.
         """
+        self._writable()
         context = _CaptureContext()
         captures = [capture(spec, _context=context) for spec in specs]
         if not captures:
@@ -1044,6 +1064,7 @@ class Store:
                                    if entry.get('claim')]}
 
     def record(self, spec, claim_id, original, normalized, status, *, progress=None, native_evidence=None, checklist=None):
+        self._writable()
         captured = capture(spec)
         if captured['subject'] != self.subject:
             raise ValueError('Spec refers to another PR')
@@ -1128,6 +1149,7 @@ class Store:
 
     def check(self, spec, claim_id, round_id, original, report):
         """Accept one reserved follow-up without replacing the primary report."""
+        self._writable()
         from checklists import submit
         captured = capture(spec)
         if captured['subject'] != self.subject:
@@ -1152,6 +1174,7 @@ class Store:
         Callers decide whether historical completion applies. The original
         fingerprint stays unchanged and supplies no current-input coverage.
         """
+        self._writable()
         from checklists import reply, reserve, submit
         if (not keys or len(set(keys)) != len(keys) or not isinstance(expected, dict) or set(expected) != set(keys)
                 or report is not None and (len(keys) != 1 or not has_output_content(original))):
@@ -1193,6 +1216,7 @@ class Store:
                     'unfinished': [entry['claim'] for entry in manifest['entries'].values() if entry.get('claim')]}
 
     def invalidate(self, keys, reason, *, recover=None):
+        self._writable()
         if not reason:
             raise ValueError('An invalidation reason is required')
         with self.locked() as manifest:

@@ -570,6 +570,9 @@ def journal(path, tasks, *, kind, head):
 
 def live_pr(pr):
     """Current alternatives inputs, never a retained readiness cache."""
+    context = _EVALUATION.get()
+    if context is not None and context['tasks'].store._read_view is not None:
+        raise ValueError('Read-only inspection requires live alternatives checks at execution')
     from shared.github_reads import run
     try:
         result = run(['gh', 'pr', 'view', pr, '--json', 'url,headRefOid,body'],
