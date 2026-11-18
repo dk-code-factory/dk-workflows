@@ -54,6 +54,9 @@ def reassessment(tasks, request, *, request_id, authorization, source):
             or any(not alternatives.text(original_request.get(k)) for k in ('id', 'source', 'instruction'))
             or original_request['id'] != request_id or original_request['instruction'] != authorization):
         raise ValueError('Reassessment must match the exact original user request artifact')
+    if not prior or prior['request']['id'] != request_id:
+        from alternatives_history import request as direct_request
+        direct_request(source)
     request_reference = {'id': request_id, 'source': source}
     descriptor['definition'].setdefault('inputs', {})['alternatives_reassessment'] = source
     # Replays reuse completed work as well as uncertain claims; changing the
@@ -131,11 +134,11 @@ def entry(tasks, stage):
 
 def pinned_definition(tasks, descriptor, definition):
     stage = descriptor['stage']
-    if stage not in STAGES or set(descriptor.get('dependencies', {})) - set(STAGES):
-        raise ValueError('The initial fix alternatives plan uses assessment, comparison, selection and alignment only')
+    if stage not in (*STAGES, 'verification') or set(descriptor.get('dependencies', {})) - set(STAGES):
+        raise ValueError('The initial fix alternatives plan uses assessment, comparison, selection, alignment and mismatch verification only')
     if definition.get('governing_inputs_complete') is not True or definition.get('cacheable') is False:
         raise ValueError('Once-per-PR alternatives review requires complete governing inputs and cacheable original evidence')
-    original = entry(tasks, stage) or entry(tasks, 'assessment')
+    original = entry(tasks, stage) or entry(tasks, 'alignment' if stage == 'verification' else 'assessment')
     result = deepcopy(definition)
     if original:
         result['git'] = deepcopy(original['managed']['definition']['git'])
@@ -255,10 +258,4 @@ def enforce(spec, repository, pr, *, options=None, upstream=None):
     tasks = (context['tasks'] if context is not None and context['tasks'].store.subject == identity(repository, pr)
              else Tasks(repository, pr))
     import assessment_alternatives as shared
-    if shared.entry(tasks, OWNER, 'assessment') is not None or entry(tasks, 'assessment') is None:
-        return shared.enforce(spec, tasks, OWNER, options=options, upstream=upstream)
-    result = gate(tasks, options=options, upstream=upstream)
-    if not result['release_reviewers']:
-        raise ValueError('Initial alternatives gate blocks fix work: ' + result['outcome'])
-    for index, reference in enumerate(result.get('governing_evidence', [])):
-        spec['inputs']['alternatives_fix_governing_' + str(index)] = reference
+    return shared.enforce(spec, tasks, OWNER, options=options, upstream=upstream)

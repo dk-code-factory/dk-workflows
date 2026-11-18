@@ -218,7 +218,7 @@ def test_fix_and_incoming_workflow_evidence_remain_independent(case):
 
 
 @pytest.mark.parametrize('required', [False, True])
-def test_fix_plan_cannot_release_incoming_review(case, required, monkeypatch):
+def test_fix_plan_supplies_incoming_design_context_without_code_coverage(case, required, monkeypatch):
     spec, store = case; tasks = Tasks(REPO, PR)
     refs = planned(tasks, spec, required=required, alignment='aligned')
     metadata = Path(spec['git']['checkout']).parent/'initial-pr.json'
@@ -226,16 +226,21 @@ def test_fix_plan_cannot_release_incoming_review(case, required, monkeypatch):
     before = store.manifest.read_bytes()
     with pytest.raises(ValueError, match='incoming workflow evidence'):
         alternatives.gate(tasks, refs)
-    with pytest.raises(ValueError, match='incoming workflow evidence'):
-        tasks.prepare({'tasks': [incoming_task(spec, refs)]})
     assert store.manifest.read_bytes() == before
+    task = tasks.prepare({'tasks': [incoming_task(spec, refs)]})['tasks'][0]
+    assert task['action'] == 'invoke'
+    assert any(item['id'] == 'alternatives-initial-plan' for item in task['checklist']['items'])
 
 
 @pytest.mark.parametrize('stage', ['assessment', 'comparison', 'selection', 'alignment'])
 def test_incoming_gate_rejects_each_fix_owned_result(case, stage, monkeypatch):
     spec, store = case; tasks = Tasks(REPO, PR)
     incoming = aligned(tasks, spec)
-    fixed = planned(tasks, spec)
+    # Retain the pre-existing mixed-route records that older versions allowed.
+    with monkeypatch.context() as legacy:
+        legacy.setattr('alternatives_history.guard_route', lambda *args, **kwargs: None)
+        legacy.setattr('alternatives_history.admit', lambda *args, **kwargs: None)
+        fixed = planned(tasks, spec)
     incoming[stage] = fixed[stage]
     monkeypatch.setattr(alternatives, 'live_pr', lambda pr: pytest.fail('Foreign evidence reached live checks'))
     before = store.manifest.read_bytes()

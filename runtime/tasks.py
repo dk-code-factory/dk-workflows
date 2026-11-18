@@ -6,7 +6,7 @@ from pathlib import Path
 from config import make_completion_spec, make_finalizer_spec, make_hook_spec
 from checklists import contract as checklist_contract
 from native_review import binding, required
-from state import Store, make_spec, task_key
+from state import Store, digest, make_spec, task_key
 import skill_config
 
 
@@ -78,6 +78,31 @@ class Tasks:
             task['finding_count'] = len(findings) if findings is not None else None
         return task
 
+    def _original_completion(self, entry):
+        """Historical alternatives finish their original contract, not new work."""
+        from alternatives_history import KINDS
+        managed = entry.get('managed', {})
+        if (entry.get('claim') or not isinstance(managed, dict) or managed.get('kind') not in KINDS
+                or not isinstance(managed.get('definition'), dict)
+                or not isinstance(entry.get('components'), dict) or not isinstance(entry.get('checklist'), dict)):
+            return False
+        saved, problem = self.store._load_saved(entry)
+        return not problem and saved['status'] == 'complete'
+
+    def _completion_assignment(self, entry):
+        saved, problem = self.store._load_saved(entry)
+        if problem:
+            raise ValueError('Restore the original completion evidence')
+        return {'task': deepcopy(entry['components']['task']),
+                'options': deepcopy(entry['components']['options']),
+                'git': {**saved['provenance'].get('commits', {}),
+                        'checkout': saved['provenance'].get('checkout')},
+                'original_definition': deepcopy(entry['managed']['definition']),
+                'original_result': saved['path'], 'historical_completion_only': True,
+                'instructions': 'Complete only the original checklist against retained primary evidence. '
+                                'Do not repeat primary analysis, edit code or publish. '
+                                'Historical completion does not establish current-code coverage.'}
+
     def reassess(self, request, *, request_id, authorization, source, compact=False):
         """Bind an explicit request to one replacement of retained initial work.
 
@@ -99,6 +124,23 @@ class Tasks:
         for flag in ('retry', 'ci_repair', 'ci_rerun'):
             if flag in request and type(request[flag]) is not bool:
                 raise ValueError(flag + ' must be boolean')
+        keys = [item['key'] for item in request['tasks']
+                if isinstance(item, dict) and set(item) == {'key'} and isinstance(item['key'], str)]
+        if len(keys) == len(request['tasks']):
+            entries = self._entries()
+            if all(self._original_completion(entries.get(key, {})) for key in keys):
+                if any(request.get(flag) for flag in ('recover', 'retry', 'ci_repair', 'ci_rerun')):
+                    raise ValueError('Original completion cannot reserve primary recovery or retry allowances')
+                assignments = {key: self._completion_assignment(entries[key]) for key in keys}
+                result = self.store.original_checks(keys, expected={key: digest(entries[key]) for key in keys})
+                for task in result['tasks']:
+                    if task['action'] == 'complete':
+                        task['action'] = 'reuse'
+                    task.update(design_context=True, current_alignment_required=True,
+                                checklist=deepcopy(entries[task['key']]['checklist']['contract']))
+                    if not compact:
+                        task['assignment'] = assignments[task['key']]
+                return result
         from alternatives_compat import descriptor as current_descriptor
         descriptors = [current_descriptor(item) if isinstance(item, dict) else item
                        for item in request['tasks']]
@@ -168,6 +210,9 @@ class Tasks:
         options = {key: value for key, value in request.items() if key != 'tasks'}
         if occurrence:
             options.pop('cycle', None)
+        if kinds <= {'alternatives', 'assessed-alternatives'}:
+            from alternatives_history import admit
+            options['admission'] = admit
         with evaluation(self):
             result = self.store.start_batch(specs, retained=retained, checklists=checklists, **options)
         # Read committed bindings, including after a lost-response recovery. They
@@ -272,6 +317,14 @@ class Tasks:
             raise ValueError('Task has no retained definition; prepare it before finishing')
         if not isinstance(report, dict) or type(report.get('complete')) is not bool:
             raise ValueError('Report requires explicit complete boolean')
+        if round_id is not None and self._original_completion(entry):
+            if status is not None or progress is not None or native_evidence is not None:
+                raise ValueError('Checklist follow-ups retain primary status, progress and native evidence')
+            result = self.store.original_checks([key], expected={key: digest(entry)}, claim_id=claim, round_id=round_id,
+                                                original=original, report=report)['tasks'][0]
+            if result.get('action') == 'recheck' and not compact:
+                result['assignment'] = self._completion_assignment(entry)
+            return result
         spec = self.spec(entry['managed'], replay=True)
         checklist = checklist_contract(spec, entry['managed']['definition'])
         if round_id is None:

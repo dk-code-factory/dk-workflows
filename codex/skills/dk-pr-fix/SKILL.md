@@ -9,6 +9,8 @@ Before repository guidance reads or handoffs, follow [repository instruction sou
 
 Persist workflow state only when it reduces total API dollar cost, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
 
+Apply the canonical [alternatives history boundary](../../../docs/alternatives-review.md#manual-alternatives-review) across both PR routes, sessions, heads and guidance versions. Only a direct user invocation of `dk-workflows:dk-pr-review-alternatives` permits a fresh PR comparison. Preserve original choices and unfinished work; historical context still needs current requirements/implementation alignment and independent review, CI and publication checks.
+
 Set PLUGIN_ROOT to this plugin's root directory. Use the current agent and native skill tools. Check ownership with `scripts/pr_route.py --pr PR_URL` under [PR routing](../../../runtime/pr.md). Proceed for your PR or when explicitly asked to maintain another author's PR. Otherwise invoke `dk-workflows:dk-pr-review` before editing code or publishing. PR ownership alone does not grant permission to write or rewrite the branch.
 
 Resolve configuration for `dk-workflows:dk-pr-fix` through [skill-owned configuration](../../../docs/skill-configuration.md) before work, including scoped and invocation-local options. This skill owns its [explicit defaults](config.json) and [option schema](config.schema.json). Preserve original additional instructions alongside the governing assignment.
