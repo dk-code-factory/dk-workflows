@@ -78,6 +78,7 @@ def _historical_accepted(tasks, task):
     from alternatives_history import accepted as original_result
     from state import resource
     value = original_result(tasks, task)
+    original_inputs = value['spec']['inputs']
     if value['managed']['kind'] != KIND:
         raise ValueError('Assessed alternatives requires its original assessed definition')
     # Keep the existing spec interface for gate dependency comparisons. Paths
@@ -89,7 +90,7 @@ def _historical_accepted(tasks, task):
         for name, path in consumed['spec']['inputs'].items():
             if name.startswith('assessed_'):
                 value['spec']['inputs'].setdefault(name, path)
-    original = original_result(tasks, task)['spec']['inputs']
+    original = original_inputs
     for name, path in list(value['spec']['inputs'].items()):
         if name.startswith('assessed_'):
             if name not in original:
@@ -165,7 +166,7 @@ def stage_spec(tasks, descriptor, definition, *, replay=False):
         source = definition.get('inputs', {}).get(name)
         if source:
             from alternatives_history import request as original_request
-            original_request(source)
+            original_request(source, tasks=tasks)
     if stage == 'assessment' and definition.get('inputs', {}).get('alternatives_request'):
         raise ValueError('Manual alternatives refresh reuses unchanged shared assessment; use explicit reassessment to change it')
     if stage == 'alignment':
@@ -214,7 +215,7 @@ def stage_spec(tasks, descriptor, definition, *, replay=False):
         for selected_value in selected:
             with tasks.store.locked() as manifest:
                 comparison_key = manifest['entries'][selected_value['key']]['managed']['dependencies']['comparison']
-            compared_value = accepted(tasks, comparison_key)
+            compared_value = accepted(tasks, comparison_key, historical=True)
             decision_id = selected_value['spec']['options']['assessed_alternatives']['decision']
             if not same_decision(compared_value['spec']['inputs']['assessed_inventory'], retained['inventory']['report'], decision_id):
                 raise ValueError('Interactions cannot mix decisions from different inventories')
@@ -286,9 +287,10 @@ def stage_spec(tasks, descriptor, definition, *, replay=False):
         if problem:
             raise ValueError('Original assessed evidence is missing or damaged; restore its sources')
         explicit = spec['inputs'].get('alternatives_reassessment') or (stage != 'assessment' and spec['inputs'].get('alternatives_request'))
-        if saved['status'] == 'complete' and not explicit and capture(spec)['fingerprint'] != saved['fingerprint']:
+        settled = saved['status'] == 'complete' and not (stage == 'selection' and not saved['normalized'].get('choice'))
+        if settled and not explicit and capture(spec)['fingerprint'] != saved['fingerprint']:
             raise ValueError('Governing assessment or alternatives inputs changed; explicit reassessment required')
-        if saved['status'] == 'complete' and explicit:
+        if settled and explicit:
             previous = original['managed']['definition'].get('inputs', {})
             prior_request = previous.get('alternatives_reassessment') or previous.get('alternatives_request')
             if prior_request:
@@ -415,12 +417,13 @@ def gate(tasks, owner, *, options=None, policy_options=None, alternatives_option
          review_operation=None, analysis_only=False, _historical=False, _consumer=None):
     """Discover compact next work; no durable completion flag or rendered plan."""
     provider(owner)
-    enabled = skill_config.effective(owner, tasks.store.subject['repository'], upstream, options=options)['options']['alternatives']['enabled']
+    consumer = _consumer or owner
+    enabled = skill_config.effective(consumer, tasks.store.subject['repository'], upstream, options=options)['options']['alternatives']['enabled']
     if not enabled:
         return {'outcome': 'disabled', 'release_reviewers': True}
     if request:
         from alternatives_history import request as original_request
-        original_request(request)
+        original_request(request, tasks=tasks)
     if not request and not _historical:
         from alternatives_history import route
         retained_route = route(tasks, owner)
@@ -446,11 +449,13 @@ def gate(tasks, owner, *, options=None, policy_options=None, alternatives_option
             if decision:
                 descriptor['decision'] = decision
             original = entry(tasks, owner, stage, decision)
+            prior_request = (original or {}).get('managed', {}).get('definition', {}).get('inputs', {}).get('alternatives_request')
+            continuing = bool(request and prior_request and read(prior_request)['id'] == read(request)['id'])
             value = None
             problem = None
             if original and original.get('result'):
                 try:
-                    value = accepted(tasks, task, historical=_historical or stage == 'assessment' and bool(request))
+                    value = accepted(tasks, task, historical=_historical or continuing or stage == 'assessment' and bool(request))
                 except ValueError as exc:
                     problem = str(exc)
             if value is not None:
@@ -465,7 +470,7 @@ def gate(tasks, owner, *, options=None, policy_options=None, alternatives_option
                     value['spec']['inputs'].get('assessed_' + name) == retained[ref]['reference']
                     for name, ref in dependencies.items())
                 same_request = not request or stage == 'assessment' or value['spec']['inputs'].get('alternatives_request') == request
-                if (_historical or stage == 'assessment' and request or assigned['policy'] == expected_policy) and same_deps and same_request:
+                if (_historical or continuing or stage == 'assessment' and request or assigned['policy'] == expected_policy) and same_deps and same_request:
                     retained[task] = value
                     refs[stage + (':' + decision if decision else '')] = task
                     return value, None
@@ -550,7 +555,7 @@ def gate(tasks, owner, *, options=None, policy_options=None, alternatives_option
                                 'governing_evidence': [*governing, verification['reference']]}
                     return {'outcome': 'alternatives_rejected', 'release_reviewers': False,
                             'complete': True, 'ordinary_review_complete': False, 'references': refs}
-                permissions = skill_config.effective(owner, tasks.store.subject['repository'], upstream, options=options)['options']['permissions']
+                permissions = skill_config.effective(consumer, tasks.store.subject['repository'], upstream, options=options)['options']['permissions']
                 if analysis_only or not permissions['post_review']:
                     return {'outcome': 'publication_blocked', 'release_reviewers': False, 'references': refs}
                 return {'outcome': 'mismatch_verified', 'release_reviewers': False, 'references': refs,

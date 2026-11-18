@@ -14,21 +14,43 @@ KINDS = {'assessed-alternatives', 'alternatives', 'architecture'}
 MANUAL = 'dk-workflows:dk-pr-review-alternatives'
 
 
-def request(path):
+def request(path, *, tasks=None):
     """Bind new comparison authorization to the dedicated direct invocation."""
     from state import read
     value = read(path)
-    if (not isinstance(value, dict)
-            or any(not isinstance(value.get(field), str) or not value[field].strip()
-                   for field in ('id', 'source', 'instruction'))
-            or value.get('skill') != MANUAL or value.get('origin') != 'user'):
+    basic = isinstance(value, dict) and all(isinstance(value.get(field), str) and value[field].strip()
+                                          for field in ('id', 'source', 'instruction'))
+    bound = False
+    if tasks is not None:
+        from pathlib import Path
+        from state import resource
+        current = resource(path)
+        for entry in entries(tasks).values():
+            inputs = entry['managed']['definition'].get('inputs', {})
+            for name in ('alternatives_request', 'alternatives_reassessment'):
+                prior = inputs.get(name)
+                if prior and Path(prior).absolute() == Path(path).absolute():
+                    expected = entry.get('components', {}).get('inputs', {}).get(name)
+                    if expected is not None and current != expected:
+                        raise ValueError('Original manual request changed; restore its original source')
+                    bound = bound or expected == current
+    if basic and value.get('skill') == MANUAL and value.get('origin') == 'user':
+        return value
+    # Older releases captured three-field request artifacts. Their unchanged
+    # original binding can resume existing work, but cannot authorize a new id.
+    if basic and 'skill' not in value and 'origin' not in value and bound:
+        return value
+    if not basic or value.get('skill') != MANUAL or value.get('origin') != 'user':
         raise ValueError('Fresh alternatives requires a stable id, original source and exact instruction for the direct user invocation of ' + MANUAL)
     return value
 
 
 def guard_route(tasks, owner, kind, definition):
     """A downstream automatic call cannot create another initial chain."""
-    if any(definition.get('inputs', {}).get(name) for name in ('alternatives_request', 'alternatives_reassessment')):
+    sources = [definition.get('inputs', {}).get(name) for name in ('alternatives_request', 'alternatives_reassessment')]
+    if any(sources):
+        for source in filter(None, sources):
+            request(source, tasks=tasks)
         return
     values = entries(tasks)
     chains = [value['managed'] for value in values.values()
@@ -147,12 +169,9 @@ def legacy_gate(tasks, owner, *, consumer=None, review_operation=None, analysis_
                     'references': refs, 'next_task': {'kind': 'alternatives', 'skill': owner,
                         'stage': 'verification', 'dependencies': {'alignment': alignment['key']}}}
         verified = alternatives.accepted(tasks, verification['key'], settled=True)
-        def handle(value):
-            original = values[value['key']]
-            saved, _ = tasks.store._load_saved(original)
-            return json.loads(base64.b64decode(saved['native_execution']['evidence']))['invocation']['handle']
         if (verified['managed'].get('dependencies', {}).get('alignment') != alignment['key']
-                or handle(verified) == handle(alignment)):
+                or not verified['native_handle'] or not alignment['native_handle']
+                or verified['native_handle'] == alignment['native_handle']):
             raise ValueError('Original mismatch requires linked independent verification')
         if verified['report']['disposition'] == 'confirmed':
             head = alignment['spec']['git']['head']

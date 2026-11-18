@@ -10,6 +10,7 @@ import pytest
 import alternatives
 import assessment_alternatives as plans
 import pr_assessment as assessment
+import skill_config
 from state import read, write
 from tasks import Tasks
 from test_state import case, REPO, PR, ROOT, git
@@ -164,3 +165,116 @@ def test_distinct_direct_invocations_refresh_and_interrupted_request_resumes_sam
         assert plans.gate(tasks, assessment.REVIEW)['outcome'] == 'planned'
         assert read(store.manifest)['entries'][refs['assessment']]['result'] == shared
     assert len(read(store.manifest)['entries'][refs['comparison:storage']]['attempts']) == 3
+
+
+def selected(tasks, spec):
+    refs = {'assessment': complete(tasks, spec, 'assessment', purpose())}
+    refs['inventory'] = complete(tasks, spec, 'inventory', inventory(('one', 'inherited')), refs)
+    refs['comparison'] = complete(tasks, spec, 'comparison', comparison(spec), refs, decision='one')
+    refs['selection_one'] = complete(tasks, spec, 'selection', selection(),
+        {'assessment': refs['assessment'], 'comparison': refs['comparison']}, decision='one')
+    return refs
+
+
+def test_cross_route_uses_consumer_enablement_and_retains_alignment_context(case):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = initial(tasks, spec, owner=assessment.FIX)
+    write(skill_config.scope_path(REPO), {'skill_defaults': {
+        assessment.FIX: {'options': {'alternatives': {'enabled': False}}}}})
+    result = plans.gate(tasks, assessment.REVIEW)
+    assert result['outcome'] == 'planned' and result['references'] == refs
+    assert result['governing_evidence'] and result['current_alignment_required']
+
+
+def test_cross_route_mismatch_uses_consumer_publication_permissions(case):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = initial(tasks, spec, owner=assessment.FIX, mismatch=True)
+    complete(tasks, spec, 'verification', {'disposition': 'confirmed', 'reason': 'Independent mismatch',
+        'required_changes': 'Apply the selected write owner', 'evidence': ['code:1']},
+        {'alignment': refs['alignment']}, owner=assessment.FIX)
+    assert skill_config.defaults(assessment.FIX)['permissions']['post_review'] is False
+    assert skill_config.defaults(assessment.REVIEW)['permissions']['post_review'] is True
+    assert plans.gate(tasks, assessment.REVIEW)['outcome'] == 'mismatch_verified'
+
+
+def test_pending_manual_choice_can_finish_without_a_new_comparison(case, tmp_path):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = selected(tasks, spec)
+    # Simulate the valid initial unresolved choice under a manual selection mode.
+    # There is no settled choice to replace and no completed comparison to rerun.
+    policy = {'selection': {'mode': 'manual'}}
+    d = descriptor(spec, 'selection', {k: refs[k] for k in ('assessment', 'comparison')}, decision='one', policy=policy)
+    source = manual(tmp_path, 2); d['definition']['inputs']['alternatives_request'] = source
+    task = tasks.prepare({'tasks': [d]})['tasks'][0]
+    finish(tasks, task, selection(choice=None))
+    original = read(store.manifest)['entries'][refs['comparison']]['result']
+    choice_source = tmp_path/'choice.txt'; choice_source.write_text('Choose the smaller evaluated option')
+    d['definition']['inputs']['user_choice'] = str(choice_source)
+    task = tasks.prepare({'tasks': [d]})['tasks'][0]
+    assert task['action'] == 'invoke'
+    report = selection(mode='manual', choice='smaller', user_source=str(choice_source),
+        reason='User selected the smaller option', rejection_reasons={'implemented': 'User declines its additional complexity'},
+        evidence=[str(choice_source)])
+    finish(tasks, task, report)
+    assert read(store.manifest)['entries'][refs['comparison']]['result'] == original
+
+
+def test_unfinished_interactions_consume_historical_comparisons_after_guidance_update(case):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    refs = selected(tasks, spec)
+    Path(spec['skill']['resources']['entry']).write_text('Updated installed review guidance')
+    result = plans.gate(tasks, assessment.REVIEW)
+    assert result['stage'] == 'interactions'
+    d = result['next_task']
+    d['definition'] = descriptor(spec, 'interactions')['definition']
+    task = tasks.prepare({'tasks': [d]})['tasks'][0]
+    assert task['action'] == 'invoke'
+    assert all(len(read(store.manifest)['entries'][key]['attempts']) == 1 for key in refs.values())
+
+
+def test_interrupted_manual_request_reuses_completed_stages_after_guidance_update(case, tmp_path):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    initial(tasks, spec)
+    source = manual(tmp_path, 2)
+    for report in (inventory(('storage', 'inherited'), ('boundary', 'materially_changed')), comparison(spec)):
+        task = tasks.prepare({'tasks': [plans.gate(tasks, assessment.REVIEW, request=source)['next_task']]})['tasks'][0]
+        finish(tasks, task, report)
+    Path(spec['skill']['resources']['entry']).write_text('Updated installed review guidance')
+    result = plans.gate(Tasks(REPO, PR), assessment.REVIEW, request=source)
+    assert result['stage'] == 'selection' and result['next_task']['decision'] == 'storage'
+    assert tasks.prepare({'tasks': [result['next_task']]})['tasks'][0]['action'] == 'invoke'
+
+
+def test_pre_upgrade_manual_request_keeps_original_bytes_and_claim(case, tmp_path, monkeypatch):
+    import alternatives_history
+    spec, store = case; tasks = Tasks(REPO, PR)
+    initial(tasks, spec)
+    path = tmp_path/'old-request.json'
+    write(path, {'id': 'old-user-message', 'source': 'conversation:old', 'instruction': 'Review PR alternatives again'})
+    before = path.read_bytes()
+    # The previous release accepted these exact three-field original artifacts.
+    with monkeypatch.context() as previous:
+        previous.setattr(alternatives_history, 'request', lambda source, **kwargs: read(source))
+        task = tasks.prepare({'tasks': [plans.gate(tasks, assessment.REVIEW, request=str(path))['next_task']]})['tasks'][0]
+        finish(tasks, task, inventory(('storage', 'inherited'), ('boundary', 'materially_changed')))
+        pending = tasks.prepare({'tasks': [plans.gate(tasks, assessment.REVIEW, request=str(path))['next_task']]})['tasks'][0]
+    result = plans.gate(Tasks(REPO, PR), assessment.REVIEW, request=str(path))
+    assert result['stage'] == 'comparison'
+    replay = tasks.prepare({'tasks': [result['next_task']]})['tasks'][0]
+    assert replay['action'] == 'recover_required' and replay['unfinished']['id'] == pending['claim']['id']
+    finish(tasks, pending, comparison(spec))
+    assert path.read_bytes() == before
+
+
+def test_completed_manual_request_cannot_be_replaced_by_mutating_its_artifact(case, tmp_path):
+    spec, store = case; tasks = Tasks(REPO, PR)
+    initial(tasks, spec)
+    source = manual(tmp_path, 2)
+    task = tasks.prepare({'tasks': [plans.gate(tasks, assessment.REVIEW, request=source)['next_task']]})['tasks'][0]
+    finish(tasks, task, inventory(('storage', 'inherited'), ('boundary', 'materially_changed')))
+    changed = read(source); changed['id'] = 'different-user-message'
+    write(source, changed)
+    before = files(store)
+    with pytest.raises(ValueError, match='Original manual request changed'):
+        plans.gate(tasks, assessment.REVIEW, request=source)
+    assert files(store) == before

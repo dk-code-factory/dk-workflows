@@ -385,7 +385,7 @@ def _stage_spec(tasks, descriptor, definition, *, replay=False, authorize_reasse
         source = definition.get('inputs', {}).get('alternatives_request')
         if source:
             from alternatives_history import request as direct_request
-            direct_request(source)
+            direct_request(source, tasks=tasks)
     dependencies = descriptor.get('dependencies', {})
     if not isinstance(dependencies, dict) or set(dependencies) - set(ALLOWS[stage]):
         raise ValueError('Alternatives dependencies must reference stage task keys')
