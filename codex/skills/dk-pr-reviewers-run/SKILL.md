@@ -3,6 +3,10 @@ name: dk-pr-reviewers-run
 description: Run selected PR reviewers on pinned inputs and reuse complete results when inputs are unchanged.
 ---
 
+Use schema-2 `native_review` declarations with explicit `required:true` for
+reviewers. Preserve schema-1 declarations on retained work; follow the shared
+[native evidence contract](../../../docs/native-review.md) for compatibility.
+
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
 Before repository guidance reads or handoffs, follow [repository instruction sources](../../../docs/instruction-sources.md). Follow all discovered repository instructions by default, or the saved explicit source override; preserve host instruction priority. Do not ask for a source choice or require onboarding to use the default.

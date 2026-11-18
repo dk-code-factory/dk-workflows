@@ -14,8 +14,8 @@ from native_review import required
 from native_review_observations import CONTRACT, observations, reported_observations
 
 
-@pytest.fixture
-def review(case):
+@pytest.fixture(params=[1, 2], ids=['legacy-contract', 'explicit-contract'])
+def review(case, request):
     spec, store = case
     spec['task']['id'] = 'content-review'
     spec['skill']['identity'] = 'selected:review'
@@ -23,6 +23,8 @@ def review(case):
         {'role': role, 'drivers': [['python3', '/installed/aspect-driver.py', '--pass', role,
                                   '--base', spec['git']['base'], '--head', spec['git']['head']]]}
         for role in ('toolkit', 'standards', 'spec')]}
+    if request.param == 2:
+        spec['native_review'].update(schema=2, required=True)
     return spec, store
 
 

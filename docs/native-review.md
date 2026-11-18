@@ -12,6 +12,21 @@ Reviewers and independent finding verifiers use the same [invocation contract](i
 
 ## Evidence capability preflight
 
+New definitions use schema 2 of `native_review`, with an explicit boolean
+`required`. For evidence-requiring work, supply `required:true`, the resolved
+`skill_version` and complete applicable `passes`. For work without an evidence
+obligation, supply exactly `{"schema":2,"required":false}`. Names and list
+locations do not override schema-2 declarations. Missing/nonboolean `required`,
+missing required execution fields and contradictory fields on `required:false`
+are rejected before claims. Do not declare evidence unnecessary to bypass the
+selected skill's required native execution.
+
+Schema 1 and definitions without `native_review` are legacy compatibility syntax.
+They retain the original task/skill/list-location inference and original
+fingerprint bytes. Keep retained definitions unchanged rather than upgrading
+accepted work. Changed declarations refresh only affected coverage through the
+existing governing-input checks; original results and consumed budgets survive.
+
 Before substantive reviewer dispatch, claims or review-cycle consumption, resolve
 requirements from the installed selected skill and all governing procedures.
 Include conditional passes applicable to the pinned change; use the same contract
@@ -22,15 +37,17 @@ that the current host exposes the required observations.
 Both `scripts/config.py preflight` and `skill-preflight` accept
 `--native-reviews REVIEWS.json` alongside `--capabilities HOST.json` and
 `--available SKILLS.json`. `REVIEWS.json` maps each selected occurrence's exact
-location to its schema-1 `native_review` contract (resolved version and applicable
-passes/driver commands). Missing-contract diagnostics return occurrence locations;
+location to its `native_review` declaration (including resolved version and
+applicable passes/driver commands when required). Schema 1 remains supported for
+legacy callers. Missing-contract diagnostics return occurrence locations;
 Python integrations can enumerate them with `config.calls` or `skill_config.calls`.
 For example, a standalone reviewer occurrence can be keyed as:
 
 ```json
 {
   "dk-workflows:dk-pr-reviewers-run/reviewers/0/0": {
-    "schema": 1,
+    "schema": 2,
+    "required": true,
     "skill_version": "1.0.7",
     "passes": [{"role": "toolkit", "drivers": [["python3", "/installed/aspect-driver.py", "--pass", "toolkit"]]}]
   }
@@ -42,7 +59,8 @@ installation. Supply every required pass and the exact commands with pinned
 arguments. Repeated occurrences need separate entries because their options and
 conditional requirements can differ. Include independent finding-verification
 occurrences explicitly even when they use instruction-only assignments or skills
-without a reviewer name. Ordinary tasks do not need evidence contracts.
+without a reviewer name. New ordinary definitions explicitly declare whether
+evidence is required; `required:false` needs no native evidence capabilities.
 
 A host capability document can include:
 
@@ -88,7 +106,7 @@ execution happened; the existing claim-bound completion guard remains mandatory.
 
 1. Resolve the skill and pin task inputs before launch. Use responsibility `content-review` for configured reviewers, and `finding-verification` for independent verification. Prepare immutable context and output paths outside the source checkout. Supply the exact task, pinned source, original guidance, resolved resources, permitted actions and required completion report. Keep source inspection read-only. The skill manages its private state and lifecycle.
    Include the complete [preference handoff](preferences.md#workflow-handoffs-and-reuse), retaining matched paths and conditional decisions. Reviewers and finding verifiers apply records only within that scope and request refreshed selection before expanding paths.
-   Include a `native_review` contract in the task definition before claiming: schema `1`, resolved `skill_version`, and the complete applicable `passes` list. Each pass has a unique `role` and `drivers`, a list of exact argument arrays for its required deeper-look commands. Derive requirements from the installed skill and referenced procedures; capture those resources. Resolve conditional passes from pinned evidence and retain the applicability decision in governing inputs. An empty pass list is valid only when the selected skill requires no independent children; it still requires successful native root evidence. Do not weaken requirements after execution to match observed work.
+   Include a `native_review` contract in the task definition before claiming: schema `2`, `required:true`, resolved `skill_version`, and the complete applicable `passes` list. Each pass has a unique `role` and `drivers`, a list of exact argument arrays for its required deeper-look commands. Derive requirements from the installed skill and referenced procedures; capture those resources. Resolve conditional passes from pinned evidence and retain the applicability decision in governing inputs. An empty pass list is valid only when the selected skill requires no independent children; it still requires successful native root evidence. Do not weaken requirements after execution to match observed work.
 2. After `prepare` returns `invoke`, launch the reviewer with native tools. Save its actual handle with the key and claim in private operational progress, outside fingerprinted inputs. Let the skill manage its internal passes and resources.
 3. Wait on that handle for a terminal host outcome. Running, queued, observation timeout and progress-only responses are incomplete. Save the terminal outcome and original final output. Collect each required child's actual spawn observation, distinct native handle, parent relationship, successful terminal observation and separate original output. When command logs are available, collect each required driver's successful completed tool observation in that same child session. Otherwise require each pass to include the exact completion report described below in its own terminal output. Reading or printing a driver's instructions does not establish driver execution. If native delegation or required result transport is unavailable, report incomplete. Do not invent a handle or reconstruct completed-session provenance.
 

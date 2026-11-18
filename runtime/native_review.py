@@ -20,17 +20,35 @@ def reported_drivers(output, commands):
 
 
 def required(components):
+    if 'native_review' in components:
+        return evidence_required(components['native_review'])
+    return legacy_required(components)
+
+
+def legacy_required(components):
+    """Compatibility for retained definitions without an explicit declaration."""
     task = components['task']['id']
     skill = components['skill']['identity'].split('@')[0].split(':')[-1]
-    return ('native_review' in components or task == 'finding-verification'
+    return (task == 'finding-verification'
             or task.startswith('finding-verification:')
             or re.search(r'(^|[-_:])review($|[-_:])', task) is not None
             or skill.startswith('code-review'))
 
 
 def contract(value):
-    if not isinstance(value, dict) or value.get('schema') != 1:
-        raise ValueError('native_review requires schema 1')
+    if (not isinstance(value, dict) or (value.get('schema') != 1
+            and (type(value.get('schema')) is not int or value['schema'] != 2))):
+        raise ValueError('native_review requires schema 1 or 2')
+    if value['schema'] == 2:
+        if type(value.get('required')) is not bool:
+            raise ValueError('native_review schema 2 requires boolean required')
+        fields = {'schema', 'required'}
+        if value['required']:
+            fields |= {'skill_version', 'passes'}
+        if set(value) != fields:
+            raise ValueError('native_review schema 2 fields must match the declared evidence requirement')
+        if not value['required']:
+            return value
     if not isinstance(value.get('skill_version'), str) or not value['skill_version'].strip():
         raise ValueError('native_review requires the resolved skill version')
     passes = value.get('passes')
@@ -53,6 +71,12 @@ def contract(value):
     return value
 
 
+def evidence_required(value):
+    """Schema 1 always requires evidence; schema 2 declares it explicitly."""
+    declaration = contract(value)
+    return declaration['required'] if declaration['schema'] == 2 else True
+
+
 def binding(components, claim):
     """Expected identities for a collector; never synthesizes observed events."""
     from state import digest
@@ -60,6 +84,8 @@ def binding(components, claim):
     if expected is None:
         raise ValueError('Reviewer execution requirements were not captured before invocation')
     contract(expected)
+    if not evidence_required(expected):
+        raise ValueError('Native execution evidence is not required by this declaration')
     return {'schema': 1, 'source': 'native-host', 'claim': claim['id'],
             'fingerprint': claim['fingerprint'], 'skill_identity': components['skill']['identity'],
             'skill_version': expected['skill_version'], 'resources': digest(components['skill']['resources']),
