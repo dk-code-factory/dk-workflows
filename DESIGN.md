@@ -399,6 +399,33 @@ parallel session database or resume-summary files are introduced.
 
 ## Agent guidance
 
+New task definitions declare execution evidence in the existing `native_review`
+field using schema 2 and a required boolean `required`. With `required:true`,
+the resolved `skill_version` and complete applicable `passes` remain mandatory.
+With `required:false`, only `schema` and `required` are accepted; contradictory
+execution requirements are rejected. The declaration controls preflight,
+assignments, checklists, completion and reuse regardless of task or skill names.
+An incomplete schema-2 declaration fails validation before a claim. Native
+bindings and independent host-observed/reported-driver validation stay unchanged.
+
+Schema 1 and absent declarations are explicitly legacy syntax: preserve their
+existing name-based inference, captured bytes, fingerprints and task keys.
+Do not upgrade retained definitions or accepted results automatically. New
+callers use schema 2, including ordinary tasks that require no evidence. Both
+preflight and task capture validate the same declaration. Changing a declaration
+changes only that task's existing governing fingerprint; original results,
+completed siblings, claims, budgets and recovery records remain retained.
+
+This extends an already captured contract rather than adding a state field,
+store, requirement map or migration. Fresh-session consumers read the retained
+declaration through existing assignments and capture, avoiding repeated native
+interpretation of names or reconstruction of missing requirements. Expected
+avoided API cost comes from refusing unsupported execution before substantive
+work and reusing unchanged accepted evidence. Its freshness ends at changes to
+the declaration, installed resources, governing inputs or claim pins. Live CI,
+publication and authorization checks remain separate. Offline regressions can
+establish compatibility and recovery; native API dollar savings are unmeasured.
+
 The task-state contract owns the lifecycle protocol. Skill prompts and recipes
 refer to it once, use the managed commands and describe only stage decisions.
 Keep native execution validation, scoped permissions, original evidence,

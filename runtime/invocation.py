@@ -103,7 +103,7 @@ def preflight(calls, available, capabilities=None, *, native_reviews=None):
     Native tools resolve occurrence-specific review contracts from installed skills;
     this helper neither discovers installations nor probes a host by launching work.
     """
-    from native_review import contract
+    from native_review import contract, evidence_required
     calls = list(calls)
     native_reviews = {} if native_reviews is None else native_reviews
     if (not isinstance(native_reviews, dict)
@@ -146,7 +146,8 @@ def preflight(calls, available, capabilities=None, *, native_reviews=None):
         reviewer = (re.search(r'/(?:options/reviewers/[0-9]+|reviewers/[0-9]+/[0-9]+)$', location)
                     is not None or location == 'reviewer' or location.endswith(('/alternatives', '/assessed-alternatives', '/assessment'))
                     or (reference or '').split(':')[-1].startswith('code-review'))
-        if reviewer or location in native_reviews:
+        needs_evidence = (evidence_required(native_reviews[location]) if location in native_reviews else reviewer)
+        if needs_evidence:
             requirements = native_reviews.get(location)
             gaps = []
             if requirements is None:

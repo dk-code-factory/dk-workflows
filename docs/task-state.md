@@ -24,7 +24,7 @@ Use `prepare --file REQUEST.json` once for the current independent task group. T
   "inputs": {"context": "/private/review-context.json"},
   "git": {"checkout": "/review/checkout", "target": "TARGET_SHA", "base": "DIFF_BASE_SHA", "head": "HEAD_SHA", "history": false, "head_sensitive": false},
   "options": {},
-  "native_review": {"schema": 1, "skill_version": "RESOLVED_VERSION", "passes": []},
+  "native_review": {"schema": 2, "required": true, "skill_version": "RESOLVED_VERSION", "passes": []},
   "governing_inputs_complete": true
  }}]
 }

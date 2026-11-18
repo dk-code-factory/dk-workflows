@@ -53,7 +53,8 @@ def contract(spec, definition):
         items.append({'id': 'alternatives-initial-plan', 'text': 'Read the retained alternatives assessment and any selected approach or required design changes. Review the current implementation against that context and verify current scope still fits its sourced requirements and constraints. Material scope changes require explicit reassessment. The initial alternatives review does not supply current-head code review, CI or publication coverage.'})
     if role == 'finding-verification':
         items.append({'id': 'verification', 'text': 'Challenge every candidate independently and return confirmed, rejected or uncertain with evidence and required locations.'})
-    if 'native_review' in spec:
+    from native_review import required as native_required
+    if 'native_review' in spec and native_required(spec):
         items.append({'id': 'native-evidence', 'text': 'Retain actual terminal native observations for every required role and driver; never synthesize missing evidence.'})
     options = spec.get('options', {})
     execution = options.get('execution', options)
