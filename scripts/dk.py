@@ -21,6 +21,10 @@ def main():
     p = sub.add_parser('prepare', help='Define, capture and claim native tasks in one call')
     p.add_argument('--file', type=Path, required=True, help='Tasks and retained run/cycle options')
     p.add_argument('--compact', action='store_true', help='Omit known assignments unless invoking new work')
+    p = sub.add_parser('next', help='Read bounded current obligations and recovery; never claim or execute')
+    p.add_argument('--file', type=Path, required=True, help='Owning skill, run and current inspection inputs')
+    p.add_argument('--after', type=int, default=0)
+    p.add_argument('--limit', type=int, default=20)
     p = sub.add_parser('reassess', help='Explicitly authorize one retained initial fix alternatives replacement')
     p.add_argument('--file', type=Path, required=True, help='Prepare request with one rebuilt alternatives definition')
     p.add_argument('--request-id', required=True, help='Original explicit user message identity')
@@ -137,6 +141,11 @@ def main():
     p.add_argument('--reason', required=True)
     p.add_argument('--recover', help='Close this stopped claim without invoking; reconcile domain writes first')
     args = parser.parse_args()
+    if args.command == 'next':
+        from next_actions import inspect
+        print(json.dumps(inspect(args.repository, args.pr, read(args.file), checkout=args.checkout,
+                                 after=args.after, limit=args.limit), sort_keys=True))
+        return
     if args.command in {'prepare', 'reassess', 'resume', 'finish', 'result', 'progress'}:
         from tasks import Tasks
         tasks = Tasks(args.repository, args.pr, checkout=args.checkout)

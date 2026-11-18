@@ -11,8 +11,8 @@ import skill_config
 
 
 class Tasks:
-    def __init__(self, repository, pr, *, checkout=None):
-        self.store = Store(repository, pr, checkout=checkout)
+    def __init__(self, repository, pr, *, checkout=None, read_only=False):
+        self.store = Store(repository, pr, checkout=checkout, read_only=read_only)
         self.checkout = Path(checkout).absolute() if checkout is not None else Path.cwd()
 
     def _retained_policy(self, descriptor):

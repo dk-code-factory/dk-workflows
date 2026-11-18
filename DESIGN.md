@@ -137,6 +137,57 @@ The low-level spec/start/record API remains compatible. Preparing a task through
 the managed interface can attach a definition to an existing reusable entry
 without invoking its reviewer, resetting budgets or changing its fingerprint.
 
+## Read-only next actions
+
+`dk.py next --file REQUEST.json` projects the current skill-owned task and
+finalizer groups (or a review runner's reviewer groups) into a bounded page.
+The request names the owning skill, invocation-local options, retained run and
+optional cycle, plus definitions for not-yet-retained work. Current configuration,
+not the saved entry list, selects required coverage. Retained definitions supply
+assignment sources only; selection and options are rebuilt live. Removed tasks
+remain historical evidence; empty/custom finalizers stay authoritative.
+
+Locations such as `tasks/0` identify current configured occurrences, not new
+durable task identities. Explicit prerequisite locations or original task keys
+are supplied as inspection inputs. Earlier ordered groups are implicit barriers;
+parallel siblings remain independent. Cyclic or unknown prerequisites are rejected.
+Native applicability decisions can exclude work only through an intact, currently
+accepted original result whose applicability record binds the exact selected
+invocation and supplies a reason and evidence. The helper makes no semantic
+applicability decision. Missing or stale evidence leaves work blocked. Optional
+terminal failure is reported without satisfying an explicit dependency on its
+result. Every selected unresolved occurrence remains visible.
+
+Actions distinguish `invoke_native`, `consume_result`, `check_completion`,
+`definition_required`, `blocked_prerequisite`, `exhausted_allowance`,
+`reconcile_claim`, `reconcile_publication`, `inspect_publication`,
+`restore_evidence`, `optional_incomplete` and `not_applicable`. Assignment, result,
+checklist, claim and journal references point to original evidence. The existing
+alternatives gate is consulted without launching or requesting a comparison;
+historical design context never supplies current code coverage. Pagination bounds
+both recovery and task output. No original finding bodies, assignments, progress
+logs or full manifests appear in routine output.
+
+Inspection reads one in-memory manifest snapshot without creating state files,
+reserving claims, check rounds or allowances. Budget validation runs on an
+in-memory copy through the existing validator. PR-wide claims and publication
+operations are inspected across runs: uncertain writes direct read-only recovery
+to their original journal, never another dispatch. Prepared intentions also point
+to their original operation for inspection. No live GitHub requests are made.
+The current native session decides whether and how to act. Inspection cannot
+authorize a write, allocate a review cycle, launch a model, delegate, or establish
+CI/publication readiness. Prepare/finish and publishers revalidate inputs and
+readiness at their existing boundaries; an observation is never a lease.
+
+The expected saving is avoiding repeated native reconstruction of current ordered
+obligations and recovery on this run and a fresh session. Original task definitions,
+results, claims, budgets and journals remain the only durable coordination state;
+no rendered plan, readiness flag, settings snapshot, second index or scheduler is
+added. Freshness ends when configuration, governing inputs or evidence changes,
+or when a concurrent claim/publication changes the observed state. Reinspect as
+needed and use targeted original-result reads. Offline reuse/recovery tests prove
+behavior, not measured API dollar savings; native dollar savings are unmeasured.
+
 ## Task completion checklists
 
 Every managed assignment includes a deterministically generated checklist, plus
