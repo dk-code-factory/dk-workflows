@@ -322,13 +322,14 @@ def _accepted(tasks, key, context, *, historical=False):
             'native_handle': native['invocation']['handle'], **assigned}
 
 
-def stage_spec(tasks, descriptor, definition, *, replay=False):
+def stage_spec(tasks, descriptor, definition, *, replay=False, authorize_reassessment=False):
     with evaluation(tasks):
-        return _stage_spec(tasks, descriptor, definition, replay=replay)
+        return _stage_spec(tasks, descriptor, definition, replay=replay,
+                           authorize_reassessment=authorize_reassessment)
 
 
-def _stage_spec(tasks, descriptor, definition, *, replay=False):
-    if set(descriptor) - {'kind', 'skill', 'stage', 'dependencies', 'definition', 'options', 'upstream'}:
+def _stage_spec(tasks, descriptor, definition, *, replay=False, authorize_reassessment=False):
+    if set(descriptor) - {'kind', 'skill', 'stage', 'dependencies', 'definition', 'options', 'upstream', 'reassessment'}:
         raise ValueError('Alternatives descriptors use stage, dependencies and owner options only')
     stage = descriptor.get('stage')
     if stage not in STAGES:
@@ -336,6 +337,8 @@ def _stage_spec(tasks, descriptor, definition, *, replay=False):
     owner = descriptor.get('skill', OWNER)
     if owner not in {OWNER, FIX_OWNER}:
         raise ValueError('Alternatives owner must be the incoming or fix workflow')
+    if owner != FIX_OWNER and ('reassessment' in descriptor or authorize_reassessment):
+        raise ValueError('Retained reassessment applies only to initial fix alternatives')
     loaded = skill_config.effective(owner, tasks.store.subject['repository'], descriptor.get('upstream'),
                                     options=descriptor.get('options'))
     loaded['options'] = legacy_options(loaded['options'])
@@ -394,8 +397,10 @@ def _stage_spec(tasks, descriptor, definition, *, replay=False):
         execution['options']['alternatives']['comparison_scoring'] = retained['comparison']['policy']['scoring']
     spec = make_spec(**tasks.store.subject, **execution)
     if owner == FIX_OWNER:
-        from fix_alternatives import guard_completed
-        guard_completed(tasks, stage, spec)
+        from fix_alternatives import guard_completed, bind_reassessment
+        bind_reassessment(tasks, descriptor, spec)
+        if not authorize_reassessment:
+            guard_completed(tasks, stage, spec)
     elif initial_review and not replay:
         guard_completed(tasks, stage, spec)
     return spec

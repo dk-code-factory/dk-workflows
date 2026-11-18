@@ -23,16 +23,18 @@ class Tasks:
                 and instruction_sources.binding(checkout, self.store.subject['repository']) is not None):
             raise ValueError('Legacy repository guidance requires a rebuilt assignment and handoff')
 
-    def spec(self, descriptor, *, replay=False):
+    def spec(self, descriptor, *, replay=False, authorize_reassessment=False):
         if (not isinstance(descriptor, dict) or set(descriptor) - {
                 'kind', 'definition', 'run', 'cycle', 'phase', 'index', 'process', 'finalizer', 'upstream',
-                'skill', 'selection', 'options', 'stage', 'dependencies', 'workflow', 'decision', 'policy_options', 'alternatives_options'}):
+                'skill', 'selection', 'options', 'stage', 'dependencies', 'workflow', 'decision', 'policy_options', 'alternatives_options', 'reassessment'}):
             raise ValueError('Task requires a definition and optional occurrence selector')
         if not isinstance(descriptor.get('definition'), dict):
             raise ValueError('Task requires an explicit definition')
         from alternatives_compat import descriptor as current_descriptor
         descriptor.update(current_descriptor(descriptor))
         kind = descriptor.get('kind', 'task')
+        if 'reassessment' in descriptor and kind != 'alternatives':
+            raise ValueError('Retained reassessment applies only to initial fix alternatives')
         definition = {key: value for key, value in descriptor['definition'].items()
                       if key not in {'checklist', 'required'}}
         if 'git' not in definition and 'instruction_policy' not in definition:
@@ -47,7 +49,8 @@ class Tasks:
             return make_spec(**self.store.subject, **definition)
         if kind == 'alternatives':
             from alternatives import stage_spec
-            return stage_spec(self, descriptor, definition, replay=replay)
+            return stage_spec(self, descriptor, definition, replay=replay,
+                              authorize_reassessment=authorize_reassessment)
         if kind == 'assessed-alternatives':
             from assessment_alternatives import stage_spec
             return stage_spec(self, descriptor, definition, replay=replay)
@@ -74,6 +77,17 @@ class Tasks:
             findings = task.pop('findings')
             task['finding_count'] = len(findings) if findings is not None else None
         return task
+
+    def reassess(self, request, *, request_id, authorization, source, compact=False):
+        """Bind an explicit request to one replacement of retained initial work.
+
+        The normal preparation transaction retains the binding with its claim.
+        No old installation is read to reconstruct a replacement definition.
+        """
+        from fix_alternatives import reassessment
+        prepared = reassessment(self, request, request_id=request_id,
+                                authorization=authorization, source=source)
+        return self.prepare(prepared, compact=compact)
 
     def prepare(self, request, *, compact=False):
         if type(compact) is not bool:
