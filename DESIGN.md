@@ -522,6 +522,33 @@ parallel session database or resume-summary files are introduced.
 
 ## Agent guidance
 
+The managed lifecycle authority is `docs/task-state.md`. Entry skills route the
+request and identify the selected workflow; recipes define stage decisions,
+applicability, consumed evidence and acceptance. They link to the lifecycle for
+capture, claims, native execution, recording, completion and recovery instead of
+restating those procedures. Domain contracts still own their authorization,
+publication, CI and native-evidence requirements.
+
+Instruction reading is staged within the already-running native session. Load
+necessary common and selected-stage guidance when entering that work, reuse
+unchanged guidance already in context, and reload it after context loss. Reading
+is separate from governing-source capture: the complete existing resource maps,
+including indirect references, are supplied before prepare even when their prose
+will be read later. Live capture at prepare, recording and final coverage keeps
+its existing semantics. No reference parser, generated instruction bundle or
+saved read-status index is introduced. Missing or uncertain dependencies block
+cacheable claims; changed identities, selected sources, options or relevant
+resources refresh affected work and preserve original results and siblings.
+
+The expected API-cost saving is avoiding repeated lifecycle interpretation in
+entry and recipe text during initial execution and fresh-session recovery.
+Necessary context-restoration reads still count, and every source remains fully
+captured. There is no durable state to create, validate or reload. The saving's
+freshness boundary is unchanged governing guidance and task inputs; context loss
+requires the relevant prose again. Offline behavior and instruction-byte
+comparisons are diagnostic evidence, not measured API dollars. Complete native
+workflow cost and finding-quality measurement remains separate.
+
 New task definitions declare execution evidence in the existing `native_review`
 field using schema 2 and a required boolean `required`. With `required:true`,
 the resolved `skill_version` and complete applicable `passes` remain mandatory.
