@@ -939,6 +939,170 @@ def test_skill_owned_review_occurrences_verification_and_active_approval_claim(r
     assert result['status'] == 'verified' and r.remote.calls == [101, 202]
 
 
+@pytest.fixture
+def workflow_reviewed(reviewed, tmp_path):
+    """Complete actual workflow-selected leaves with original native evidence."""
+    import skill_config
+    from tasks import Tasks
+    from native_review_observations import observations
+    from checklist_reports import accept
+    r = reviewed
+
+    def build(*, enabled=True, repeated=False, local_runner=False, candidate=False, extra_runner=False,
+              selector_options='explicit'):
+        value = read(r.evidence)
+        original = read(Path(value['discovery'][0]))
+        fields = {'resources': original['skill']['resources'], 'assigned_instructions': original['task']['instructions'],
+                  'instructions': original['instructions'], 'inputs': {}, 'options': {}, 'git': original['git'],
+                  'governing_inputs_complete': True, 'native_review': original['native_review']}
+        runner = 'dk-workflows:dk-pr-reviewers-run'
+        ordinary = ['fixture:a', 'fixture:a' if repeated else 'fixture:b']
+        runner_call = {'skill': runner, 'instructions': 'Review the owning workflow scope.'}
+        if local_runner:
+            runner_call['options'] = {'reviewers': ordinary, 'max_parallel': 1}
+        else:
+            write(config.path(value['repository']), {
+                'skill_defaults': {runner: {'options': {'reviewers': ordinary}}}})
+        tasks = [runner_call]
+        if extra_runner:
+            tasks.append({'skill': runner, 'options': {'reviewers': ['fixture:c']}})
+        tasks.append({'instructions': 'Independently verify findings.'})
+        owner_options = {'alternatives': {'enabled': False}, 'tasks': tasks,
+                         'simplification': {'enabled': enabled}}
+        # Distinct providers without simplification retain separate task identities.
+        if extra_runner:
+            owner_options['simplification']['enabled'] = False
+        if selector_options != 'explicit':
+            scoped = read(config.path(value['repository']))
+            scoped.setdefault('skill_defaults', {})['dk-workflows:dk-pr-review'] = {'options': owner_options}
+            write(config.path(value['repository']), scoped)
+            owner_options = {}
+        coordinator = Tasks(value['repository'], fixture.PR, checkout=value['checkout'])
+
+        def complete(owner, kind, index, identity, *, workflow=None, normalized=None, inputs=None):
+            descriptor = {'kind': 'skill', 'skill': owner, 'selection': kind, 'index': index,
+                          'options': {} if workflow else owner_options,
+                          'definition': {**fields, 'skill_identity': identity,
+                                         'responsibility': 'finding-verification' if kind == 'tasks' else 'content-review',
+                                         'inputs': inputs or {}}}
+            if workflow is not None:
+                descriptor['workflow'] = workflow
+            started = coordinator.prepare({'run': value['run'], 'cycle': value['cycle'],
+                                           'tasks': [descriptor]})['tasks'][0]
+            spec = coordinator.saved_spec(started['key'])
+            output = b'Original completed workflow-selected review'
+            result = coordinator.finish(started['key'], started['claim']['id'], output,
+                                        normalized or {'complete': True, 'findings': []},
+                                        native_evidence=observations(spec, started['claim'], output))
+            accept(coordinator, result)
+            return {'key': started['key']}
+
+        discovery, candidates, inputs = [], [], {}
+        for runner_index in range(len(tasks) - 1):
+            workflow = {'skill': 'dk-workflows:dk-pr-review', 'index': runner_index, 'options': owner_options}
+            if selector_options == 'omitted':
+                workflow.pop('options')
+            elif selector_options == 'null':
+                workflow['options'] = None
+            plan = skill_config.plan(runner, 'reviewers', value['repository'], workflow=workflow)
+            calls = [call for group in plan['groups'] for call in group]
+            for index, call in enumerate(calls):
+                selected = skill_config.configured_call(call, value['repository'])
+                has_candidate = candidate and not discovery
+                reference = complete(runner, 'reviewers', index, selected.get('skill', runner), workflow=workflow,
+                                     normalized={'complete': True, 'findings': [{'body': 'Candidate'}] if has_candidate else []})
+                discovery.append(reference)
+                if has_candidate:
+                    candidates.append({'task': reference['key'], 'index': 0, 'status': 'rejected',
+                                       'evidence': 'Pinned source establishes correct behavior.'})
+                    inputs['candidate'] = coordinator.result(reference['key'])['result']
+        verification = complete('dk-workflows:dk-pr-review', 'tasks', len(tasks) - 1,
+                                'dk-workflows:dk-pr-review', inputs=inputs,
+                                normalized={'complete': True, 'findings': [], 'dispositions': candidates})
+        r.edit(lambda document: document.update(configuration='skill-owned', options=owner_options,
+                                                 reviewer_options={}, discovery=discovery, verification=verification),
+               snapshot=True)
+        return r, coordinator
+
+    return build
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+@pytest.mark.parametrize('repeated', [False, True])
+@pytest.mark.parametrize('local_runner', [False, True])
+@pytest.mark.parametrize('gates', [False, True])
+def test_workflow_composed_coverage_approves_or_returns_verified_noop(workflow_reviewed, enabled, repeated, local_runner, gates):
+    r, coordinator = workflow_reviewed(enabled=enabled, repeated=repeated, local_runner=local_runner, candidate=True)
+    if not gates:
+        r.remote.pages = lambda: [[]]
+    before = coordinator.store.manifest.read_bytes()
+    result = r.cli.approve(r.evidence)
+    assert result['status'] == 'verified' and result['noop'] is (not gates)
+    assert r.remote.calls == ([101, 202] if gates else [])
+    assert coordinator.store.manifest.read_bytes() == before
+    # A new coordinator consumes the same accepted results without review work.
+    from tasks import Tasks
+    fresh = Tasks(read(r.evidence)['repository'], fixture.PR, checkout=read(r.evidence)['checkout'])
+    assert all(task['reusable'] for task in fresh.resume(keys=[ref['key'] for ref in read(r.evidence)['discovery']])['tasks'])
+    assert r.cli.approve(r.evidence)['noop']
+    assert coordinator.store.manifest.read_bytes() == before
+
+
+@pytest.mark.parametrize('defect', ['missing-simplifier', 'missing-ordinary', 'duplicate', 'standalone',
+                                  'owner-options', 'runner-options', 'source', 'policy'])
+def test_workflow_composed_coverage_rejects_incomplete_or_changed_evidence(workflow_reviewed, defect):
+    r, coordinator = workflow_reviewed(repeated=True)
+    before = coordinator.store.manifest.read_bytes()
+    if defect == 'source':
+        r.instructions.write_text('Changed governing review instructions.\n')
+    elif defect == 'policy':
+        settings = deepcopy(r.settings)
+        settings['skill_defaults']['dk-workflows:dk-pr-review'] = {'options': {'simplification': {'enabled': False}}}
+        write(config.path(read(r.evidence)['repository']), settings)
+    else:
+        def change(value):
+            if defect == 'missing-simplifier': value['discovery'].pop()
+            elif defect == 'missing-ordinary': value['discovery'].pop(0)
+            elif defect == 'duplicate': value['discovery'][1] = value['discovery'][0]
+            elif defect == 'standalone': value['discovery'][0] = r.task('fixture:a', 'standalone-owned')
+            elif defect == 'owner-options': value['options']['simplification']['priority'] = 'code-first'
+            elif defect == 'runner-options': value['reviewer_options'] = {'max_parallel': 1}
+        r.edit(change, snapshot=defect in {'owner-options', 'runner-options'})
+    with pytest.raises(ValueError):
+        r.cli.approve(r.evidence)
+    assert r.remote.calls == []
+    if defect != 'standalone':
+        assert coordinator.store.manifest.read_bytes() == before
+
+
+@pytest.mark.parametrize('selector_options', ['omitted', 'null'])
+@pytest.mark.parametrize('enabled', [False, True])
+def test_workflow_composed_coverage_accepts_default_owner_selector_options(workflow_reviewed, selector_options, enabled):
+    r, _ = workflow_reviewed(selector_options=selector_options, enabled=enabled)
+    assert r.cli.approve(r.evidence)['status'] == 'verified'
+    assert r.remote.calls == [101, 202]
+
+
+def test_workflow_composed_coverage_rejects_different_explicit_owner_options(workflow_reviewed):
+    r, _ = workflow_reviewed(selector_options='omitted')
+    r.edit(lambda value: value.update(options={'limits': {'review_cycles': 4}}), snapshot=True)
+    with pytest.raises(ValueError, match='coverage is incomplete'):
+        r.cli.approve(r.evidence)
+    assert r.remote.calls == []
+
+
+def test_workflow_composed_coverage_requires_every_distinct_runner_occurrence_without_simplification(workflow_reviewed):
+    r, _ = workflow_reviewed(extra_runner=True)
+    document = read(r.evidence)
+    r.edit(lambda value: value.update(discovery=document['discovery'][:-1]))
+    with pytest.raises(ValueError, match='coverage is incomplete'):
+        r.cli.approve(r.evidence)
+    assert r.remote.calls == []
+    r.edit(lambda value: value.update(discovery=document['discovery']))
+    assert r.cli.approve(r.evidence)['status'] == 'verified'
+    assert r.remote.calls == [101, 202]
+
+
 @pytest.mark.parametrize('include_followup_source', [False, True])
 def test_followup_findings_require_verification_of_every_report_source(reviewed, include_followup_source):
     from tasks import Tasks

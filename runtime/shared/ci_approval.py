@@ -35,6 +35,12 @@ class ApprovalFailure(ValueError):
         self.stderr, self.stdout = error.stderr, error.stdout
 
 
+def _workflow_selector(value):
+    if value is None:
+        return None
+    return {**value, 'options': {} if value.get('options') is None else value['options']}
+
+
 class Approval:
     def __init__(self, handler):
         self.handler = handler
@@ -211,14 +217,7 @@ class Approval:
             return current['key'], normalized
 
         discovery = value.get('discovery', [])
-        if owned:
-            selected = [skill_config.configured_call(call, repository, value.get('upstream'))
-                        for group in skill_config.groups(selected_settings['dk-pr-reviewers-run']['options']['reviewers'])
-                        for call in group]
-        else:
-            selected = [config.select(settings['settings'], 'pr-review', 'reviewer', index)
-                        for index, _ in enumerate(config.reviewers(settings['settings'], 'pr-review'))]
-        if not discovery or not selected:
+        if not discovery:
             raise ValueError('Complete selected discovery coverage is required')
         candidates, discovery_specs = [], []
         for path in discovery:
@@ -227,12 +226,39 @@ class Approval:
                 raise ValueError('Current selected reviewer coverage is incomplete or duplicated')
             discovery_specs.append((key, specs[key]))
             candidates.extend((key, index) for index, _ in enumerate(result.get('findings', [])))
+        selected = []
+        if owned:
+            from simplification import RUNNER, selection as reviewer_selection
+            workflow_bound = any('workflow' in spec.get('skill_configuration', {}) for _, spec in discovery_specs)
+            if workflow_bound:
+                tasks = [call for group in skill_config.groups(selected_settings['dk-pr-review']['options']['tasks'])
+                         for call in group]
+                workflows = [{'skill': 'dk-workflows:dk-pr-review', 'index': index,
+                              'options': value.get('options', {})}
+                             for index, call in enumerate(tasks)
+                             if skill_config.configured_call(call, repository, value.get('upstream')).get('skill') == RUNNER]
+            else:
+                # Retain the standalone skill-spec evidence contract. Only
+                # workflow-bound leaves select the live composed runner plan.
+                workflows = [None]
+            for workflow in workflows:
+                loaded = reviewer_selection(RUNNER, 'reviewers', repository, value.get('upstream'),
+                                            value.get('reviewer_options', {}), workflow)
+                calls = [call for group in skill_config.groups(loaded['options']['reviewers']) for call in group]
+                selected.extend((index, skill_config.configured_call(call, repository, value.get('upstream')), workflow)
+                                for index, call in enumerate(calls))
+        else:
+            selected = [(index, config.select(settings['settings'], 'pr-review', 'reviewer', index), None)
+                        for index, _ in enumerate(config.reviewers(settings['settings'], 'pr-review'))]
+        if not selected:
+            raise ValueError('Complete selected discovery coverage is required')
         remaining = list(discovery_specs)
-        for index, call in enumerate(selected):
+        for index, call, workflow in selected:
             expected = call.get('skill', 'dk-workflows:dk-pr-reviewers-run' if owned else config.invocation.normalize(
                 settings['settings']['processes']['pr-review']['coordinator']).get('skill'))
             matches = [(key, spec) for key, spec in remaining if config.invocation.matches(expected, spec['skill']['identity'])
-                       and (not owned or spec.get('skill_configuration', {}).get('index') == index)]
+                       and (not owned or spec.get('skill_configuration', {}).get('index') == index
+                            and _workflow_selector(spec.get('skill_configuration', {}).get('workflow')) == workflow)]
             if len(matches) != 1:
                 raise ValueError('Current selected reviewer coverage is incomplete or duplicated')
             key, spec = matches[0]
