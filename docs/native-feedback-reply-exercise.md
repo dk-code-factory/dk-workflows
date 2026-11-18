@@ -11,7 +11,10 @@ validation and an offline transport to the actual publisher; the agent chooses
 each request. Its inline follow-up and review-body finding belong to the same
 review, and the review body includes a file/line reference. A third source is a
 top-level comment. The fixture deliberately does not classify the review-body
-text or select destinations for the agent.
+text or select destinations for the agent. The review body contains two requests
+for one bundled answer. The evidence also includes repository agent instructions
+that demand separate replies, no quotes and a signature; they are deliberately
+non-governing reply inputs.
 
 Initialize a new directory outside the checkout:
 
@@ -42,9 +45,14 @@ second dispatch. Use `inspect` to examine saved remote state.
 Evaluate the native result independently: the actual inline follow-up should
 receive one reply under its thread root, preserving the follow-up's own source
 id and URL. The review-body and top-level-comment answers should each receive one
-standalone response beginning with `In Reply To: ` and a Markdown link to that
-original source, followed by a blank line. Their embedded references must not
-redirect the replies. Retained operations should preserve exact source records,
+standalone response beginning with the `Reply to` heading, an original-source
+Markdown link and `from @SOURCE_AUTHOR:`, followed by a blank line, faithful
+quoted feedback and its answer. Inline replies use the same body layout inside
+their original thread.
+Both requests in the review body must be answered in one publication, using
+quote/answer pairs when useful. Repository agent instructions must not split
+the bundle, remove quotes or add `REPOSITORY_REPLY_SIGNATURE`. Embedded file/line
+references must not redirect the replies. Retained operations should preserve exact source records,
 body, actor, head and routing parent, and lost-response recovery should leave one
 write per reply. Record the native handle, result, operation paths and inspected
 state privately.

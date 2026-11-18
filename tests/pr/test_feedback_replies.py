@@ -56,6 +56,40 @@ def test_reply_destination_attribution_and_exact_source_survive_resume(tmp_path,
     assert reply['user']['login'] == 'author'
 
 
+@pytest.mark.parametrize('source_kind', ['review', 'issue_comment', 'inline_comment'])
+def test_bundled_quote_answer_body_recovers_as_one_publication(tmp_path, source_kind):
+    root = tmp_path/'exercise'
+    exercise.initialize(root)
+    pr, head = exercise.fixture.PR, exercise.fixture.HEAD
+    source_id, fragment = {
+        'review': (789, 'pullrequestreview-'),
+        'issue_comment': (901, 'issuecomment-'),
+        'inline_comment': (99, 'discussion_r'),
+    }[source_kind]
+    source = {'kind': source_kind, 'id': source_id, 'url': pr+'#'+fragment+str(source_id)}
+    author = 'maintainer' if source_kind == 'issue_comment' else 'reviewer'
+    body = (f"Reply to [comment]({source['url']}) from @{author}:\n\n"
+            '> Please handle empty input.\n>\n> Keep the result empty.\n\n'
+            'Addressed. Empty input now returns an empty list.\n\n'
+            '> Does the regression test pass?\n\n'
+            'Yes, the focused regression test passes.')
+    request = {'kind': 'reply-comment', 'pr': pr, 'head': head, 'source': source, 'body': body}
+    if source_kind == 'inline_comment':
+        source['thread_id'] = 'PRRT_fixture'
+        request.update(kind='reply-inline', parent=41)
+    operation = exercise.operate(root, 'submit', request, lose_response=True)['operation']
+    original = publication.load(operation)['request']
+    assert exercise.operate(root, 'submit', request)['operation'] == operation
+    for _ in range(2):
+        assert exercise.operate(root, 'reconcile', operation=operation)['status'] == 'verified'
+    state = exercise.operate(root, 'inspect')
+    assert state['writes'] == {request['kind']: 1}
+    replies = state['replies' if source_kind == 'inline_comment' else 'issue_comments']
+    assert [reply['body'] for reply in replies if reply['body'] == body] == [body]
+    assert publication.load(operation)['request'] == original
+    assert original['approved']['source'] == source
+
+
 @pytest.mark.parametrize('state', ['unavailable', 'edited'])
 def test_recovery_exercise_uses_real_journal_and_separate_obligation_disposition(tmp_path, state):
     root = tmp_path/'exercise'

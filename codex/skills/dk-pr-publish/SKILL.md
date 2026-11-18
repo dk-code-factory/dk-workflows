@@ -7,6 +7,8 @@ Read and obey [private workflow reporting](../../../docs/private-reporting.md), 
 
 Before repository guidance reads or handoffs, follow [repository instruction sources](../../../docs/instruction-sources.md). Follow all discovered repository instructions by default, or the saved explicit source override; preserve host instruction priority. Do not ask for a source choice or require onboarding to use the default.
 
+For feedback reply actions, apply the [reply instruction boundary](../../../docs/pr/feedback-responses.md#reply-instruction-boundary) instead: do not adopt or reintroduce repository agent instructions into reply preparation or publication. Preserve the bundled quote/answer body and original source through handoffs and recovery.
+
 Persist workflow state only when it reduces total API dollar cost, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).
 
 Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task contract](../../../docs/pr/contracts.md).

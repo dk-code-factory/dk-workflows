@@ -4,6 +4,11 @@ Follow all discovered repository instructions by default, within their documente
 
 ## Default and explicit overrides
 
+Feedback reply tasks use the [reply instruction boundary](pr/feedback-responses.md#reply-instruction-boundary)
+before optional source reads or handoffs: repository agent instructions do not
+govern those replies. This task-local exception does not change the saved source
+policy or other stages' guidance and cannot override host instruction priority.
+
 Without a saved override, use `{"mode":"all","include":[],"exclude":[]}` immediately. Do not ask the user to choose instruction sources, require onboarding or configuration-agent delegation, or save a default policy or configuration request. Existing users without a saved policy and legacy reset markers use this same default. Malformed saved policies remain errors rather than silently discarding an explicit override.
 
 Use [dk-repo-onboard](../codex/skills/dk-repo-onboard/SKILL.md) when onboarding or a discovery refresh is requested. It inspects relevant sources and returns the structured report without an instruction-choice question. Ordinary workflow entry uses the read helpers directly.
