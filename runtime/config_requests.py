@@ -13,6 +13,7 @@ import uuid
 import config_adapters as adapters
 import config
 import skill_config
+from config_upgrades import Upgrades, internal, reading, revision, inventory
 from shared.private_state import atomic_text, write, sync_directory
 from shared.repository_scope import checkout_roots, repository
 from shared.storage_paths import location
@@ -104,7 +105,7 @@ def differences(before, after, path=()):
     return changes
 
 
-class Requests:
+class Requests(Upgrades):
     def __init__(self):
         self.root = location('tasks')/'configuration-history'
 
@@ -139,7 +140,8 @@ class Requests:
                 self._git('init', '--quiet')
             if self._git('remote'):
                 raise ValueError('Private configuration history must have no remote')
-            yield
+            with internal():
+                yield
 
     def _path(self, request_id):
         if not isinstance(request_id, str) or not re.fullmatch(r'cfg-[0-9a-f]{32}', request_id):
@@ -177,20 +179,34 @@ class Requests:
         context = context_value(context)
         self._private(context['checkout'])
         with self.locked():
+            self._barrier()
+            if self._upgrade_check(context)['status'] != 'ready':
+                raise ValueError('Configuration layout requires upgrade-start before new requests')
             request = {'id': 'cfg-' + uuid.uuid4().hex, 'ask': text(ask), 'context': context,
-                       'status': 'open', 'clarifications': []}
+                       'status': 'open', 'clarifications': [], 'layout_revision': revision()}
             self._save(request, 'start')
             return self._status(request)
 
     def _records(self):
-        return [json.loads(p.read_text()) for p in sorted(self.root.glob('cfg-*.json'))]
+        records = []
+        for path in sorted(self.root.glob('cfg-*.json')):
+            record = self._read(path.stem)
+            if (not isinstance(record, dict) or record.get('id') != path.stem
+                    or record.get('status') not in {'open', 'prepared', 'clarification', 'applying', 'applied', 'cancelled'}
+                    or not isinstance(record.get('context'), dict)):
+                raise ValueError('Corrupt configuration request: ' + str(path))
+            records.append(record)
+        return records
 
     def candidates(self, request):
         context = request['context']
         records = self._records()
         superseded = {(r['request'], r['decision']) for entry in records if entry['status'] == 'applied'
                       for r in entry.get('assessment', {}).get('relations', []) if r['choice'] in {'replace', 'narrow'}}
+        superseded.update((r['request'], r['decision']) for entry in records if entry['status'] == 'applied'
+                          for r in entry.get('upgrade', {}).get('lineage', []) if r['disposition'] != 'preserved')
         result = []
+        domain_chain = None
         for entry in records:
             if entry['id'] == request['id'] or entry['status'] != 'applied':
                 continue
@@ -200,9 +216,21 @@ class Requests:
                 op = entry['operations'][decision['operation']]
                 scope = decision.get('scope', op['scope'])
                 repository = decision.get('repository', entry['context']['repository'])
+                eligible = {scope_identity(context['repository']), scope_identity(context.get('upstream'))}
+                if scope == 'repo' and op['domain'] in {*adapters.settings.DOMAINS, 'pr-size', 'ci-exceptions'}:
+                    from config_upgrades import receipt_owner, ci_owner
+                    if op['domain'] != 'ci-exceptions':
+                        if domain_chain is None:
+                            domain_chain = adapters.chain(context)
+                        eligible.update(scope_identity(key) for key in domain_chain)
+                    if op['domain'] == 'ci-exceptions':
+                        eligible.add(ci_owner(context))
+                    repository = receipt_owner(entry, decision, eligible)
+                    if repository is None:
+                        continue
                 applies = (scope == 'user' or
                            scope == 'pr' and entry['context'].get('pr') == context.get('pr') or
-                           scope == 'repo' and scope_identity(repository) in {scope_identity(context['repository']), scope_identity(context.get('upstream'))})
+                           scope == 'repo' and scope_identity(repository) in eligible)
                 if applies and (entry['id'], decision['id']) not in superseded:
                     result.append({'request': entry['id'], **decision, 'domain': op['domain'],
                                    'scope': scope, 'repository': repository, 'summary': entry['assessment']['summary']})
@@ -210,7 +238,12 @@ class Requests:
 
     def _inputs(self, request, operations):
         context = request['context']
-        paths = adapters.input_paths(context, operations)
+        paths = adapters.input_paths(context, operations, bootstrap='upgrade' in request)
+        if 'upgrade' in request:
+            import config_upgrades
+            paths.update(config_upgrades.dependency_paths(context, operations))
+            _, _, keys, answers = self._upgrade_source_closure(request)
+            paths.update(self._path(source) for source in {key[0] for key in keys} | answers)
         targets = {adapters.destination(context, op)[0].resolve() for op in operations}
         inputs = {str(path.resolve()): digest(read_text(path)) for path in sorted(paths) if path.resolve() not in targets}
         inputs['@checkout_identity'] = repository(context['checkout'])
@@ -279,16 +312,28 @@ class Requests:
                                'candidates': candidates, 'clarifications': request['clarifications']})
         return progress, decisions, inputs, candidates, binding
 
-    def prepare(self, request_id, proposal):
-        if not isinstance(proposal, dict) or set(proposal) - {'operations', 'assessment'}:
+    def prepare(self, request_id, proposal, claim_token=None):
+        if not isinstance(proposal, dict) or set(proposal) - {'operations', 'assessment', 'lineage'}:
             raise ValueError('Prepare requires typed operations and optional assessment')
         operations = proposal.get('operations')
-        if operations != 'retained' and (not isinstance(operations, list) or not operations):
+        if operations != 'retained' and not isinstance(operations, list):
             raise ValueError('Nonempty operation list or retained selector required')
         with self.locked():
             request = self._read(request_id)
+            self._barrier(request_id)
+            self._owner(request, claim_token)
+            if 'upgrade' in request:
+                self._upgrade_context(request)
+            if 'upgrade' not in request and request.get('layout_revision', 1) != revision():
+                if self._upgrade_check(request['context'])['status'] != 'ready':
+                    raise ValueError('Upgrade configuration before refreshing this original request')
+                request['layout_revision'] = revision()
+            if not operations and 'upgrade' not in request:
+                raise ValueError('Nonempty operation list required')
+            if 'lineage' in proposal and 'upgrade' not in request:
+                raise ValueError('Translation lineage is upgrade-only')
             if operations == 'retained':
-                if not request.get('operations'):
+                if 'operations' not in request:
                     raise ValueError('No retained operations to prepare')
                 operations = [adapters.expand(request['context'], op, progress)
                               for op, progress in zip(request['operations'], request['progress'])]
@@ -315,7 +360,13 @@ class Requests:
                     return {'id': request_id, 'status': 'assessment_required', 'fingerprint': binding,
                             'decisions': decisions, 'candidates': [{k: v for k, v in c.items() if k not in {'before', 'after'}} for c in candidates],
                             'legacy_intent': 'unknown where no matching request decision exists'}
-                self._assessment(assessment, binding, candidates, decisions, operations, request['context'])
+                self._upgrade_admission(request, proposal, candidates, decisions, operations)
+                self._assessment(assessment, binding, candidates, decisions, operations, request['context'],
+                                 upgrade='upgrade' in request)
+                if 'upgrade' in request:
+                    for decision in decisions:
+                        decision['origins'] = [{'request': item['request'], 'decision': item['decision']}
+                                               for item in request['upgrade']['lineage'] if decision['id'] in item['targets']]
                 request.update(status=('applying' if request['status'] == 'applying' else
                                        'prepared' if not assessment['unresolved'] else 'clarification'),
                                operations=[adapters.compact(op, read_text(adapters.destination(request['context'], op)[0]))
@@ -326,7 +377,7 @@ class Requests:
                 self._save(request, 'prepare admission')
                 return self._status(request)
 
-    def _assessment(self, assessment, binding, candidates, decisions, operations, context):
+    def _assessment(self, assessment, binding, candidates, decisions, operations, context, *, upgrade=False):
         if (not isinstance(assessment, dict) or set(assessment) != {'fingerprint', 'summary', 'reviewed', 'relations', 'unresolved'}
                 or assessment['fingerprint'] != binding):
             raise ValueError('Admission must bind the fresh preparation fingerprint')
@@ -338,6 +389,15 @@ class Requests:
             raise ValueError('Unresolved conflicts must be explicit questions')
         if not isinstance(assessment['relations'], list):
             raise ValueError('Relations must be a list')
+
+        def same_scope(old, new):
+            op = operations[new['operation']]
+            repository = new.get('repository', context['repository'])
+            if op['scope'] == 'repo' and op['domain'] in {*adapters.settings.DOMAINS, 'pr-size', 'ci-exceptions'}:
+                repository = adapters.owner(context, op)
+            return (old['scope'] == new.get('scope', op['scope']) and
+                    (old['scope'] == 'user' or scope_identity(old['repository']) == scope_identity(repository)))
+
         ids = {item['id'] for item in decisions}
         seen = set()
         for relation in assessment['relations']:
@@ -354,12 +414,12 @@ class Requests:
             old = next(c for c in candidates if (c['request'], c['id']) == key)
             new = next(d for d in decisions if d['id'] == relation['new_decision'])
             op = operations[new['operation']]
-            same_scope = (old['scope'] == new.get('scope', op['scope']) and
-                          (old['scope'] == 'user' or scope_identity(old['repository']) == scope_identity(new.get('repository', context['repository']))))
             same_preference = old['domain'] == op['domain'] == 'preferences' and old['path'] == new['path']
-            if relation['choice'] in {'replace', 'narrow'} and not (same_scope or same_preference):
+            if relation['choice'] in {'replace', 'narrow'} and not (same_scope(old, new) or same_preference):
                 raise ValueError('A narrower scope is an exception, not global supersession')
         # Deterministic overlap is a floor; semantic contradictions belong to the agent.
+        if upgrade:
+            return  # Every source is separately bound by the translation lineage.
         for candidate in candidates:
             for decision in decisions:
                 op = operations[decision['operation']]
@@ -372,14 +432,14 @@ class Requests:
                 if relation is None and not assessment['unresolved']:
                     raise ValueError('Changed earlier setting requires an explicit conflict resolution')
                 if relation:
-                    same_scope = (candidate['scope'] == decision.get('scope', op['scope']) and
-                                  (candidate['scope'] == 'user' or scope_identity(candidate['repository']) == scope_identity(decision.get('repository', context['repository']))))
-                    if relation['choice'] == 'preserve' and same_scope:
+                    if relation['choice'] == 'preserve' and same_scope(candidate, decision):
                         raise ValueError('Preserving an earlier setting requires removing the conflicting operation')
 
-    def clarify(self, request_id, excerpt, question=None):
+    def clarify(self, request_id, excerpt, question=None, claim_token=None):
         with self.locked():
             request = self._read(request_id)
+            self._barrier(request_id)
+            self._owner(request, claim_token)
             if request['status'] in {'applied', 'cancelled'}:
                 raise ValueError('Cannot clarify a completed request')
             entry = {'excerpt': text(excerpt)}
@@ -397,9 +457,11 @@ class Requests:
             self._save(request, 'clarification')
             return self._status(request)
 
-    def cancel(self, request_id, reason):
+    def cancel(self, request_id, reason, claim_token=None):
         with self.locked():
             request = self._read(request_id)
+            self._barrier(request_id)
+            self._owner(request, claim_token)
             if request['status'] in {'applying', 'applied'}:
                 raise self._condition(request, 'configuration_write_uncertain' if request['status'] == 'applying' else 'stale_inputs',
                                       'Reconcile uncertain writes first; applied changes need a new request')
@@ -423,11 +485,22 @@ class Requests:
             if observed not in expected:
                 raise self._condition(request, 'stale_inputs', 'Configuration changed unexpectedly; fresh preparation or recovery required')
 
-    def apply(self, request_id, operation=None, context=None):
+    def apply(self, request_id, operation=None, context=None, claim_token=None):
         request = None
         try:
             with self.locked():
                 request = self._read(request_id)
+                self._owner(request, claim_token)
+                if request['status'] != 'applied':
+                    self._barrier(request_id)
+                    if 'upgrade' in request:
+                        if request['upgrade']['binding'] is None:
+                            raise ValueError('Bind the reserved native configuration agent before writing')
+                        self._upgrade_context(request)
+                    if request.get('layout_revision', 1) != revision():
+                        raise ValueError(self._upgrade_revision_error(request) if 'upgrade' in request else
+                                         'Request layout changed; restore a compatible installation declaring layout '
+                                         + str(request.get('layout_revision', 1)) + ' to reconcile original writes before upgrading')
                 if context is not None:
                     # Legacy commands must bind to their current repository and scope.
                     supplied = context_value(context)
@@ -500,12 +573,20 @@ class Requests:
         result = {'id': request['id'], 'status': request['status'],
                   'reference': str(self._path(request['id']))}
         if request['status'] not in {'applied', 'cancelled'}:
+            if 'upgrade' in request:
+                result['upgrade'] = {'target_revision': request['layout_revision'],
+                                     'binding': request['upgrade']['binding'],
+                                     'action': 'reconcile_native' if request['upgrade']['binding'] else 'reserved'}
+                return self._operation_status(request, result)
             import behavior
             assignment = behavior.resolve('dk-workflows:dk-config', 'configuration-agent',
                 request['context']['repository'], request['context'].get('upstream'))
             result['handoff'] = {'behavior': assignment, 'request_id': request['id'], 'responsibility': 'configuration-only',
                                  'contract': str(ROOT/'docs/configuration-agent.md'),
                                  'evidence_sections': ['ask', 'context', 'operations', 'assessment']}
+        return self._operation_status(request, result)
+
+    def _operation_status(self, request, result):
         if 'operations' in request:
             result['operations'] = [{'index': i, 'domain': op['domain'], 'scope': op['scope'],
                                      'status': 'applied' if request['progress'][i].get('receipt') else
@@ -518,11 +599,18 @@ class Requests:
         return result
 
     def resume(self, request_id):
+        with reading(self):
+            return self._resume(request_id)
+
+    def _resume(self, request_id):
         request = self._read(request_id)
         result = self._status(request)
         if request['status'] in {'prepared', 'applying'}:
             try:
-                self._fresh(request)
+                # This is targeted admission inspection under a shared history
+                # lock, not permission to consume partially migrated settings.
+                with internal():
+                    self._fresh(request)
                 result['admission'] = 'reusable'
             except (ValueError, OSError) as exc:
                 result.update(admission='stale', reason=str(exc))
@@ -535,7 +623,15 @@ class Requests:
         if section == 'status':
             return self.resume(request_id)
         if section == 'ask':
+            if 'upgrade' in request:
+                return {'id': request_id, 'sources': self.upgrade_sources(request),
+                        'clarifications': request['clarifications']}
             return {key: request[key] for key in ('id', 'ask', 'clarifications')}
+        if section == 'sources' and 'upgrade' in request:
+            return {'id': request_id, **self.upgrade_sources(request)}
+        if section == 'ownership' and 'upgrade' in request:
+            return {'id': request_id, 'claim_token': request['upgrade']['claim'],
+                    'binding': request['upgrade']['binding']}
         if section not in {'decisions', 'operations', 'assessment', 'progress', 'context'}:
             raise ValueError('Select a request evidence section')
         return {'id': request_id, section: request.get(section)}

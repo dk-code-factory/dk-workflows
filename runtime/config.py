@@ -1,4 +1,5 @@
 """Process configuration and shared native invocation definitions."""
+from config_upgrades import configuration_read
 from copy import deepcopy
 from pathlib import Path
 import os
@@ -164,6 +165,7 @@ def _merge_settings(base, layer):
     return result
 
 
+@configuration_read(workflow_only=True)
 def effective(repository, upstream=None, *, expanded=True):
     result, sources = deepcopy(DEFAULTS) if expanded else {}, []
     for repo in [None] + ([upstream] if upstream else []) + [repository]:

@@ -21,15 +21,31 @@ def main(arguments=None):
     start.add_argument('--repository')
     start.add_argument('--upstream')
     start.add_argument('--pr')
+    for name in ('upgrade-check', 'upgrade-start'):
+        command = sub.add_parser(name)
+        command.add_argument('--checkout', default='.')
+        command.add_argument('--repository')
+        command.add_argument('--upstream')
+        command.add_argument('--pr')
+    for name in ('upgrade-bind', 'upgrade-recover'):
+        command = sub.add_parser(name)
+        command.add_argument('--request-id', required=True)
+        command.add_argument('--claim-token', required=True)
+        if name == 'upgrade-bind':
+            command.add_argument('--binding', required=True)
+        else:
+            command.add_argument('--file', type=Path, required=True)
     for name in ('prepare', 'clarify', 'apply', 'cancel', 'resume', 'show'):
         command = sub.add_parser(name)
         command.add_argument('--request-id', required=True)
+        if name in {'prepare', 'clarify', 'apply', 'cancel'}:
+            command.add_argument('--claim-token')
         if name in {'prepare', 'clarify'}:
             command.add_argument('--file', type=Path, required=True)
         if name == 'cancel':
             command.add_argument('--reason', required=True)
         if name == 'show':
-            command.add_argument('--section', choices=['status', 'ask', 'context', 'operations', 'decisions', 'assessment', 'progress'], default='status')
+            command.add_argument('--section', choices=['status', 'ask', 'sources', 'ownership', 'context', 'operations', 'decisions', 'assessment', 'progress'], default='status')
     history = sub.add_parser('history')
     history.add_argument('--repository')
     history.add_argument('--domain')
@@ -38,13 +54,20 @@ def main(arguments=None):
     args = vars(parser.parse_args(arguments))
     command = args.pop('command')
     service = Requests()
+    if command in {'upgrade-check', 'upgrade-start'}:
+        return getattr(service, command.replace('-', '_'))({k: v for k, v in args.items() if v is not None})
+    if command == 'upgrade-bind':
+        return service.upgrade_bind(**args)
+    if command == 'upgrade-recover':
+        evidence = json.loads(args.pop('file').read_text())
+        return service.upgrade_recover(**args, evidence=evidence)
     if command == 'start':
         ask = args.pop('ask_file').read_text()
         return service.start(ask, {k: v for k, v in args.items() if v is not None})
     if command == 'prepare':
-        return service.prepare(args['request_id'], json.loads(args['file'].read_text()))
+        return service.prepare(args['request_id'], json.loads(args['file'].read_text()), claim_token=args['claim_token'])
     if command == 'clarify':
-        return service.clarify(args['request_id'], **json.loads(args['file'].read_text()))
+        return service.clarify(args['request_id'], claim_token=args['claim_token'], **json.loads(args['file'].read_text()))
     return getattr(service, command)(**args)
 
 

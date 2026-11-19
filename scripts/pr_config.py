@@ -56,6 +56,12 @@ def main(arguments=None):
                 if action_name not in {'show', 'list'}:
                     action_parser.add_argument('--request-id')
     a=p.parse_args(arguments)
+    from config_upgrades import using_context
+    with using_context({'checkout': a.cwd, **({'pr': a.pr} if a.pr else {})}):
+        return dispatch(a)
+
+
+def dispatch(a):
     if a.action in {'show', 'list'}:
         if a.command == 'pr-partition':
             return pr_partition_policy.load(a.pr)

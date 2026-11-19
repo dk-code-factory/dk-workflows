@@ -1,5 +1,7 @@
 # Native invocations
 
+Before workflow configuration consumption, follow [automatic layout upgrades](configuration-upgrades.md). Baseline reads create no upgrade history; only declared layout changes require native reinterpretation. Retain the original workflow permissions through upgrade and resume.
+
 Follow [private workflow reporting](private-reporting.md). Operational reports, blockers, diagnostics, handles and receipts go only to the invoking user or private caller, never into external text. Pass this governing contract downstream; publication permission does not authorize disclosure.
 
 New skill-owned lists and compatibility process calls use [invocation.schema.json](../schemas/invocation.schema.json). The shared Python validator is `runtime/invocation.py`. Process `coordinator` calls, purpose-based `tasks` (including `verify_findings`), `options.reviewers`, hooks, finalizers, drafting selections and commit policy providers all reference this schema instead of defining their own agent formats.

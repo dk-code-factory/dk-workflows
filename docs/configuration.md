@@ -1,5 +1,7 @@
 # Workflow configuration
 
+Before workflow configuration consumption, follow [automatic layout upgrades](configuration-upgrades.md). Baseline reads create no upgrade history; only declared layout changes require native reinterpretation. Retain the original workflow permissions through upgrade and resume.
+
 Saved mutations use the [dedicated configuration agent](configuration-agent.md) and [request history](configuration-requests.md). Every saved-write command requires `--request-id ID` bound to its exact prepared operation; read commands are unchanged.
 
 For repository initialization, follow [repository instruction sources](instruction-sources.md) before adopting repository files. All discovered instructions apply by default without a choice question, saved initialization or delegation. Requested [dk-repo-onboard](../codex/skills/dk-repo-onboard/SKILL.md) discovery returns a structured report. `dk-config` supports explicit overrides, inspection and reset to the all-source default without editing upstream files. Ordinary reads use the effective default or saved override.

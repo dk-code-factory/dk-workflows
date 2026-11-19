@@ -5,6 +5,8 @@ description: Resolve GitHub review and re-review recipients for a PR, returning 
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md). Keep selection reports and blockers private to the caller.
 
+Before workflow configuration consumption, follow [automatic configuration upgrades](../../../docs/configuration-upgrades.md). Resume the original workflow with its permissions after an upgrade; ordinary baseline reads require no delegation.
+
 Before repository guidance reads or handoffs, follow [repository instruction sources](../../../docs/instruction-sources.md). Use the saved choice and selected original sources.
 
 Persist workflow state only when it reduces total API dollar cost, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).

@@ -8,11 +8,6 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'runtime'))
 
 def main():
-    from state import read
-    from config_requests import apply_bound
-    import config
-    import invocation
-    import skill_config
     import settings
 
     p=argparse.ArgumentParser(description=__doc__)
@@ -65,6 +60,20 @@ def main():
             if action == 'behavior-set':
                 c.add_argument('--file', type=Path, required=True, help='Object with override and/or append fields')
     a=p.parse_args()
+    from config_upgrades import using_context
+    with using_context({'checkout': str(a.checkout), 'repository': a.repository,
+                        **({'pr': a.pr} if a.pr else {}), **({'upstream': a.upstream} if a.upstream else {})}):
+        return dispatch(a)
+
+
+def dispatch(a):
+    from state import read
+    from config_requests import apply_bound
+    import config
+    import invocation
+    import skill_config
+    import settings
+
     if a.action.startswith('behavior-'):
         import behavior
         if a.action != 'behavior-show':
