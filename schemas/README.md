@@ -13,7 +13,7 @@ Schemas use [JSON Schema Draft 2020-12](https://json-schema.org/draft/2020-12/js
 | [ci-exceptions.schema.json](ci-exceptions.schema.json) | Stored explicit CI exceptions and matchers. |
 | [pr-partition.schema.json](pr-partition.schema.json) | Stored per-PR partition choices, history and declines. |
 | [rules.schema.json](rules.schema.json) | Domain-owned private PR rules; contents intentionally remain open. |
-| [agent-context.schema.json](agent-context.schema.json) | Proposed per-agent context document and standalone items; see [agent context](../docs/agent-context.md). Validated against the documented examples by `tests/test_agent_context_examples.py`. |
+| [agent-context.schema.json](agent-context.schema.json) | Proposed per-agent context document; see [agent context](../docs/agent-context.md). Validated against the documented examples by `tests/test_agent_context_examples.py`. |
 
 Workflow and drafting files accept `$schema` metadata. Helper-managed policy and preference records retain their existing formats; use editor file associations for those schemas and edit records through their owning helpers. Completion prompts are plain text and have no JSON Schema.
 

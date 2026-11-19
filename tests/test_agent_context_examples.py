@@ -9,101 +9,141 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = json.loads((ROOT/'schemas/agent-context.schema.json').read_text())
 DOC = (ROOT/'docs/agent-context.md').read_text()
-BLOCKS = [json.loads(block) for block in re.findall(r'```json\n(.*?)\n```', DOC, re.S)]
-DOCUMENTS = [block for block in BLOCKS if isinstance(block, dict) and 'agent' in block]
-ITEMS = [block for block in BLOCKS if isinstance(block, dict) and 'kind' in block]
-SCOPES = {'global': 0, 'repo': 3, 'pr': 4, 'run': 5}
+EXAMPLES = DOC.split('\n## Examples\n', 1)[1].split('\n## ', 1)[0]
+DOCUMENTS = {re.sub(r'\W+', '-', name.strip().lower()): json.loads(block) for name, block in
+             re.findall(r'^### ([^\n]+)\n(?:(?!^### ).)*?```json\n(.*?)\n```', EXAMPLES, re.S | re.M)}
+SECTIONS = ['governing', 'execution', 'task', 'evidence']
+SCOPES = ['global', 'repo', 'pr', 'run']
+OWNER_SEGMENTS = {'global': 0, 'repo': 3, 'pr': 4, 'run': 5}
 
 
 def validator(definition=None):
-    schema = SCHEMA if definition is None else {**SCHEMA, '$ref': f'#/$defs/{definition}'}
-    if definition is not None:
-        schema = {key: value for key, value in schema.items()
-                  if key not in ('properties', 'required', 'additionalProperties', 'type')}
-    return Draft202012Validator(schema)
+    if definition is None:
+        return Draft202012Validator(SCHEMA)
+    return Draft202012Validator({'$schema': SCHEMA['$schema'], '$defs': SCHEMA['$defs'],
+                                 '$ref': f'#/$defs/{definition}'})
 
 
-def owner(context, scope):
-    repo = context['repo'].split('/')
-    return {'global': [], 'repo': repo, 'pr': [*repo, str(context.get('pr'))],
-            'run': [*repo, str(context.get('pr')), str(context.get('run'))]}[scope]
+def task_owner(task_id):
+    """Owner segments of a full task address: repo and PR, plus the run for run tasks."""
+    _, scope, *rest = task_id.lstrip('/').split('/')
+    return rest[:OWNER_SEGMENTS[scope]]
 
 
-def expand(address, context):
-    """Packed addresses take their owner segments from the document context."""
+def owner(task_id, scope):
+    segments = task_owner(task_id)
+    count = OWNER_SEGMENTS[scope]
+    return segments[:count] if count <= len(segments) else None
+
+
+def expand(address, task_id):
+    """Short addresses take their owner segments from task.id."""
     if address.startswith('/'):
         return address
     path, _, pointer = address.partition('#')
     kind, scope, *name = path.split('/')
-    assert scope == 'global' or context.get({'repo': 'repo', 'pr': 'pr', 'run': 'run'}[scope])
-    return '/' + '/'.join([kind, scope, *owner(context, scope), *name]) + ('#' + pointer if pointer else '')
+    segments = owner(task_id, scope)
+    assert segments is not None, f'{address} cannot be short under {task_id}'
+    return '/' + '/'.join([kind, scope, *segments, *name]) + ('#' + pointer if pointer else '')
 
 
-def pack(address, context):
+def shorten(address, task_id):
     path, _, pointer = address.partition('#')
     kind, scope, *rest = path.lstrip('/').split('/')
-    count = SCOPES[scope]
-    if rest[:count] != owner(context, scope):
+    segments = owner(task_id, scope)
+    count = OWNER_SEGMENTS[scope]
+    if segments is None or rest[:count] != segments:
         return address
     return '/'.join([kind, scope, *rest[count:]]) + ('#' + pointer if pointer else '')
 
 
-def references(value):
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if key in ('$ref', '$id') and isinstance(item, str):
-                yield item
-            else:
-                yield from references(item)
-    elif isinstance(value, list):
-        for item in value:
-            yield from references(item)
+def addresses(document):
+    for section in ('governing', 'evidence'):
+        yield from document.get(section, {})
+    yield from document['task'].get('material', {})
+
+
+def scope_rank(address):
+    return SCOPES.index(address.lstrip('/').split('/')[1])
 
 
 def test_schema_is_valid_and_examples_exist():
     Draft202012Validator.check_schema(SCHEMA)
-    assert len(DOCUMENTS) == 3 and ITEMS
+    assert set(DOCUMENTS) == {'fixer', 'reviewer', 'reply-writer'}
 
 
-@pytest.mark.parametrize('document', DOCUMENTS, ids=lambda document: document['agent'])
-def test_context_documents_validate_and_pack_their_own_owners(document):
+@pytest.mark.parametrize('name', ['fixer', 'reviewer', 'reply-writer'])
+def test_documents_validate_and_shorten_every_address_they_can(name):
+    document = DOCUMENTS[name]
     validator().validate(document)
-    context = document['context']
-    for address in references(document):
-        canonical = expand(address, context)
-        assert pack(canonical, context) == address, address
+    task_id = document['task']['id']
+    for address in addresses(document):
+        assert shorten(expand(address, task_id), task_id) == address, address
 
 
-def test_standalone_items_validate():
-    for item in ITEMS:
-        validator('item').validate(item)
+@pytest.mark.parametrize('name', ['fixer', 'reviewer', 'reply-writer'])
+def test_sections_and_governing_items_are_in_cache_order(name):
+    document = DOCUMENTS[name]
+    assert list(document) == [section for section in SECTIONS if section in document]
+    governing = list(document['governing'])
+    full = [expand(address, document['task']['id']) for address in governing]
+    assert full == sorted(full, key=lambda address: (scope_rank(address), address)), governing
+
+
+def test_agents_in_one_run_share_the_governing_prefix():
+    def prefix(document):
+        return json.dumps({'governing': document['governing']}, separators=(',', ':'))[:-1]
+    assert prefix(DOCUMENTS['fixer']) == prefix(DOCUMENTS['reviewer'])
 
 
 def test_addressing_table_round_trips():
-    context = {'repo': 'github.com/acme/project', 'pr': 42, 'run': 'run-7'}
-    rows = re.findall(r'^\| (global|repo|pr|run) \| `(/[^`]+)` \| `([^`]+)` \|$', DOC, re.M)
-    assert {row[0] for row in rows} == set(SCOPES)
-    for _, canonical, packed in rows:
-        assert pack(canonical, context) == packed
-        assert expand(packed, context) == canonical
+    task_id = '/task/run/github.com/acme/project/42/run-7/finalize'
+    rows = re.findall(r'^\| (global|repo|pr|run) \| `([^`]+)` \| `(/[^`]+)` \|$', DOC, re.M)
+    assert [row[0] for row in rows] == SCOPES
+    for _, short, full in rows:
+        assert expand(short, task_id) == full
+        assert shorten(full, task_id) == short
+
+
+def test_run_items_stay_full_in_pr_tasks():
+    task_id = '/task/pr/github.com/acme/project/42/fix'
+    address = '/instruction/run/github.com/acme/project/42/run-7/user-ask'
+    assert shorten(address, task_id) == address
+    with pytest.raises(AssertionError):
+        expand('instruction/run/user-ask', task_id)
+
+
+def test_other_repositories_stay_full():
+    task_id = '/task/pr/github.com/acme/project/42/fix'
+    upstream = '/decision/repo/github.com/upstream/project/state-format'
+    assert shorten(upstream, task_id) == upstream
+    assert validator('address').is_valid(upstream)
 
 
 @pytest.mark.parametrize('address', [
     'decision/team/x', '/decision/repo/github.com/acme/x', 'decision/pr', 'note/global/x',
-    '/decision/pr/github.com/acme/project/0/x', 'evidence/pr/x#events',
+    '/decision/pr/github.com/acme/project/0/x', 'evidence/pr/x#events', 'task/pr/x', 'schema/global/x',
 ])
 def test_malformed_addresses_are_rejected(address):
     assert not validator('address').is_valid(address)
 
 
-def test_other_repositories_stay_canonical():
-    context = {'repo': 'github.com/acme/project', 'pr': 42}
-    upstream = '/decision/repo/github.com/upstream/project/state-format'
-    assert pack(upstream, context) == upstream
-    assert validator('address').is_valid(upstream)
+@pytest.mark.parametrize('task_id', [
+    'task/pr/fix', '/task/repo/github.com/acme/project/fix', '/task/pr/github.com/acme/project/42',
+    '/decision/pr/github.com/acme/project/42/fix',
+])
+def test_task_ids_must_be_full_pr_or_run_addresses(task_id):
+    assert not validator('task_id').is_valid(task_id)
 
 
-def test_truncated_copies_require_text_and_items_cannot_mix_with_references():
-    assert not validator('reference').is_valid({'$ref': 'instruction/repo/x', 'truncated': True})
-    assert not validator('item').is_valid({'$ref': 'decision/pr/x', '$id': 'decision/pr/x', 'kind': 'decision',
-                                           'scope': 'pr', 'source': {'$ref': 'evidence/pr/y'}})
+def test_items_are_complete_and_documents_carry_no_derivable_fields():
+    items = validator('items')
+    assert not items.is_valid({'decision/pr/x': {'$ref': 'decision/pr/x'}})
+    assert not items.is_valid({'instruction/repo/x': {'text': 'cut', 'truncated': True}})
+    assert not items.is_valid({'decision/pr/x': {}})
+    document = DOCUMENTS['fixer']
+    for extra in ({'context': {}}, {'role': {}}):
+        assert not validator().is_valid({**document, **extra})
+    for field in ('key', 'claim', 'subject'):
+        assert not validator().is_valid({**document, 'task': {**document['task'], field: 'x'}})
+    assert not validator().is_valid({**document, 'execution': {'native_review': {'passes': ['a'], 'skill_version': '1'}}})
