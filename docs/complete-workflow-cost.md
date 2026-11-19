@@ -5,6 +5,10 @@ Preparation, accounting tests and helper counts are not native cost results.
 Native paired trials and their independent quality assessment remain required.
 No savings or default change is justified before those results exist.
 
+Recorded [native outcomes and pricing evidence](complete-workflow-cost-results.md)
+retain the complete scope of attempted work, blocked obligations and independent
+quality limitations. Pricing completeness alone cannot establish adoption.
+
 ## Frozen scope
 
 The historical baseline is `1befef223aca04f481a0417d8368238b5cc9b5df`, the source
