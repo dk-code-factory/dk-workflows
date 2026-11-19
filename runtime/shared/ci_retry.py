@@ -74,6 +74,16 @@ def run_inputs(run):
         'source': source | {'run': metadata}}
 
 
+def diagnosis_behavior(pr, selection=None):
+    from urllib.parse import urlsplit
+    import behavior
+    parsed = urlsplit(pr)
+    repository = parsed.hostname + '/' + '/'.join(parsed.path.strip('/').split('/')[:2])
+    selection = selection or {}
+    return behavior.resolve('dk-workflows:dk-ci', 'failure-diagnosis', repository,
+                            selection.get('upstream'), behavior=selection.get('behavior'))
+
+
 def run_capture(api, pr, head, pull, files, snapshot, run):
     checks = []
     for check in snapshot['checks']:
@@ -85,10 +95,11 @@ def run_capture(api, pr, head, pull, files, snapshot, run):
             checks.append(check)
     return digest({'pr': pr, 'head': head, 'revisions': revisions(pull), 'changes': files,
                    'checks': fingerprint({'head': head, 'checks': checks}),
-                   'run': run_inputs(run)})
+                   'run': run_inputs(run),
+                   'behavior': diagnosis_behavior(pr, run.get('behavior_selection'))['effective']})
 
 
-def capture(api, pr, head, decision, snapshot):
+def capture(api, pr, head, decision, snapshot, *, upstream=None, behavior=None):
     """Read current boundaries, returning a transient native diagnosis handoff."""
     pr = pr.rstrip('/').lower()
     if (decision.get('result') != 'failure' or decision.get('head') != head
@@ -141,6 +152,9 @@ def capture(api, pr, head, decision, snapshot):
                     'failed_steps': [s['name'] for s in j.get('steps', [])
                                      if s.get('conclusion') in {'failure', 'timed_out'}]}
                     for j in failed_jobs]}
+            selection = {key: value for key, value in [('upstream', upstream), ('behavior', behavior)] if value is not None}
+            if selection:
+                captured_run['behavior_selection'] = selection
             captured_run['capture'] = run_capture(api, pr, head, pull, files, snapshot, captured_run)
             runs[run_id] = captured_run
         except (OSError, ValueError, KeyError, RuntimeError, zipfile.BadZipFile) as exc:
@@ -152,7 +166,8 @@ def capture(api, pr, head, decision, snapshot):
     result = {'pr': pr, 'head': head, 'base': pull['base']['sha'],
         'changes': [{k: f[k] for k in ('filename', 'status', 'additions', 'deletions') if k in f}
                     for f in files], 'diff_command': ['gh', 'pr', 'diff', pr],
-        'runs': sorted(runs.values(), key=lambda r: r['run_id']), 'blockers': blockers}
+        'runs': sorted(runs.values(), key=lambda r: r['run_id']), 'blockers': blockers,
+        'behavior': diagnosis_behavior(pr, {'upstream': upstream, 'behavior': behavior})}
     result['capture'] = digest({'pr': pr, 'head': head, 'revisions': revisions(pull),
         'changes': files, 'checks': fingerprint(snapshot),
         'runs': [run['capture'] for run in result['runs']], 'blockers': blockers})
@@ -172,6 +187,8 @@ def validate(request, api, snapshot):
                      'failed_steps': [s['name'] for s in j.get('steps', [])
                                       if s.get('conclusion') in {'failure', 'timed_out'}]}
                     for j in jobs if j.get('conclusion') in {'failure', 'timed_out'}]}
+    if 'behavior_selection' in diagnosis:
+        run['behavior_selection'] = diagnosis['behavior_selection']
     with zipfile.ZipFile(diagnosis['archive_file']) as bundle:
         run['log_members'] = bundle.namelist()
     pull, files = changes(api, request['pr'], request['head'])
@@ -234,5 +251,6 @@ def requests(handoff, diagnosis, *, automatic_limit=3):
                 'run_id': run['run_id'], 'attempt': run['attempt'],
                 'reason': '; '.join(j['reason'] for j in jobs), 'automatic_limit': automatic_limit,
                 'diagnosis': {'capture': run['capture'], 'jobs': jobs,
-                              'source_file': run['source_file'], 'archive_file': run['archive_file']}})
+                              'source_file': run['source_file'], 'archive_file': run['archive_file'],
+                              **({'behavior_selection': run['behavior_selection']} if 'behavior_selection' in run else {})}})
     return {'requests': prepared, 'blockers': blockers}

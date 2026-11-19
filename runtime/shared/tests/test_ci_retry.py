@@ -498,3 +498,37 @@ def test_unavailable_shared_pr_inputs_block_all_retry_diagnosis(context, monkeyp
     monkeypatch.setattr(api, 'request', unavailable_changes)
     with pytest.raises(RuntimeError, match='GitHub request unavailable'):
         capture(api, PR, HEAD, decision, snapshot)
+
+
+def test_diagnosis_behavior_changes_refresh_only_consumed_role(context):
+    import config
+    from state import write
+    api, decision, snapshot, handoff, diagnosis = context
+    request = requests(handoff, diagnosis)['requests'][0]
+    validate(request, api, snapshot)
+    write(config.path(api.repo), {'skill_defaults': {'dk-workflows:dk-ci': {
+        'behavior': {'default': {'append': 'Unconsumed CI observer role.'}}}}})
+    validate(request, api, snapshot)
+    write(config.path(api.repo), {'skill_defaults': {'dk-workflows:dk-ci': {
+        'behavior': {'failure-diagnosis': {'override': 'Reconsider failure causes.'}}}}})
+    with pytest.raises(ValueError, match='diagnosis inputs changed'):
+        validate(request, api, snapshot)
+    refreshed = capture(api, PR, HEAD, decision, snapshot)
+    assert refreshed['capture'] != handoff['capture']
+    assert refreshed['behavior']['effective'] == 'Reconsider failure causes.'
+
+
+def test_diagnosis_behavior_upstream_and_local_selector_survive_validation(context):
+    import config
+    from state import write
+    api, decision, snapshot, _, diagnosis = context
+    upstream = 'github.com/upstream/repo'
+    write(config.path(upstream), {'skill_defaults': {'dk-workflows:dk-ci': {
+        'behavior': {'failure-diagnosis': {'override': 'Upstream method.', 'append': 'Upstream extra.'}}}}})
+    local = {'failure-diagnosis': {'append': None}}
+    handoff = capture(api, PR, HEAD, decision, snapshot, upstream=upstream, behavior=local)
+    assert handoff['behavior']['effective'] == 'Upstream method.'
+    diagnosis['capture'] = handoff['capture']
+    request = requests(handoff, diagnosis)['requests'][0]
+    assert request['diagnosis']['behavior_selection'] == {'upstream': upstream, 'behavior': local}
+    validate(request, api, snapshot)

@@ -18,15 +18,6 @@ from task_primitives import git, read, task_key
 
 KIND = 'assessed-alternatives'
 STAGES = ('assessment', 'inventory', 'comparison', 'selection', 'interactions', 'alignment', 'verification')
-GUIDANCE = {
-    'assessment': 'Assess purpose and scoped evaluation rubrics from requirements and repository evidence. Return the shared assessment contract; references replace copied metadata or discussion.',
-    'inventory': 'Inventory architectural decisions throughout the branch including inherited decisions, labeling origin inherited, introduced or materially_changed. Judge questionability using the applicable persisted rubric and evaluation guidance, without a predefined defect checklist. In fix mode inventory the whole implementation problem from issue requirements, with the PR as an optional candidate. Return coverage, decisions and evidence.',
-    'comparison': 'Compare materially distinct approaches for the assigned decision using its persisted rubric consistently for every option. Include retaining the current implementation when a PR exists. Estimate every option against the same pinned target revision, counting work already on the PR branch. Return the comparison contract and target_revision. Do not select or edit.',
-    'selection': 'Use helper totals and the shared selection policy. Apply feasibility, confidence, sensitivity, unresolved-doubt and score-gap checks. Manual choices require an explicit sourced user choice of an evaluated feasible option. Selection grants no edit or publication permission.',
-    'interactions': 'Check interactions between every settled approach and the retained nonquestionable decisions. Return compatible:boolean, reason, evidence and required_changes for incompatibility. Do not silently alter settled choices. Unresolved interactions block dependent work.',
-    'alignment': 'Compare the pinned implementation against the settled approaches and interaction analysis. Return aligned, mismatch or uncertain with reason, evidence and required_changes for mismatch. In fix mode hand off selected changes to authorized implementation tasks and relevant tests; retaining current code needs no edit. In review mode report recommendations without edits.',
-    'verification': alternatives.GUIDANCE['verification'],
-}
 
 
 def provider(owner):
@@ -248,21 +239,17 @@ def stage_spec(tasks, descriptor, definition, *, replay=False):
         raise ValueError('Assessed alternatives definition must resolve ' + skill)
     execution['skill_identity'] = skill
     execution['responsibility'] = task
-    guidance = GUIDANCE[stage]
     relevant_policy = (pr_assessment.assessment_policy(policy) if stage in {'assessment', 'inventory', 'comparison'} else
                        {'selection': policy['selection']} if stage == 'selection' else {})
-    if stage == 'assessment':
-        guidance += '\n' + policy['assessment_prompt']
-        guidance += '\nScoring compatibility guidance: ' + json.dumps(policy['scoring'], sort_keys=True)
-    if stage in {'assessment', 'inventory', 'comparison'}:
-        guidance += '\nEvaluation guidance: ' + policy['evaluation_prompt']
-    if stage == 'selection':
-        mode = policy['selection']['mode']
-        guidance += '\nSelection mode: ' + mode + '. ' + policy['selection']['prompt']
-        guidance += (' Never prompt the user; return an unresolved choice when checks fail.' if mode == 'automatic' else
-                     ' Require an explicit sourced user choice.' if mode == 'manual' else
-                     ' Select a qualifying clear winner; otherwise request an explicit user choice.')
-    execution['assigned_instructions'] = guidance + '\n' + definition.get('assigned_instructions', '')
+    execution['assigned_instructions'] = definition.get('assigned_instructions', '') or 'Return the required stage evidence and explicit completion.'
+    execution['behavior'] = {**definition.get('behavior', {}), 'skill': skill, 'role': stage,
+                             'upstream': descriptor.get('upstream')}
+    # Raw invocation edits only; live defaults/scopes are resolved at assignment.
+    local = pr_assessment.translate((descriptor.get('options') or {}).get('alternatives', {}))
+    import invocation
+    local = invocation.merge(local, descriptor.get('policy_options') or {})
+    local = invocation.merge(local, descriptor.get('alternatives_options') or {})
+    execution['behavior']['options'] = local
     execution.setdefault('inputs', {}).update({'assessed_' + name: value['reference'] for name, value in retained.items()})
     if stage in {'alignment', 'verification'}:
         source = retained['interactions' if stage == 'alignment' else 'alignment']['spec']['inputs']

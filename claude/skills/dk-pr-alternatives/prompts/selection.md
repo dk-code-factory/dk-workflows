@@ -1,0 +1,1 @@
+Use helper totals and the shared selection policy. Apply feasibility, confidence, sensitivity, unresolved-doubt and score-gap checks. Manual choices require an explicit sourced user choice of an evaluated feasible option. Selection grants no edit or publication permission.

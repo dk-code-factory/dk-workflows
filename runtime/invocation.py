@@ -4,7 +4,7 @@ import re
 
 SKILL_PATTERN = r'[A-Za-z0-9][A-Za-z0-9_.-]*:[A-Za-z0-9][A-Za-z0-9_.-]*'
 EFFORTS = ('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra')
-FIELDS = {'skill', 'instructions', 'options', 'agent', 'required'}
+FIELDS = {'skill', 'instructions', 'options', 'agent', 'required', 'behavior'}
 
 
 def text(value):
@@ -23,16 +23,19 @@ def skill_name(value):
     return value
 
 
-def validate_settings(value):
+def validate_settings(value, *, skill=None):
     if not isinstance(value, dict) or set(value) - (FIELDS - {'skill'}):
         raise ValueError('Unknown invocation setting')
+    if 'behavior' in value:
+        import behavior
+        behavior.validate(skill, value['behavior'])
     if 'instructions' in value and not text(value['instructions']):
         raise ValueError('Invocation instructions must be nonempty text without NUL bytes')
     if not isinstance(value.get('options', {}), dict):
         raise ValueError('Invocation options must be an object')
     if 'reviewers' in value.get('options', {}):
         from skill_config import groups
-        groups(value['options']['reviewers'])
+        groups(value['options']['reviewers'], owner=skill)
     if type(value.get('required', True)) is not bool:
         raise ValueError('Invocation required must be boolean')
     if 'agent' in value:
@@ -46,7 +49,7 @@ def validate_settings(value):
     return deepcopy(value)
 
 
-def validate(value):
+def validate(value, *, owner=None):
     from alternatives_compat import call
     value = call(value)
     if isinstance(value, str):
@@ -56,7 +59,7 @@ def validate(value):
             raise ValueError('Invocation requires a skill or instructions')
         if 'skill' in value:
             skill_name(value['skill'])
-        validate_settings({key: item for key, item in value.items() if key != 'skill'})
+        validate_settings({key: item for key, item in value.items() if key != 'skill'}, skill=value.get('skill', owner))
         if 'skill' in value:
             from skill_config import validate as validate_options
             validate_options(value['skill'], value.get('options', {}))
@@ -65,8 +68,8 @@ def validate(value):
     return deepcopy(value)
 
 
-def normalize(value):
-    value = validate(value)
+def normalize(value, *, owner=None):
+    value = validate(value, owner=owner)
     return {'skill': value} if isinstance(value, str) else value
 
 

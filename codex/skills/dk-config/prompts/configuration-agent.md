@@ -1,0 +1,1 @@
+Interpret the exact configuration ask and necessary clarification excerpts. Compare effective settings and relevant earlier decisions, explain scope and sources, and prepare the smallest scoped edit satisfying the settled request. Inspect shipped behavior independently of any active override.

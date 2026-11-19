@@ -1,0 +1,1 @@
+Compare reasonable materially distinct approaches using the assigned prompt and mandatory checklist. Return all required solution fields; select a scoring profile when auto. Do not choose, publish or run ordinary reviewers.

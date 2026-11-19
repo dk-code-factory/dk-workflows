@@ -50,7 +50,38 @@ def main():
             c.add_argument('--available', type=Path, required=True)
             c.add_argument('--capabilities', type=Path)
             c.add_argument('--native-reviews', type=Path, help='Resolved review contracts keyed by occurrence location')
+    for action in ('behavior-show', 'behavior-set', 'behavior-reset'):
+        c = sub.add_parser(action)
+        c.add_argument('--skill', required=True)
+        c.add_argument('--role', default='default')
+        c.add_argument('--options', type=Path)
+        c.add_argument('--behavior', type=Path, help='Invocation-local role map; never saved by reads')
+        if action == 'behavior-show':
+            c.add_argument('--section', choices=['default', 'effective', 'sources'])
+            c.add_argument('--roles', action='store_true', help='List shipped role names without prompt bodies')
+        else:
+            c.add_argument('--scope', choices=['repo', 'user'], default='repo')
+            c.add_argument('--request-id')
+            if action == 'behavior-set':
+                c.add_argument('--file', type=Path, required=True, help='Object with override and/or append fields')
     a=p.parse_args()
+    if a.action.startswith('behavior-'):
+        import behavior
+        if a.action != 'behavior-show':
+            operation = {'domain': 'behavior', 'action': a.action.removeprefix('behavior-'),
+                         'scope': a.scope, 'skill': a.skill, 'role': a.role}
+            if a.action == 'behavior-set':
+                operation['value'] = read(a.file)
+            apply_bound(a.request_id, operation, {'repository': a.repository, 'checkout': str(a.checkout),
+                **({'upstream': a.upstream} if a.upstream else {}), **({'pr': a.pr} if a.pr else {})})
+        result = ({'skill': a.skill, 'roles': list(behavior.roles(a.skill))}
+                  if a.action == 'behavior-show' and a.roles else
+                  behavior.resolve(a.skill, a.role, a.repository, a.upstream,
+                    behavior=read(a.behavior) if a.behavior else None,
+                    options=read(a.options) if a.options else None,
+                    section=a.section if a.action == 'behavior-show' else None))
+        print(json.dumps(result, sort_keys=True))
+        return
     if a.action.startswith('skill-'):
         invocation.skill_name(a.skill)
         local = read(a.options) if a.options else None

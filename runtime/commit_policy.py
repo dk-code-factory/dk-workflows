@@ -70,7 +70,8 @@ def policy_spec(*, chain, repository, pr, definition, options=None):
     raw_call = selected_call(selected['value'])
     if not provider(selected['value']) and local_options is not None:
         raw_call['options'] = skill_config.validate('dk-workflows:dk-commit-split', local_options)
-    call = skill_config.configured_call(raw_call, repository, upstream)
+    import behavior
+    call = behavior.narrow_call(skill_config.configured_call(raw_call, repository, upstream))
     expected = call.get('skill', 'dk-workflows:dk-commit-split')
     if not invocation.matches(expected, definition.get('skill_identity', '')):
         raise ValueError('Resolve and supply the selected policy skill identity')
@@ -108,6 +109,9 @@ def policy_spec(*, chain, repository, pr, definition, options=None):
                               'invocation': call, 'configured': call.get('options', {})})
     if local_options is not None:
         execution['options']['commit_policy_options'] = skill_config.validate('dk-workflows:dk-commit-split', local_options)
+    if skill_config.directory(execution['skill_identity']):
+        import behavior
+        execution['behavior'] = behavior.selection(execution['skill_identity'], upstream=upstream, call=behavior.narrow_call(call))
     spec = make_spec(repository=repository, pr=pr, **execution)
     skill_config.bind_options(spec, call, repository, upstream, raw_call=raw_call)
     spec['policy_fingerprint'] = capture(spec)['fingerprint']

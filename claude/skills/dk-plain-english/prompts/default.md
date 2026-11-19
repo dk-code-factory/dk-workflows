@@ -1,0 +1,1 @@
+Favor short sentences, familiar words, active voice and explicit references. Name the actor when the source establishes it. Split long sentences without losing logical connections. Keep necessary technical terms and precise modal verbs. Do not invent an actor, strengthen a recommendation into a requirement, remove a qualifier or simplify a technical distinction away.

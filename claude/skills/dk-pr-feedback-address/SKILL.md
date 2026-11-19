@@ -15,8 +15,6 @@ Resolve configuration for `dk-workflows:dk-pr-feedback-address` through [skill-o
 
 Use [shared PR evidence](../../../docs/pr/supplied-evidence.md) for analysis and live verification.
 
-Read complete, stable feedback from the supplied handoff. Without a handoff, collect it with the feedback read helpers. Read the governing instructions, Decisions and code for each item. Check its validity and scope. Preserve settled decisions and deferred work. Make focused fixes and run relevant checks. Run configured `additional_validation_commands` as argument arrays in the affected checkout in addition to relevant checks. Never use them to launch Codex or Claude Code.
-
 For caller-supplied alternatives and decision resolutions, follow [decision reconciliation](../../../docs/decision-reconciliation.md). Honor complete user instructions, scoped revisions, conditions and exceptions; do not restore superseded or excluded choices from historical Decisions. Reuse applicable sourced answers, leave unresolved governing conflicts unfinished, and implement assigned reconciled changes with current code and relevant validation evidence or an already-satisfied disposition. Carry original resolution references into the existing result and subsequent handoffs.
 
 Apply [feedback response obligations](../../../docs/pr/feedback-responses.md) to each request. Questions for other participants and discussion requiring no author response need no author reply or resolution. Preserve separately actionable author requests in mixed threads and explicit user instructions to reply. Carry source references and the reason for any no-reply assessment into the existing result/dispositions so later reply tasks do not invent an outstanding answer.
@@ -30,3 +28,7 @@ Record each finding's disposition with evidence and source links. Follow the cal
 For managed feedback and reviewer-finding fixes, use the prepared checklist to check every finding disposition, assigned deliverable and relevant test. Supply complete initial checklist evidence or finish the caller's recheck with the same agent before reporting accepted completion. Follow [completion checks](../../../docs/task-state.md#completion-checks).
 
 Follow [simplification review](../../../docs/simplification.md): use the live owning workflow selector for managed reviewer composition, retain independent ordinary coverage, and assess bounded recommendations through the existing verification or fix stages. Concrete maintainability benefits do not require a functional bug. Reject or defer insufficient-benefit or out-of-scope recommendations; no broad refactor is authorized.
+
+Resolve the selected role through [bundled behavior](../../../docs/behavior.md) before assignment or direct execution. The main role is `default`; [its shipped prompt](prompts/default.md) is inspectable even with an override. Execute only the resolved role behavior, followed by its resolved addition and separate original assignment instructions. The remaining entry and referenced execution contracts govern every replacement.
+
+Run relevant checks and configured `additional_validation_commands` as argument arrays in the affected checkout. These commands must never launch Codex or Claude Code. Preserve settled decisions and deferred work; return original tested dispositions and evidence.

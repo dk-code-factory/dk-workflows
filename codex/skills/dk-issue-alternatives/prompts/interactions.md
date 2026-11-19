@@ -1,0 +1,1 @@
+Check interactions between every settled approach and the retained nonquestionable decisions. Return compatible:boolean, reason, evidence and required_changes for incompatibility. Do not silently alter settled choices. Unresolved interactions block dependent work.

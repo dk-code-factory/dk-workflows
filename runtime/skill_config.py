@@ -39,7 +39,7 @@ def _read(path):
         raise condition('configuration_invalid', 'Cannot read skill configuration: ' + str(path), path) from exc
 
 
-def _validate(value, schema, location='options'):
+def _validate(value, schema, location='options', *, owner=None):
     """Validate our closed option-schema vocabulary without runtime dependencies."""
     import invocation
     supported = {'$schema', '$id', 'title', 'description', 'default', '$ref', 'anyOf',
@@ -50,23 +50,23 @@ def _validate(value, schema, location='options'):
     if '$ref' in schema:
         reference = schema['$ref']
         if reference.endswith('invocation.schema.json#/$defs/plan'):
-            groups(value)
+            groups(value, owner=owner)
         elif reference.endswith('invocation.schema.json'):
-            invocation.validate(value)
+            invocation.validate(value, owner=owner)
         elif reference.endswith('commit-policy.schema.json'):
             if isinstance(value, dict) and set(value) == {'prompt'}:
                 if not invocation.text(value['prompt']):
                     raise ValueError(location + ': policy prompt must be nonempty')
             else:
-                invocation.validate(value)
+                invocation.validate(value, owner=owner)
         else:
             raise ValueError('Unsupported skill schema reference: ' + reference)
-        _validate(value, {key: item for key, item in schema.items() if key != '$ref'}, location)
+        _validate(value, {key: item for key, item in schema.items() if key != '$ref'}, location, owner=owner)
         return
     if 'anyOf' in schema:
         for candidate in schema['anyOf']:
             try:
-                _validate(value, candidate, location)
+                _validate(value, candidate, location, owner=owner)
                 return
             except ValueError:
                 pass
@@ -93,7 +93,7 @@ def _validate(value, schema, location='options'):
         if schema.get('uniqueItems') and len({json.dumps(x, sort_keys=True) for x in value}) != len(value):
             raise ValueError(location + ': duplicate entries')
         for index, item in enumerate(value):
-            _validate(item, schema.get('items', {}), location + '/' + str(index))
+            _validate(item, schema.get('items', {}), location + '/' + str(index), owner=owner)
     elif actual == 'object':
         properties = schema.get('properties', {})
         if schema.get('additionalProperties') is False and set(value) - properties.keys():
@@ -101,7 +101,7 @@ def _validate(value, schema, location='options'):
         if set(schema.get('required', [])) - value.keys():
             raise ValueError(location + ': missing required fields')
         for key, item in value.items():
-            _validate(item, properties.get(key, {}), location + '/' + key)
+            _validate(item, properties.get(key, {}), location + '/' + key, owner=owner)
 
 
 @configuration_validation
@@ -113,7 +113,7 @@ def validate(skill, options):
     if not isinstance(options, dict):
         raise ValueError('Skill options must be an object')
     if target:
-        _validate(options, _read(target/'config.schema.json'), skill)
+        _validate(options, _read(target/'config.schema.json'), skill, owner=skill)
     return deepcopy({key: value for key, value in options.items() if key != '$schema'})
 
 
@@ -247,7 +247,7 @@ def effective(skill, repository=None, upstream=None, *, options=None, domain=Tru
         result = merge_options(result, validate(skill, layer))
         provenance.update({key: str(source) for key in layer})
         shared = raw.get('skill_defaults', {}).get(skill, {})
-        invocation.validate_settings(shared)
+        invocation.validate_settings(shared, skill=skill)
         layer = (alternatives_settings(raw.get('skill_defaults', {}), skill) if skill in {ISSUE, PR}
                  else shared.get('options', {}))
         result = merge_options(result, validate(skill, layer))
@@ -312,14 +312,15 @@ def check_options(spec):
             or binding['repository'].lower() != spec['repository'].lower()
             or binding['upstream'] is not None and not isinstance(binding['upstream'], str)):
         raise ValueError('Malformed skill option configuration binding')
-    if 'call' in binding and configured_call(binding['call'], binding['repository'], binding['upstream']) != spec['options'].get('invocation'):
+    import behavior
+    if 'call' in binding and behavior.narrow_call(configured_call(binding['call'], binding['repository'], binding['upstream']), spec.get('behavior_configuration', {}).get('role', 'default')) != spec['options'].get('invocation'):
         raise condition('stale_inputs', 'Inputs changed: selected skill instructions or native controls changed')
     parameters = {key: value for key, value in binding.items() if key != 'call'}
     if effective(**parameters)['options'] != spec['options'].get('configured'):
         raise condition('stale_inputs', 'Inputs changed: selected skill options changed')
 
 
-def groups(plan):
+def groups(plan, *, owner=None):
     """Ordered leaves with explicit parallel groups; no implicit task registry."""
     import invocation
     if not isinstance(plan, list):
@@ -331,7 +332,7 @@ def groups(plan):
         if not isinstance(group, list) or not group:
             raise ValueError('Parallel groups must be nonempty invocation lists')
         for item in group:
-            invocation.validate(item)
+            invocation.validate(item, owner=owner)
         result.append(deepcopy(group))
     return result
 
@@ -350,7 +351,7 @@ def configured_call(value, repository=None, upstream=None):
             if not isinstance(saved, dict) or not isinstance(saved.get('skill_defaults', {}), dict):
                 raise ValueError('Workflow skill defaults must be an object')
             settings = saved.get('skill_defaults', {}).get(skill, {})
-            invocation.validate_settings(settings)
+            invocation.validate_settings(settings, skill=skill)
             shared = invocation.configured({'skill': skill, **settings}, {skill: shared})
             shared.pop('skill', None)
     return invocation.validate(invocation.configured(call, {skill: shared} if skill else {}))
@@ -447,9 +448,16 @@ def make_spec(*, repository, pr, skill, kind, index, definition, upstream=None, 
     selected, owner = select(skill, kind, index, repository, upstream, options=options, workflow=workflow)
     call = invocation.normalize(selected)
     runner = call.get('skill', skill)
+    import behavior
     if not isinstance(definition, dict) or definition.get('skill_identity') != runner:
         raise ValueError('Definition must resolve the exact configured skill identity')
+    role = definition.get('behavior', {}).get('role', 'finding-verification' if definition.get('responsibility') == 'finding-verification' else 'default')
+    if 'behavior' in call:
+        behavior.validate(runner, call['behavior'])
+    call = behavior.narrow_call(call, role)
     execution = deepcopy(definition)
+    if directory(runner):
+        execution['behavior'] = behavior.selection(runner, role, upstream=upstream, call=call)
     configured = effective(runner, repository, upstream, options=call.get('options', {})) if 'skill' in call else {'options': call.get('options', {})}
     from simplification import OWNERS, RUNNER, compose
     if skill in OWNERS and kind == 'tasks' and runner == RUNNER:
@@ -466,8 +474,9 @@ def make_spec(*, repository, pr, skill, kind, index, definition, upstream=None, 
         # Stable across workflow/run/order changes, while repeated identical
         # reviewers still own independent claims and evidence.
         earlier = [item for group in groups(owner['options'][kind]) for item in group][:index]
-        repeat = sum(configured_call(item, repository, upstream) == call for item in earlier)
-        occurrence = {'call': call, 'repeat': repeat}
+        repeat = sum({key: value for key, value in configured_call(item, repository, upstream).items() if key != 'behavior'}
+                     == {key: value for key, value in call.items() if key != 'behavior'} for item in earlier)
+        occurrence = {'call': {key: value for key, value in call.items() if key != 'behavior'}, 'repeat': repeat}
         if workflow is not None and index == len([item for group in groups(owner['options'][kind]) for item in group]) - 1:
             # Keep the composed leaf's claim/recovery identity through policy
             # changes. Its call and policy still govern the input fingerprint.
@@ -550,7 +559,9 @@ def check_selection(spec):
         raise
     except (ValueError, KeyError) as exc:
         raise condition('stale_inputs', 'Inputs changed: configured invocation no longer resolves') from exc
-    call = invocation.normalize(value)
+    import behavior
+    role = spec.get('behavior_configuration', {}).get('role', 'default')
+    call = behavior.narrow_call(invocation.normalize(value), role)
     actual = effective(call['skill'], selection['repository'], selection['upstream'], options=call.get('options', {}))['options'] if 'skill' in call else call.get('options', {})
     from simplification import OWNERS, RUNNER, compose
     if selection['skill'] in OWNERS and selection['kind'] == 'tasks' and call.get('skill') == RUNNER:

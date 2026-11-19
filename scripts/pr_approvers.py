@@ -25,7 +25,9 @@ def selection(pr, head, *, upstream=None, publisher_options=None):
     loaded = skill_config.effective('dk-workflows:dk-pr-publish', repository, upstream,
                                     options=publisher_options)
     override = loaded['options']['review_requests']
-    return {'pr': 'https://' + repository + '/pull/' + str(int(parts[3])), 'head': head,
+    import behavior
+    selected_behavior = behavior.resolve('dk-workflows:dk-pr-approvers', repository=repository, upstream=upstream)
+    return {'behavior': selected_behavior, 'pr': 'https://' + repository + '/pull/' + str(int(parts[3])), 'head': head,
             'action': 'discover' if override is None else 'return',
             'source': 'automatic' if override is None else 'override',
             'selection': override, 'sources': loaded['sources'],

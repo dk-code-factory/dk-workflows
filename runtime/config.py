@@ -50,7 +50,7 @@ DEFAULTS = {
 }
 
 
-def finalizer_groups(finalizers):
+def finalizer_groups(finalizers, *, owner=None):
     if not isinstance(finalizers, list):
         raise ValueError('Finalizers must be an ordered invocation list')
     groups = []
@@ -59,13 +59,13 @@ def finalizer_groups(finalizers):
         if not group:
             raise ValueError('Parallel finalizer groups must not be empty')
         for value in group:
-            call = invocation.normalize(value)
+            call = invocation.normalize(value, owner=owner)
         groups.append(deepcopy(group))
     return groups
 
 
 @configuration_validation
-def validate(settings):
+def validate(settings, *, resolved=False):
     if not isinstance(settings, dict) or set(settings) - (DEFAULTS.keys() | {'$schema'}):
         raise ValueError('Unknown workflow setting; use the process configuration format')
     from alternatives_compat import configuration
@@ -97,7 +97,7 @@ def validate(settings):
         raise ValueError('skill_defaults must be a skill-to-settings object')
     for skill, value in defaults.items():
         invocation.skill_name(skill)
-        invocation.validate_settings(value)
+        invocation.validate_settings(value, skill=skill)
         skill_config.validate(skill, value.get('options', {}))
     processes = result.get('processes', {})
     if not isinstance(processes, dict):
@@ -109,14 +109,17 @@ def validate(settings):
             raise ValueError('Unknown process setting')
         if 'coordinator' in process:
             invocation.validate(process['coordinator'])
+        # A partial scope cannot establish an inherited or subsequently replaced owner.
+        coordinator = process.get('coordinator') if resolved else None
+        owner = invocation.normalize(coordinator).get('skill') if coordinator is not None else None
         if 'finalizers' in process:
-            finalizer_groups(process['finalizers'])
+            finalizer_groups(process['finalizers'], owner=owner)
         if not isinstance(process.get('tasks', {}), dict):
             raise ValueError('Process tasks must map purpose names to invocations')
         for task, call in process.get('tasks', {}).items():
             if not isinstance(task, str) or not re.fullmatch(r'[a-z][a-z0-9]*(?:_[a-z0-9]+)*', task):
                 raise ValueError('Task names must describe their purpose in snake_case')
-            invocation.validate(call)
+            invocation.validate(call, owner=owner)
         limits = process.get('limits', {})
         if not isinstance(limits, dict) or set(limits) - LIMITS.keys() or any(
                 type(value) is not int or value < (1 if key == 'review_cycles' else 0)
@@ -138,7 +141,7 @@ def validate(settings):
             if not isinstance(entries, list):
                 raise ValueError('Hooks must be ordered invocation lists')
             for call in entries:
-                invocation.validate(call)
+                invocation.validate(call, owner=owner)
         routes = process.get('routes', {})
         if not isinstance(routes, dict) or set(routes) - {'own_pr', 'other_pr'} or any(
                 not isinstance(route, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', route)
@@ -183,6 +186,7 @@ def effective(repository, upstream=None, *, expanded=True):
             for route in process.get('routes', {}).values():
                 if route not in result['processes']:
                     raise ValueError('Route selects an unknown process: ' + route)
+        result = validate(result, resolved=True)
     return {'settings': result, 'sources': sources}
 
 
@@ -304,6 +308,14 @@ def make_invocation_spec(*, repository, pr, process, definition, kind='coordinat
         options={'invocation': call, 'configured': call.get('options', {}),
                  'process_limits': loaded['settings']['processes'][process].get('limits', dict(LIMITS)),
                  'execution': execution.get('options', {})})
+    import behavior
+    role = 'finding-verification' if kind == 'task' and task == 'verify_findings' else 'default'
+    if 'behavior' in call:
+        behavior.validate(runner, call['behavior'])
+    call = behavior.narrow_call(call, role)
+    execution['options']['invocation'] = call
+    if skill_config.directory(runner):
+        execution['behavior'] = behavior.selection(runner, role, upstream=upstream, call=call)
     if 'instructions' in call:
         execution['assigned_instructions'] = invocation.additional_instructions(
             execution.get('assigned_instructions', ''), call['instructions'])
@@ -341,6 +353,8 @@ def check_selection(spec):
     try:
         call = select(settings, selection['process'], selection['kind'], selection['index'], selection['phase'], selection['task'])
         call = invocation.configured(call, settings['skill_defaults'], identity=spec['skill']['identity'])
+        import behavior
+        call = behavior.narrow_call(call, spec.get('behavior_configuration', {}).get('role', 'default'))
         process = settings['processes'][selection['process']]
     except (ValueError, KeyError) as exc:
         raise condition('stale_inputs', 'Inputs changed: configured invocation no longer resolves') from exc
@@ -371,6 +385,8 @@ def make_completion_spec(*, repository, pr, run, definition, upstream=None, opti
     execution.update(cacheable=False, responsibility='workflow-completion:' + digest({'run': run}),
                      options={'completion_plan': loaded['options']['finalizers'],
                               'execution': definition.get('options', {})})
+    import behavior
+    execution['behavior'] = behavior.selection(owner, 'completion', upstream=upstream, call={'options': options or {}})
     spec = make_spec(repository=repository, pr=pr, **execution)
     from fix_alternatives import enforce
     enforce(spec, repository, pr, options=options, upstream=upstream)

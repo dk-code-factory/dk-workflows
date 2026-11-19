@@ -1,0 +1,1 @@
+Onboard a repository by discovering instruction sources and reporting all discovered rules, settings and gaps in a structured inventory. Use for requested repository onboarding or an explicit discovery refresh.

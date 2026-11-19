@@ -70,6 +70,9 @@
           "type": "boolean",
           "default": true,
           "description": "Required work must complete before its caller can claim required coverage."
+        },
+        "behavior": {
+          "$ref": "#/$defs/behavior"
         }
       }
     },
@@ -98,6 +101,15 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-ci/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default",
+                        "failure-diagnosis"
+                      ]
+                    }
                   }
                 }
               }
@@ -117,6 +129,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-ci-approve/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -136,6 +156,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-ci-flakes/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -155,6 +183,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-commit-message/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -174,6 +210,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-commit-split/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -193,6 +237,15 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-config/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "configuration-agent",
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -212,6 +265,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-issue/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -231,6 +292,15 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-pr-decisions/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default",
+                        "language-review"
+                      ]
+                    }
                   }
                 }
               }
@@ -250,6 +320,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-pr-description/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -269,6 +347,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-pr-feedback-address/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -288,6 +374,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-pr-feedback-read/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -307,6 +401,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-pr-feedback-reply/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -326,6 +428,22 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-pr-fix/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "alternatives-alignment",
+                        "alternatives-assessment",
+                        "alternatives-comparison",
+                        "alternatives-impact",
+                        "alternatives-selection",
+                        "alternatives-verification",
+                        "completion",
+                        "default",
+                        "finding-fix"
+                      ]
+                    }
                   }
                 }
               }
@@ -345,6 +463,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-pr-iter/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -364,6 +490,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-pr-publish/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -383,6 +517,21 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-pr-review/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "alternatives-alignment",
+                        "alternatives-assessment",
+                        "alternatives-comparison",
+                        "alternatives-impact",
+                        "alternatives-selection",
+                        "alternatives-verification",
+                        "default",
+                        "finding-verification"
+                      ]
+                    }
                   }
                 }
               }
@@ -402,6 +551,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-pr-review-post/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -421,6 +578,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-pr-reviewers-run/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -440,6 +605,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-pr-split/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -459,6 +632,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-preferences/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -478,6 +659,14 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-alternatives-review/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
                 }
               }
@@ -497,7 +686,331 @@
                 "properties": {
                   "options": {
                     "$ref": "../codex/skills/dk-code-simplify/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
                   }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "skill": {
+                    "const": "dk-workflows:dk-asd-ste100"
+                  }
+                },
+                "required": [
+                  "skill"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "skill": {
+                    "const": "dk-workflows:dk-issue-alternatives"
+                  }
+                },
+                "required": [
+                  "skill"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "alignment",
+                        "assessment",
+                        "comparison",
+                        "default",
+                        "interactions",
+                        "inventory",
+                        "selection",
+                        "verification"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "skill": {
+                    "const": "dk-workflows:dk-plain-english"
+                  }
+                },
+                "required": [
+                  "skill"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "skill": {
+                    "const": "dk-workflows:dk-pr-alternatives"
+                  }
+                },
+                "required": [
+                  "skill"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "alignment",
+                        "assessment",
+                        "comparison",
+                        "default",
+                        "interactions",
+                        "inventory",
+                        "selection",
+                        "verification"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "skill": {
+                    "const": "dk-workflows:dk-pr-approvers"
+                  }
+                },
+                "required": [
+                  "skill"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "skill": {
+                    "const": "dk-workflows:dk-pr-review-alternatives"
+                  }
+                },
+                "required": [
+                  "skill"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "skill": {
+                    "const": "dk-workflows:dk-repo-onboard"
+                  }
+                },
+                "required": [
+                  "skill"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "skill": {
+                    "const": "dk-workflows:dk-architecture-review"
+                  }
+                },
+                "required": [
+                  "skill"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "options": {
+                    "$ref": "../codex/skills/dk-alternatives-review/config.schema.json"
+                  },
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "skill": {
+                    "const": "dk-workflows:dk-pr-review-architect"
+                  }
+                },
+                "required": [
+                  "skill"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "default"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "skill": {
+                    "const": "dk-workflows:dk-issue-implementation-alternatives"
+                  }
+                },
+                "required": [
+                  "skill"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "behavior": {
+                    "$ref": "#/$defs/behavior",
+                    "propertyNames": {
+                      "enum": [
+                        "alignment",
+                        "assessment",
+                        "comparison",
+                        "default",
+                        "interactions",
+                        "inventory",
+                        "selection",
+                        "verification"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "skill"
+                ],
+                "properties": {
+                  "skill": {
+                    "not": {
+                      "enum": [
+                        "dk-workflows:dk-ci",
+                        "dk-workflows:dk-ci-approve",
+                        "dk-workflows:dk-ci-flakes",
+                        "dk-workflows:dk-commit-message",
+                        "dk-workflows:dk-commit-split",
+                        "dk-workflows:dk-config",
+                        "dk-workflows:dk-issue",
+                        "dk-workflows:dk-pr-decisions",
+                        "dk-workflows:dk-pr-description",
+                        "dk-workflows:dk-pr-feedback-address",
+                        "dk-workflows:dk-pr-feedback-read",
+                        "dk-workflows:dk-pr-feedback-reply",
+                        "dk-workflows:dk-pr-fix",
+                        "dk-workflows:dk-pr-iter",
+                        "dk-workflows:dk-pr-publish",
+                        "dk-workflows:dk-pr-review",
+                        "dk-workflows:dk-pr-review-post",
+                        "dk-workflows:dk-pr-reviewers-run",
+                        "dk-workflows:dk-pr-split",
+                        "dk-workflows:dk-preferences",
+                        "dk-workflows:dk-alternatives-review",
+                        "dk-workflows:dk-code-simplify",
+                        "dk-workflows:dk-asd-ste100",
+                        "dk-workflows:dk-issue-alternatives",
+                        "dk-workflows:dk-plain-english",
+                        "dk-workflows:dk-pr-alternatives",
+                        "dk-workflows:dk-pr-approvers",
+                        "dk-workflows:dk-pr-review-alternatives",
+                        "dk-workflows:dk-repo-onboard",
+                        "dk-workflows:dk-architecture-review",
+                        "dk-workflows:dk-pr-review-architect",
+                        "dk-workflows:dk-issue-implementation-alternatives"
+                      ]
+                    }
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "behavior": false
                 }
               }
             }
@@ -556,6 +1069,38 @@
             "deprecated": true
           }
         ]
+      }
+    },
+    "behavior": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "override": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/instructions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "append": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/instructions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
       }
     }
   }

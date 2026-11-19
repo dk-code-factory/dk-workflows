@@ -76,7 +76,7 @@ Additional validation commands are argument arrays, supplement relevant checks, 
 
 Decision reconciliation is owned by `dk-workflows:dk-pr-decisions.options.reconciliation_prompt`, with its explicit default in [config.json](../codex/skills/dk-pr-decisions/config.json). Set it through ordinary user/upstream/repository scopes or selected invocation-local options; the effective text replaces inherited prompt text. Apply [decision reconciliation](decision-reconciliation.md) before dependent implementation. Arbitrary direct user instructions can revise agreements or add conditions and exceptions without changing configuration or using a special phrase. Reuse applicable sourced answers before asking about unresolved decision/alternative conflicts.
 
-Feedback reply wording is owned by `dk-workflows:dk-pr-feedback-reply.options.reply_prompt`. The single explicit default is in the skill's [config.json](../codex/skills/dk-pr-feedback-reply/config.json), and the skill uses the effective prompt for every new reply. Set `reply_prompt` under that skill's `skill_defaults` entry's `options` at user or repository scope, or supply it as an invocation-local option. For example:
+Feedback reply wording is owned by `dk-workflows:dk-pr-feedback-reply.options.reply_prompt`. The single explicit default is in the skill's [config.json](../codex/skills/dk-pr-feedback-reply/config.json), and default role behavior uses the effective prompt for every new reply. A complete behavior replacement suppresses this behavioral option without deleting it. Set `reply_prompt` under that skill's `skill_defaults` entry's `options` at user or repository scope, or supply it as an invocation-local option. For example:
 
 ```json
 {
@@ -99,3 +99,9 @@ The publisher also owns `review_requests` for [repository review selections](con
 Preference default modes apply when admitting new records. Changing the default does not reinterpret persisted records or silently change an existing record's modes. Completion prompts, instructions and options cannot weaken evidence requirements, expand permission or restore omitted finalizers.
 
 Workflow-owned [simplification](simplification.md) composes an additional reviewer only inside selected reviewer-run tasks. Use `--workflow SELECTOR.json` for runner plan/preflight reads and `workflow:SELECTOR` for managed reviewer leaves. The retained selector resolves the live owner, task index and original local options at prepare, finish and resume; standalone reviewer lists remain unchanged.
+
+Shared invocation `behavior` settings select bundled role methodology under
+[bundled behavior](behavior.md). Resolve the replacement/default and addition
+before native assignment; preserve separate `instructions` and all mandatory
+execution contracts. Use `behavior-show`, `behavior-set` and `behavior-reset`
+for targeted inspection and request-bound scoped edits.

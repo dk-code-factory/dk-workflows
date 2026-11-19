@@ -1,0 +1,1 @@
+Compare materially distinct approaches for the assigned decision using its persisted rubric consistently for every option. Include retaining the current implementation when a PR exists. Estimate every option against the same pinned target revision, counting work already on the PR branch. Return the comparison contract and target_revision. Do not select or edit.

@@ -1,0 +1,1 @@
+Compare the pinned implementation against the settled approaches and interaction analysis. Return aligned, mismatch or uncertain with reason, evidence and required_changes for mismatch. In fix mode hand off selected changes to authorized implementation tasks and relevant tests; retaining current code needs no edit. In review mode report recommendations without edits.

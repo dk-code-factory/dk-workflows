@@ -1711,3 +1711,46 @@ changes require delta analysis. Missing evidence or Git objects blocks reuse.
 No current authorization, publication or CI check is cached. Offline fixtures
 establish reuse, recovery, delta selection and isolated invalidation; native API
 dollar savings have not been measured. No token/process proxy is a dollar claim.
+
+## Configurable bundled role behavior
+
+Shared invocations accept a role-keyed `behavior` map. Each `override` and `append`
+field resolves independently through user, upstream, repository and invocation
+precedence. Omission inherits, explicit null clears, and text replaces at each
+scope. Compose replacement or shipped default, then addition; original assignment
+instructions remain separate. Every bundled skill has a maintained default prompt
+under `codex/skills/SKILL/prompts/`; generated alternatives, verification,
+configuration and supporting roles have named resources. Synchronize these into
+Claude's distribution. External plugins retain ownership of their prompts.
+
+Entry and execution contracts stay mandatory across replacements: host/repository
+rules, scope, output/evidence/checklists, permissions, budgets, publication, CI and
+historical alternatives/reassessment boundaries. Specialized prompt options still
+construct default behavior. Full replacements suppress that behavioral text and
+helper-injected methodology without deleting settings. Deterministic helpers
+resolve prompts before native assignment; they never launch model sessions.
+Configuration-agent self-edits apply on its next assignment. CI diagnosis uses
+its existing capture digest to bind consumed role behavior; optional upstream and
+invocation edits remain small selectors in the existing diagnosis evidence,
+avoiding repeated diagnosis while unsent retries still revalidate. Uncertain
+publication retains its original operation and reconciliation boundary.
+
+Only sparse scoped edits use existing configuration records and request-bound
+operations. Existing intents, original before/after hashes and receipts reconcile
+uncertain writes without another action store. Managed definitions retain role
+selectors and original invocation edits; consumed prompt digests and role resources
+use existing freshness. Rendered prompts are constructed transiently in the existing
+assignment, not saved as another recovery artifact or settings snapshot. Task keys,
+original results, completed siblings, claims, retries and publication recovery
+remain addressable. Unrelated role edits are excluded from occurrence identities
+and consumed-role fingerprints. Owning runner behavior governs its leaves, while
+unrelated internal roles do not. Historical alternatives retain their explicit
+reassessment boundary and original evidence.
+
+Targeted default/effective/source inspection and deterministic handoffs avoid
+reconstructing prompts in this run and the next fresh session. This adds no state
+store or rendered-prompt cache to create, validate, load or explain; sparse settings
+are the requested durable configuration itself. Freshness ends at changed consumed
+behavior, governing contracts or relevant inputs. Offline reuse, partial recovery,
+role invalidation and uncertain-write tests establish behavior; native API dollar
+savings remain unmeasured.

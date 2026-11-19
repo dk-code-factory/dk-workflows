@@ -15,6 +15,6 @@ Resolve configuration for `dk-workflows:dk-commit-message` through [skill-owned 
 
 Follow [local commit preparation](../../../docs/pr/commit-preparation.md) before selecting the diff, including existing staged and unstaged hunks. Message-only requests return the proposed scope and message without changing Git.
 
-Read the diff, repository guidance, commit template and recent human commits. When supplied by cleanup, apply the verified [commit policy](../../../docs/commit-policy.md) message instructions. Explicit policy instructions replace built-in stylistic defaults and historical style preferences; required repository conventions and current user constraints still apply. Preserve authorship and source records. Return the reviewed message, policy and sources. Commit only when requested.
+Resolve the selected role through [bundled behavior](../../../docs/behavior.md) before assignment or direct execution. The main role is `default`; [its shipped prompt](prompts/default.md) is inspectable even with an override. Execute only the resolved role behavior, followed by its resolved addition and separate original assignment instructions. The remaining entry and referenced execution contracts govern every replacement.
 
-Without explicit message instructions, match repository style and apply the configured `subject_target_length`, `body_wrap_length` and `max_line_length` fallbacks and use [the field conventions](../../../runtime/dk-commit-message/references/field-schema.md) when repository formatting rules leave a choice open.
+Explicit verified commit-policy message instructions and required repository conventions govern stylistic defaults. Preserve authorship and source records. Return the reviewed message, policy and sources. Commit only when requested.

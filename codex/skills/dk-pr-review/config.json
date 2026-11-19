@@ -12,7 +12,7 @@
       "required": true
     },
     {
-      "instructions": "Independently verify candidate findings against pinned source and governing instructions. Return confirmed, rejected or uncertain findings with evidence. Do not edit, publish or recursively invoke the review workflow.",
+      "instructions": "Return independent verification dispositions under the governing output and native evidence contracts. Do not edit, publish or recursively invoke the review workflow.",
       "options": {},
       "required": true
     },
