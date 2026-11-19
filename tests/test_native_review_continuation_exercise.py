@@ -33,6 +33,8 @@ def test_standalone_fixture_isolates_inherited_git_and_state(tmp_path, overrides
     donor = tmp_path/'donor'
     donor.mkdir()
     git(donor, env, 'init', '-q', '--template=')
+    # Background maintenance can change .git after the donor snapshot is taken.
+    git(donor, env, 'config', 'maintenance.auto', 'false')
     git(donor, env, 'config', 'user.name', 'Original author')
     git(donor, env, 'config', 'user.email', 'original@example.test')
     (donor/'code').write_text('original\n')
