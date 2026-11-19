@@ -28,9 +28,53 @@ def collect(path, thread, *, expected_turns, descendants):
     return result
 
 
-def collect_thread(path, thread, *, expected_turns):
+def own_thread_rows(rows, thread, *, ancestors=None):
+    """Exclude only a corroborated, usage-free copied ancestor prefix in memory.
+
+    Some host forks replay parent events at the child's creation timestamp.
+    Timestamps cannot establish ownership. The caller supplies ancestor turns
+    from the independently inventoried host graph and validated parent traces.
+    """
+    if len(rows) < 2 or rows[1]['type'] != 'session_meta':
+        return rows, 0
+    ancestors = ancestors or {}
+    require(rows[0]['type'] == 'session_meta' and rows[0]['payload']['id'] == thread,
+            'Missing own fork identity')
+    parent = rows[0]['payload'].get('parent_thread_id')
+    require(parent in ancestors and rows[1]['payload']['id'] == parent,
+            'Uncorroborated copied parent identity')
+    boundary = next((i for i, row in enumerate(rows[2:], 2)
+                     if row['type'] == 'event_msg' and
+                     row['payload'].get('type') == 'thread_settings_applied'), None)
+    require(boundary is not None, 'Missing own fork settings boundary')
+    foreign_turns = {turn for turns in ancestors.values() for turn in turns}
+    for row in rows[1:boundary]:
+        payload = row['payload']
+        if row['type'] == 'session_meta':
+            require(payload['id'] in ancestors, 'Unknown copied ancestor identity')
+        if row['type'] == 'token_usage_record':
+            require(payload['thread_id'] in ancestors,
+                    'Own or unknown usage in copied ancestor prefix')
+        if row['type'] == 'event_msg' and payload.get('type') == 'token_count':
+            require(not payload.get('info'), 'Counter evidence in copied ancestor prefix')
+        if row['type'] == 'turn_context' or (row['type'] == 'event_msg' and
+                payload.get('type') in ('task_started', 'task_complete', 'task_completed')):
+            require(payload['turn_id'] in foreign_turns,
+                    'Unknown turn in copied ancestor prefix')
+    own_rows = [rows[0], *rows[boundary:]]
+    require(not any(row['type'] == 'session_meta' for row in own_rows[1:]),
+            'Unexpected session identity after own fork boundary')
+    require(not any(row['type'] == 'event_msg' and
+                    row['payload'].get('type') == 'task_started' and
+                    row['payload']['turn_id'] in foreign_turns for row in own_rows),
+            'Ancestor turn after own fork boundary')
+    return own_rows, boundary-1
+
+
+def collect_thread(path, thread, *, expected_turns, ancestors=None):
     """Collect one thread; its caller must independently account for descendants."""
     rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    rows, inherited = own_thread_rows(rows, thread, ancestors=ancestors)
     records = native_usage.read_records([path])
     records = {key: value for key, value in records.items() if value['thread_id'] == thread}
     controls, contexts, starts, terminals = {}, {}, [], {}
@@ -127,12 +171,15 @@ def collect_thread(path, thread, *, expected_turns):
         response_ids.extend(ids)
     require(set(response_ids) == set(records), 'Usage outside the measured scope')
     totals['fresh_input_tokens'] = totals['input_tokens'] - totals['cached_input_tokens']
-    return {'telemetry_complete': True, 'tokens': totals, 'response_ids': response_ids,
+    result = {'telemetry_complete': True, 'tokens': totals, 'response_ids': response_ids,
             'response_count': len(response_ids), 'settings': settings,
             'api_equivalent_cost_usd': str(cost), 'rate_card': dollar_usage.RATE_CARD,
             'raw_rollout_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
             'inventory_basis': 'Advancing host token_count events, cumulative deltas and terminal outcomes',
             'turns': turns}
+    if inherited:
+        result['inherited_prefix_rows'] = inherited
+    return result
 
 
 def starting_context(path, *, replacements):

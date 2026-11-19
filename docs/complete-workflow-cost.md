@@ -103,6 +103,17 @@ advancing cumulative counters, actual model/effort/tier and original terminal
 output. Copied parent usage is not charged again in a child. Reasoning is already
 part of output and is charged once.
 
+Forked host traces can also replay an unfinished parent's start and context before
+the child's first settings event, with every copied event re-stamped at child
+creation. The reader corroborates the immediate parent and every copied turn
+against the host graph and already validated ancestor traces. It excludes that
+prefix only in memory, rejecting own or unknown usage, counters, unknown turns
+and missing settings boundaries. Original trace hashes and the excluded row count
+remain available; no normalized transcript is stored. All own follow-up turns,
+response inventories, terminal checks and cumulative deltas still apply. A reader
+correction may re-account preserved raw evidence without repeating native work;
+retain the original reader's failure and identify the corrected reader revision.
+
 Price each response with the observed model, service tier and context size. The
 existing rate card covers GPT-6.1 Sol's fresh input, cache reads, cache writes,
 output, tier multipliers and whole-response long-context surcharge. The native
