@@ -14,6 +14,7 @@ from urllib.parse import quote, urlsplit
 sys.path.insert(0, str(next(p for p in Path(__file__).resolve().parents if (p / 'shared').is_dir())))
 import pr_evidence as evidence
 import fetch_pr_conversation as conversation
+import finding_anchors
 from shared import publication
 from shared.github_publications import Handler
 from shared.review_request_recovery import Recovery
@@ -136,7 +137,7 @@ def commits(pr, head, cwd, anchors=()):
 
 
 def sources(inline, top):
-    """Keep identities and candidate evidence; agents decide what links mean."""
+    """Keep original source identities; links alone never establish report age."""
     result = {}
     reviews = {item['reference']: item for item in top['reviews']}
     pr = evidence.identity(inline)['pr']
@@ -155,11 +156,13 @@ def sources(inline, top):
             if match:
                 linked.append(match[1])
         record = {'reference': item['reference'], 'kind': kind, 'id': item.get('databaseId', item.get('id')),
+                  'nodeId': item['reference'] if thread else item.get('nodeId'),
                   'url': item.get('url'), 'createdAt': item.get('createdAt'),
                   'reviewCommit': review.get('commitId'), 'linkedCommits': sorted(set(linked))}
         if thread:
             record.update(thread=thread['id'], resolved=thread['isResolved'],
-                          parent=thread['comments'][0].get('databaseId'))
+                          parent=thread['comments'][0].get('databaseId'),
+                          originalInline=item is thread['comments'][0])
         result[item['reference']] = record
 
     for thread in inline['threads']:
@@ -184,10 +187,11 @@ def operations(pr, cwd):
     return result
 
 
-def inspect(inline, top, history, retained):
+def inspect(inline, top, history, retained, resolutions=None):
     subject = evidence.identity(inline)
     return {**subject, 'commits': history['commits'], 'commitEvidence': history,
             'sources': sources(inline, top),
+            'resolutions': resolutions or {},
             'discussion': evidence.digest([inline, top]),
             'operations': [{'path': path, 'status': value['status'],
                             'kind': value['request']['kind'],
@@ -208,6 +212,8 @@ def inspection_output(context, *, full_commits=False):
     anchors = {sha for source in context['sources'].values()
                for sha in [source['reviewCommit'], *source['linkedCommits']] if sha}
     anchors.update(item['head'] for item in context['operations'] if item['head'])
+    anchors.update(item['anchor'] for findings in context.get('resolutions', {}).values()
+                   for item in findings.values() if item.get('anchor'))
     ages = {sha: age for sha, age in proof.get('newCommits', {}).items() if sha in anchors}
     result['commitEvidence'] = {
         'mode': proof.get('mode', 'github'), 'count': len(members),
@@ -294,13 +300,19 @@ def plan(context, assessments, retained, *, cwd=None):
         anchors = []
         uncertain = False
         for request in requests:
-            original = context['sources'][request['reference']]
-            anchor = request.get('commit', original.get('reviewCommit'))
-            # Explicit links need a native finding-specific explanation that
-            # they bind this request, rather than merely citing earlier code.
-            if anchor != original.get('reviewCommit'):
-                if anchor not in original['linkedCommits'] or not request.get('anchorEvidence'):
-                    anchor = None
+            identities = context.get('resolutions', {}).get(request['reference'], {})
+            identity = request.get('findingId')
+            if identity is None:
+                if request['reference'] in identities:
+                    identity = request['reference']
+                elif len(identities) == 1:
+                    identity = next(iter(identities))
+            if identities and identity not in identities:
+                raise ValueError('select a helper-resolved findingId for each multi-finding request')
+            resolution = identities.get(identity, {})
+            # Native semantics can group equivalent reports, but cannot choose
+            # a SHA or supply prose in place of source-history provenance.
+            anchor = resolution.get('anchor') if resolution.get('status') == 'resolved' else None
             if anchor not in context['commits']:
                 # A later evidenced request can supersede an unanchored old
                 # report. Native semantics must establish which request is
@@ -440,11 +452,16 @@ def main():
         # Old receipts never establish current discussion or head freshness.
         evidence.verify(args.handoff, cwd, sha256=args.sha256, pr=args.pr, head=args.head)
         retained = operations(args.pr, cwd)
+        resolved = finding_anchors.collect(inline, top, sources(inline, top), cwd)
+        # Revision and push reads do not replace live discussion freshness.
+        evidence.verify(args.handoff, cwd, sha256=args.sha256, pr=args.pr, head=args.head)
         anchors = [sha for item in sources(inline, top).values()
                    for sha in [item['reviewCommit'], *item['linkedCommits']] if sha]
         anchors += [value['request']['approved'].get('head') for value in retained.values()]
+        anchors += [item['anchor'] for findings in resolved.values() for item in findings.values()
+                    if item.get('anchor')]
         history = commits(args.pr, args.head, cwd, anchors=[sha for sha in anchors if sha])
-        context = inspect(inline, top, history, retained)
+        context = inspect(inline, top, history, retained, resolved)
         if args.command == 'plan':
             if not args.assessment:
                 raise ValueError('--assessment required for plan')
