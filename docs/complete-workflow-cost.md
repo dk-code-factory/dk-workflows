@@ -73,6 +73,15 @@ findings and complete selected-stage evidence, rather than trust a coordinator's
 `complete` flag. A lower bill cannot compensate for a missed finding, skipped
 finalizer, stale coverage or weakened authorization/publication checks.
 
+`tests/fixtures/workflow_native_evidence.py` corroborates original driver markers
+against native host command records. It reads only the accounted thread's own
+turns and requires the same host graph and original trace hashes. Whole shell
+command status stays separate from a driver's individual exit: a multi-command
+script's successful exit does not prove every command ran or succeeded. The
+helper returns observations for independent assessment, with no quality verdict,
+native dispatch or new workflow state. Finding recall, dispositions and complete
+selected-stage coverage still require their original evidence.
+
 The immutable exercise protocol selects four phases: initial execution with an
 incomplete simplifier, fresh recovery, unchanged fresh-session reuse, and relevant
 invalidation. A mutable external dispatch marker schedules these phases; it is

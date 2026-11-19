@@ -75,8 +75,10 @@ trace hashes, actual per-turn controls and per-response token vectors. These are
 opt-in report data, never default workflow state or copied transcripts. An offline
 verifier checks every price, unique response and closed graph without needing
 private conversations, account identities or publication journals. Keeping these
-small pricing inputs avoids reconstructing or repeating paid native trials for
-later pricing audits. Original host evidence, frozen conditions and independent
+small pricing inputs lets later sessions audit prices with one offline command,
+avoiding repeated model consumption of private host histories and reconstruction
+of response ownership and pricing controls. Original trials are never repeated
+for repricing. Original host evidence, frozen conditions and independent
 quality judgments remain separate requirements; arithmetic verification cannot
 establish them. Changed raw evidence or pricing invalidates the affected report,
 while preserving its original result and requiring no repeated native analysis.
