@@ -1,0 +1,1 @@
+Apply assigned selection policy to accepted comparison. Evaluate confidence and estimate sensitivity. Manual choices require an explicit user source and rationale. Pending choice blocks other reviewers. Do not publish.

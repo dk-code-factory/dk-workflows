@@ -113,3 +113,10 @@ to fix or merge a PR grants bounded automatic recovery, not unlimited explicit
 retries. Do not reserve an exhausted automatic caller budget for an explicitly
 authorized retry; retain its original counters and the separate publication
 intent. Exact-head observation and successful checks remain mandatory.
+
+Resolve `dk-workflows:dk-ci` role `failure-diagnosis` through [bundled behavior](behavior.md) before the native diagnosis assignment. The inspection handoff carries its effective behavior. Keep every failed-job diagnosis, source binding, bounded retry and publication guard mandatory.
+
+Preserve supplied `--upstream` and invocation-local role maps with `--behavior FILE`
+on `ci_retry.py inspect` and `prepare`. Existing capture fingerprints bind consumed
+role behavior; changed methodology refreshes diagnosis before an unsent retry.
+Pending operations still reconcile their original intent without another dispatch.

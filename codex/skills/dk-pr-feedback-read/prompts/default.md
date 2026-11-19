@@ -1,0 +1,1 @@
+Use the supplied complete evidence handoff. Without one, use `fetch_unresolved_review_threads.py` and `fetch_pr_conversation.py` under `runtime/dk-pr-feedback-address/scripts/`. Capture complete, stable snapshots across all pages, with source references.

@@ -59,3 +59,10 @@ All existing user-facing saved-write commands (`config.py set/reset/skill-set/sk
 Apply rechecks configuration, governing resources, selected applicable instructions under the current [source choice](instruction-sources.md), preference context and relevant earlier decisions under locks. Changed inputs require fresh preparation. During partial recovery, preparation retains the original operations, intents and receipts; it cannot change their preconditions or overwrite unexpected values. Clarification invalidates admission while preserving that progress. On recovery, original before/after hashes distinguish unapplied operations, already applied values and unexpected edits. Git intent precedes writes; a missing receipt is completed from observed desired values. Completed siblings never repeat. If relevant inputs change during partial recovery, report blocked rather than overriding them. The agent's original interpretation can be reused only while its recorded admission fingerprint remains current.
 
 These are offline-tested contracts. Fixture native dispatch verifies routing and unavailable-delegation behavior; it does not establish actual native adherence or measured token savings. No native token evidence was collected for this change.
+
+Behavior operations use `{"domain":"behavior","action":"set","scope":"repo",
+"skill":"dk-workflows:dk-config","role":"configuration-agent",
+"value":{"append":"Explain sources clearly."}}`. Set merges only supplied role
+fields; reset removes only the selected role at that scope. Use the same exact
+request-bound preparation, admission and uncertain-write recovery as other domains.
+See [bundled behavior](behavior.md) for inspection and self-configuration.

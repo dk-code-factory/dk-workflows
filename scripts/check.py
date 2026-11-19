@@ -40,6 +40,12 @@ def package(root):
         source=root/'codex/skills'/name/'SKILL.md'
         target=root/'claude/skills'/name/'SKILL.md'
         assert source.read_bytes()==target.read_bytes(),'Run scripts/sync_skills.py: '+name
+        prompts = sorted((root/'codex/skills'/name/'prompts').glob('*.md'))
+        assert any(path.name == 'default.md' for path in prompts), 'Missing default role: '+name
+        assert [p.name for p in prompts] == [p.name for p in sorted((root/'claude/skills'/name/'prompts').glob('*.md'))]
+        for prompt in prompts:
+            assert prompt.read_text().strip() and '\x00' not in prompt.read_text()
+            assert prompt.read_bytes() == (root/'claude/skills'/name/'prompts'/prompt.name).read_bytes()
         for filename in ('config.json', 'config.schema.json'):
             source = root/'codex/skills'/name/filename
             target = root/'claude/skills'/name/filename

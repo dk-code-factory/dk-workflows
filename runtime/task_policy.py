@@ -9,7 +9,7 @@ from task_primitives import digest, identity
 
 def make_spec(*, repository, pr, skill_identity, resources, responsibility,
               assigned_instructions, instructions, inputs, options, git=None,
-              governing_inputs_complete=False, cacheable=None, native_review=None, instruction_policy=None):
+              governing_inputs_complete=False, cacheable=None, native_review=None, instruction_policy=None, behavior=None):
     """Build a task spec and bind any adopted repository instruction sources.
 
     Callers supply the complete governing resource/input maps. Apart from the
@@ -73,12 +73,18 @@ def make_spec(*, repository, pr, skill_identity, resources, responsibility,
         raise condition('stale_inputs', 'Repository instruction choice or sources changed; rebuild assignment and handoff')
     if live_policy is not None:
         spec['instruction_policy'] = live_policy
+    import behavior as role_behavior
+    selected_behavior = (role_behavior.for_task(skill_identity, responsibility, options)
+                         if behavior is None else behavior)
+    role_behavior.bind(spec, selected_behavior)
     digest(spec)  # Reject values that cannot survive the JSON task-spec contract.
     return spec
 
 
 def validate_current(spec):
     """Validate governing sources and selections independently of storage."""
+    import behavior
+    behavior.check(spec)
     import instruction_sources
     policy = spec.get('instruction_policy')
     checkout = spec.get('git', {}).get('checkout', policy['checkout'] if policy else Path.cwd())

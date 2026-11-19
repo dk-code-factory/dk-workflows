@@ -59,7 +59,11 @@ def runner_configuration(workflow, repository, upstream=None):
     loaded['workflow_permissions'] = owner['options']['permissions']
     # Parent prompts and native controls govern all leaves; reviewer lists and
     # scheduling remain leaf-local so unrelated siblings keep their results.
-    loaded['workflow_assignment'] = {key: deepcopy(value) for key, value in call.items() if key != 'options'}
+    import behavior
+    loaded['workflow_assignment'] = {key: deepcopy(value) for key, value in call.items() if key not in {'options', 'behavior'}}
+    loaded['workflow_assignment']['instructions'] = behavior.assignment(
+        RUNNER, repository=repository, upstream=upstream, behavior=call.get('behavior'),
+        options=call.get('options'), instructions=call.get('instructions', ''))
     return compose(loaded, owner['options']['simplification'], repository, upstream)
 
 

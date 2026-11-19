@@ -22,3 +22,5 @@ Read JSON on stdout. Compact output includes counts, a bounded page of test iden
 Save the repository, head, job, attempt, test and proof that the linked issue is open. Missing logs, inaccessible or closed issues, unsupported reports and unknown failures block acceptance. A known flaky test cannot exempt an entire job.
 
 Configured exceptions are separate from flake records. Read them with `python3 PACKAGE_ROOT/scripts/pr_config.py --cwd REPO --pr PR_URL ci-exceptions list`. Report each exception's id and reason from `entries`, with the returned `source` scope and `file`. Create issues or rerun jobs only when authorized.
+
+Resolve the selected role through [bundled behavior](../../../docs/behavior.md) before assignment or direct execution. The main role is `default`; [its shipped prompt](prompts/default.md) is inspectable even with an override. Execute only the resolved role behavior, followed by its resolved addition and separate original assignment instructions. The remaining entry and referenced execution contracts govern every replacement.

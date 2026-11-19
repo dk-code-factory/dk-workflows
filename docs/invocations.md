@@ -49,3 +49,9 @@ The helper never launches a CLI model session or implements a second agent runne
 Named task specs retain `options.configured_task` and select by `--task NAME`, so task-map ordering and unrelated task edits preserve eligible reuse. When a definition omits `responsibility`, the task name supplies it; `verify_findings` uses the established `finding-verification` responsibility. Explicit responsibilities must distinguish separate duties. Regenerate affected specs after task, prompt, options, model, permission or consumed-context changes. Only the selected invocation and applicable policy enter its configuration fingerprint.
 
 For standalone tasks with explicitly supplied definitions, preserve the same normalized invocation in `options.invocation` and capture this contract, runtime and schema. The shared validator applies at task creation and capture. Independent verification uses the `finding-verification` responsibility and the verification-only assignment in the owning incoming-review skill; it must not edit, publish or recursively coordinate a new review.
+
+Shared invocation `behavior` settings select bundled role methodology under
+[bundled behavior](behavior.md). Resolve the replacement/default and addition
+before native assignment; preserve separate `instructions` and all mandatory
+execution contracts. Use `behavior-show`, `behavior-set` and `behavior-reset`
+for targeted inspection and request-bound scoped edits.

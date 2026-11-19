@@ -1,0 +1,1 @@
+Compare current pinned implementation to the selected approach. Return aligned, mismatch or uncertain with evidence. A material mismatch needs substantive required design changes. Do not run ordinary reviewers.

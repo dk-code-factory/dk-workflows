@@ -13,10 +13,12 @@ Set PACKAGE_ROOT to this plugin's root directory. Follow [the shared PR task con
 
 Resolve configuration for `dk-workflows:dk-pr-description` through [skill-owned configuration](../../../docs/skill-configuration.md) before work, including scoped and invocation-local options. This skill owns its [explicit defaults](config.json) and [option schema](config.schema.json). Preserve original additional instructions alongside the governing assignment.
 
-Read the complete diff, PR template, linked issue, maintainer conventions and current Decisions. Use the configured repository-relative `template` when present; null uses repository discovery. Apply `fallback_sections` only when repository formatting leaves a choice. Honor `update_title` and `update_body`, preserving each disabled field. Describe the resulting behavior and validation. Preserve Decisions and unrelated body sections. Make the description match the agreed scope before review.
-
 Keep generated alternatives analysis and selection in private managed results. Do not add an alternatives review section or copy its comparisons, scores, alternatives or selection rationale into the description.
 
 Draft locally and review the text. Publish authorized edits with `scripts/publish.py` after checking the current head, title and body. Follow [the decision record](../../../runtime/dk-pr-description/references/decisions.md) when handling Decisions.
 
 Use [the field conventions](../../../runtime/dk-pr-description/references/field-schema.md) when repository formatting rules leave a choice open.
+
+Resolve the selected role through [bundled behavior](../../../docs/behavior.md) before assignment or direct execution. The main role is `default`; [its shipped prompt](prompts/default.md) is inspectable even with an override. Execute only the resolved role behavior, followed by its resolved addition and separate original assignment instructions. The remaining entry and referenced execution contracts govern every replacement.
+
+Honor `update_title` and `update_body`, preserving disabled fields, Decisions and unrelated sections. Repository formatting governs templates and fallback sections. Publish only authorized reviewed text through the current-head publication contract.

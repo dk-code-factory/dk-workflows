@@ -32,3 +32,5 @@ Admission examples:
 - “When implementing HTTP retries, honor Retry-After” can use the relevant source paths plus that condition; use prompt-only scope when no stable path scope is known.
 - An existing “Use unittest setup methods” preference overlapping a new pytest-fixture request requires a user choice to revise, replace, narrow or cancel before saving.
 - If repository instructions prohibit shared fixtures in the same scope, surface that conflict with the instruction source even for a personal preference. Do not save a contradictory rule by assuming personal or repository precedence.
+
+Resolve the selected role through [bundled behavior](../../../docs/behavior.md) before assignment or direct execution. The main role is `default`; [its shipped prompt](prompts/default.md) is inspectable even with an override. Execute only the resolved role behavior, followed by its resolved addition and separate original assignment instructions. The remaining entry and referenced execution contracts govern every replacement.

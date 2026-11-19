@@ -500,7 +500,10 @@ class Requests:
         result = {'id': request['id'], 'status': request['status'],
                   'reference': str(self._path(request['id']))}
         if request['status'] not in {'applied', 'cancelled'}:
-            result['handoff'] = {'request_id': request['id'], 'responsibility': 'configuration-only',
+            import behavior
+            assignment = behavior.resolve('dk-workflows:dk-config', 'configuration-agent',
+                request['context']['repository'], request['context'].get('upstream'))
+            result['handoff'] = {'behavior': assignment, 'request_id': request['id'], 'responsibility': 'configuration-only',
                                  'contract': str(ROOT/'docs/configuration-agent.md'),
                                  'evidence_sections': ['ask', 'context', 'operations', 'assessment']}
         if 'operations' in request:

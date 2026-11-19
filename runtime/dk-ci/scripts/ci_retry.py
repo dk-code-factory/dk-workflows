@@ -24,11 +24,14 @@ def main():
                         help='Current failing ci_wait decision JSON')
     parser.add_argument('--diagnosis', type=Path,
                         help='Native diagnosis with capture and a decision for each failed job')
+    parser.add_argument('--upstream')
+    parser.add_argument('--behavior', type=Path, help='Invocation-local CI role behavior map')
     parser.add_argument('--automatic-limit', type=int, choices=range(4), default=3)
     args = parser.parse_args()
     decision = json.loads(args.decision.read_text())
     handoff = capture(GitHub(pr_repository(args.pr)), args.pr, args.head, decision,
-                      observe(args.pr, args.head))
+                      observe(args.pr, args.head), upstream=args.upstream,
+                      behavior=json.loads(args.behavior.read_text()) if args.behavior else None)
     if args.action == 'inspect':
         result = handoff
     else:

@@ -1,0 +1,1 @@
+Inspect current requirements, complete discussion, Decisions and pinned diff. Require alternatives review for material boundaries, interfaces, dependencies, state, concurrency, recovery or operational choices; otherwise explain a simple-change skip with evidence.

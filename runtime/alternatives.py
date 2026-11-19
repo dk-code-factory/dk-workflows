@@ -48,14 +48,6 @@ ALLOWS = {'assessment': (), 'comparison': ('assessment',), 'impact': ('assessmen
 REQUIRES = {'assessment': (), 'comparison': ('assessment',), 'impact': (),
             'selection': ('comparison',), 'alignment': ('comparison', 'selection'),
             'verification': ('alignment',)}
-GUIDANCE = {
-    'assessment': 'Inspect current requirements, complete discussion, Decisions and pinned diff. Require alternatives review for material boundaries, interfaces, dependencies, state, concurrency, recovery or operational choices; otherwise explain a simple-change skip with evidence.',
-    'comparison': 'Compare reasonable materially distinct approaches using the assigned prompt and mandatory checklist. Return all required solution fields; select a scoring profile when auto. Do not choose, publish or run ordinary reviewers.',
-    'impact': 'Compare retained applicability, alternatives and settled selection with current requirements, solution choices, constraints and relevant evidence. Nonmaterial requires unchanged applicability, feasibility, choice, confidence and estimate sensitivity, including any sourced user choice. Return material, nonmaterial or uncertain impact with evidence. Only nonmaterial permits reuse; always refresh current alignment. Own Decisions edits require exact reconciled before/after evidence.',
-    'selection': 'Apply assigned selection policy to accepted comparison. Evaluate confidence and estimate sensitivity. Manual choices require an explicit user source and rationale. Pending choice blocks other reviewers. Do not publish.',
-    'alignment': 'Compare current pinned implementation to the selected approach. Return aligned, mismatch or uncertain with evidence. A material mismatch needs substantive required design changes. Do not run ordinary reviewers.',
-    'verification': 'Independently challenge the material alternatives mismatch against the selected decision and current pinned implementation. Return confirmed, rejected or uncertain with evidence and required design changes. Verify only; no publication or ordinary review.',
-}
 
 
 def legacy_options(options):
@@ -317,6 +309,7 @@ def _accepted(tasks, key, context, *, historical=False):
         loaded['options'] = legacy_options(loaded['options'])
         definition = {k: v for k, v in descriptor['definition'].items() if k not in {'checklist', 'required'}}
         execution = stage_execution(definition, descriptor['stage'], loaded['options'], owner=owner)
+        execution['behavior'].update(upstream=descriptor.get('upstream'), options=descriptor.get('options', {}))
         current_spec = make_spec(**tasks.store.subject, **execution)
     else:
         current_spec = tasks.saved_spec(key)
@@ -430,6 +423,7 @@ def _stage_spec(tasks, descriptor, definition, *, replay=False, authorize_reasse
     if initial_review:
         definition = pinned_definition(tasks, descriptor, definition)
     execution = stage_execution(definition, stage, loaded['options'], owner=owner)
+    execution['behavior'].update(upstream=descriptor.get('upstream'), options=descriptor.get('options', {}))
     execution.setdefault('inputs', {}).update({'alternatives_' + name: value['reference']
                                                for name, value in retained.items()})
     execution['options']['alternatives']['dependencies'] = dependencies
@@ -494,14 +488,8 @@ def stage_execution(definition, stage, options, *, owner=OWNER):
         raise ValueError('Alternatives definition must resolve the exact stage skill')
     policy = ({'scoring': scoring_policy(config['scoring'])} if stage == 'comparison' else
               {'auto_pick': config['auto_pick']} if stage == 'selection' else {})
-    if stage == 'comparison':
-        execution['assigned_instructions'] = GUIDANCE[stage]
-        if config['scoring']['profile'] == 'auto':
-            execution['assigned_instructions'] += '\n' + config['scoring']['profile_selection_prompt']
-        if config['scoring']['profile'] == 'custom':
-            execution['assigned_instructions'] += '\n' + config['scoring']['custom_prompt']
-    else:
-        execution['assigned_instructions'] = GUIDANCE[stage]
+    execution['assigned_instructions'] = 'Return required stage evidence and explicit completion.'
+    execution['behavior'] = {**definition.get('behavior', {}), 'skill': owner, 'role': 'alternatives-' + stage}
     request = execution.get('inputs', {}).get('alternatives_request')
     if request:
         original = read(request)
@@ -512,8 +500,6 @@ def stage_execution(definition, stage, options, *, owner=OWNER):
             '\nAn explicit manual alternatives review was requested. Read alternatives_request. '
             'Require comparison even for a simple change; assess alternatives afresh for this request. '
             'Resume completed stages of the same request rather than repeating them.')
-    if stage == 'selection':
-        execution['assigned_instructions'] += '\n' + config['auto_pick']['prompt']
     assigned = definition.get('assigned_instructions')
     if assigned:
         execution['assigned_instructions'] += '\n\nOriginal additional instructions:\n' + assigned

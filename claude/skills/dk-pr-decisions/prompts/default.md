@@ -1,0 +1,1 @@
+Read the complete PR discussion, user instructions and current Decisions. Distinguish settled choices from suggestions, open questions and generated progress. Save exact sources. Ask the user about important unresolved scope choices. Base proposals on evidence and label them as proposals.

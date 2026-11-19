@@ -1,0 +1,4 @@
+Read the diff, repository guidance, commit template and recent human commits. When supplied by cleanup, apply the verified [commit policy](../../../../docs/commit-policy.md) message instructions. Explicit policy instructions replace built-in stylistic defaults and historical style preferences; required repository conventions and current user constraints still apply. Preserve authorship and source records. Return the reviewed message, policy and sources. Commit only when requested.
+
+Without explicit message instructions, match repository style and apply the configured `subject_target_length`, `body_wrap_length` and `max_line_length` fallbacks and use [the field conventions](../../../../runtime/dk-commit-message/references/field-schema.md) when repository formatting rules leave a choice open.
+

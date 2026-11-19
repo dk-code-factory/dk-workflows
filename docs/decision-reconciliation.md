@@ -42,7 +42,7 @@ task list has not yet reached Decisions or omits it. Reading its policy does not
 invoke an omitted skill, restore a removed finalizer or change task ordering.
 Automatic alternative selection still returns unresolved ranking choices without
 prompting. A separate reconciliation question about an existing agreement is
-governed by `reconciliation_prompt`, not by ranking mode.
+governed by resolved Decisions role behavior, with `reconciliation_prompt` only in default construction, independently of ranking mode.
 
 Before asking, use compact task resume and targeted result reads to find a
 previous answer. A current direct instruction or an applicable retained answer
@@ -103,3 +103,5 @@ cost. Savings end at relevant source/condition changes or missing evidence;
 current authorization, code review, CI and publication remain live. Offline tests
 verify policy transport, evidence reuse, recovery and invalidation, not native
 judgment or measured API dollar savings.
+
+The effective Decisions role behavior controls methodology. A complete `default` behavior replacement suppresses `reconciliation_prompt`; sourced commitments, direct user instructions, admission and dependent-work guards remain governing contracts. Resolve [bundled behavior](behavior.md) before each supporting assignment.

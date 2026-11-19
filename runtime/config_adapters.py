@@ -15,7 +15,7 @@ import skill_config
 from shared import ci_exceptions, pr_partition_policy, pr_size
 from shared.repository_scope import identities, repository
 
-DOMAINS = {'workflow', 'skill', 'preferences', *settings.DOMAINS,
+DOMAINS = {'workflow', 'skill', 'behavior', 'preferences', *settings.DOMAINS,
            'pr-size', 'ci-exceptions', 'pr-partition', 'instruction-sources'}
 
 
@@ -25,7 +25,7 @@ def normalize(operation):
     op = deepcopy(operation)
     domain = op['domain']
     allowed = {'domain', 'action', 'scope'}
-    allowed |= {'workflow': {'value'}, 'skill': {'skill', 'value'},
+    allowed |= {'workflow': {'value'}, 'skill': {'skill', 'value'}, 'behavior': {'skill', 'role', 'value'},
                 'preferences': {'proposal'}, 'pr-size': {'value', 'keys'},
                 'ci-exceptions': {'value', 'id'},
                 'pr-partition': {'reason', 'source', 'instructions'}}.get(domain, {'value'})
@@ -51,9 +51,17 @@ def normalize(operation):
             raise ValueError('Expected prepared preference proposal')
         proposal.pop('context', None)  # Live admission context is not another snapshot.
         proposal.setdefault('reused', [])
-    if domain == 'skill':
+    if domain in {'skill', 'behavior'}:
         if not isinstance(op.get('skill'), str) or not op['skill'].startswith('dk-workflows:') or not skill_config.directory(op['skill']):
             raise ValueError('Only installed dk-workflows skill options are owned here')
+    if domain == 'behavior':
+        import behavior
+        from alternatives_compat import skill as current_skill
+        op['skill'] = current_skill(op.get('skill'))
+        if op.get('role') not in behavior.roles(op['skill']):
+            raise ValueError('Unknown behavior role')
+        if op['action'] == 'set':
+            behavior.validate(op['skill'], {op['role']: op['value']})
     if domain == 'workflow' and op['action'] == 'set':
         op['value'] = config.validate(op['value'])
     if domain == 'instruction-sources' and op['action'] == 'set':
@@ -99,7 +107,7 @@ def lock_paths(context, operations):
 
 def destination(context, op):
     domain, scope = op['domain'], op['scope']
-    if domain in {'workflow', 'skill'}:
+    if domain in {'workflow', 'skill', 'behavior'}:
         target = config.path(context['repository'] if scope == 'repo' else None)
     elif domain == 'instruction-sources':
         target = instruction_sources.policy_path(context['repository'])
@@ -150,9 +158,20 @@ def project(context, op, raw):
     if action == 'reset' and (domain in {*settings.DOMAINS, 'ci-exceptions'} or domain == 'pr-size' and not op.get('keys')):
         return None
     current = json.loads(raw) if raw is not None and domain not in settings.DOMAINS else None
-    if domain in {'workflow', 'skill'}:
+    if domain in {'workflow', 'skill', 'behavior'}:
         saved = config.validate(current) if current is not None else {}
-        if action == 'set':
+        if domain == 'behavior':
+            entry = (saved.setdefault('skill_defaults', {}).setdefault(op['skill'], {}) if action == 'set'
+                     else saved.get('skill_defaults', {}).get(op['skill'], {}))
+            if action == 'set':
+                entry.setdefault('behavior', {}).setdefault(op['role'], {}).update(value)
+            else:
+                entry.get('behavior', {}).pop(op['role'], None)
+            if not entry.get('behavior'):
+                entry.pop('behavior', None)
+            if not entry:
+                saved.get('skill_defaults', {}).pop(op['skill'], None)
+        elif action == 'set':
             saved.setdefault('skill_defaults', {}).setdefault(op['skill'], {})['options'] = skill_config.validate(op['skill'], value)
         else:
             entry = saved.get('skill_defaults', {}).get(op['skill'], {})
@@ -252,11 +271,12 @@ def input_paths(context, operations):
                  'docs/skill-configuration.md', 'docs/pr/configuration.md', 'docs/commit-policy.md',
                  'docs/invocations.md', 'docs/private-reporting.md', 'scripts/config.py', 'scripts/pr_config.py',
                  'scripts/preferences.py', 'scripts/config_requests.py'))
-    paths.update(root/'runtime'/name for name in ('config.py', 'preferences.py', 'skill_config.py', 'settings.py', 'commit_policy.py', 'invocation.py'))
+    paths.update(root/'runtime'/name for name in ('config.py', 'preferences.py', 'skill_config.py', 'settings.py', 'commit_policy.py', 'invocation.py', 'behavior.py'))
     paths.update((root/'runtime/shared').glob('*.py'))
     paths.update((root/'schemas').glob('*.json'))
     for name in ('dk-config', 'dk-preferences', 'dk-repo-onboard'):
         paths.add(root/'codex/skills'/name/'SKILL.md')
+        paths.update((root/'codex/skills'/name/'prompts').glob('*.md'))
     for folder in (root/'codex/skills').iterdir():
         paths.update([folder/'config.json', folder/'config.schema.json'])
     paths.update(config.path(key) for key in [None, context.get('upstream'), context['repository']])
@@ -276,6 +296,10 @@ def input_paths(context, operations):
     for op in operations:
         paths.add(destination(context, op)[0])
         domain = op['domain']
+        if domain == 'behavior':
+            import behavior
+            paths.add(behavior.roles(op['skill'])[op['role']])
+            paths.add(skill_config.directory(op['skill'])/'SKILL.md')
         if domain in {*settings.DOMAINS, 'pr-size', 'ci-exceptions'}:
             for key in [*policy_chain(context, domain), 'user']:
                 paths.add(pr_size.path(key) if domain == 'pr-size' else
@@ -292,7 +316,7 @@ def validate_observed(context, op, raw):
     value = json.loads(raw) if domain != 'completion' else raw
     if domain == 'instruction-sources':
         instruction_sources.load(context['repository'])
-    elif domain in {'workflow', 'skill'}:
+    elif domain in {'workflow', 'skill', 'behavior'}:
         config.validate(value)
     elif domain == 'preferences':
         preferences._catalog(value)

@@ -1,0 +1,1 @@
+Independently challenge the material alternatives mismatch against the selected decision and current pinned implementation. Return confirmed, rejected or uncertain with evidence and required design changes. Verify only; no publication or ordinary review.
