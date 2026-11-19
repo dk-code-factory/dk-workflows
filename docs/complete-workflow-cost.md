@@ -121,6 +121,23 @@ reader rejects nonzero cache writes without independently observed duration.
 Unknown prices or duration, missing descendants or incomplete response inventories
 make the comparison inconclusive. API-equivalent estimates are not account billing.
 
+`tests/fixtures/workflow_ledger.py` exports opt-in JSONL pricing data only after
+the strict native reader accepts the closed host forest. One scope header and one
+record per thread retain pseudonymous parent/response identities, original trace
+hashes, per-turn controls and compact per-response token vectors. No transcript,
+private path, account identity or publication journal is exported. The five usage
+columns are input, cache-read input, cache-write input, output and reasoning output;
+reasoning is a subset of output. Inventory checksums, graph membership,
+bucket totals and the frozen rate card constrain verification of every response.
+
+Run `python3 tests/fixtures/workflow_ledger.py verify REPORT.jsonl` to reproduce
+the arithmetic offline without host database access, GitHub or a model request.
+The verifier checks prices and inventory consistency. It does not authenticate
+the original host observations, evaluate finding quality, establish equivalent
+frozen conditions or include experiment orchestration. Those remain explicit
+parts of the report and its original evidence. Export creates a new file and
+refuses to overwrite an existing report; retain every earlier outcome.
+
 Combine recurring initial and recovery costs, including preparation, evidence
 loading, coordination, waiting, all descendants and terminal reporting. Keep
 implementation, actual PR review and experiment orchestration in separate spending

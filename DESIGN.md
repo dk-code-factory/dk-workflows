@@ -70,6 +70,17 @@ the corrected reader source. No normalized transcript or production state is
 added. Existing original-evidence references provide the avoided reconstruction
 and trial cost benefit within their unchanged freshness boundary.
 
+Public measurement artifacts may retain pseudonymous graph identities, original
+trace hashes, actual per-turn controls and per-response token vectors. These are
+opt-in report data, never default workflow state or copied transcripts. An offline
+verifier checks every price, unique response and closed graph without needing
+private conversations, account identities or publication journals. Keeping these
+small pricing inputs avoids reconstructing or repeating paid native trials for
+later pricing audits. Original host evidence, frozen conditions and independent
+quality judgments remain separate requirements; arithmetic verification cannot
+establish them. Changed raw evidence or pricing invalidates the affected report,
+while preserving its original result and requiring no repeated native analysis.
+
 Fork-CI approval binds reviewed source coverage to the current PR head and live
 target branch tip. The PR REST base SHA may be historical; retain it in the
 existing context and match workflow-run base metadata to that SHA, alongside
