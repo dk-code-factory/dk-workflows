@@ -1538,9 +1538,8 @@ unavailable.
 
 Complete discussion and retained original findings feed discovery and independent
 current-head verification even when a report already exists. Native agents group
-equivalent requests per finding, distinguish substantive requests from formatting
-edits, choose the latest request and preserve fixed/rejected/uncertain and explicit
-accepted/deferred dispositions. At least one new PR commit after the latest
+equivalent requests per finding, choose the latest equivalent request and preserve
+fixed/rejected/uncertain and explicit accepted/deferred dispositions. At least one new PR commit after the latest
 substantive request makes a still-confirmed finding eligible for a reminder; zero
 new commits suppress
 unchanged reruns. Verified follow-up receipts reset that boundary even before
@@ -1549,8 +1548,33 @@ retain their ordinary approval/CI/merge gates and posting permissions remain liv
 
 The read-only follow-up helper verifies existing complete evidence, captures a
 stable paginated PR commit list with its total and constructs source routes and
-reply payloads. Review commit IDs or native-validated source-head links supply
-anchors; unsupported or rewritten latest anchors stay uncertain. Complete API
+reply payloads. A deterministic source resolver owns finding identities and
+anchor provenance; native SHA selections and prose never establish age. Formal
+reviews and original inline comments use their associated review commit only
+when complete edit history proves the finding was already present at creation.
+Supported Qodo details blocks use stable `/findings/<uuid>` identities. Complete,
+undeleted original-to-current GitHub edit snapshots locate each finding's
+introduction independently; supported numbering, whitespace and presentation
+changes preserve that revision even when the report footer changes. Whitespace
+normalization applies only to prose; recognized code and preformatted fragments,
+leftover code delimiters and indented quote/list content remain verbatim,
+including indentation and whitespace in string literals. Changed or
+disappearing/reintroduced finding content is conservatively unknown. The
+structural parser reads HTML with recognized code masked at its original offsets;
+details tokens in code, comments or attribute values do not delimit findings.
+Unsupported code markup makes structured parsing unknown. Numbering and trailing
+recognized status badges normalize only in the outer finding summary. If prose
+has quotes, backslashes, tabs or uncertain code markers, the finding otherwise compares
+verbatim without guessing string boundaries. Qodo introductions require an
+unambiguous same-repository report footer in an actual HTML comment on a
+standalone line outside code and quotation. Only whitespace or the recognized
+Qodo attribution may follow it. A verified PR head force-push event must prove
+that SHA arrived before the revision.
+Ordinary push arrival without equivalent evidence, unsupported formats, missing
+or deleted revisions and ambiguous identities remain unknown. Source/edit and
+push timestamps order authenticated events only; commit dates and whole-comment
+creation/update times never stand in for per-finding arrival evidence. Unsupported
+or rewritten latest anchors stay uncertain. Complete API
 parent graphs count PR members reachable from the current head but absent from
 the anchor ancestry. Chronological list position is never arrival history:
 merging an older-dated side branch can add commits after the request. Complete
@@ -1562,6 +1586,13 @@ exclude target-only commits. Changed pins, shallow/missing objects or incomplete
 GitHub evidence require restoration and recapture. Timestamps never substitute
 for PR membership. Formatting-only bot edits require semantic reassessment of the
 changed discussion, while retaining each unchanged finding's original anchor.
+Edit/push reads are paginated and recaptured for stability; their compact
+finding-specific provenance joins the existing transient inspection fingerprint.
+There is no new registry or cache: original histories remain on GitHub and
+existing native results and publication journals retain their identities. This
+removes repeated model inference over full edited reports, including in fresh
+sessions; native API dollar savings have not been measured. Live source changes
+invalidate only affected discussion assessments under existing freshness rules.
 
 Inspection returns compact source and publication references; native decisions
 stay in existing original task results. Default inspection exposes counts, pins

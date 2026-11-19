@@ -52,6 +52,7 @@ def normalize(items: list[dict], *, review: bool) -> list[dict]:
         user = item.get("user")
         result.append({
             "id": item["id"],
+            "nodeId": item.get("node_id"),
             "reference": ("pullrequestreview-" if review else "issuecomment-") + str(item["id"]),
             "kind": "review" if review else "issue_comment",
             "replyKind": "unclassified" if review else "issue_comment",

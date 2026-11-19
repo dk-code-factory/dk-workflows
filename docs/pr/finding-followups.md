@@ -33,7 +33,7 @@ python3 PACKAGE_ROOT/runtime/dk-pr-feedback-address/scripts/finding_followups.py
 ```
 
 This read-only helper verifies the handoff against live sources, captures stable,
-complete PR commit membership and returns compact source/anchor candidates,
+complete PR commit membership and returns compact source/anchor resolutions,
 original publication references and a `context` fingerprint. It writes no state
 and runs no agents. Default output includes membership count, captured target pins
 when local proof is needed, and ages for source/operation anchor candidates;
@@ -48,16 +48,47 @@ bot-summary comment has no resolved/open thread state; its existence alone does
 not establish an equivalent unresolved inline thread or a current correction
 request.
 
-Review submissions provide their captured `commitId`; inline comments use their
-associated review. Explicit commit links in other reports/requests are only
-anchor candidates: the verifier must establish that the link identifies the
-report/request head, rather than historical code cited as evidence. Do not infer
-PR arrival from commit author/committer dates, comment `updatedAt`, wall-clock
-age or target-branch ancestry. Do not silently use a review's old commit for a
-substantive request newly added by an edit. Supply an evidenced request-head link
-or leave that latest request's anchor unknown. Formatting-only edits retain the
-unchanged finding's original review/link anchor, even though changed discussion
-requires semantic reassessment.
+`resolutions` contains deterministic finding identities and provenance per source.
+Formal reviews and original inline comments use immutable source IDs and the
+associated review commit only when complete source history proves the original
+content. Inline replies cannot inherit an older review's commit. Supported Qodo
+numbered details blocks use `qodo:<uuid>` identities from `/findings/<uuid>` links.
+The resolver reads all GitHub comment revisions, requires the original and current
+body, rejects deleted or missing revisions, and identifies the first revision
+containing each stable finding. Supported numbering, prose whitespace, bold/HTML
+presentation, unrelated findings and shared-footer edits preserve that revision.
+Recognized code and preformatted fragments compare verbatim, preserving string
+whitespace and indentation. Leftover code delimiters and indented quote/list
+content stay verbatim rather than using prose whitespace normalization.
+The helper does not guess string boundaries: quotes, backslashes, tabs or
+uncertain code markers make the remaining finding compare verbatim. For Qodo,
+outer numbering and one category badge with an optional status badge normalize
+before comparison. It parses HTML structure
+with recognized code masked at its original offsets: details tags in code,
+comments or attribute values do not delimit findings. Unsupported code markup
+makes structured parsing unknown before comparison, including backslash escapes
+outside recognized code.
+Changed finding content or disappearance followed by reintroduction is ambiguous
+and returns `unknown`, without resetting age.
+
+A Qodo introduction needs an unambiguous same-repository report footer on a
+standalone line outside code and quotation. It must be an actual HTML comment.
+Only whitespace or the recognized Qodo attribution
+may follow it. A verified PR force-push event must prove that head arrived before
+the revision.
+Ordinary push arrival without supported evidence, unsupported report formats,
+unavailable histories and ambiguous changes return `unknown`. Commit dates,
+comment container dates and an agent's explanation never establish arrival or
+per-finding age. Formal unstructured reviews edited substantively also remain
+unknown rather than assigning their old commit to a newly added request.
+
+The collector paginates complete revisions and force-push history, recaptures
+for stability and rechecks the original live discussion before planning. Full
+revision bodies remain transient; inspection exposes the source, finding ID,
+introduction revision, anchor SHA, push/report metadata and resolution reason.
+No finding registry or extra durable snapshot is created. Existing source
+artifacts, native verification results and publication journals retain their
+original freshness and recovery boundaries.
 
 Missing/rewritten latest anchors leave reminder age uncertain; never invent age
 proof. They do not permanently suppress a freshly confirmed actionable finding.
@@ -112,8 +143,7 @@ For example (substitute real references and full SHAs):
     "evidence": "Original independent verification result reference and current code/reproduction evidence",
     "requests": [{
       "reference": "issuecomment-901",
-      "commit": "REPORT_FULL_SHA",
-      "anchorEvidence": "The source labels this link as the report head; the finding was unchanged by its formatting edit."
+      "findingId": "qodo:cf5754d9-20f4-45f1-8283-9dc97ed065bf"
     }],
     "latestRequest": "issuecomment-901",
     "operations": [],
@@ -126,9 +156,12 @@ For example (substitute real references and full SHAs):
 equivalent substantive requests in the discussion. `latestRequest` selects the
 latest substantive request reference or equivalent retained operation path.
 `operations` lists all relevant equivalent intents/receipts, including ones not
-yet visible remotely. Review-based requests default to their `reviewCommit`;
-other requests need an explicit `commit` from `linkedCommits` and a finding-specific
-`anchorEvidence` explanation. Use `commit:null` when that binding is unsupported.
+yet visible remotely. Each request selects a `findingId` returned under its
+source in `resolutions`; original unstructured review findings default to their
+source reference. Selecting an ID associates native semantics with collected
+evidence; it cannot supply or replace that evidence. Legacy `commit` and
+`anchorEvidence` fields are ignored. Missing identities or unresolved provenance
+remain unknown.
 The helper counts from the newest evidenced equivalent request/receipt and leaves
 an unknown latest anchor uncertain unless the fallback's coverage assessment is
 supplied. The verifier owns completeness, substantive equivalence, ordering,
