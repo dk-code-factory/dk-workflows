@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "purpose": "Complete default native workflows with controlled external recovery inputs; never substitute instruction-only duties.",
+  "native_ownership": "The current native coordinator invokes actual skills and supported descendants through the pinned package's contracts. Fixture helpers and the external controller do not launch model sessions.",
+  "control": "Read control/phase.json. This is the external caller's prescribed dispatch schedule, not workflow readiness or a new semantic requirement for completed leaves. Bind the immutable original assignment/protocol and each task's relevant sources; do not bind this changing dispatch marker as a global analysis input. Use compact native workflow status and original evidence to determine actual obligations.",
+  "original_constraints": "Read inputs/simplification-context.md as a required original maintainer source for every simplifier. Include its original reference in governing inputs. The normal skill contract still owns preparation, claims, native evidence, recording, retries and completion checks.",
+  "phases": {
+    "initial": {
+      "work": "Start the default workflow, including initial alternatives and actual ordinary reviewers. Honor the resolved parallel groups and host capacity. Prepare the ordinary/simplifier group and dispatch ordinary work normally; pause only the first simplifier before its native dispatch. Do not wait for ordinary completion merely to serialize this checkpoint.",
+      "checkpoint": "Send the caller simplifier-ready with the prepared task reference, key and claim. Wait for missing-context-dispatch. Then invoke the actual native simplifier with its original required source reference. Missing evidence must remain incomplete.",
+      "recovery": "After the child terminates incomplete, send simplifier-incomplete with its actual handle, original report and observations. Wait for context-restored. Retain the actual incomplete result under the existing recovery contract. Wait for already launched ordinary siblings and accept their actual completed results before ending this phase; never abandon those siblings or repeat completed review. Full workflow completion remains false.",
+      "expected_boundary": "A real incomplete leaf and completed ordinary sibling remain recoverable; overall workflow completion is false."
+    },
+    "recover": {
+      "work": "In a fresh native context, resume original state and stopped work. Reuse accepted siblings, original alternatives, claims, results and allowances. Complete missing native work and the remaining default tasks/finalizers through their actual contracts.",
+      "incoming_checkpoint": "When a read-only incoming workflow has published confirmed findings, report author-correction-needed. Preserve current findings and readiness gates. The external controller supplies a real local author commit, after which another fresh coordinator resumes current-head review. Never edit the incoming PR yourself or invent clean readiness.",
+      "expected_boundary": "Complete selected workflow and clean current readiness only after required corrections and all default finalizers."
+    },
+    "unchanged": {
+      "work": "In a fresh native context, consume necessary guidance and targeted original evidence. Reuse every valid cacheable analysis at the unchanged published head; refresh current noncacheable checks. Do not allocate another review cycle just to resume.",
+      "expected_boundary": "Unchanged accepted analysis, original findings/dispositions and allowances survive; live readiness remains independently checked."
+    },
+    "invalidate": {
+      "work": "The external caller adds a greeting requirement and commits it on the local PR branch. Refresh affected current coverage under the same default plan, retaining valid design analysis, original results and allowances. Fix-route edits remain authorized; incoming-route edits remain forbidden.",
+      "incoming_checkpoint": "If the current source violates the new requirement, publish independently verified findings under the normal route grant and report author-correction-needed. Resume after the controlled author's correction and finish all required current work.",
+      "expected_boundary": "Affected work refreshes; unchanged applicable evidence is retained. Complete readiness requires the new requirement as well as all original requirements."
+    }
+  },
+  "publication": "The transport applies one write and loses its response: push on the fix route, post-review on the incoming route. Reconcile its original operation read-only, preserve intent/receipts and do not create a replacement action.",
+  "ci": "Local CI starts pending. The external controller releases it after observing a current-head check read. Include preparation, actual native waiting and terminal evidence consumption; retain the observer's original deadline/progress.",
+  "reporting": "Return actual stage and recovery evidence, findings/dispositions, retained result references, validation and unresolved work. Phase completion is not full workflow completion. Do not run the independent quality evaluator or infer native dollar savings. Keep operational details private."
+}

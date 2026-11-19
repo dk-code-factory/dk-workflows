@@ -1,5 +1,6 @@
 """Offline executables for full recipe tests; unknown network operations fail."""
 import importlib.util
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -7,6 +8,8 @@ import subprocess
 import sys
 
 state_path=Path(os.environ['DK_RECIPE_REMOTE'])
+state_lock=state_path.with_name(state_path.name+'.lock').open('a')
+fcntl.flock(state_lock.fileno(),fcntl.LOCK_EX)
 state=json.loads(state_path.read_text())
 module=importlib.util.spec_from_file_location('fixture_remote',os.environ['DK_RECIPE_FIXTURE'])
 fixture=importlib.util.module_from_spec(module);module.loader.exec_module(fixture)
@@ -25,7 +28,9 @@ try:
             ref=arguments[-1]
             head,branch=ref.split(':refs/heads/')
             state['branches'][branch]=head
-            if branch=='pr-branch':
+            if hasattr(remote,'pushed'):
+                remote.pushed(branch,head)
+            elif branch=='pr-branch':
                 state['metadata']['headRefOid']=head
                 state['run']['head_sha']=head
             remote.changed('push',None)
@@ -41,3 +46,4 @@ except (OSError,AssertionError,KeyError,ValueError) as exc:
     print(str(exc),file=sys.stderr);sys.exit(1)
 finally:
     state_path.write_text(json.dumps(state))
+    state_lock.close()
