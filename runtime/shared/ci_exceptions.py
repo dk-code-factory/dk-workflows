@@ -1,4 +1,5 @@
 """Explicit private CI exceptions shared by dk-config and live CI decisions."""
+from config_upgrades import configuration_read
 import fcntl
 import hashlib
 import json
@@ -60,6 +61,7 @@ def validate(value, identity):
     return value
 
 
+@configuration_read(workflow_only=True, ci_identity=True)
 def load(identity, scope='effective'):
     if scope not in {'effective', 'repo', 'user'}:
         raise ValueError('CI exception scope must be effective, repo or user')

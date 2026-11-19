@@ -1,5 +1,7 @@
 # Configuration agent contract
 
+Before workflow configuration consumption, follow [automatic layout upgrades](configuration-upgrades.md). Baseline reads create no upgrade history; only declared layout changes require native reinterpretation. Retain the original workflow permissions through upgrade and resume.
+
 Read and obey [private workflow reporting](private-reporting.md), the paramount package-wide rule. Pass it with the original assignment and keep requests, decisions, blockers and receipts private.
 
 The already-running main session delegates explicit configuration requests to one fresh native agent. Helpers never launch Codex or Claude Code. If supported native delegation is unavailable, report configuration-agent execution as blocked. Inspection and explanation use a transient configuration-agent assignment with the exact ask and relevant context, without a request ID or durable history. That agent uses the existing read helpers directly. Ordinary workflow reads use those helpers without invoking the configuration skill or delegating.

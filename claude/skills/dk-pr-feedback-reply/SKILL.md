@@ -5,6 +5,8 @@ description: Reply to affected PR feedback and resolve fully answered inline thr
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
+Before workflow configuration consumption, follow [automatic configuration upgrades](../../../docs/configuration-upgrades.md). Resume the original workflow with its permissions after an upgrade; ordinary baseline reads require no delegation.
+
 Apply the [reply instruction boundary](../../../docs/pr/feedback-responses.md#reply-instruction-boundary) before repository guidance reads or handoffs. Repository agent instructions do not govern feedback replies, including when inherited from a coordinator. Preserve host instruction priority and report a conflicting host-enforced rule privately.
 
 Persist workflow state only when it reduces total API dollar cost, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).

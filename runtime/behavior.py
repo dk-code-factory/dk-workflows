@@ -3,6 +3,7 @@
 Only scoped edits live in configuration. Selection references and digests use the
 existing task freshness boundary; inspection and rendered prompts are transient.
 """
+from config_upgrades import configuration_read
 from copy import deepcopy
 from pathlib import Path
 import re
@@ -67,6 +68,12 @@ def specialized(skill, role, options):
     return ''
 
 
+def _reads_domain(values):
+    import skill_config
+    return skill_config.reads_domain(values)
+
+
+@configuration_read(workflow_only=True, domain_repository=_reads_domain)
 def resolve(skill, role='default', repository=None, upstream=None, *, behavior=None,
             options=None, section=None):
     import skill_config

@@ -1,4 +1,5 @@
 """Private PR size settings and final-diff accounting (never commit churn)."""
+from config_upgrades import configuration_read
 import fcntl
 import hashlib
 import json
@@ -32,6 +33,7 @@ def path(identity):
     return data_root() / folder / 'pr-size.json'
 
 
+@configuration_read(workflow_only=True, domain_chain=True)
 def load(chain, scope='effective'):
     if scope not in ('effective', 'repo', 'upstream', 'user'):
         raise ValueError('invalid PR size scope')
@@ -75,6 +77,7 @@ def load(chain, scope='effective'):
             'settings': result, 'sources': sources, 'fingerprint': fingerprint(sources)}
 
 
+@configuration_read
 def effective(cwd, pr=None):
     return load(identities(cwd, pr))
 

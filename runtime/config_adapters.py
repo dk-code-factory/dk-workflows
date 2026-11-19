@@ -262,12 +262,12 @@ def project(context, op, raw):
     return encode(value)
 
 
-def input_paths(context, operations):
+def input_paths(context, operations, *, bootstrap=False):
     """References only; discover live inherited settings and governing instructions."""
     paths = {Path(__file__), Path(__file__).with_name('config_requests.py')}
     root = Path(__file__).resolve().parents[1]
     paths.update(root/name for name in ('DESIGN.md', 'AGENTS.md', 'docs/configuration-agent.md',
-                 'docs/configuration-requests.md', 'docs/configuration.md', 'docs/preferences.md', 'docs/instruction-sources.md',
+                 'docs/configuration-requests.md', 'docs/configuration-upgrades.md', 'docs/configuration.md', 'docs/preferences.md', 'docs/instruction-sources.md',
                  'docs/skill-configuration.md', 'docs/pr/configuration.md', 'docs/commit-policy.md',
                  'docs/invocations.md', 'docs/private-reporting.md', 'scripts/config.py', 'scripts/pr_config.py',
                  'scripts/preferences.py', 'scripts/config_requests.py'))
@@ -284,7 +284,8 @@ def input_paths(context, operations):
     checkout = instruction_sources.root(requested_checkout)
     selection = next((op for op in operations if op['domain'] == 'instruction-sources'), None)
     saved = (instruction_sources.envelope(context['repository'], selection.get('value')) if selection else
-             instruction_sources.load(context['repository']))
+             (instruction_sources.bootstrap_load(context['repository']) if bootstrap else
+              instruction_sources.load(context['repository'])))
     paths.add(instruction_sources.policy_path(context['repository']))
     paths.add(root/'runtime/instruction_sources.py')
     paths.add(root/'scripts/instruction_sources.py')
@@ -315,7 +316,7 @@ def validate_observed(context, op, raw):
     domain = op['domain']
     value = json.loads(raw) if domain != 'completion' else raw
     if domain == 'instruction-sources':
-        instruction_sources.load(context['repository'])
+        instruction_sources.validate_saved(context['repository'], value)
     elif domain in {'workflow', 'skill', 'behavior'}:
         config.validate(value)
     elif domain == 'preferences':

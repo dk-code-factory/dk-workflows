@@ -1754,3 +1754,101 @@ are the requested durable configuration itself. Freshness ends at changed consum
 behavior, governing contracts or relevant inputs. Offline reuse, partial recovery,
 role invalidation and uncertain-write tests establish behavior; native API dollar
 savings remain unmeasured.
+
+## Configuration layout upgrades from saved intent
+
+The declared configuration layout revision is independent of package releases.
+Revision 1 freezes the existing layout as baseline, including historical records
+without a revision. Installation and unchanged reads create no upgrade history.
+Future deliberate revision changes gate configuration consumption before ordinary
+workflow execution. The existing session reserves one upgrade, delegates its native
+configuration-only assignment, applies admitted typed operations, reloads settings
+and resumes the original workflow with its original permissions. Helpers never
+launch model sessions. Unsupported newer layouts, corrupt evidence, invalid
+bootstrap behavior or unavailable native delegation leave affected work incomplete.
+
+The same private configuration history owns upgrade requests. A target revision,
+minimal scope selectors, a checkout-identity fingerprint, a claim token and
+native-agent binding prevent competing
+paid interpretations and uncertain duplicate delegation. There is one active
+upgrade per history because user settings span repositories. Short history locks
+serialize reservations and writes; configuration consumers hold shared read locks
+through their complete read and check the upgrade barrier. Existing request writers
+check the same barrier, including previously prepared requests. Ordinary baseline
+reads without history have no filesystem side effects. Unaffected installations
+continue reading. Within an affected history, v1 conservatively gates all scoped
+reads, since every effective workflow can inherit user configuration.
+
+Ownership has no timeout. Only reconciled native terminal evidence (or proof that
+an unbound reservation never started) permits token rotation. Retain that original
+evidence reference with the binding; stale owners cannot assess, clarify, cancel
+or write. Fresh sessions inspect compact request status and targeted ownership,
+sources, original asks or receipts. Uncertain delegation remains incomplete until
+reconciled. The existing host owns evidence truth; helpers enforce its required
+shape and binding without pretending to prove native execution.
+
+Active setting decisions are computed from original applied records, successful
+setting replacements/narrowings and prior translation lineage. Superseded masks
+prevent partial asks from restoring obsolete portions. Removals remain active
+decisions; scoped exceptions retain broader asks. Native assessment covers all
+active asks in user/current-repository/current-PR scopes and inherited upstream
+context. Unexplained recorded/current-value conflicts require clarification.
+Prior applied clarification references remain discoverable without copying answers
+or repeating questions; native admission still checks their subject and conditions.
+Preserve unrecorded settings with clear meaning; ambiguous intent or unsupported
+settings require a sourced decision. Incompatible upstream stores require their
+own checkout. Bootstrap resolves just the configuration role and controls, rather
+than requiring the complete obsolete settings to pass the new validator. Known
+revision-1 instruction selections retain their baseline discovery semantics during
+bootstrap even when the target validator rejects their mode. This preserves
+exclusions without resetting the policy; unknown or invalid bootstrap selection
+remains blocked. Inferred parent-domain stores join explicit upstream inputs.
+
+Validated proposals retain sparse changes in existing request operations.
+Lineage links each active source decision to translated leaves, a preserved
+source or a sourced retirement. Existing readback receipt namespaces identify
+original domain store owners, including baseline records without owner metadata.
+Match their stable namespace and filename against current scoped stores, without
+resolving a removed checkout or reading arbitrary historical paths. No duplicate
+owner field is saved.
+
+Revision receipts distinguish workflow, domain-store and CI owners when scope
+identities differ, avoiding false coverage of an untouched store. Pure workflow
+and instruction-policy reads need only their workflow receipt; the global active
+upgrade barrier still protects every consumer.
+
+Skill and behavior reads also require the repository domain receipt for the
+legacy stores they consume. A different checkout namespace cannot supply that
+receipt; use the owning checkout when it is missing.
+
+CI identity and explicit-chain policy readers check the stores they select,
+including nested calls. Ordinary readers retain their shared lock while nested
+readers check admission; only request-evidence reads bypass admission. Readiness
+reuse lasts one outer read and is invalidated on exit, including copied execution
+contexts. It creates no durable state and never carries into another command.
+The reservation fingerprint blocks paid reassessment under a changed
+checkout namespace; restore that identity for recovery or cancel before any
+write. Its small load/validation cost is expected to be lower than another
+native assessment and uncertain-store reconciliation. It stays valid only for
+that original identity. New migration leaves retain original ask references;
+migration is never a new user preference. Historical requests remain immutable
+and never replay completed writes. Existing intent-before-write, original
+before/after hashes, locks and readback receipts preserve completed siblings and
+reconcile partial application. Recovery never overwrites unexpected values.
+Completed upgrade requests supply per-scope revision receipts without a separate
+index.
+
+Expected avoided API cost is one semantic interpretation per valid upgrade,
+no competing analyses and targeted recovery in the next fresh session. The small
+revision/claim/binding, lineage, existing sparse operation and receipt fields avoid
+reconstructing original choices and uncertain writes; their expected avoided paid
+interpretation exceeds their creation, validation, loading and explanation cost.
+No copied asks, conversations, configuration snapshots, derived status registry,
+telemetry or migration database is added. Freshness binds relevant current store
+values, active source decisions and clarifications, schemas/defaults, consumed
+behavior and applicable governing instructions. Changed inputs refresh affected
+admission; partial recovery preserves original operations, lineage and receipts.
+Existing review keys/results, siblings, budgets and publication recovery stay
+intact. Current authorization, publication and CI checks remain live. Offline
+reuse/concurrency/recovery tests are proxies; measured native API dollar savings
+are unavailable and are not inferred from process counts.

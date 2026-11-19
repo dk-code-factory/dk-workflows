@@ -1,4 +1,5 @@
 """Read selected settings once; preserve domain precedence and legacy addresses."""
+from config_upgrades import configuration_read
 import hashlib
 from pathlib import Path
 
@@ -27,6 +28,7 @@ def domain_path(domain, key):
     return folder/(domain + '.json')
 
 
+@configuration_read(workflow_only=True, domain_chain=True)
 def domain_load(domain, chain, scope='effective'):
     if domain == 'commit-policy':
         return commit_policy.load(chain, scope)
@@ -59,6 +61,7 @@ def domain_load(domain, chain, scope='effective'):
     return {'value': None, 'source': 'default'}
 
 
+@configuration_read
 def load_sections(repository, *, checkout='.', pr=None, upstream=None, sections=('workflow',)):
     if (not isinstance(sections, (list, tuple)) or not sections
             or any(section not in SECTIONS for section in sections) or len(set(sections)) != len(sections)):

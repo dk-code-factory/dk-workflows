@@ -1,5 +1,7 @@
 # Configuration requests
 
+Before workflow configuration consumption, follow [automatic layout upgrades](configuration-upgrades.md). Baseline reads create no upgrade history; only declared layout changes require native reinterpretation. Retain the original workflow permissions through upgrade and resume.
+
 Saved changes enter through `dk-workflows:dk-config` and its [dedicated native agent](configuration-agent.md). `dk-preferences` sends mutations through the same agent while retaining its preference admission rules. Inspection/explanation use a transient native configuration agent without a request ID; ordinary workflows use direct read helpers. Neither creates history.
 
 Request history lives in a private local Git repository at `${XDG_STATE_HOME:-~/.local/state}/dk-workflows/v2/configuration-history`, outside plugin/working repositories, with no remote. Live configuration stays in its existing stores. Exact asks, necessary clarification excerpts, typed operations, setting-level before/after changes, assessment fingerprints and write receipts avoid repeated admission and uncertain writes after interruption. Full transcripts, effective configuration snapshots and review caches are not copied here. Existing legacy values remain valid with unknown original intent.

@@ -1,4 +1,5 @@
 """Persistent, user-authored partition preferences for one canonical base PR."""
+from config_upgrades import configuration_read
 import copy
 import json
 from pathlib import Path
@@ -93,6 +94,7 @@ def validate(value, pr):
     return value
 
 
+@configuration_read
 def load(pr):
     canonical, _ = identity(pr)
     target = path(canonical)

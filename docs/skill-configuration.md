@@ -1,5 +1,7 @@
 # Skill-owned configuration
 
+Before workflow configuration consumption, follow [automatic layout upgrades](configuration-upgrades.md). Baseline reads create no upgrade history; only declared layout changes require native reinterpretation. Retain the original workflow permissions through upgrade and resume.
+
 Saved mutations use the [dedicated configuration agent](configuration-agent.md) and [request history](configuration-requests.md). Every saved-write command requires `--request-id ID` bound to its exact prepared operation; read commands are unchanged.
 
 Every bundled skill owns `config.json` (explicit bundled defaults) and `config.schema.json` (its accepted options) beside `SKILL.md`. Codex is the maintained source; `scripts/sync_skills.py` copies all three files into Claude's distribution. Empty configuration objects are intentional for skills without domain options. Shared invocation fields stay in [the invocation schema](../schemas/invocation.schema.json).

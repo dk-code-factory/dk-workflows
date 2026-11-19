@@ -1,4 +1,5 @@
 """Commit policy settings and captured native-provider handoffs; no execution."""
+from config_upgrades import configuration_read
 import hashlib
 import re
 from pathlib import Path
@@ -35,6 +36,7 @@ def path(key):
     return folder/'commit-policy.json'
 
 
+@configuration_read(workflow_only=True, domain_chain=True)
 def load(chain, scope='effective', *, options=None):
     if scope not in {'effective', 'repo', 'user'}:
         raise ValueError('Commit policy scope must be effective, repo or user')

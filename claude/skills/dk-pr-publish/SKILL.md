@@ -5,6 +5,8 @@ description: Publish prepared PR changes, replies, reviews and authorized merges
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
+Before workflow configuration consumption, follow [automatic configuration upgrades](../../../docs/configuration-upgrades.md). Resume the original workflow with its permissions after an upgrade; ordinary baseline reads require no delegation.
+
 Before repository guidance reads or handoffs, follow [repository instruction sources](../../../docs/instruction-sources.md). Follow all discovered repository instructions by default, or the saved explicit source override; preserve host instruction priority. Do not ask for a source choice or require onboarding to use the default.
 
 For feedback reply actions, apply the [reply instruction boundary](../../../docs/pr/feedback-responses.md#reply-instruction-boundary) instead: do not adopt or reintroduce repository agent instructions into reply preparation or publication. Preserve the bundled quote/answer body and original source through handoffs and recovery.

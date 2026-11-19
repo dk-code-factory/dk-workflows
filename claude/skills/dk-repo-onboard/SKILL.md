@@ -5,6 +5,8 @@ description: Onboard a repository by discovering instruction sources and reporti
 
 Read and obey [private workflow reporting](../../../docs/private-reporting.md), the paramount package-wide rule for public text and private user reports.
 
+Before workflow configuration consumption, follow [automatic configuration upgrades](../../../docs/configuration-upgrades.md). Resume the original workflow with its permissions after an upgrade; ordinary baseline reads require no delegation.
+
 Follow [repository instruction sources](../../../docs/instruction-sources.md) before adopting repository guidance; preserve host instruction priority. Follow all discovered repository instructions by default, or the saved explicit source override. Do not ask which instructions to follow, save a default choice or require configuration-agent delegation for discovery.
 
 Persist workflow state only when it reduces total API dollar cost, including the next run in a new session; follow [state admission](../../../DESIGN.md#objective-and-state-admission).

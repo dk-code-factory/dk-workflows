@@ -3,6 +3,7 @@
 Semantic admission and conditional applicability belong to native agents. Nothing
 in this module ranks instructions or infers contradictions.
 """
+from config_upgrades import configuration_read
 from copy import deepcopy
 import fcntl
 import fnmatch
@@ -129,6 +130,7 @@ def _owned(item, identity):
     return item['owner'] in ({'type': 'user'}, {'type': 'repo', 'repository': identity})
 
 
+@configuration_read
 def list_records(checkout):
     identity = repository(checkout)
     catalog = _read(checkout)
@@ -273,6 +275,7 @@ def task_paths(values):
     return sorted(result)
 
 
+@configuration_read
 def resolve(checkout, mode, paths):
     if mode not in MODES:
         raise ValueError('Unknown preference application mode')

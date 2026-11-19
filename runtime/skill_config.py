@@ -4,6 +4,7 @@ Schemas/defaults live with each maintained skill. Scoped overrides retain the
 existing private workflow files and domain stores. Runtime validation implements
 only the deliberately small schema vocabulary used by these option schemas.
 """
+from config_upgrades import configuration_read
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -153,10 +154,20 @@ def repository_key(cwd=None, pr=None):
     return repository(cwd or Path.cwd()).removeprefix('remote:')
 
 
+DOMAIN_SKILLS = {'dk-workflows:dk-pr-split': 'pr-size',
+                 'dk-workflows:dk-commit-split': 'commit-policy',
+                 'dk-workflows:dk-pr-fix': 'completion'}
+
+
+def reads_domain(values):
+    return values.get('domain', True) and values.get('skill') in DOMAIN_SKILLS
+
+
 def _domain_layer(skill, repository):
     """Read existing private domain records at their original scope and path."""
     identity = (repository if repository.startswith(('remote:', 'path:')) else 'remote:' + repository) if repository else 'user'
-    if skill == 'dk-workflows:dk-pr-split':
+    domain = DOMAIN_SKILLS.get(skill)
+    if domain == 'pr-size':
         from shared import pr_size
         path = pr_size.path(identity)
         if path.exists():
@@ -166,11 +177,11 @@ def _domain_layer(skill, repository):
                 raise ValueError('Malformed saved PR size policy: ' + str(path))
             return pr_size.validate(record['pr_size']), path
         return {}, path
-    if skill == 'dk-workflows:dk-commit-split':
+    if domain == 'commit-policy':
         import commit_policy
         path = commit_policy.path(identity)
         return ({'policy': commit_policy.validate(_read(path))} if path.exists() else {}), path
-    if skill == 'dk-workflows:dk-pr-fix':
+    if domain == 'completion':
         from settings import domain_path
         path = domain_path('completion', identity)
         if path.exists():
@@ -183,6 +194,7 @@ def _domain_layer(skill, repository):
     return {}, None
 
 
+@configuration_read(workflow_only=True, domain_repository=reads_domain)
 def effective(skill, repository=None, upstream=None, *, options=None, domain=True):
     import invocation
     from alternatives_compat import ISSUE, PR, alternatives_settings, skill as current_skill
@@ -280,7 +292,10 @@ def for_context(skill, *, cwd=None, pr=None, repository=None, upstream=None, opt
         key = key.removeprefix('remote:')
     if len(key.split('/')) == 2:
         key = os.environ.get('GH_HOST', 'github.com') + '/' + key
-    return effective(skill, key, upstream, options=options)
+    from config_upgrades import using_context
+    with using_context({'checkout': str(cwd or '.'), 'repository': key,
+                        **({'pr': pr} if pr else {}), **({'upstream': upstream} if upstream else {})}):
+        return effective(skill, key, upstream, options=options)
 
 
 def bind_options(spec, call, repository, upstream=None, *, raw_call=None):
@@ -337,6 +352,7 @@ def groups(plan, *, owner=None):
     return result
 
 
+@configuration_read
 def configured_call(value, repository=None, upstream=None):
     import invocation
     call = invocation.normalize(value)

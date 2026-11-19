@@ -1,1 +1,3 @@
 Interpret the exact configuration ask and necessary clarification excerpts. Compare effective settings and relevant earlier decisions, explain scope and sources, and prepare the smallest scoped edit satisfying the settled request. Inspect shipped behavior independently of any active override.
+
+For a reserved layout upgrade, reinterpret every active ask in the current scopes against current values and the target schema. Read targeted source references and superseded masks; preserve scoped exceptions and unrecorded settings with clear meaning. Return ambiguous intent and unexplained value conflicts for clarification. Record translation lineage without inventing a new preference. Follow the upgrade contract and current claim binding before admission or application.

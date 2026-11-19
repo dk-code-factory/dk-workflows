@@ -1,4 +1,5 @@
 """Repository instruction discovery with an all-source default and optional overrides."""
+from config_upgrades import configuration_read
 import hashlib
 import json
 import os
@@ -37,6 +38,11 @@ def relative(value):
 
 
 def validate(value):
+    return _baseline_policy(value)
+
+
+def _baseline_policy(value):
+    """Stable revision-1 source selection, including obsolete target modes."""
     if (not isinstance(value, dict) or set(value) != {'mode', 'include', 'exclude'}
             or value['mode'] not in {'human', 'all', 'custom'}):
         raise ValueError('Instruction policy requires mode human, all or custom and include/exclude lists')
@@ -55,15 +61,41 @@ def envelope(identity, value):
     return {'version': 1, 'repository': key(identity), 'policy': validate(value) if value is not None else None}
 
 
+@configuration_read(workflow_only=True)
 def load(identity):
     path = policy_path(identity)
     if not path.exists():
         return None
     value = json.loads(path.read_text())
+    return validate_saved(identity, value)
+
+
+def validate_saved(identity, value):
+    """Validate supplied bytes as well as live readbacks of a policy."""
     if (not isinstance(value, dict) or set(value) != {'version', 'repository', 'policy'}
             or type(value['version']) is not int or value['version'] != 1 or value['repository'] != key(identity)):
         raise ValueError('Malformed repository instruction policy')
     return envelope(identity, value['policy'])
+
+
+@configuration_read(workflow_only=True)
+def bootstrap_load(identity):
+    """Read known governing selection without requiring its target-layout schema."""
+    path = policy_path(identity)
+    if not path.exists():
+        return None
+    value = json.loads(path.read_text())
+    try:
+        return validate_saved(identity, value)
+    except ValueError:
+        if (not isinstance(value, dict) or set(value) != {'version', 'repository', 'policy'}
+                or type(value['version']) is not int or value['version'] != 1 or value['repository'] != key(identity)):
+            raise ValueError('Restore valid bootstrap instruction policy: ' + str(path))
+        try:
+            policy = _baseline_policy(value['policy']) if value['policy'] is not None else None
+        except ValueError as exc:
+            raise ValueError('Invalid or ambiguous bootstrap instruction policy: ' + str(path)) from exc
+        return {'version': 1, 'repository': key(identity), 'policy': policy}
 
 
 def effective_policy(saved):
@@ -129,6 +161,7 @@ def discover(checkout, policy=None):
     return sources
 
 
+@configuration_read(workflow_only=True)
 def inspect(checkout, identity=None):
     identity = identity or repository(checkout)
     checkout = root(checkout)
@@ -139,6 +172,7 @@ def inspect(checkout, identity=None):
             'sources': discover(checkout, policy), 'host_limitations': HOST_LIMITATIONS}
 
 
+@configuration_read(workflow_only=True)
 def read_source(checkout, source, *, discovery=False, identity=None):
     identity = identity or repository(checkout)
     checkout = root(checkout)
@@ -156,6 +190,7 @@ def read_source(checkout, source, *, discovery=False, identity=None):
     return {**found, 'adopted': found['selected'], 'text': (checkout/source).read_text()}
 
 
+@configuration_read(workflow_only=True)
 def binding(checkout, identity):
     saved = load(identity)
     policy = effective_policy(saved)
@@ -169,6 +204,7 @@ def binding(checkout, identity):
     return {'checkout': str(checkout), 'fingerprint': hashlib.sha256(encoded).hexdigest()}
 
 
+@configuration_read(workflow_only=True)
 def check_paths(checkout, identity, paths):
     context = inspect(checkout, identity)
     checkout = root(checkout)
