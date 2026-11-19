@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/dk-code-factory/dk-workflows/main/schemas/agent-context.schema.json",
+  "title": "Agent context document",
+  "description": "Proposed per-agent context document; see docs/agent-context.md. Standalone items returned by get-item use #/$defs/item.",
+  "type": "object",
+  "properties": {
+    "context": {"$ref": "#/$defs/context"},
+    "agent": {"type": "string", "minLength": 1},
+    "resolve": {"type": "string", "minLength": 1},
+    "subject": {
+      "type": "object",
+      "properties": {
+        "base": {"type": "string", "minLength": 1},
+        "head": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "task": {"$ref": "#/$defs/task"},
+    "instructions": {"$ref": "#/$defs/entries"},
+    "decisions": {"$ref": "#/$defs/entries"},
+    "permissions": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "required_reads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "$ref": {"$ref": "#/$defs/address"},
+          "reason": {"type": "string", "minLength": 1}
+        },
+        "required": ["$ref", "reason"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["context", "agent", "resolve", "task"],
+  "additionalProperties": false,
+  "$defs": {
+    "context": {
+      "type": "object",
+      "properties": {
+        "repo": {"type": "string", "pattern": "^[a-z0-9.-]+/[a-z0-9_.-]+/[a-z0-9_.-]+$"},
+        "pr": {"type": "integer", "minimum": 1},
+        "run": {"type": "string", "pattern": "^[A-Za-z0-9._~:@+-]+$"}
+      },
+      "required": ["repo"],
+      "dependentRequired": {"run": ["pr"]},
+      "additionalProperties": false
+    },
+    "address": {
+      "description": "Canonical (leading /) or packed address, optionally followed by # and an RFC 6901 pointer.",
+      "type": "string",
+      "anyOf": [
+        {"pattern": "^/(task|instruction|decision|evidence|schema)/(global|repo/[a-z0-9.-]+/[a-z0-9_.-]+/[a-z0-9_.-]+|pr/[a-z0-9.-]+/[a-z0-9_.-]+/[a-z0-9_.-]+/[1-9][0-9]*|run/[a-z0-9.-]+/[a-z0-9_.-]+/[a-z0-9_.-]+/[1-9][0-9]*/[A-Za-z0-9._~:@+-]+)(/[A-Za-z0-9._~:@+-]+)+(#(/([^/~]|~[01])*)*)?$"},
+        {"pattern": "^(task|instruction|decision|evidence|schema)/(global|repo|pr|run)(/[A-Za-z0-9._~:@+-]+)+(#(/([^/~]|~[01])*)*)?$"}
+      ]
+    },
+    "reference": {
+      "description": "A reference, optionally with copied sibling fields (a partial copy).",
+      "type": "object",
+      "properties": {
+        "$ref": {"$ref": "#/$defs/address"},
+        "truncated": {"const": true}
+      },
+      "required": ["$ref"],
+      "dependentRequired": {"truncated": ["text"]}
+    },
+    "entry": {
+      "anyOf": [
+        {"$ref": "#/$defs/reference"},
+        {"$ref": "#/$defs/item"}
+      ]
+    },
+    "entries": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/entry"}
+    },
+    "item": {
+      "description": "A complete standalone item.",
+      "type": "object",
+      "properties": {
+        "$id": {"$ref": "#/$defs/address"},
+        "kind": {"enum": ["instruction", "decision", "evidence"]},
+        "scope": {"enum": ["global", "repo", "pr", "run"]},
+        "source": {"$ref": "#/$defs/reference"}
+      },
+      "required": ["$id", "kind", "scope", "source"],
+      "not": {"required": ["$ref"]}
+    },
+    "task": {
+      "type": "object",
+      "properties": {
+        "$id": {"$ref": "#/$defs/address"},
+        "instruction": {"type": "string", "minLength": 1},
+        "checks": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "sources": {"type": "array", "items": {"$ref": "#/$defs/entry"}},
+        "paths": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "output": {
+          "type": "object",
+          "properties": {
+            "report": {"$ref": "#/$defs/reference"},
+            "must_include": {"type": "array", "items": {"type": "string", "minLength": 1}}
+          },
+          "additionalProperties": false
+        },
+        "execution": {"type": "object"}
+      },
+      "required": ["$id", "instruction"],
+      "additionalProperties": false
+    }
+  }
+}

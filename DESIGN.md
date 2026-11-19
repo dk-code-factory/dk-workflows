@@ -695,6 +695,16 @@ remains the existing claim, inputs, resources/version and requirements binding;
 changed governing inputs stale affected work without discarding siblings, claims,
 budgets or original results. Native API dollar savings have not been measured.
 
+## Proposed shared agent context
+
+[Agent context](docs/agent-context.md) proposes one JSON document per agent:
+governing instructions, decisions and the task are inlined, evidence is a `$ref`
+read on demand through `get-item`. Addresses reuse existing owner identities
+under `/{kind}/{scope}/{owner…}/{name}` and are packed relative to the
+document's repository, PR and run. Reads are served only while their backing
+source matches the claim's captured hash, so no revision store or new durable
+state is introduced. Native API dollar savings are unmeasured.
+
 ## Acceptance
 
 - An unchanged task prepared from a new process reuses its original result and
