@@ -107,6 +107,8 @@ def collect(database, roots):
     This returns accounting evidence, not a workflow coverage/quality verdict.
     """
     graph = host_graph(database, roots)
+    # Validate copied response identities across traces before filtering ownership.
+    native_usage.read_records([node['rollout'] for node in graph.values()])
     summaries, response_ids, buckets = {}, set(), {}
     for thread, node in graph.items():
         path = Path(node['rollout'])
@@ -116,10 +118,17 @@ def collect(database, roots):
         if node['parent'] is not None:
             observations.require(meta.get('parent_thread_id') == node['parent'],
                                  'Host rollout parent mismatch')
+        ancestors = {}
+        parent = node['parent']
+        while parent is not None:
+            ancestors[parent] = [turn['turn_id'] for turn in summaries[parent]['turns']]
+            parent = graph[parent]['parent']
+        rows, _ = observations.own_thread_rows(rows, thread, ancestors=ancestors)
         turns = [row['payload']['turn_id'] for row in rows if row['type'] == 'event_msg'
                  and row['payload'].get('type') == 'task_started']
         observations.require(bool(turns), 'Host thread has no started turn')
-        result = observations.collect_thread(path, thread, expected_turns=turns)
+        result = observations.collect_thread(path, thread, expected_turns=turns,
+                                             ancestors=ancestors)
         ids = set(result['response_ids'])
         observations.require(not response_ids.intersection(ids), 'Response charged twice')
         response_ids.update(ids)

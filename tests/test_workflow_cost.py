@@ -1,5 +1,6 @@
 """Complete accounting needs host descendants, terminal turns and actual controls."""
 from copy import deepcopy
+import hashlib
 import json
 import sqlite3
 
@@ -100,6 +101,141 @@ def test_copied_parent_usage_is_not_charged_again_in_child(tmp_path):
     result = workflow_cost.collect(database, {'initial': 'workflow-initial'})
     assert result['response_count'] == 6
     assert result['workflow_cost_usd'] == '0.0027'
+
+
+def copied_parent_fixture(tmp_path):
+    """Replay the host fork shape, including an unfinished parent turn."""
+    database = host(tmp_path)
+    traces = {}
+    for thread in ('initial', 'reviewer'):
+        path = tmp_path/(thread+'.jsonl')
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        for row in rows:
+            payload = row['payload']
+            if 'turn_id' in payload:
+                payload['turn_id'] = thread+'-turn'
+            if 'root_turn_id' in payload:
+                payload['root_turn_id'] = thread+'-turn'
+        path.write_text('\n'.join(map(json.dumps, rows))+'\n')
+        traces[thread] = rows
+    prefix = [deepcopy(row) for row in traces['initial'] if row['type'] != 'token_usage_record'
+              and not (row['type'] == 'event_msg' and row['payload'].get('type') in
+                       ('thread_settings_applied', 'task_complete', 'token_count'))]
+    # The host re-stamps copied records; time alone cannot identify foreign work.
+    for row in prefix:
+        row['timestamp'] = '2026-11-18T23:15:06.727Z'
+    child = traces['reviewer']
+    rows = [child[0], *prefix, child[2], child[3], child[1], *child[4:]]
+    return database, rows
+
+
+def test_copied_active_parent_prefix_preserves_every_own_response_and_raw_evidence(tmp_path):
+    database, rows = copied_parent_fixture(tmp_path)
+    path = tmp_path/'reviewer.jsonl'
+    raw = ('\n'.join(map(json.dumps, rows))+'\n').encode()
+    path.write_bytes(raw)
+    result = workflow_cost.collect(database, {'initial': 'workflow-initial'})
+    assert result['telemetry_complete'] and result['response_count'] == 6
+    assert result['workflow_cost_usd'] == '0.0027'
+    child = result['threads']['reviewer']
+    assert child['turns'][0]['turn_id'] == 'reviewer-turn'
+    assert child['response_ids'] == ['reviewer-response-'+str(i) for i in range(1, 4)]
+    assert child['raw_rollout_sha256'] == hashlib.sha256(raw).hexdigest()
+    assert path.read_bytes() == raw
+
+
+@pytest.mark.parametrize('conflicting', [False, True])
+def test_copied_ancestor_response_identity_is_checked_before_ownership_filtering(tmp_path, conflicting):
+    database, rows = copied_parent_fixture(tmp_path)
+    parent = [json.loads(line) for line in (tmp_path/'initial.jsonl').read_text().splitlines()]
+    copied = deepcopy(next(row for row in parent if row['type'] == 'token_usage_record'))
+    if conflicting:
+        copied['payload']['usage'] = usage(2)
+    rows.insert(2, copied)
+    (tmp_path/'reviewer.jsonl').write_text('\n'.join(map(json.dumps, rows))+'\n')
+    if conflicting:
+        with pytest.raises(ValueError, match='Conflicting duplicate response'):
+            workflow_cost.collect(database, {'initial': 'workflow-initial'})
+    else:
+        result = workflow_cost.collect(database, {'initial': 'workflow-initial'})
+        assert result['response_count'] == 6 and result['workflow_cost_usd'] == '0.0027'
+
+
+def test_nested_fork_prefix_is_corroborated_against_all_original_ancestors(tmp_path):
+    database, parent = copied_parent_fixture(tmp_path)
+    (tmp_path/'reviewer.jsonl').write_text('\n'.join(map(json.dumps, parent))+'\n')
+    path = tmp_path/'leaf.jsonl'
+    own = write_trace(path, 'leaf', 'reviewer')
+    for row in own:
+        payload = row['payload']
+        if 'turn_id' in payload:
+            payload['turn_id'] = 'leaf-turn'
+        if 'root_turn_id' in payload:
+            payload['root_turn_id'] = 'leaf-turn'
+    prefix = [row for row in parent if row['type'] != 'token_usage_record'
+              and not (row['type'] == 'event_msg' and row['payload'].get('type') in
+                       ('thread_settings_applied', 'task_complete', 'token_count'))]
+    path.write_text('\n'.join(map(json.dumps,
+        [own[0], *prefix, own[2], own[3], own[1], *own[4:]]))+'\n')
+    with sqlite3.connect(database) as db:
+        db.execute('INSERT INTO threads VALUES (?,?)', ('leaf', str(path)))
+        db.execute('INSERT INTO thread_spawn_edges VALUES (?,?)', ('reviewer', 'leaf'))
+    result = workflow_cost.collect(database, {'initial': 'workflow-initial'})
+    assert result['thread_count'] == 3 and result['response_count'] == 9
+    assert result['workflow_cost_usd'] == '0.0036'
+
+
+@pytest.mark.parametrize('mutation', ['unknown-parent', 'unknown-turn', 'own-usage', 'counter',
+                                      'missing-settings', 'late-ancestor', 'missing-usage',
+                                      'missing-terminal'])
+def test_copied_prefix_cannot_hide_uncorroborated_or_missing_evidence(tmp_path, mutation):
+    database, rows = copied_parent_fixture(tmp_path)
+    if mutation == 'unknown-parent':
+        rows[1]['payload']['id'] = 'unknown-parent'
+    elif mutation == 'unknown-turn':
+        rows[2]['payload']['turn_id'] = 'not-in-parent-trace'
+    elif mutation == 'own-usage':
+        rows.insert(2, deepcopy(next(row for row in rows if row['type'] == 'token_usage_record')))
+    elif mutation == 'counter':
+        rows.insert(2, deepcopy(next(row for row in rows if row['type'] == 'event_msg'
+                                    and row['payload'].get('type') == 'token_count')))
+    elif mutation == 'missing-settings':
+        rows = [row for row in rows if not (row['type'] == 'event_msg' and
+                                            row['payload'].get('type') == 'thread_settings_applied')]
+    elif mutation == 'late-ancestor':
+        rows.append({'type': 'event_msg', 'payload': {'type': 'task_started',
+                                                     'turn_id': 'initial-turn'}})
+    elif mutation == 'missing-usage':
+        rows = [row for row in rows if not (row['type'] == 'token_usage_record' and
+                                            row['payload']['response_id'] == 'reviewer-response-2')]
+    elif mutation == 'missing-terminal':
+        rows.pop()
+    (tmp_path/'reviewer.jsonl').write_text('\n'.join(map(json.dumps, rows))+'\n')
+    with pytest.raises(ValueError):
+        workflow_cost.collect(database, {'initial': 'workflow-initial'})
+
+
+def test_copied_parent_prefix_keeps_fresh_followup_turns_and_cumulative_cost(tmp_path):
+    database, rows = copied_parent_fixture(tmp_path)
+    followup = seed()
+    for row in followup:
+        payload = row['payload']
+        if 'turn_id' in payload:
+            payload['turn_id'] = 'reviewer-followup'
+        if row['type'] == 'token_usage_record':
+            payload.update(thread_id='reviewer', session_id='reviewer',
+                           root_turn_id='reviewer-followup')
+            payload['response_id'] = 'followup-'+payload['response_id']
+        if row['type'] == 'event_msg' and payload.get('type') == 'token_count':
+            count = payload['info']['total_token_usage']['input_tokens']//100
+            payload['info']['total_token_usage'] = usage(count+3)
+        if row['type'] == 'event_msg' and payload.get('type') == 'thread_settings_applied':
+            payload['thread_settings']['service_tier'] = 'fast'
+    rows.extend(followup)
+    (tmp_path/'reviewer.jsonl').write_text('\n'.join(map(json.dumps, rows))+'\n')
+    result = workflow_cost.collect(database, {'initial': 'workflow-initial'})
+    assert result['response_count'] == 9 and result['workflow_cost_usd'] == '0.0045'
+    assert len(result['threads']['reviewer']['turns']) == 2
 
 
 def test_missing_cache_duration_or_unknown_prices_stay_incomplete(tmp_path):

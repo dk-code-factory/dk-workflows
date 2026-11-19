@@ -59,6 +59,30 @@ arm or authorize rerunning it. Ordinary tests use synthetic host records and loc
 transports only. Helpers neither launch model sessions nor manufacture native
 completion. No measured savings follow from the fixture implementation alone.
 
+The test reader may exclude a copied ancestor event prefix only when the host
+graph, original parent identity and already validated ancestor turn inventories
+corroborate it, with no own usage or counter evidence before the child's settings
+boundary. Replayed timestamps do not prove ownership. Filtering is transient;
+original hashes, all own turns and independent response/terminal checks remain
+required. Re-account retained raw observations after a reader correction instead
+of repeating paid native work, preserving the original failure and identifying
+the corrected reader source. No normalized transcript or production state is
+added. Existing original-evidence references provide the avoided reconstruction
+and trial cost benefit within their unchanged freshness boundary.
+
+Public measurement artifacts may retain pseudonymous graph identities, original
+trace hashes, actual per-turn controls and per-response token vectors. These are
+opt-in report data, never default workflow state or copied transcripts. An offline
+verifier checks every price, unique response and closed graph without needing
+private conversations, account identities or publication journals. Keeping these
+small pricing inputs lets later sessions audit prices with one offline command,
+avoiding repeated model consumption of private host histories and reconstruction
+of response ownership and pricing controls. Original trials are never repeated
+for repricing. Original host evidence, frozen conditions and independent
+quality judgments remain separate requirements; arithmetic verification cannot
+establish them. Changed raw evidence or pricing invalidates the affected report,
+while preserving its original result and requiring no repeated native analysis.
+
 Fork-CI approval binds reviewed source coverage to the current PR head and live
 target branch tip. The PR REST base SHA may be historical; retain it in the
 existing context and match workflow-run base metadata to that SHA, alongside

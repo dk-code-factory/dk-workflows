@@ -73,6 +73,15 @@ findings and complete selected-stage evidence, rather than trust a coordinator's
 `complete` flag. A lower bill cannot compensate for a missed finding, skipped
 finalizer, stale coverage or weakened authorization/publication checks.
 
+`tests/fixtures/workflow_native_evidence.py` corroborates original driver markers
+against native host command records. It reads only the accounted thread's own
+turns and requires the same host graph and original trace hashes. Whole shell
+command status stays separate from a driver's individual exit: a multi-command
+script's successful exit does not prove every command ran or succeeded. The
+helper returns observations for independent assessment, with no quality verdict,
+native dispatch or new workflow state. Finding recall, dispositions and complete
+selected-stage coverage still require their original evidence.
+
 The immutable exercise protocol selects four phases: initial execution with an
 incomplete simplifier, fresh recovery, unchanged fresh-session reuse, and relevant
 invalidation. A mutable external dispatch marker schedules these phases; it is
@@ -103,12 +112,40 @@ advancing cumulative counters, actual model/effort/tier and original terminal
 output. Copied parent usage is not charged again in a child. Reasoning is already
 part of output and is charged once.
 
+Forked host traces can also replay an unfinished parent's start and context before
+the child's first settings event, with every copied event re-stamped at child
+creation. The reader corroborates the immediate parent and every copied turn
+against the host graph and already validated ancestor traces. It excludes that
+prefix only in memory, rejecting own or unknown usage, counters, unknown turns
+and missing settings boundaries. Original trace hashes and the excluded row count
+remain available; no normalized transcript is stored. All own follow-up turns,
+response inventories, terminal checks and cumulative deltas still apply. A reader
+correction may re-account preserved raw evidence without repeating native work;
+retain the original reader's failure and identify the corrected reader revision.
+
 Price each response with the observed model, service tier and context size. The
 existing rate card covers GPT-6.1 Sol's fresh input, cache reads, cache writes,
 output, tier multipliers and whole-response long-context surcharge. The native
 reader rejects nonzero cache writes without independently observed duration.
 Unknown prices or duration, missing descendants or incomplete response inventories
 make the comparison inconclusive. API-equivalent estimates are not account billing.
+
+`tests/fixtures/workflow_ledger.py` exports opt-in JSONL pricing data only after
+the strict native reader accepts the closed host forest. One scope header and one
+record per thread retain pseudonymous parent/response identities, original trace
+hashes, per-turn controls and compact per-response token vectors. No transcript,
+private path, account identity or publication journal is exported. The five usage
+columns are input, cache-read input, cache-write input, output and reasoning output;
+reasoning is a subset of output. Inventory checksums, graph membership,
+bucket totals and the frozen rate card constrain verification of every response.
+
+Run `python3 tests/fixtures/workflow_ledger.py verify REPORT.jsonl` to reproduce
+the arithmetic offline without host database access, GitHub or a model request.
+The verifier checks prices and inventory consistency. It does not authenticate
+the original host observations, evaluate finding quality, establish equivalent
+frozen conditions or include experiment orchestration. Those remain explicit
+parts of the report and its original evidence. Export creates a new file and
+refuses to overwrite an existing report; retain every earlier outcome.
 
 Combine recurring initial and recovery costs, including preparation, evidence
 loading, coordination, waiting, all descendants and terminal reporting. Keep
