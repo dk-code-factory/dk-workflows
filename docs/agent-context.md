@@ -110,9 +110,10 @@ of `task.id`, and expands against them:
 dk.py get-item --task /task/pr/github.com/acme/project/42/fix-retry-count evidence/pr/ci-2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6#/events
 ```
 
-The helper finds the task entry from `task.id`, uses its active claim's captured
-inputs, and resolves Git evidence against the subject that claim captured. This
-command is documented once in skill guidance, not repeated in documents.
+Task keys also cover skill and options, so the helper finds the task entry by
+the active claim for `task.id`, uses that claim's captured inputs, and resolves
+Git evidence against the subject that claim captured. This command is documented
+once in skill guidance, not repeated in documents.
 Outcomes other than the item itself:
 
 | Outcome | When |
@@ -120,8 +121,8 @@ Outcomes other than the item itself:
 | `not_found` | No item has this address, or the pointer selects nothing. |
 | `not_in_context` | The item's backing source is not among the claim's captured inputs. |
 | `recheck` | The backing source changed after the claim captured it. |
-| `too_large` | The selected value exceeds the bound; keys and sizes are returned instead. |
-| `ambiguous` | `task.id` matches more than one task entry, such as the same id under two skills. |
+| `too_large` | The selected value exceeds the helper's fixed response limit; keys and sizes are returned instead. |
+| `ambiguous` | More than one active claim has this `task.id`, such as the same task under two skills. |
 
 `get-item` is read-only. It never claims, publishes, grants authority or launches
 models. `evidence/pr/result-…` addresses are read through the existing validated
