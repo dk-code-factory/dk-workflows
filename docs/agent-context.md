@@ -132,10 +132,9 @@ claim is no longer active.
 Freshness is unchanged: the document is a projection of the existing task
 definition. Every `governing` address must already be a captured governing input,
 and every `material` and `evidence` address must already be a captured input. The
-builder adds no inputs, so task keys and fingerprints stay byte-identical.
-`get-item` serves an item only while its backing source matches the captured
-hash; on `recheck` the coordinator refreshes the task through the existing path,
-and unchanged siblings stay reusable.
+builder adds no inputs, so task keys and fingerprints stay byte-identical. On
+`recheck` the coordinator refreshes the task through the existing path, and
+unchanged siblings stay reusable.
 
 ## Owner mapping
 
@@ -156,6 +155,10 @@ and unchanged siblings stay reusable.
 | CI flakes | `evidence/repo/flake-<entry-key>` |
 | CI observations | `evidence/pr/ci-<observation-id>` |
 | Publication receipts | `evidence/pr/publication-<operation-id>` |
+
+A finding index is stable while the result matches its captured hash: recorded
+result files are immutable, and checklist follow-ups only append findings after
+the primary ones. Re-recording the task replaces the result and yields `recheck`.
 
 Drafting selections choose an invocation; its `instructions` arrive as
 `instruction/run/additional`. Configuration requests, claims, budgets and
