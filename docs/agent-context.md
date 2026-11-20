@@ -13,8 +13,9 @@ settled, conflicts follow existing native judgment and
 
 Each agent receives one JSON document that says what it must do and what governs
 it. What the task always needs is inlined. Optional reading is listed by address
-and fetched on demand. Agents in one run start their documents with the same
-bytes, so the governing part can be served from the prompt cache.
+and fetched on demand. Agents in one run with the same governing inputs start
+their documents with the same bytes, so that part can be served from the prompt
+cache.
 
 The document contains only what the agent acts on. Anything a helper can derive
 from the task (repository, PR, run, subject, task key, claim, skill version,
@@ -25,11 +26,12 @@ permission lists and precedence rules.
 
 ## Document
 
-Sections appear in this order, from most widely shared to least:
+Items are keyed by [address](#addressing). Sections appear in this order, from
+most widely shared to least:
 
 | Section | Holds | Form | Same for |
 | --- | --- | --- | --- |
-| `governing` | Instructions and decisions | address → complete item | every agent in the run with the same exclusions |
+| `governing` | Instructions and decisions | address → complete item | every agent in the run with the same governing inputs |
 | `execution` | Required native review passes | pass roles | agents running the same skill |
 | `task` | `id`, `instructions`, `material` | complete | one task |
 | `evidence` | Optional reading | address → owner fields | one task |
