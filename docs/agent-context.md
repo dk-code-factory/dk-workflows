@@ -32,7 +32,7 @@ most widely shared to least:
 | Section | Holds | Form | Same for |
 | --- | --- | --- | --- |
 | `governing` | Instructions and decisions | address → complete item | every agent in the run with the same governing inputs |
-| `execution` | Required native review passes | pass roles | agents running the same skill |
+| `execution` | Required native review passes | pass roles | agents with the same applicable passes |
 | `task` | `id`, `instructions`, `material` | complete | one task |
 | `evidence` | Optional reading | address → owner fields | one task |
 
@@ -43,8 +43,9 @@ most widely shared to least:
 - `execution` appears only when the task's `native_review` declaration requires
   evidence and lists at least one pass. The skill version and driver commands
   stay with the helper that checks them.
-- `task.id` is the task's full address; `task.instructions` is the existing task
-  definition's `instructions`.
+- `task.id` is the task's full address; `task.instructions` is its existing
+  assigned instructions (`assigned_instructions` in a `prepare` definition, not
+  that definition's governing `instructions` map).
 - `evidence` maps an address to `{}` or to at most four scalar fields copied
   verbatim from the owner's item, such as a finding's location or a CI job name.
   These are hints; the agent reads the item before relying on it.
