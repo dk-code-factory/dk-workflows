@@ -34,18 +34,18 @@ Sections appear in this order, from most widely shared to least:
 | `task` | `id`, `instructions`, `material` | complete | one task |
 | `evidence` | Optional reading | address → owner fields | one task |
 
-- `governing` holds complete items exactly as their owners store them. Nothing is
-  truncated, summarized or partially copied. Every entry must already be a captured
-  governing input of the task.
+- `governing` and `task.material` hold complete items exactly as their owners
+  store them; nothing is truncated, summarized or partially copied. `material` is
+  what the task always needs, such as the finding being fixed or the feedback
+  being answered.
 - `execution` appears only when the task's `native_review` declaration has
-  `required: true`. It lists the role names of its passes. The skill version and
-  driver commands stay with the helper that checks them.
-- `task.id` is the task's full address. `task.instructions` is the existing task
-  definition's `instructions`. `task.material` holds complete owner items the task
-  always needs, such as the finding being fixed or the feedback being answered.
-- `evidence` maps an address to `{}` or to a few small fields copied verbatim from
-  the owner's stored item, such as a finding's location or a CI job name. These
-  are hints. The agent reads the item before relying on it.
+  `required: true`. The skill version and driver commands stay with the helper
+  that checks them.
+- `task.id` is the task's full address; `task.instructions` is the existing task
+  definition's `instructions`.
+- `evidence` maps an address to `{}` or to at most four scalar fields copied
+  verbatim from the owner's item, such as a finding's location or a CI job name.
+  These are hints; the agent reads the item before relying on it.
 - An item's kind and scope come from its address, so item bodies do not repeat
   them. Provenance stays with the owner; `get-item` returns it.
 
@@ -53,7 +53,7 @@ Sections appear in this order, from most widely shared to least:
 
 Prompt caching only matches identical bytes. The builder emits sections in the
 order above, sorts `governing` by scope (`global`, `repo`, `pr`, `run`) and then
-by address, and uses fixed separators. The order serves caching, not precedence.
+by full address, and uses fixed separators. The order serves caching, not precedence.
 A role that excludes some governing items, such as a reply writer without
 repository instruction files, gets its own prefix for that exclusion set.
 
@@ -81,8 +81,8 @@ kind     scope  name       optional JSON Pointer
 /task/run/github.com/acme/project/42/run-7/finalize
 ```
 
-Every other address in the document is short and expands against the owner
-segments of `task.id`:
+Every other address is written short when its owner matches the owner segments
+of `task.id`, and expands against them:
 
 | Scope | Short (task `/task/run/github.com/acme/project/42/run-7/…`) | Full |
 | --- | --- | --- |
@@ -109,9 +109,7 @@ dk.py get-item --task /task/pr/github.com/acme/project/42/fix-retry-count eviden
 The helper finds the task entry from `task.id`, uses its active claim's captured
 inputs, and resolves Git evidence against the subject that claim captured. This
 command is documented once in skill guidance, not repeated in documents.
-
-Without a pointer, an item larger than the bound returns its top-level keys and
-sizes instead of its body. Outcomes:
+Outcomes other than the item itself:
 
 | Outcome | When |
 | --- | --- |
@@ -131,7 +129,7 @@ claim is no longer active.
 
 ## Freshness
 
-Freshness is unchanged. The document is a projection of the existing task
+Freshness is unchanged: the document is a projection of the existing task
 definition. Every `governing` address must already be a captured governing input,
 and every `material` and `evidence` address must already be a captured input. The
 builder adds no inputs, so task keys and fingerprints stay byte-identical.
@@ -250,8 +248,7 @@ has its own governing prefix. The feedback it answers is inlined.
 ## State and cost
 
 This model adds no durable state. Documents are rendered in memory from existing
-task definitions and rendered again on `resume`. Addresses reuse existing owner
-identities. Task keys, fingerprints, original results, claims, budgets and
+task definitions and again on `resume`; original results, claims, budgets and
 publication intents are unchanged.
 
 The cost hypothesis has two parts. Agents in a run read the shared governing
