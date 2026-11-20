@@ -52,14 +52,6 @@ most widely shared to least:
   verbatim from the owner's item, such as a finding's location or a CI job name.
   These are hints; the agent reads the item before relying on it.
 
-### Byte stability
-
-Prompt caching only matches identical bytes. The builder emits sections in the
-order above, sorts `governing` by scope (`global`, `repo`, `pr`, `run`) and then
-by full address, and uses fixed separators. The order serves caching, not
-precedence. Run items are short only in run-scoped tasks, so PR- and run-scoped
-tasks in one run share the prefix up to the first run item.
-
 ## Addressing
 
 An address names one item:
@@ -105,6 +97,41 @@ of `task.id`, and expands against them:
 - The same name in different scopes identifies different items. Resolution never
   falls back from one scope to another.
 
+## Owner mapping
+
+| Owner | Address (short) |
+| --- | --- |
+| Preferences | `instruction/global/pref-…`, `instruction/repo/pref-…` |
+| Repository instruction sources | `instruction/repo/files/<path>` (the whole file) |
+| Rules, completion prompts | `instruction/repo/rules`, `instruction/repo/completion` and their `global` counterparts |
+| Run-only user asks | `instruction/run/<label>` |
+| Commit policy | `instruction/repo/commit-policy` |
+| Decision reconciliation | `decision/pr/…`, `decision/repo/…` |
+| Alternatives selections | `decision/pr/<inventory decision id>` |
+| CI exceptions | `decision/repo/ci-<hash16>`, `decision/global/ci-<hash16>` |
+| Task results and findings | `evidence/pr/result-<task-key>`; one finding is `…#/findings/<index>` |
+| Feedback threads and comments | `evidence/pr/thread-<node-id>`, `evidence/pr/comment-<database-id>` |
+| Git subject | `evidence/pr/diff`, `evidence/pr/files/<path>` |
+| CI flakes | `evidence/repo/flake-<entry-key>` |
+| CI observations | `evidence/pr/ci-<observation-id>` |
+| Publication receipts | `evidence/pr/publication-<operation-id>` |
+
+A finding index is stable while the result matches its captured hash: recorded
+result files are immutable, and checklist follow-ups only append findings after
+the primary ones. Re-recording the task replaces the result and yields `recheck`.
+
+Role behavior and invocation instructions (already in `task.instructions`) and
+bookkeeping (configuration requests, claims, budgets, checklist rounds) have no
+addresses.
+
+## Byte stability
+
+Prompt caching only matches identical bytes. The builder emits sections in
+[document](#document) order, sorts `governing` by scope (`global`, `repo`, `pr`, `run`) and then
+by full address, and uses fixed separators. The order serves caching, not
+precedence. Run items are short only in run-scoped tasks, so PR- and run-scoped
+tasks in one run share the prefix up to the first run item.
+
 ## Reading items
 
 ```
@@ -141,33 +168,6 @@ and every `material` and `evidence` address must already be a captured input. Th
 builder adds no inputs, so task keys and fingerprints stay byte-identical. On
 `recheck` the coordinator refreshes the task through the existing path, and
 unchanged siblings stay reusable.
-
-## Owner mapping
-
-| Owner | Address (short) |
-| --- | --- |
-| Preferences | `instruction/global/pref-…`, `instruction/repo/pref-…` |
-| Repository instruction sources | `instruction/repo/files/<path>` (the whole file) |
-| Rules, completion prompts | `instruction/repo/rules`, `instruction/repo/completion` and their `global` counterparts |
-| Run-only user asks | `instruction/run/<label>` |
-| Commit policy | `instruction/repo/commit-policy` |
-| Decision reconciliation | `decision/pr/…`, `decision/repo/…` |
-| Alternatives selections | `decision/pr/<inventory decision id>` |
-| CI exceptions | `decision/repo/ci-<hash16>`, `decision/global/ci-<hash16>` |
-| Task results and findings | `evidence/pr/result-<task-key>`; one finding is `…#/findings/<index>` |
-| Feedback threads and comments | `evidence/pr/thread-<node-id>`, `evidence/pr/comment-<database-id>` |
-| Git subject | `evidence/pr/diff`, `evidence/pr/files/<path>` |
-| CI flakes | `evidence/repo/flake-<entry-key>` |
-| CI observations | `evidence/pr/ci-<observation-id>` |
-| Publication receipts | `evidence/pr/publication-<operation-id>` |
-
-A finding index is stable while the result matches its captured hash: recorded
-result files are immutable, and checklist follow-ups only append findings after
-the primary ones. Re-recording the task replaces the result and yields `recheck`.
-
-Role behavior and invocation instructions are already composed into
-`task.instructions` and have no addresses. Configuration requests, claims, budgets
-and checklist rounds are bookkeeping, not agent context, and have no addresses either.
 
 ## Examples
 
