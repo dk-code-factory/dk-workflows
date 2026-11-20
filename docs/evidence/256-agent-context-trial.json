@@ -1,0 +1,205 @@
+{
+  "arms": {
+    "pair-1-baseline": {
+      "api_equivalent_cost_usd": "0.0716452",
+      "cache_write_input_tokens": 0,
+      "cached_input_tokens": 81792,
+      "correctness": {
+        "complete": true,
+        "defects": {
+          "escape": true,
+          "history": true
+        },
+        "finding_count": 2,
+        "passed": true
+      },
+      "output_tokens": 2002,
+      "pins": {
+        "assignment": "159a465846754129c64b5dcd454f7b15a249c9f03e86b3115883453272ceb77f",
+        "conditions": "e92de13f23bd980cefc1a0ebf5c2e8fe3cbbd72299b40e56a17fd648d119bcd6",
+        "guidance": "68d6637813ee251a4bd0740fd7b95259146438aae5e3d49dc03161f2e7da122e",
+        "resources": "da9f03892c117ce9647ec498bc4c14bf8128e8057467d814b9a6316561af989d",
+        "runtime": "3c78cda03b0f4dbcd28372766f599cccc0337d16fdd9da6e47ab926039eab47f",
+        "scenario": "c25adaf9559aec857ac8eba047a245fba9b64097105b2355be2c804d34f72195"
+      },
+      "reasoning_output_tokens": 167,
+      "uncached_input_tokens": 21723
+    },
+    "pair-1-candidate": {
+      "api_equivalent_cost_usd": "0.0710168",
+      "cache_write_input_tokens": 0,
+      "cached_input_tokens": 102528,
+      "correctness": {
+        "complete": true,
+        "defects": {
+          "escape": true,
+          "history": true
+        },
+        "finding_count": 2,
+        "passed": true
+      },
+      "output_tokens": 1804,
+      "pins": {
+        "assignment": "159a465846754129c64b5dcd454f7b15a249c9f03e86b3115883453272ceb77f",
+        "conditions": "e92de13f23bd980cefc1a0ebf5c2e8fe3cbbd72299b40e56a17fd648d119bcd6",
+        "guidance": "dcd7a76e09bcc095f4ebd00987752c68163aca5ab53a25644f67bb7cc2cb4f44",
+        "resources": "da9f03892c117ce9647ec498bc4c14bf8128e8057467d814b9a6316561af989d",
+        "runtime": "3c78cda03b0f4dbcd28372766f599cccc0337d16fdd9da6e47ab926039eab47f",
+        "scenario": "c25adaf9559aec857ac8eba047a245fba9b64097105b2355be2c804d34f72195"
+      },
+      "reasoning_output_tokens": 189,
+      "uncached_input_tokens": 21362
+    },
+    "pair-2-baseline": {
+      "api_equivalent_cost_usd": "0.0689804",
+      "cache_write_input_tokens": 0,
+      "cached_input_tokens": 102144,
+      "correctness": {
+        "complete": true,
+        "defects": {
+          "escape": true,
+          "history": true
+        },
+        "finding_count": 2,
+        "passed": true
+      },
+      "output_tokens": 1558,
+      "pins": {
+        "assignment": "159a465846754129c64b5dcd454f7b15a249c9f03e86b3115883453272ceb77f",
+        "conditions": "e92de13f23bd980cefc1a0ebf5c2e8fe3cbbd72299b40e56a17fd648d119bcd6",
+        "guidance": "68d6637813ee251a4bd0740fd7b95259146438aae5e3d49dc03161f2e7da122e",
+        "resources": "da9f03892c117ce9647ec498bc4c14bf8128e8057467d814b9a6316561af989d",
+        "runtime": "3c78cda03b0f4dbcd28372766f599cccc0337d16fdd9da6e47ab926039eab47f",
+        "scenario": "c25adaf9559aec857ac8eba047a245fba9b64097105b2355be2c804d34f72195"
+      },
+      "reasoning_output_tokens": 67,
+      "uncached_input_tokens": 21593
+    },
+    "pair-2-candidate": {
+      "api_equivalent_cost_usd": "0.1038392",
+      "cache_write_input_tokens": 0,
+      "cached_input_tokens": 59392,
+      "correctness": {
+        "complete": true,
+        "defects": {
+          "escape": true,
+          "history": true
+        },
+        "finding_count": 2,
+        "passed": true
+      },
+      "output_tokens": 1521,
+      "pins": {
+        "assignment": "159a465846754129c64b5dcd454f7b15a249c9f03e86b3115883453272ceb77f",
+        "conditions": "e92de13f23bd980cefc1a0ebf5c2e8fe3cbbd72299b40e56a17fd648d119bcd6",
+        "guidance": "dcd7a76e09bcc095f4ebd00987752c68163aca5ab53a25644f67bb7cc2cb4f44",
+        "resources": "da9f03892c117ce9647ec498bc4c14bf8128e8057467d814b9a6316561af989d",
+        "runtime": "3c78cda03b0f4dbcd28372766f599cccc0337d16fdd9da6e47ab926039eab47f",
+        "scenario": "c25adaf9559aec857ac8eba047a245fba9b64097105b2355be2c804d34f72195"
+      },
+      "reasoning_output_tokens": 38,
+      "uncached_input_tokens": 41345
+    },
+    "pair-3-baseline": {
+      "api_equivalent_cost_usd": "0.0676524",
+      "cache_write_input_tokens": 0,
+      "cached_input_tokens": 81664,
+      "correctness": {
+        "complete": true,
+        "defects": {
+          "escape": true,
+          "history": true
+        },
+        "finding_count": 2,
+        "passed": true
+      },
+      "output_tokens": 1560,
+      "pins": {
+        "assignment": "159a465846754129c64b5dcd454f7b15a249c9f03e86b3115883453272ceb77f",
+        "conditions": "e92de13f23bd980cefc1a0ebf5c2e8fe3cbbd72299b40e56a17fd648d119bcd6",
+        "guidance": "68d6637813ee251a4bd0740fd7b95259146438aae5e3d49dc03161f2e7da122e",
+        "resources": "da9f03892c117ce9647ec498bc4c14bf8128e8057467d814b9a6316561af989d",
+        "runtime": "3c78cda03b0f4dbcd28372766f599cccc0337d16fdd9da6e47ab926039eab47f",
+        "scenario": "c25adaf9559aec857ac8eba047a245fba9b64097105b2355be2c804d34f72195"
+      },
+      "reasoning_output_tokens": 57,
+      "uncached_input_tokens": 21943
+    },
+    "pair-3-candidate": {
+      "api_equivalent_cost_usd": "0.0643536",
+      "cache_write_input_tokens": 0,
+      "cached_input_tokens": 79616,
+      "correctness": {
+        "complete": true,
+        "defects": {
+          "escape": true,
+          "history": true
+        },
+        "finding_count": 2,
+        "passed": true
+      },
+      "output_tokens": 1443,
+      "pins": {
+        "assignment": "159a465846754129c64b5dcd454f7b15a249c9f03e86b3115883453272ceb77f",
+        "conditions": "e92de13f23bd980cefc1a0ebf5c2e8fe3cbbd72299b40e56a17fd648d119bcd6",
+        "guidance": "dcd7a76e09bcc095f4ebd00987752c68163aca5ab53a25644f67bb7cc2cb4f44",
+        "resources": "da9f03892c117ce9647ec498bc4c14bf8128e8057467d814b9a6316561af989d",
+        "runtime": "3c78cda03b0f4dbcd28372766f599cccc0337d16fdd9da6e47ab926039eab47f",
+        "scenario": "c25adaf9559aec857ac8eba047a245fba9b64097105b2355be2c804d34f72195"
+      },
+      "reasoning_output_tokens": 62,
+      "uncached_input_tokens": 20981
+    }
+  },
+  "billing_basis": "API-equivalent cost; not actual account billing",
+  "correctness_passed": true,
+  "descendants_observed": 0,
+  "gate": {
+    "accepted": false,
+    "baseline_usd": [
+      "0.0716452",
+      "0.0689804",
+      "0.0676524"
+    ],
+    "candidate_usd": [
+      "0.0710168",
+      "0.1038392",
+      "0.0643536"
+    ],
+    "decision": "declined",
+    "improved_pairs": 2,
+    "limitation": "Three pairs give bounded evidence, not a general savings guarantee",
+    "median_baseline_usd": "0.0689804",
+    "median_candidate_usd": "0.0710168",
+    "reasons": [
+      "Median dollar savings below 5%",
+      "Total candidate dollar cost did not decrease"
+    ],
+    "sum_baseline_usd": "0.2082780",
+    "sum_candidate_usd": "0.2392096"
+  },
+  "governing_bytes": 688,
+  "host": {
+    "codex_cli": "0.165.0",
+    "effort": "high",
+    "model": "gpt-6.1-sol",
+    "service_tier": "default",
+    "transport": "SSE"
+  },
+  "host_context_audit": {
+    "passed": true,
+    "starting_context_digests": 1
+  },
+  "issue": 256,
+  "kit": "tests/fixtures/agent_context_trial.py at 3ebd103e387363507c1f87c0b3def1d9200ac637",
+  "limitations": [
+    "One reviewer agent per arm: no cross-agent sharing of the governing prefix was exercised.",
+    "The 688-byte governing section is below the cacheable prefix minimum, so the trial measures inlining versus file reads.",
+    "Scenario and guidance pins were recomputed with arm directories normalized to ARM; the kit hashed raw per-arm paths.",
+    "Pair 2 candidate had 59,392 cached of 100,737 input tokens versus about 80-100k in other arms; it is retained, not rerun."
+  ],
+  "native_arm_count": 6,
+  "proposal": "agent context document for the reviewer (hand-built, docs/agent-context.md)",
+  "rate_card_date": "2026-11-05",
+  "telemetry_complete": true
+}
