@@ -395,11 +395,30 @@ def require_git_context_paths(checkout):
             pytest.skip('This Git does not expose the paths needed for safe capture sharing')
 
 
+def quiet_outside(monkeypatch, root):
+    """Pin process counts to the test tree.
+
+    The Git context guard also watches ancestors such as /tmp, whose timestamps
+    change with unrelated machine activity. Ignore that churn outside root while
+    keeping identity, so counts measure only the workflow under test.
+    """
+    root = Path(root).resolve()
+    original = task_capture._GitContextGuard.version
+    def version(path):
+        value = original(path)
+        if value is None or Path(path).resolve().is_relative_to(root) or not Path(path).is_dir():
+            return value
+        own, target = value
+        return own[:3], target and target[:3]
+    monkeypatch.setattr(task_capture._GitContextGuard, 'version', staticmethod(version))
+
+
 @pytest.mark.parametrize('linked', [False, True])
 def test_status_batch_process_count_comparison(case, tmp_path, monkeypatch, linked):
     """Reproduce the issue's two completed-reviewer recipe, without model calls."""
     a, store = case
     require_git_context_paths(a['git']['checkout'])
+    quiet_outside(monkeypatch, tmp_path)
     if linked:
         checkout = tmp_path/'linked'
         git(a['git']['checkout'], 'worktree', 'add', '--detach', '-q', str(checkout), a['git']['head'])
@@ -433,6 +452,7 @@ def test_status_batch_mixed_modes_process_count_comparison(case, monkeypatch):
     a, store = case
     checkout = Path(a['git']['checkout'])
     require_git_context_paths(checkout)
+    quiet_outside(monkeypatch, checkout.parent)
     (checkout/'code').write_text('third distinct tree\n')
     git(checkout, 'commit', '-qam', 'third commit')
     a['git'].update(base=a['git']['head'], head=git(checkout, 'rev-parse', 'HEAD'))
