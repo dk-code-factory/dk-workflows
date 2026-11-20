@@ -56,6 +56,8 @@ most widely shared to least:
 Prompt caching only matches identical bytes. The builder emits sections in the
 order above, sorts `governing` by scope (`global`, `repo`, `pr`, `run`) and then
 by full address, and uses fixed separators. The order serves caching, not precedence.
+Run items are short only in run-scoped tasks, so PR- and run-scoped tasks in one
+run share the prefix up to the first run item.
 
 ## Addressing
 
@@ -69,9 +71,8 @@ kind     scope  name       optional JSON Pointer
 - Kinds: `task`, `instruction` (something to follow), `decision` (a settled
   commitment) and `evidence` (material the work is based on).
 - Scopes: `global` (user-wide), `repo`, `pr`, `run`.
-- Names are existing owner identities (`pref-…`, `ci-…`, task keys, thread node
-  ids, operation ids) and may span several segments, as in
-  `instruction/repo/files/docs/recovery.md`.
+- Names come from existing owner identities ([owner mapping](#owner-mapping))
+  and may span several segments, as in `instruction/repo/files/docs/recovery.md`.
 - `#` followed by an RFC 6901 JSON Pointer selects one field of an item.
 
 `task.id` is always written in full, with the owner after the scope:

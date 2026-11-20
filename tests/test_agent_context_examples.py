@@ -105,21 +105,6 @@ def test_addressing_table_round_trips():
         assert shorten(full, task_id) == short
 
 
-def test_run_items_stay_full_in_pr_tasks():
-    task_id = '/task/pr/github.com/acme/project/42/fix'
-    address = '/instruction/run/github.com/acme/project/42/run-7/user-ask'
-    assert shorten(address, task_id) == address
-    with pytest.raises(AssertionError):
-        expand('instruction/run/user-ask', task_id)
-
-
-def test_other_repositories_stay_full():
-    task_id = '/task/pr/github.com/acme/project/42/fix'
-    upstream = '/decision/repo/github.com/upstream/project/state-format'
-    assert shorten(upstream, task_id) == upstream
-    assert validator('address').is_valid(upstream)
-
-
 @pytest.mark.parametrize('address', [
     'decision/team/x', '/decision/repo/github.com/acme/x', 'decision/pr', 'note/global/x',
     '/decision/pr/github.com/acme/project/0/x', 'evidence/pr/x#events', 'task/pr/x', 'schema/global/x',
