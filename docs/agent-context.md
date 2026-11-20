@@ -265,9 +265,8 @@ after native trials. The difference here is the cache-stable governing prefix. I
 helps only when that prefix reaches the model's minimum cacheable length and every
 agent in the run emits identical bytes.
 
-Before any implementation, run a three-pair dollar trial on the reviewer
-([#256](https://github.com/dk-code-factory/dk-workflows/issues/256)) with
+Before any implementation, run a three-pair dollar trial on the reviewer in
+Codex ([#256](https://github.com/dk-code-factory/dk-workflows/issues/256)) with
 hand-built documents under the
-[dollar experiment plan](dollar-experiment-plan.md). Report cache reads, cache
-writes, fresh input and output separately, and implement only on a measured
-saving.
+[dollar experiment plan](dollar-experiment-plan.md). Report cached input,
+uncached input and output separately, and implement only on a measured saving.
