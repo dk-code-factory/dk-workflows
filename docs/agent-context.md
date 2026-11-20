@@ -5,9 +5,9 @@ Status: proposal. This document defines the model, addressing and schema
 adapters, builder, dollar trial and skill adoption are tracked in
 [#246](https://github.com/dk-code-factory/dk-workflows/issues/246)–[#251](https://github.com/dk-code-factory/dk-workflows/issues/251)
 and [#256](https://github.com/dk-code-factory/dk-workflows/issues/256).
-Precedence between scopes is an open question in
-[#252](https://github.com/dk-code-factory/dk-workflows/issues/252); until it is
-settled, conflicts follow existing native judgment and
+Scopes have no fixed precedence
+([#252](https://github.com/dk-code-factory/dk-workflows/issues/252)); conflicts
+follow existing native judgment and
 [decision reconciliation](decision-reconciliation.md).
 
 ## Goal
