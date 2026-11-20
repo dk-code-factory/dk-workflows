@@ -44,9 +44,10 @@ most widely shared to least:
 - `execution` appears only when the task's `native_review` declaration requires
   evidence and lists at least one pass. The skill version and driver commands
   stay with the helper that checks them.
-- `task.id` is the task's full address; `task.instructions` is its existing
-  assigned instructions (`assigned_instructions` in a `prepare` definition, not
-  that definition's governing `instructions` map).
+- `task.id` is the task's full address; `task.instructions` is the task spec's
+  existing `task.instructions`: the effective role behavior followed by the
+  assigned instructions (`assigned_instructions` in a `prepare` definition, with
+  any invocation instructions), not that definition's governing `instructions` map.
 - `evidence` maps an address to `{}` or to at most four scalar fields copied
   verbatim from the owner's item, such as a finding's location or a CI job name.
   These are hints; the agent reads the item before relying on it.
@@ -148,7 +149,6 @@ unchanged siblings stay reusable.
 | Preferences | `instruction/global/pref-…`, `instruction/repo/pref-…` |
 | Repository instruction sources | `instruction/repo/files/<path>` (the whole file) |
 | Rules, completion prompts | `instruction/repo/rules`, `instruction/repo/completion` and their `global` counterparts |
-| Role behavior, additional instructions | `instruction/run/behavior-<role>`, `instruction/run/additional` |
 | Run-only user asks | `instruction/run/<label>` |
 | Commit policy | `instruction/repo/commit-policy` |
 | Decision reconciliation | `decision/pr/…`, `decision/repo/…` |
@@ -165,9 +165,9 @@ A finding index is stable while the result matches its captured hash: recorded
 result files are immutable, and checklist follow-ups only append findings after
 the primary ones. Re-recording the task replaces the result and yields `recheck`.
 
-Drafting selections choose an invocation; its `instructions` arrive as
-`instruction/run/additional`. Configuration requests, claims, budgets and
-checklist rounds are bookkeeping, not agent context, and have no addresses.
+Role behavior and invocation instructions are already composed into
+`task.instructions` and have no addresses. Configuration requests, claims, budgets
+and checklist rounds are bookkeeping, not agent context, and have no addresses either.
 
 ## Examples
 
@@ -234,8 +234,7 @@ The feedback it answers is inlined.
 {
   "governing": {
     "decision/global/offline-recovery": {"statement": "Recovery must work without contacting a remote service."},
-    "decision/pr/retry-migration": {"statement": "Old state files without a consumed count are treated as exhausted, not as zero."},
-    "/instruction/run/github.com/acme/project/42/run-7/behavior-default": {"append": "Keep replies short. Link commits with full SHAs."}
+    "decision/pr/retry-migration": {"statement": "Old state files without a consumed count are treated as exhausted, not as zero."}
   },
   "task": {
     "id": "/task/pr/github.com/acme/project/42/reply-thread-1187",
