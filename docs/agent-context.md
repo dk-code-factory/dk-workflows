@@ -40,9 +40,9 @@ most widely shared to least:
   store them; nothing is truncated, summarized or partially copied. `material` is
   what the task always needs, such as the finding being fixed or the feedback
   being answered.
-- `execution` appears only when the task's `native_review` declaration has
-  `required: true` and a non-empty `passes` list. The skill version and driver commands stay with the helper
-  that checks them.
+- `execution` appears only when the task's `native_review` declaration requires
+  evidence and lists at least one pass. The skill version and driver commands
+  stay with the helper that checks them.
 - `task.id` is the task's full address; `task.instructions` is the existing task
   definition's `instructions`.
 - `evidence` maps an address to `{}` or to at most four scalar fields copied
@@ -110,11 +110,11 @@ of `task.id`, and expands against them:
 dk.py get-item --task /task/pr/github.com/acme/project/42/fix-retry-count evidence/pr/ci-2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6#/events
 ```
 
-Task keys also cover skill and options, so the helper finds the task entry by
-the active claim for `task.id`, uses that claim's captured inputs, and resolves
-Git evidence against the subject that claim captured. This command is documented
-once in skill guidance, not repeated in documents.
-Outcomes other than the item itself:
+Skill guidance documents this command once; documents do not repeat it. Task
+keys also cover skill and options, so the helper finds the task entry by the
+active claim for `task.id`, uses that claim's captured inputs, and resolves Git
+evidence against the subject that claim captured. Outcomes other than the item
+itself:
 
 | Outcome | When |
 | --- | --- |
