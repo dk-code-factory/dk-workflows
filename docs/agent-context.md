@@ -55,9 +55,9 @@ most widely shared to least:
 
 Prompt caching only matches identical bytes. The builder emits sections in the
 order above, sorts `governing` by scope (`global`, `repo`, `pr`, `run`) and then
-by full address, and uses fixed separators. The order serves caching, not precedence.
-Run items are short only in run-scoped tasks, so PR- and run-scoped tasks in one
-run share the prefix up to the first run item.
+by full address, and uses fixed separators. The order serves caching, not
+precedence. Run items are short only in run-scoped tasks, so PR- and run-scoped
+tasks in one run share the prefix up to the first run item.
 
 ## Addressing
 

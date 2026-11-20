@@ -700,10 +700,10 @@ budgets or original results. Native API dollar savings have not been measured.
 [Agent context](docs/agent-context.md) proposes one JSON document per agent with
 `governing`, `execution`, `task` and `evidence` sections, emitted byte-stably so
 agents in a run with the same governing inputs share a cacheable governing
-prefix. Governing and task material
-are complete owner items; evidence is listed by address and read on demand with
-`get-item --task <task.id>`. Repository, PR, run, subject, key and claim are
-derived from the full `task.id`, not carried in the document. The document is a
+prefix. Governing and task material are complete owner items; evidence is listed
+by address and read on demand with `get-item --task <task.id>`. Repository, PR,
+run, subject, key and claim are derived from the full `task.id`, not carried in
+the document. The document is a
 projection of existing task definitions: it adds no inputs, so fingerprints and
 freshness are unchanged, and it introduces no durable state. Native API dollar
 savings are unmeasured; a reviewer dollar trial gates skill adoption.
