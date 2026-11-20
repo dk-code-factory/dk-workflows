@@ -2,8 +2,9 @@
 
 Status: proposal. This document defines the model, addressing and schema
 ([agent-context.schema.json](../schemas/agent-context.schema.json)). The resolver,
-adapters, builder and skill adoption are tracked in
-[#246](https://github.com/dk-code-factory/dk-workflows/issues/246)–[#251](https://github.com/dk-code-factory/dk-workflows/issues/251).
+adapters, builder, dollar trial and skill adoption are tracked in
+[#246](https://github.com/dk-code-factory/dk-workflows/issues/246)–[#251](https://github.com/dk-code-factory/dk-workflows/issues/251)
+and [#256](https://github.com/dk-code-factory/dk-workflows/issues/256).
 Precedence between scopes is an open question in
 [#252](https://github.com/dk-code-factory/dk-workflows/issues/252); until it is
 settled, conflicts follow existing native judgment and
@@ -266,6 +267,7 @@ agent in the run emits identical bytes.
 
 Before skills adopt the document
 ([#251](https://github.com/dk-code-factory/dk-workflows/issues/251)), run a
-three-pair dollar trial on the reviewer under the
+three-pair dollar trial on the reviewer
+([#256](https://github.com/dk-code-factory/dk-workflows/issues/256)) under the
 [dollar experiment plan](dollar-experiment-plan.md). Report cache reads, cache
 writes, fresh input and output separately, and adopt only on a measured saving.
