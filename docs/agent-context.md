@@ -36,10 +36,11 @@ most widely shared to least:
 | `task` | `id`, `instructions`, `material` | complete | one task |
 | `evidence` | Optional reading | address → owner fields | one task |
 
-- `governing` and `task.material` hold complete items exactly as their owners
-  store them; nothing is truncated, summarized or partially copied. `material` is
-  what the task always needs, such as the finding being fixed or the feedback
-  being answered.
+- `governing` and `task.material` hold complete owner items; nothing is
+  truncated or summarized. Only the id and owner fields, which the
+  [address](#addressing) already encodes, are dropped; `get-item` returns
+  provenance. `material` is what the task always needs, such as the finding being
+  fixed or the feedback being answered.
 - `execution` appears only when the task's `native_review` declaration requires
   evidence and lists at least one pass. The skill version and driver commands
   stay with the helper that checks them.
@@ -49,8 +50,6 @@ most widely shared to least:
 - `evidence` maps an address to `{}` or to at most four scalar fields copied
   verbatim from the owner's item, such as a finding's location or a CI job name.
   These are hints; the agent reads the item before relying on it.
-- An item's kind and scope come from its address, so item bodies do not repeat
-  them. Provenance stays with the owner; `get-item` returns it.
 
 ### Byte stability
 
@@ -181,7 +180,7 @@ The fixer and reviewer run in the same PR and share `governing` byte for byte.
 {
   "governing": {
     "decision/global/offline-recovery": {"statement": "Recovery must work without contacting a remote service."},
-    "instruction/global/pref-5fa0d77bb169432b977f10be37b634be": {"text": "Use pytest fixtures for shared test setup.", "paths": ["tests/**"]},
+    "instruction/global/pref-5fa0d77bb169432b977f10be37b634be": {"prompt": "Use pytest fixtures for shared test setup.", "applies_to": ["implementation", "review"], "scope": {"include": [{"type": "glob", "path": "tests/**"}], "exclude": [], "condition": null}},
     "decision/repo/retry-storage": {"statement": "Retry counters are persisted in the task state file."},
     "instruction/repo/files/AGENTS.md": {"text": "Tests must not make authenticated model or GitHub calls."},
     "decision/pr/retry-migration": {"statement": "Old state files without a consumed count are treated as exhausted, not as zero."},
@@ -207,7 +206,7 @@ The fixer and reviewer run in the same PR and share `governing` byte for byte.
 {
   "governing": {
     "decision/global/offline-recovery": {"statement": "Recovery must work without contacting a remote service."},
-    "instruction/global/pref-5fa0d77bb169432b977f10be37b634be": {"text": "Use pytest fixtures for shared test setup.", "paths": ["tests/**"]},
+    "instruction/global/pref-5fa0d77bb169432b977f10be37b634be": {"prompt": "Use pytest fixtures for shared test setup.", "applies_to": ["implementation", "review"], "scope": {"include": [{"type": "glob", "path": "tests/**"}], "exclude": [], "condition": null}},
     "decision/repo/retry-storage": {"statement": "Retry counters are persisted in the task state file."},
     "instruction/repo/files/AGENTS.md": {"text": "Tests must not make authenticated model or GitHub calls."},
     "decision/pr/retry-migration": {"statement": "Old state files without a consumed count are treated as exhausted, not as zero."},
@@ -227,15 +226,16 @@ The fixer and reviewer run in the same PR and share `governing` byte for byte.
 
 ### Reply writer
 
-Repository instruction files are excluded from reply tasks, so the reply writer
-has its own governing prefix. The feedback it answers is inlined.
+Reply tasks exclude repository instruction files, and preferences resolve only
+for implementation and review, so the reply writer has its own governing prefix.
+The feedback it answers is inlined.
 
 ```json
 {
   "governing": {
     "decision/global/offline-recovery": {"statement": "Recovery must work without contacting a remote service."},
-    "instruction/global/pref-0b3f8d07d7e34447827fd80a61ec8395": {"text": "Keep replies short. Link commits with full SHAs."},
-    "decision/pr/retry-migration": {"statement": "Old state files without a consumed count are treated as exhausted, not as zero."}
+    "decision/pr/retry-migration": {"statement": "Old state files without a consumed count are treated as exhausted, not as zero."},
+    "/instruction/run/github.com/acme/project/42/run-7/behavior-default": {"append": "Keep replies short. Link commits with full SHAs."}
   },
   "task": {
     "id": "/task/pr/github.com/acme/project/42/reply-thread-1187",
