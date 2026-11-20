@@ -191,6 +191,36 @@ def rejected_push(value):
     return len(statuses) == 1
 
 
+def rejected_review(value):
+    """Only the original, explicit pending-review rejection proves non-delivery."""
+    failure = value.get('failure', {})
+    if (value['request']['kind'] != 'post-review' or not isinstance(failure, dict)
+            or failure.get('phase') != 'send' or type(failure.get('exit_status')) is not int
+            or failure['exit_status'] <= 0 or value.get('response') is not None
+            or value.get('receipt') is not None or failure.get('response') is not None
+            or not isinstance(failure.get('stdout'), str)
+            or not isinstance(failure.get('stderr'), str)
+            or failure['stderr'].strip() != 'gh: Unprocessable Entity (HTTP 422)'):
+        return False
+
+    def unique_object(pairs):
+        result = dict(pairs)
+        if len(result) != len(pairs):
+            raise ValueError('Ambiguous rejection response')
+        return result
+
+    try:
+        response = json.loads(failure['stdout'], object_pairs_hook=unique_object)
+    except (ValueError, TypeError):
+        return False
+    return (isinstance(response, dict)
+            and set(response) <= {'message', 'errors', 'status', 'documentation_url'}
+            and response.get('message') == 'Unprocessable Entity'
+            and response.get('errors') == ['User can only have one pending review per pull request']
+            and type(response.get('status')) in (str, int)
+            and response['status'] in ('422', 422))
+
+
 def validate_rerun_authorization(request, records):
     """Reject conflicting user identities before changing a prepared intent."""
     user = request.get('user_retry')
@@ -436,7 +466,8 @@ def publish(path, *, reconcile=False):
         try:
             result = publication.execute(path,kind,check=check,send=send,observe=observe,reconcile=reconcile,
                 reconcile_argv=[sys.executable,str(Path(__file__).resolve()),'reconcile'],
-                confirm_not_applied=rejected_push if kind == 'push' else None)
+                confirm_not_applied=(rejected_push if kind == 'push' else
+                                     rejected_review if kind == 'post-review' else None))
         except Diagnostic as exc:
             if kind == 'request-review' and publication.load(path)['status'] == 'pending':
                 from shared.diagnostics import command

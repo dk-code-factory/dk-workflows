@@ -549,6 +549,28 @@ preserving unrelated completed analysis and all original recovery evidence.
 Offline fresh-process, partial recovery, concurrency and changed-input checks
 establish behavior, not measured native token or API dollar savings.
 
+Review submission recovery also uses the existing `not_applied` state, only when
+the original failed send has a nonzero exit status, the exact HTTP 422
+pending-review error body and matching gh status, with no successful response or
+receipt. Reconciliation preserves the original request, intent and failure, never
+resends and never attributes a later review to that rejected operation. Missing,
+malformed, conflicting and transport-only evidence remains uncertain. This
+historical outcome depends on original send evidence, not current review absence.
+Fresh preparation still applies every live authorization, head and payload guard.
+
+Review preparation and dispatch inspect the complete paginated review list and
+refuse an existing pending review owned by the acting account, returning a
+read-only inspection command. Another account's draft is preserved and does not
+block this account. Missing review state or pending-author identity fails closed;
+submitted reviews from deleted accounts do not create a draft hold. No draft
+is automatically submitted, deleted, adopted or overwritten. No new field,
+journal, migration or analysis cache is introduced: existing failure evidence and
+terminal status let a fresh session settle a proven rejection without repeated
+agent reconstruction or futile reconciliation. Live draft checks are never
+cached; original-evidence changes invalidate rejection classification. Offline
+fresh-process and lost-response regressions establish behavior, not measured API
+dollar savings.
+
 Uncertain review requests retain their original pending intent and first failure.
 Small creation/dispatch timestamps, available native run/session references and
 safe transport diagnostics live in that existing operation. They avoid repeated

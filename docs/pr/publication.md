@@ -35,6 +35,28 @@ Reply callers supply a `source` object with `kind` (`inline_comment`, `review` o
 
 Retain source identity, routing parent, head, exact body and operation path through handoffs and resume. Reuse the operation for reconciliation; do not infer a different destination from prose, replace the source URL or regenerate an uncertain reply's attribution. Exact-body observation must preserve the heading as well as the response.
 
+## Recover a rejected review submission
+
+`post-review` preparation and dispatch refuse an existing pending review owned by
+the acting account and return a read-only inspection command. Inspect that draft
+and handle it only through a separately authorized action. Do not automatically
+submit, delete, overwrite or adopt it, including when its payload differs from the
+new findings. Another account's pending review is not this account's draft.
+
+If a creation attempt races with a pending review, normal reconciliation can
+settle the original operation as `not_applied` from its conclusive saved send
+failure: the exact pending-review HTTP 422 response and matching gh status, a
+nonzero exit status, and no successful response or receipt. Retained operations
+from earlier releases use the same recovery. Preserve the request, intent and
+original failure. A terminal rejected operation must never be resent or acquire a
+receipt from a later review. Resolve the live draft under separate authorization,
+then prepare a fresh review with all current head, payload and permission checks.
+
+Other HTTP 422 errors, timeouts, connection loss, malformed or conflicting evidence
+remain pending and permit read-only reconciliation only. Absence from the current
+review listing cannot establish non-delivery. Do not clear or replace an uncertain
+operation to release its publication barrier.
+
 ## Recover an uncertain review request
 
 A pending `request-review` has an unknown delivery outcome. An empty current
