@@ -30,7 +30,7 @@ Sections appear in this order, from most widely shared to least:
 | Section | Holds | Form | Same for |
 | --- | --- | --- | --- |
 | `governing` | Instructions and decisions | address → complete item | every agent in the run with the same exclusions |
-| `execution` | Required native review passes | role names | agents running the same skill |
+| `execution` | Required native review passes | pass roles | agents running the same skill |
 | `task` | `id`, `instructions`, `material` | complete | one task |
 | `evidence` | Optional reading | address → owner fields | one task |
 
@@ -54,8 +54,6 @@ Sections appear in this order, from most widely shared to least:
 Prompt caching only matches identical bytes. The builder emits sections in the
 order above, sorts `governing` by scope (`global`, `repo`, `pr`, `run`) and then
 by full address, and uses fixed separators. The order serves caching, not precedence.
-A role that excludes some governing items, such as a reply writer without
-repository instruction files, gets its own prefix for that exclusion set.
 
 ## Addressing
 
@@ -68,7 +66,7 @@ kind     scope  name       optional JSON Pointer
 
 - Kinds: `task`, `instruction` (something to follow), `decision` (a settled
   commitment) and `evidence` (material the work is based on).
-- Scopes: `global`, `repo`, `pr`, `run`.
+- Scopes: `global` (user-wide), `repo`, `pr`, `run`.
 - Names are existing owner identities (`pref-…`, `ci-…`, thread node ids,
   operation ids) and may span several segments, as in
   `instruction/repo/files/docs/recovery.md`.
@@ -134,8 +132,8 @@ definition. Every `governing` address must already be a captured governing input
 and every `material` and `evidence` address must already be a captured input. The
 builder adds no inputs, so task keys and fingerprints stay byte-identical.
 `get-item` serves an item only while its backing source matches the captured
-hash. Otherwise the agent gets `recheck` and the coordinator refreshes the task
-through the existing path. Unchanged siblings stay reusable.
+hash; on `recheck` the coordinator refreshes the task through the existing path,
+and unchanged siblings stay reusable.
 
 ## Owner mapping
 
@@ -143,7 +141,7 @@ through the existing path. Unchanged siblings stay reusable.
 | --- | --- |
 | Preferences | `instruction/global/pref-…`, `instruction/repo/pref-…` |
 | Repository instruction sources | `instruction/repo/files/<path>` (the whole file) |
-| Rules, drafting, completion prompts | `instruction/repo/rules`, `instruction/global/completion` |
+| Rules, completion prompts | `instruction/repo/rules`, `instruction/repo/completion` and their `global` counterparts |
 | Role behavior, additional instructions | `instruction/run/behavior-<role>`, `instruction/run/additional` |
 | Run-only user asks | `instruction/run/<label>` |
 | Commit policy | `instruction/repo/commit-policy` |
@@ -157,8 +155,9 @@ through the existing path. Unchanged siblings stay reusable.
 | CI observations | `evidence/pr/ci-<observation-id>` |
 | Publication receipts | `evidence/pr/publication-<operation-id>` |
 
-Configuration requests, claims, budgets and checklist rounds are bookkeeping, not
-agent context, and have no addresses.
+Drafting selections choose an invocation; its `instructions` arrive as
+`instruction/run/additional`. Configuration requests, claims, budgets and
+checklist rounds are bookkeeping, not agent context, and have no addresses.
 
 ## Examples
 
@@ -191,9 +190,6 @@ The fixer and reviewer run in the same PR and share `governing` byte for byte.
 }
 ```
 
-The run-scoped user ask keeps its full address because the fixer's task is
-PR-scoped.
-
 ### Reviewer
 
 ```json
@@ -217,8 +213,6 @@ PR-scoped.
   }
 }
 ```
-
-`state-format` belongs to an upstream repository, so its address stays full.
 
 ### Reply writer
 
