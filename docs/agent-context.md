@@ -84,8 +84,8 @@ of `task.id`, and expands against them:
 
 | Scope | Short (task `/task/run/github.com/acme/project/42/run-7/…`) | Full |
 | --- | --- | --- |
-| global | `decision/global/offline-recovery` | `/decision/global/offline-recovery` |
-| repo | `decision/repo/retry-storage` | `/decision/repo/github.com/acme/project/retry-storage` |
+| global | `instruction/global/rules` | `/instruction/global/rules` |
+| repo | `instruction/repo/rules` | `/instruction/repo/github.com/acme/project/rules` |
 | pr | `decision/pr/retry-migration` | `/decision/pr/github.com/acme/project/42/retry-migration` |
 | run | `instruction/run/focus-recovery` | `/instruction/run/github.com/acme/project/42/run-7/focus-recovery` |
 
@@ -107,7 +107,7 @@ of `task.id`, and expands against them:
 | Rules, completion prompts | `instruction/repo/rules`, `instruction/repo/completion` and their `global` counterparts |
 | Run-only user asks | `instruction/run/<label>` |
 | Commit policy | `instruction/repo/commit-policy` |
-| Decision reconciliation | `decision/pr/…`, `decision/repo/…` |
+| Decision reconciliation | `decision/pr/reconciliation-<task-key>` (the Decisions task's result) |
 | Alternatives selections | `decision/pr/<inventory decision id>` |
 | CI exceptions | `decision/repo/ci-<hash16>`, `decision/global/ci-<hash16>` |
 | Task results and findings | `evidence/pr/result-<task-key>`; one finding is `…#/findings/<index>` |
@@ -120,6 +120,10 @@ of `task.id`, and expands against them:
 A finding index is stable while the result matches its captured hash: recorded
 result files are immutable, and checklist follow-ups only append findings after
 the primary ones. Re-recording the task replaces the result and yields `recheck`.
+Reconciliation resolutions have no ids of their own, so their item is the
+Decisions task's complete normalized result under the same rule. The agreements
+and user answers it cites keep their own `evidence/pr/thread-…`, `comment-…` and
+`instruction/run/<label>` addresses.
 
 Role behavior and invocation instructions (already in `task.instructions`) and
 bookkeeping (configuration requests, claims, budgets, checklist rounds) have no
@@ -180,10 +184,10 @@ The fixer and reviewer run in the same PR and share `governing` byte for byte.
 ```json
 {
   "governing": {
-    "decision/global/offline-recovery": {"statement": "Recovery must work without contacting a remote service."},
     "instruction/global/pref-5fa0d77bb169432b977f10be37b634be": {"prompt": "Use pytest fixtures for shared test setup.", "applies_to": ["implementation", "review"], "scope": {"include": [{"type": "glob", "path": "tests/**"}], "exclude": [], "condition": null}},
-    "decision/repo/retry-storage": {"statement": "Retry counters are persisted in the task state file."},
+    "instruction/global/rules": {"text": "Recovery must work without contacting a remote service."},
     "instruction/repo/files/AGENTS.md": {"text": "Tests must not make authenticated model or GitHub calls."},
+    "instruction/repo/rules": {"text": "Retry counters are persisted in the task state file."},
     "decision/pr/retry-migration": {"statement": "Old state files without a consumed count are treated as exhausted, not as zero."},
     "/instruction/run/github.com/acme/project/42/run-7/user-ask": {"text": "Retries reset after restart, please fix."}
   },
@@ -206,10 +210,10 @@ The fixer and reviewer run in the same PR and share `governing` byte for byte.
 ```json
 {
   "governing": {
-    "decision/global/offline-recovery": {"statement": "Recovery must work without contacting a remote service."},
     "instruction/global/pref-5fa0d77bb169432b977f10be37b634be": {"prompt": "Use pytest fixtures for shared test setup.", "applies_to": ["implementation", "review"], "scope": {"include": [{"type": "glob", "path": "tests/**"}], "exclude": [], "condition": null}},
-    "decision/repo/retry-storage": {"statement": "Retry counters are persisted in the task state file."},
+    "instruction/global/rules": {"text": "Recovery must work without contacting a remote service."},
     "instruction/repo/files/AGENTS.md": {"text": "Tests must not make authenticated model or GitHub calls."},
+    "instruction/repo/rules": {"text": "Retry counters are persisted in the task state file."},
     "decision/pr/retry-migration": {"statement": "Old state files without a consumed count are treated as exhausted, not as zero."},
     "/instruction/run/github.com/acme/project/42/run-7/user-ask": {"text": "Retries reset after restart, please fix."}
   },
@@ -220,7 +224,7 @@ The fixer and reviewer run in the same PR and share `governing` byte for byte.
   },
   "evidence": {
     "evidence/pr/diff": {},
-    "/decision/repo/github.com/upstream/project/state-format": {}
+    "/instruction/repo/github.com/upstream/project/rules": {}
   }
 }
 ```
@@ -234,7 +238,7 @@ The feedback it answers is inlined.
 ```json
 {
   "governing": {
-    "decision/global/offline-recovery": {"statement": "Recovery must work without contacting a remote service."},
+    "instruction/global/rules": {"text": "Recovery must work without contacting a remote service."},
     "decision/pr/retry-migration": {"statement": "Old state files without a consumed count are treated as exhausted, not as zero."}
   },
   "task": {
