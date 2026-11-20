@@ -116,6 +116,7 @@ def test_malformed_addresses_are_rejected(address):
 def test_names_percent_encode_other_characters():
     assert validator('address').is_valid('evidence/pr/files/docs/my%20notes.md')
     assert not validator('address').is_valid('evidence/pr/files/docs/my notes.md')
+    assert not validator('address').is_valid('evidence/pr/files/docs/my%2anotes.md')
 
 
 @pytest.mark.parametrize('task_id', [
