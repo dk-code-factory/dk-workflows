@@ -113,6 +113,11 @@ def test_malformed_addresses_are_rejected(address):
     assert not validator('address').is_valid(address)
 
 
+def test_names_percent_encode_other_characters():
+    assert validator('address').is_valid('evidence/pr/files/docs/my%20notes.md')
+    assert not validator('address').is_valid('evidence/pr/files/docs/my notes.md')
+
+
 @pytest.mark.parametrize('task_id', [
     'task/pr/fix', '/task/repo/github.com/acme/project/fix', '/task/pr/github.com/acme/project/42',
     '/decision/pr/github.com/acme/project/42/fix',
@@ -126,6 +131,7 @@ def test_items_are_complete_and_documents_carry_no_derivable_fields():
     assert not items.is_valid({'decision/pr/x': {'$ref': 'decision/pr/x'}})
     assert not items.is_valid({'instruction/repo/x': {'text': 'cut', 'truncated': True}})
     assert not items.is_valid({'decision/pr/x': {}})
+    assert not validator().is_valid({**DOCUMENTS['fixer'], 'governing': {'evidence/pr/diff': {'text': 'x'}}})
     document = DOCUMENTS['fixer']
     for extra in ({'context': {}}, {'role': {}}):
         assert not validator().is_valid({**document, **extra})

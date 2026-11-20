@@ -5,7 +5,7 @@
   "description": "Proposed per-agent context document; see docs/agent-context.md. Item bodies are owner-defined.",
   "type": "object",
   "properties": {
-    "governing": {"$ref": "#/$defs/items"},
+    "governing": {"$ref": "#/$defs/items", "propertyNames": {"pattern": "^/?(instruction|decision)/"}},
     "execution": {
       "type": "object",
       "properties": {
@@ -49,8 +49,8 @@
       "description": "Full (leading /) or short address, optionally followed by # and an RFC 6901 pointer.",
       "type": "string",
       "anyOf": [
-        {"pattern": "^/(instruction|decision|evidence)/(global|repo/[a-z0-9.-]+/[a-z0-9_.-]+/[a-z0-9_.-]+|pr/[a-z0-9.-]+/[a-z0-9_.-]+/[a-z0-9_.-]+/[1-9][0-9]*|run/[a-z0-9.-]+/[a-z0-9_.-]+/[a-z0-9_.-]+/[1-9][0-9]*/[A-Za-z0-9._~:@+-]+)(/[A-Za-z0-9._~:@+-]+)+(#(/([^/~]|~[01])*)*)?$"},
-        {"pattern": "^(instruction|decision|evidence)/(global|repo|pr|run)(/[A-Za-z0-9._~:@+-]+)+(#(/([^/~]|~[01])*)*)?$"}
+        {"pattern": "^/(instruction|decision|evidence)/(global|repo/[a-z0-9.-]+/[a-z0-9_.-]+/[a-z0-9_.-]+|pr/[a-z0-9.-]+/[a-z0-9_.-]+/[a-z0-9_.-]+/[1-9][0-9]*|run/[a-z0-9.-]+/[a-z0-9_.-]+/[a-z0-9_.-]+/[1-9][0-9]*/[A-Za-z0-9._~:@+-]+)(/([A-Za-z0-9._~:@+-]|%[0-9A-F]{2})+)+(#(/([^/~]|~[01])*)*)?$"},
+        {"pattern": "^(instruction|decision|evidence)/(global|repo|pr|run)(/([A-Za-z0-9._~:@+-]|%[0-9A-F]{2})+)+(#(/([^/~]|~[01])*)*)?$"}
       ]
     },
     "task_id": {

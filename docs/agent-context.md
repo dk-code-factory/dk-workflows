@@ -73,6 +73,7 @@ kind     scope  name       optional JSON Pointer
 - Scopes: `global` (user-wide), `repo`, `pr`, `run`.
 - Names come from existing owner identities ([owner mapping](#owner-mapping))
   and may span several segments, as in `instruction/repo/files/docs/recovery.md`.
+  Other characters, such as spaces or `#` in a file path, are percent-encoded.
 - `#` followed by an RFC 6901 JSON Pointer selects one field of an item.
 
 `task.id` is always written in full, with the owner after the scope:
