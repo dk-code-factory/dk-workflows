@@ -69,8 +69,8 @@ kind     scope  name       optional JSON Pointer
 - Kinds: `task`, `instruction` (something to follow), `decision` (a settled
   commitment) and `evidence` (material the work is based on).
 - Scopes: `global` (user-wide), `repo`, `pr`, `run`.
-- Names are existing owner identities (`pref-…`, `ci-…`, thread node ids,
-  operation ids) and may span several segments, as in
+- Names are existing owner identities (`pref-…`, `ci-…`, task keys, thread node
+  ids, operation ids) and may span several segments, as in
   `instruction/repo/files/docs/recovery.md`.
 - `#` followed by an RFC 6901 JSON Pointer selects one field of an item.
 
@@ -103,7 +103,7 @@ of `task.id`, and expands against them:
 ## Reading items
 
 ```
-dk.py get-item --task /task/pr/github.com/acme/project/42/fix-retry-count evidence/pr/ci-7d20e4#/events
+dk.py get-item --task /task/pr/github.com/acme/project/42/fix-retry-count evidence/pr/ci-2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6#/events
 ```
 
 The helper finds the task entry from `task.id`, uses its active claim's captured
@@ -150,10 +150,10 @@ and unchanged siblings stay reusable.
 | Decision reconciliation | `decision/pr/…`, `decision/repo/…` |
 | Alternatives selections | `decision/pr/<inventory decision id>` |
 | CI exceptions | `decision/repo/ci-<hash16>`, `decision/global/ci-<hash16>` |
-| Task results and findings | `evidence/pr/result-<key12>`, `evidence/pr/finding-<digest8>` |
+| Task results and findings | `evidence/pr/result-<task-key>`; one finding is `…#/findings/<index>` |
 | Feedback threads and comments | `evidence/pr/thread-<node-id>`, `evidence/pr/comment-<database-id>` |
 | Git subject | `evidence/pr/diff`, `evidence/pr/files/<path>` |
-| CI flakes | `evidence/repo/flake-<key12>` |
+| CI flakes | `evidence/repo/flake-<entry-key>` |
 | CI observations | `evidence/pr/ci-<observation-id>` |
 | Publication receipts | `evidence/pr/publication-<operation-id>` |
 
@@ -172,7 +172,7 @@ The fixer and reviewer run in the same PR and share `governing` byte for byte.
 {
   "governing": {
     "decision/global/offline-recovery": {"statement": "Recovery must work without contacting a remote service."},
-    "instruction/global/pref-3k9a": {"text": "Use pytest fixtures for shared test setup.", "paths": ["tests/**"]},
+    "instruction/global/pref-5fa0d77bb169432b977f10be37b634be": {"text": "Use pytest fixtures for shared test setup.", "paths": ["tests/**"]},
     "decision/repo/retry-storage": {"statement": "Retry counters are persisted in the task state file."},
     "instruction/repo/files/AGENTS.md": {"text": "Tests must not make authenticated model or GitHub calls."},
     "decision/pr/retry-migration": {"statement": "Old state files without a consumed count are treated as exhausted, not as zero."},
@@ -182,11 +182,11 @@ The fixer and reviewer run in the same PR and share `governing` byte for byte.
     "id": "/task/pr/github.com/acme/project/42/fix-retry-count",
     "instructions": "Fix retry-count restoration after a workflow restart. Restore the consumed count instead of resetting it to zero. Limit edits to retry persistence and recovery. Verify: limit 3 with 2 consumed leaves 1 attempt after restart; an old state file without a consumed count loads as exhausted.",
     "material": {
-      "evidence/pr/finding-5c1e09ab": {"title": "consumed_attempts reset to 0 on load", "path": "runtime/retry.py", "line": 88}
+      "evidence/pr/result-454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1#/findings/0": {"title": "consumed_attempts reset to 0 on load", "path": "runtime/retry.py", "line": 88}
     }
   },
   "evidence": {
-    "evidence/pr/ci-7d20e4": {"job": "tests"},
+    "evidence/pr/ci-2e7d2c03a9507ae265ecf5b5356885a53393a2029d241394997265a1a25aefc6": {"job": "tests"},
     "instruction/repo/files/docs/recovery.md": {}
   }
 }
@@ -198,7 +198,7 @@ The fixer and reviewer run in the same PR and share `governing` byte for byte.
 {
   "governing": {
     "decision/global/offline-recovery": {"statement": "Recovery must work without contacting a remote service."},
-    "instruction/global/pref-3k9a": {"text": "Use pytest fixtures for shared test setup.", "paths": ["tests/**"]},
+    "instruction/global/pref-5fa0d77bb169432b977f10be37b634be": {"text": "Use pytest fixtures for shared test setup.", "paths": ["tests/**"]},
     "decision/repo/retry-storage": {"statement": "Retry counters are persisted in the task state file."},
     "instruction/repo/files/AGENTS.md": {"text": "Tests must not make authenticated model or GitHub calls."},
     "decision/pr/retry-migration": {"statement": "Old state files without a consumed count are treated as exhausted, not as zero."},
@@ -225,18 +225,18 @@ has its own governing prefix. The feedback it answers is inlined.
 {
   "governing": {
     "decision/global/offline-recovery": {"statement": "Recovery must work without contacting a remote service."},
-    "instruction/global/pref-7q2c": {"text": "Keep replies short. Link commits with full SHAs."},
+    "instruction/global/pref-0b3f8d07d7e34447827fd80a61ec8395": {"text": "Keep replies short. Link commits with full SHAs."},
     "decision/pr/retry-migration": {"statement": "Old state files without a consumed count are treated as exhausted, not as zero."}
   },
   "task": {
     "id": "/task/pr/github.com/acme/project/42/reply-thread-1187",
     "instructions": "Answer every request in the feedback. Quote each request, then state what changed and where, or why nothing changed.",
     "material": {
-      "evidence/pr/thread-1187": {"author": "reviewer-a", "body": "After a restart the retry budget is back to 3. What happens with old state files?"}
+      "evidence/pr/thread-PRRT_kwDOLx3a9M5FvQ2b": {"author": "reviewer-a", "body": "After a restart the retry budget is back to 3. What happens with old state files?"}
     }
   },
   "evidence": {
-    "evidence/pr/result-5c1e09ab7f21": {}
+    "evidence/pr/result-454349e422f05297191ead13e21d3db520e5abef52055e4964b82fb213f593a1": {}
   }
 }
 ```
