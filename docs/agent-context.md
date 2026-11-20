@@ -14,8 +14,8 @@ settled, conflicts follow existing native judgment and
 Each agent receives one JSON document that says what it must do and what governs
 it. What the task always needs is inlined. Optional reading is listed by address
 and fetched on demand. Agents in one run with the same governing inputs start
-their documents with the same bytes, so that part can be served from the prompt
-cache.
+their documents with the same bytes ([byte stability](#byte-stability)), so that
+part can be served from the prompt cache.
 
 The document contains only what the agent acts on. Anything a helper can derive
 from the task (repository, PR, run, subject, task key, claim, skill version,
@@ -41,7 +41,7 @@ most widely shared to least:
   what the task always needs, such as the finding being fixed or the feedback
   being answered.
 - `execution` appears only when the task's `native_review` declaration has
-  `required: true`. The skill version and driver commands stay with the helper
+  `required: true` and a non-empty `passes` list. The skill version and driver commands stay with the helper
   that checks them.
 - `task.id` is the task's full address; `task.instructions` is the existing task
   definition's `instructions`.
