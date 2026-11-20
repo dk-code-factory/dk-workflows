@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from test_state import case, done, git, require_git_context_paths, REPO, PR, ROOT
+from test_state import case, done, git, quiet_outside, require_git_context_paths, REPO, PR, ROOT
 import state
 import task_capture
 import task_policy
@@ -268,6 +268,7 @@ def test_batch_preserves_independent_fingerprints_provenance_and_cli_recovery(ca
 def test_start_batch_process_count_comparison(case, tmp_path, monkeypatch, linked):
     a, store = case
     require_git_context_paths(a['git']['checkout'])
+    quiet_outside(monkeypatch, tmp_path)
     if linked:
         checkout = tmp_path/'linked'
         git(a['git']['checkout'], 'worktree', 'add', '--detach', '-q', str(checkout), a['git']['head'])
