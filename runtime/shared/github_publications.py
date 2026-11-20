@@ -66,6 +66,34 @@ class Handler:
         return self.run(['gh', 'api', '--hostname', self.host, self.root + suffix,
                          '--method', 'POST', '--input', '-'], payload=payload, json_output=False)
 
+    def review_actor(self):
+        actor = self.api(self.request['pr'], 'user')
+        login = actor.get('login') if isinstance(actor, dict) else None
+        if not isinstance(login, str) or not login:
+            raise ValueError('Review requires a complete authenticated actor identity')
+        return login
+
+    def check_pending_reviews(self, reviews):
+        from shared.diagnostics import Diagnostic, command
+        states = {'APPROVED', 'CHANGES_REQUESTED', 'COMMENTED', 'DISMISSED', 'PENDING'}
+        for review in reviews:
+            if not isinstance(review.get('state'), str) or review['state'] not in states:
+                raise ValueError('Incomplete review state')
+            if review['state'] != 'PENDING':
+                continue
+            user = review.get('user')
+            if not isinstance(user, dict) or not isinstance(user.get('login'), str) or not user['login']:
+                raise ValueError('Incomplete pending review author identity')
+            if user['login'].casefold() == self.request['actor'].casefold():
+                review_id = positive(review['id'], 'Pending review id')
+                raise Diagnostic('pending_review',
+                    'The authenticated account already has pending review ' + str(review_id)
+                    + '. Inspect it and resolve it under separate authorization before preparing a new review; '
+                    'do not automatically submit, delete or overwrite it.',
+                    command(['gh', 'api', '--hostname', self.host,
+                             self.root + '/pulls/' + self.number + '/reviews/' + str(review_id)]),
+                    dispatched=False)
+
     def graphql(self, query, variables):
         value = self.run(['gh', 'api', '--hostname', self.host, 'graphql', '--input', '-'],
                          payload={'query': query, 'variables': variables})
@@ -223,10 +251,12 @@ class Handler:
             if not isinstance(request.setdefault('body', ''), str):
                 raise ValueError('Review body must be text')
             self.validate_comments()
-            request['actor'] = self.api(request['pr'], 'user')['login']
+            request['actor'] = self.review_actor()
             if request['event'] == 'APPROVE':
                 expected['approval_identity'] = self.approval_identity()
-            expected['review_ids'] = [v['id'] for v in self.pages('/pulls/' + self.number + '/reviews')]
+            reviews = self.pages('/pulls/' + self.number + '/reviews')
+            self.check_pending_reviews(reviews)
+            expected['review_ids'] = [v['id'] for v in reviews]
         return expected
 
     @staticmethod
@@ -274,9 +304,13 @@ class Handler:
             if not verified and self.candidates() != expected['existing']:
                 raise ValueError('PR appeared before creation; inspect it first')
         elif kind == 'post-review' and not verified:
+            if self.review_actor() != request['actor']:
+                raise ValueError('Review actor changed before publication')
             if request['event'] == 'APPROVE' and self.approval_identity() != expected['approval_identity']:
                 raise ValueError('Approval actor or author changed')
-            if [v['id'] for v in self.pages('/pulls/' + self.number + '/reviews')] != expected['review_ids']:
+            reviews = self.pages('/pulls/' + self.number + '/reviews')
+            self.check_pending_reviews(reviews)
+            if [v['id'] for v in reviews] != expected['review_ids']:
                 raise ValueError('Reviews changed before publication')
             self.validate_comments()
 
